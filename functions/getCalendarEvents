@@ -1,0 +1,49 @@
+import { createClientFromRequest } from 'npm:@base44/sdk@0.8.4';
+
+Deno.serve(async (req) => {
+  try {
+    const base44 = createClientFromRequest(req);
+    const user = await base44.auth.me();
+    
+    if (!user) {
+      return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const accessToken = await base44.asServiceRole.connectors.getAccessToken('googlecalendar');
+    
+    // Get events for the next 7 days
+    const now = new Date();
+    const weekLater = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+    
+    const eventsResponse = await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/primary/events?` +
+      `timeMin=${now.toISOString()}&` +
+      `timeMax=${weekLater.toISOString()}&` +
+      `singleEvents=true&` +
+      `orderBy=startTime&` +
+      `maxResults=20`,
+      { headers: { 'Authorization': `Bearer ${accessToken}` } }
+    );
+    
+    if (!eventsResponse.ok) {
+      throw new Error('Failed to fetch calendar events');
+    }
+    
+    const eventsData = await eventsResponse.json();
+    
+    const events = (eventsData.items || []).map(event => ({
+      id: event.id,
+      title: event.summary,
+      start: event.start.dateTime || event.start.date,
+      end: event.end.dateTime || event.end.date,
+      description: event.description,
+      location: event.location,
+      allDay: !event.start.dateTime
+    }));
+    
+    return Response.json({ events });
+    
+  } catch (error) {
+    return Response.json({ error: error.message }, { status: 500 });
+  }
+});
