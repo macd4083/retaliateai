@@ -1,0 +1,64 @@
+import { createClientFromRequest } from 'npm:@base44/sdk@0.8.4';
+
+Deno.serve(async (req) => {
+  try {
+    const base44 = createClientFromRequest(req);
+    const user = await base44.auth.me();
+    
+    if (!user) {
+      return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const accessToken = await base44.asServiceRole.connectors.getAccessToken('googlecalendar');
+    
+    // Fetch tasks from Google Tasks
+    const tasksResponse = await fetch('https://tasks.googleapis.com/tasks/v1/users/@me/lists', {
+      headers: { 'Authorization': `Bearer ${accessToken}` }
+    });
+    
+    if (!tasksResponse.ok) {
+      throw new Error('Failed to fetch task lists');
+    }
+    
+    const taskLists = await tasksResponse.json();
+    const allTasks = [];
+    
+    // Get tasks from each list
+    for (const list of taskLists.items || []) {
+      const tasksInListResponse = await fetch(
+        `https://tasks.googleapis.com/tasks/v1/lists/${list.id}/tasks?showCompleted=false`,
+        { headers: { 'Authorization': `Bearer ${accessToken}` } }
+      );
+      
+      if (tasksInListResponse.ok) {
+        const tasksData = await tasksInListResponse.json();
+        allTasks.push(...(tasksData.items || []));
+      }
+    }
+    
+    // Sync with local Todo entity
+    const existingTodos = await base44.asServiceRole.entities.Todo.filter({ created_by: user.email });
+    const existingGoogleIds = new Set(existingTodos.filter(t => t.google_id).map(t => t.google_id));
+    
+    // Create new todos for Google tasks not in our system
+    for (const task of allTasks) {
+      if (!existingGoogleIds.has(task.id)) {
+        await base44.asServiceRole.entities.Todo.create({
+          title: task.title,
+          completed: task.status === 'completed',
+          google_id: task.id,
+          source: 'google',
+          created_by: user.email
+        });
+      }
+    }
+    
+    return Response.json({ 
+      synced: allTasks.length,
+      tasks: allTasks.map(t => ({ title: t.title, completed: t.status === 'completed' }))
+    });
+    
+  } catch (error) {
+    return Response.json({ error: error.message }, { status: 500 });
+  }
+});
