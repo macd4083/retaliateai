@@ -6,6 +6,7 @@ import { pagesConfig } from './pages.config'
 import { Route, Routes, Navigate } from 'react-router-dom';
 import PageNotFound from './lib/PageNotFound';
 import { AuthProvider, useAuth } from '@/lib/AuthContext';
+import AuthCallback from './pages/AuthCallback';
 
 const { Pages, Layout, mainPage } = pagesConfig;
 const mainPageKey = mainPage ??  Object.keys(Pages)[0];
@@ -69,7 +70,13 @@ function App() {
   return (
     <AuthProvider>
       <QueryClientProvider client={queryClient}>
-        <AuthenticatedApp />
+        <Routes>
+          {/* Public auth callback route - must be outside AuthenticatedApp */}
+          <Route path="/auth/callback" element={<AuthCallback />} />
+          
+          {/* All other routes */}
+          <Route path="*" element={<AuthenticatedApp />} />
+        </Routes>
         <Toaster />
       </QueryClientProvider>
     </AuthProvider>
