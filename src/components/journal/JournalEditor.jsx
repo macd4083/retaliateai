@@ -1,171 +1,166 @@
-import React, { useState, useEffect } from 'react';
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Sparkles, Send, Plus, X } from "lucide-react";
-import { Input } from "@/components/ui/input";
-import { format } from "date-fns";
+import React, { useState } from 'react';
 
-const DEFAULT_PROMPTS = [
-  "What did you do good today?",
-  "What could you improve?",
-  "Brain Dump",
-  "How do you feel today?"
-];
+export default function JournalEditor({ entry = null, onSave, onCancel, isSaving = false }) {
+  const [formData, setFormData] = useState({
+    title: entry?.title || '',
+    content: entry?.content || '',
+    mood_rating: entry?.mood_rating || 5,
+    tags:  entry?.tags || [],
+  });
+  const [tagInput, setTagInput] = useState('');
 
-export default function JournalEditor({ onSave, isProcessing }) {
-  const [title, setTitle] = useState('');
-  const [content, setContent] = useState('');
-  const [customPrompts, setCustomPrompts] = useState([]);
-  const [showCustomInput, setShowCustomInput] = useState(false);
-  const [newCustomPrompt, setNewCustomPrompt] = useState('');
-  const [todaysDate, setTodaysDate] = useState(format(new Date(), 'EEEE, MMMM d, yyyy'));
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setTodaysDate(format(new Date(), 'EEEE, MMMM d, yyyy'));
-    }, 60000);
-    return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    const stored = localStorage.getItem('customJournalPrompts');
-    if (stored) {
-      setCustomPrompts(JSON.parse(stored));
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!formData.content.trim()) {
+      alert('Please write something in your entry.');
+      return;
     }
-  }, []);
-
-  useEffect(() => {
-    if (!title) {
-      setTitle(todaysDate);
-    }
-  }, [todaysDate]);
-
-  const handleSubmit = () => {
-    if (!content.trim()) return;
-    onSave({ title: title.trim() || undefined, content });
-    setTitle(todaysDate);
-    setContent('');
+    onSave(formData);
   };
 
-  const handleAddCustomPrompt = () => {
-    if (!newCustomPrompt.trim()) return;
-    const updated = [...customPrompts, newCustomPrompt.trim()];
-    setCustomPrompts(updated);
-    localStorage.setItem('customJournalPrompts', JSON.stringify(updated));
-    setTitle(newCustomPrompt.trim());
-    setNewCustomPrompt('');
-    setShowCustomInput(false);
-  };
-
-  const handleDeletePrompt = (prompt) => {
-    const updated = customPrompts.filter(p => p !== prompt);
-    setCustomPrompts(updated);
-    localStorage.setItem('customJournalPrompts', JSON.stringify(updated));
-    if (title === prompt) {
-      setTitle(todaysDate);
+  const handleAddTag = () => {
+    const tag = tagInput. trim().toLowerCase();
+    if (tag && !formData.tags. includes(tag)) {
+      setFormData({ ...formData, tags: [...formData.tags, tag] });
+      setTagInput('');
     }
   };
 
-  const handleDeleteDefaultPrompt = (prompt) => {
-    if (title === prompt) {
-      setTitle(todaysDate);
-    }
+  const handleRemoveTag = (tagToRemove) => {
+    setFormData({
+      ... formData,
+      tags: formData.tags.filter((tag) => tag !== tagToRemove),
+    });
   };
+
+  const wordCount = formData.content.split(/\s+/).filter(Boolean).length;
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-      <div className="p-6 space-y-4">
-        <Select value={title} onValueChange={setTitle}>
-          <SelectTrigger className="border-0 text-lg font-medium focus:ring-0 px-0">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={todaysDate}>{todaysDate}</SelectItem>
-            
-            {DEFAULT_PROMPTS.map((prompt) => (
-              <div key={prompt} className="flex items-center justify-between px-2 py-1.5 hover:bg-slate-50 cursor-pointer group">
-                <SelectItem value={prompt} className="flex-1 border-0">{prompt}</SelectItem>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDeleteDefaultPrompt(prompt);
-                  }}
-                  className="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-50 rounded"
-                >
-                  <X className="w-3 h-3 text-red-500" />
-                </button>
-              </div>
-            ))}
-            
-            {customPrompts.map((prompt) => (
-              <div key={prompt} className="flex items-center justify-between px-2 py-1.5 hover:bg-slate-50 cursor-pointer group">
-                <SelectItem value={prompt} className="flex-1 border-0">{prompt}</SelectItem>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDeletePrompt(prompt);
-                  }}
-                  className="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-50 rounded"
-                >
-                  <X className="w-3 h-3 text-red-500" />
-                </button>
-              </div>
-            ))}
-            
-            {showCustomInput ? (
-              <div className="px-2 py-2 flex gap-2">
-                <Input
-                  placeholder="Custom prompt..."
-                  value={newCustomPrompt}
-                  onChange={(e) => setNewCustomPrompt(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleAddCustomPrompt()}
-                  className="h-8 text-sm"
-                  autoFocus
+    <div className="h-full bg-slate-50 overflow-y-auto">
+      <div className="max-w-4xl mx-auto p-8">
+        <form onSubmit={handleSubmit} className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+          {/* Title */}
+          <div className="p-6 border-b border-slate-200">
+            <input
+              type="text"
+              placeholder="Entry title (optional)"
+              value={formData.title}
+              onChange={(e) => setFormData({ ...formData, title: e.target. value })}
+              className="w-full text-2xl font-semibold text-slate-900 placeholder-slate-400 focus:outline-none"
+            />
+          </div>
+
+          {/* Content */}
+          <div className="p-6">
+            <textarea
+              placeholder="What's on your mind?  Write freely..."
+              value={formData.content}
+              onChange={(e) => setFormData({ ... formData, content: e.target.value })}
+              className="w-full h-96 text-lg text-slate-800 placeholder-slate-400 focus: outline-none resize-none"
+              autoFocus
+            />
+          </div>
+
+          {/* Metadata */}
+          <div className="p-6 bg-slate-50 border-t border-slate-200 space-y-6">
+            {/* Mood Rating */}
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-3">
+                Mood:  {formData.mood_rating}/10
+              </label>
+              <div className="flex items-center gap-4">
+                <span className="text-2xl">😢</span>
+                <input
+                  type="range"
+                  min="1"
+                  max="10"
+                  value={formData.mood_rating}
+                  onChange={(e) =>
+                    setFormData({ ... formData, mood_rating: parseInt(e.target.value) })
+                  }
+                  className="flex-1 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
                 />
-                <Button size="sm" onClick={handleAddCustomPrompt} className="h-8 px-2">
-                  <Plus className="w-4 h-4" />
-                </Button>
+                <span className="text-2xl">😊</span>
               </div>
-            ) : (
-              <button
-                onClick={() => setShowCustomInput(true)}
-                className="w-full flex items-center gap-2 px-2 py-2 text-sm text-slate-600 hover:bg-slate-50"
-              >
-                <Plus className="w-4 h-4" />
-                Add custom prompt
-              </button>
-            )}
-          </SelectContent>
-        </Select>
-        
-        <Textarea
-          placeholder="What's on your mind today? Write freely..."
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          className="min-h-[200px] border-0 resize-none text-slate-700 placeholder:text-slate-300 focus-visible:ring-0 px-0 text-base leading-relaxed"
-        />
-      </div>
-      
-      <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end">
-        <Button
-          onClick={handleSubmit}
-          disabled={!content.trim() || isProcessing}
-          className="bg-slate-900 hover:bg-slate-800 rounded-xl px-6"
-        >
-          {isProcessing ? (
-            <>
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              <Sparkles className="w-4 h-4 mr-2" />
-              Analyzing...
-            </>
-          ) : (
-            <>
-              <Send className="w-4 h-4 mr-2" />
-              Save Entry
-            </>
-          )}
-        </Button>
+            </div>
+
+            {/* Tags */}
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Tags</label>
+              <div className="flex gap-2 mb-3 flex-wrap">
+                {formData.tags.map((tag) => (
+                  <span
+                    key={tag}
+                    className="inline-flex items-center gap-1 px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm"
+                  >
+                    {tag}
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveTag(tag)}
+                      className="hover:text-blue-900"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Add a tag..."
+                  value={tagInput}
+                  onChange={(e) => setTagInput(e.target.value)}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleAddTag();
+                    }
+                  }}
+                  className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <button
+                  type="button"
+                  onClick={handleAddTag}
+                  className="px-4 py-2 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 text-sm font-medium"
+                >
+                  Add
+                </button>
+              </div>
+            </div>
+
+            {/* Word Count */}
+            <div className="text-sm text-slate-500">
+              {wordCount} {wordCount === 1 ? 'word' : 'words'}
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="p-6 bg-white border-t border-slate-200 flex items-center justify-between">
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={isSaving}
+              className="px-6 py-2 text-slate-700 hover:bg-slate-100 rounded-lg font-medium disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isSaving || !formData.content. trim()}
+              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+            >
+              {isSaving ? 'Saving...' : entry ? 'Update Entry' : 'Save Entry'}
+            </button>
+          </div>
+        </form>
+
+        {isSaving && (
+          <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+            <p className="text-blue-800 text-sm">
+              ✨ Generating AI summary and analyzing patterns... 
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

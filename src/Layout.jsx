@@ -1,14 +1,12 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { createPageUrl } from '@/utils';
+import { createPageUrl } from '@/lib/utils';
 import { BookOpen, Sparkles, Target, Users, Menu, X, PanelLeftClose, PanelLeft, UserCog } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import AuthGuard from '@/components/auth/AuthGuard';
-import { base44 } from '@/api/base44Client';
+import { useAuth } from '@/lib/AuthContext';
 
 const navItems = [
-  { name: 'Journal', icon: BookOpen, page: 'Journal', color: 'text-slate-900' },
-  { name: 'Insights', icon: Sparkles, page: 'Insights', color: 'text-violet-600' },
+  { name: 'Journal', icon:  BookOpen, page: 'Journal', color: 'text-slate-900' },
+  { name: 'Insights', icon:  Sparkles, page: 'Insights', color: 'text-violet-600' },
   { name: 'Goals', icon: Target, page: 'Goals', color: 'text-blue-600' },
   { name: 'People', icon: Users, page: 'People', color: 'text-purple-600' },
   { name: 'Users', icon: UserCog, page: 'Users', color: 'text-orange-600' },
@@ -17,19 +15,12 @@ const navItems = [
 export default function Layout({ children, currentPageName, sidebarContent }) {
   const [sidebarOpen, setSidebarOpen] = React.useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
-  const [currentUser, setCurrentUser] = React.useState(null);
+  const { user, logout } = useAuth();
 
-  React.useEffect(() => {
-    base44.auth.me().then(setCurrentUser);
-  }, []);
-
-  const visibleNavItems = currentUser?.role === 'admin' 
-    ? navItems 
-    : navItems.filter(item => item.page !== 'Users');
+  const visibleNavItems = navItems;
 
   return (
-    <AuthGuard>
-      <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-slate-50">
       {/* Desktop Sidebar */}
       <aside className={`hidden md:flex fixed left-0 top-0 h-screen bg-white border-r border-slate-200 flex-col p-6 transition-transform duration-300 ${
         sidebarOpen ? 'translate-x-0 w-64' : '-translate-x-full w-64'
@@ -46,14 +37,12 @@ export default function Layout({ children, currentPageName, sidebarContent }) {
             </h1>
             <p className="text-xs text-slate-400 mt-1">AI-Powered Journaling</p>
           </div>
-          <Button
-            variant="ghost"
-            size="icon"
+          <button
             onClick={() => setSidebarOpen(false)}
-            className="h-8 w-8"
+            className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-slate-100 transition-colors"
           >
             <PanelLeftClose className="w-4 h-4" />
-          </Button>
+          </button>
         </div>
         
         <nav className="space-y-1">
@@ -63,7 +52,7 @@ export default function Layout({ children, currentPageName, sidebarContent }) {
             return (
               <Link
                 key={item.page}
-                to={createPageUrl(item.page)}
+                to={createPageUrl(item. page)}
                 className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${
                   isActive 
                     ? 'bg-slate-100 text-slate-900 font-medium' 
@@ -79,7 +68,7 @@ export default function Layout({ children, currentPageName, sidebarContent }) {
         
         <div id="sidebar-content-slot" className="flex-1 overflow-hidden flex flex-col min-h-0"></div>
         
-        <div className="pt-6 border-t border-slate-100">
+        <div className="pt-6 border-t border-slate-100 space-y-3">
           <div className="px-4 py-3 bg-gradient-to-br from-violet-50 to-purple-50 rounded-xl">
             <div className="flex items-center gap-2 mb-1">
               <Sparkles className="w-4 h-4 text-violet-600" />
@@ -87,19 +76,29 @@ export default function Layout({ children, currentPageName, sidebarContent }) {
             </div>
             <p className="text-xs text-violet-700">Learning your patterns</p>
           </div>
+          
+          {user && (
+            <div className="px-4 py-2">
+              <p className="text-xs text-slate-500 mb-2">{user.email}</p>
+              <button
+                onClick={() => logout()}
+                className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg hover: bg-slate-50 transition-colors"
+              >
+                Logout
+              </button>
+            </div>
+          )}
         </div>
       </aside>
 
       {/* Sidebar Toggle Button - When Closed */}
       {!sidebarOpen && (
-        <Button
-          variant="ghost"
-          size="icon"
+        <button
           onClick={() => setSidebarOpen(true)}
-          className="hidden md:flex fixed top-4 left-4 z-50 bg-white border border-slate-200 shadow-sm hover:shadow-md"
+          className="hidden md:flex fixed top-4 left-4 z-50 bg-white border border-slate-200 shadow-sm hover:shadow-md rounded-lg w-10 h-10 items-center justify-center"
         >
           <PanelLeft className="w-5 h-5" />
-        </Button>
+        </button>
       )}
 
       {/* Mobile Header */}
@@ -111,13 +110,12 @@ export default function Layout({ children, currentPageName, sidebarContent }) {
             </span>
             Reflect
           </h1>
-          <Button
-            variant="ghost"
-            size="icon"
+          <button
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            className="h-10 w-10 flex items-center justify-center rounded-lg hover:bg-slate-100 transition-colors"
           >
             {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-          </Button>
+          </button>
         </div>
         
         {mobileMenuOpen && (
@@ -147,11 +145,10 @@ export default function Layout({ children, currentPageName, sidebarContent }) {
 
       {/* Main Content */}
       <main className={`pt-16 md:pt-0 transition-all duration-300 ${
-        sidebarOpen ? 'md:ml-64' : 'md:ml-0'
+        sidebarOpen ?  'md:ml-64' : 'md:ml-0'
       }`}>
         {children}
       </main>
-      </div>
-      </AuthGuard>
-      );
-      }
+    </div>
+  );
+}

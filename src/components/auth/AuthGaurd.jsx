@@ -1,62 +1,24 @@
-import React, { useState, useEffect } from 'react';
-import { base44 } from '@/api/base44Client';
-import { Loader2 } from 'lucide-react';
-import TermsAgreement from './TermsAgreement';
+import React from 'react';
+import { useAuth } from '@/lib/AuthContext';
+import { Navigate } from 'react-router-dom';
 
 export default function AuthGuard({ children }) {
-  const [loading, setLoading] = useState(true);
-  const [user, setUser] = useState(null);
-  const [needsTerms, setNeedsTerms] = useState(false);
+  const { isAuthenticated, isLoadingAuth } = useAuth();
 
-  useEffect(() => {
-    checkAuth();
-  }, []);
-
-  const checkAuth = async () => {
-    try {
-      const isAuth = await base44.auth.isAuthenticated();
-      if (!isAuth) {
-        base44.auth.redirectToLogin(window.location.pathname);
-        return;
-      }
-
-      const currentUser = await base44.auth.me();
-      setUser(currentUser);
-
-      if (!currentUser.agreed_to_terms) {
-        setNeedsTerms(true);
-      }
-      
-      setLoading(false);
-    } catch (error) {
-      base44.auth.redirectToLogin(window.location.pathname);
-    }
-  };
-
-  const handleAcceptTerms = async (data) => {
-    try {
-      await base44.auth.updateMe(data);
-      setNeedsTerms(false);
-      setUser({ ...user, ...data });
-    } catch (error) {
-      console.error('Failed to update terms:', error);
-    }
-  };
-
-  if (loading) {
+  if (isLoadingAuth) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
         <div className="text-center">
-          <Loader2 className="w-8 h-8 animate-spin text-slate-400 mx-auto mb-4" />
+          <div className="w-12 h-12 border-4 border-slate-200 border-t-slate-800 rounded-full animate-spin mx-auto mb-4"></div>
           <p className="text-slate-600">Loading...</p>
         </div>
       </div>
     );
   }
 
-  if (needsTerms) {
-    return <TermsAgreement onAccept={handleAcceptTerms} />;
+  if (!isAuthenticated) {
+    return <Navigate to="/Login" replace />;
   }
 
-  return children;
+  return <>{children}</>;
 }
