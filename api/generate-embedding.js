@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 
 const openai = new OpenAI({
-  apiKey: process.env. OPENAI_API_KEY,
+  apiKey:  process.env.OPENAI_API_KEY,
 });
 
 export default async function handler(req, res) {
@@ -10,15 +10,15 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { content } = req.body;
+    const { text } = req.body;  // ← CHANGED FROM content TO text
 
-    if (!content) {
-      return res.status(400).json({ error: 'Content is required' });
+    if (!text) {
+      return res.status(400).json({ error: 'Text is required' });
     }
 
-    const response = await openai.embeddings.create({
+    const response = await openai. embeddings.create({
       model: 'text-embedding-3-small',
-      input: content,
+      input: text,  // ← CHANGED FROM content TO text
     });
 
     return res.status(200).json({ 
