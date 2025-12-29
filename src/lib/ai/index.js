@@ -1,6 +1,5 @@
 // Don't export openai client anymore - it's backend only
 export { embeddingHelpers } from './embeddings';
-export { summaryHelpers } from './summaries';
 export { insightsHelpers } from './insights';
 export { aiWorkflows } from './workflows';
 
