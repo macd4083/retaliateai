@@ -45,15 +45,23 @@ export default function Journal() {
 });
 
   const handleSave = async (entryData) => {
-    try {
-      await createEntry.mutateAsync(entryData);
-      setIsWriting(false);
-      setSelectedEntry(null);
-    } catch (error) {
-      console.error('Failed to save entry:', error);
-      alert('Failed to save entry. Please try again.');
+  try {
+    const result = await createEntry. mutateAsync(entryData);
+    
+    // Check if there are follow-up questions
+    if (result?. followUpQuestions && result.followUpQuestions.length > 0) {
+      // TODO: Show follow-up questions modal/dialog
+      console.log('Follow-up questions:', result.followUpQuestions);
+      // For now, just log them - we'll build the UI next
     }
-  };
+    
+    setIsWriting(false);
+    setSelectedEntry(null);
+  } catch (error) {
+    console.error('Failed to save entry:', error);
+    alert('Failed to save entry. Please try again.');
+  }
+};
 
   const handleDelete = async (entryId) => {
     if (! confirm('Are you sure you want to delete this entry?')) return;

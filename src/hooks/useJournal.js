@@ -22,10 +22,12 @@ export function useCreateJournalEntry(userId) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (entryData) => aiWorkflows.processNewEntry(userId, entryData),
+    mutationFn:  (entryData) => aiWorkflows.processNewEntry(userId, entryData),
     onSuccess: () => {
       // Invalidate and refetch journal entries
       queryClient.invalidateQueries({ queryKey: ['journal', userId] });
+      // Also invalidate user profile (might have been updated)
+      queryClient.invalidateQueries({ queryKey: ['userProfile', userId] });
     },
   });
 }
@@ -35,11 +37,9 @@ export function useUpdateJournalEntry() {
 
   return useMutation({
     mutationFn: ({ entryId, entryData }) =>
-      journalHelpers.updateEntry(entryId, entryData),
-    onSuccess: (data, variables) => {
-      // Invalidate the specific entry and the list
-      queryClient.invalidateQueries({ queryKey: ['journal', variables.entryId] });
-      queryClient.invalidateQueries({ queryKey: ['journal'] });
+      journalHelpers. updateEntry(entryId, entryData),
+    onSuccess: () => {
+      queryClient. invalidateQueries({ queryKey:  ['journal'] });
     },
   });
 }
