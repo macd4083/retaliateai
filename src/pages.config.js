@@ -14,7 +14,6 @@ export const pagesConfig = {
     People,
     Users,
     Login,
-    AITest, 
   },
   Layout,
   mainPage: 'Journal'
