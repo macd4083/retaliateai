@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '@/lib/AuthContext';
 import { useJournalEntries, useCreateJournalEntry, useUpdateJournalEntry, useDeleteJournalEntry } from '@/hooks';
-import SidebarNav from '@/components/journal/SidebarNav';
 import EntrySidebar from '@/components/journal/EntrySidebar';
 import JournalEditor from '@/components/journal/JournalEditor';
 import EntryDetailModal from '@/components/journal/EntryDetailModal';
@@ -12,8 +11,6 @@ export default function Journal() {
   const [viewingEntry, setViewingEntry] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSaving, setIsSaving] = useState(false);
-  const navUserIsAdmin = user && user.email === "admin@example.com";
-  const [nav, setNav] = useState('journal');
 
   const { data: entries = [], isLoading, error } = useJournalEntries(user?.id);
   const createEntry = useCreateJournalEntry(user?.id);
@@ -162,22 +159,16 @@ export default function Journal() {
   }
 
   return (
-    <div className="flex h-full min-h-screen">
-      {/* Button Sidebar */}
-      <SidebarNav current={nav} isAdmin={navUserIsAdmin} onNav={setNav} />
+    <div className="h-full flex">
+      {/* Only show the entry sidebar and main content! */}
+      <EntrySidebar
+        entries={entries}
+        selectedEntryId={viewingEntry?.id}
+        onSelectEntry={setViewingEntry}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+      />
 
-      {/* Entry List Sidebar (Journal view only) */}
-      {nav === "journal" && (
-        <EntrySidebar
-          entries={entries}
-          selectedEntryId={viewingEntry?.id}
-          onSelectEntry={setViewingEntry}
-          searchQuery={searchQuery}
-          onSearchChange={setSearchQuery}
-        />
-      )}
-
-      {/* Main Content Area */}
       <div className="flex-1 bg-slate-50">
         <JournalEditor
           entry={selectedEntry}
@@ -187,7 +178,6 @@ export default function Journal() {
         />
       </div>
 
-      {/* Entry Detail Modal */}
       {viewingEntry && (
         <EntryDetailModal
           entry={viewingEntry}
