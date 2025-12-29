@@ -1,73 +1,141 @@
 import React, { useState } from 'react';
 import { useAuth } from '@/lib/AuthContext';
-import { useJournalEntries, useCreateJournalEntry, useDeleteJournalEntry } from '@/hooks';
+import { useJournalEntries, useCreateJournalEntry, useUpdateJournalEntry, useDeleteJournalEntry } from '@/hooks';
+import EntrySidebar from '@/components/journal/EntrySidebar';
 import JournalEditor from '@/components/journal/JournalEditor';
-import JournalList from '@/components/journal/JournalList';
-import JournalFilters from '@/components/journal/JournalFilters';
+import EntryDetailModal from '@/components/journal/EntryDetailModal';
+import { aiWorkflows } from '@/lib/ai/workflows';
 
 export default function Journal() {
   const { user } = useAuth();
-  const [isWriting, setIsWriting] = useState(false);
   const [selectedEntry, setSelectedEntry] = useState(null);
-  const [filters, setFilters] = useState({
-    searchQuery: '',
-    sortBy: 'created_at',
-    sortOrder:  'desc',
-  });
+  const [viewingEntry, setViewingEntry] = useState(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
 
-  // Fetch journal entries
   const { data: entries = [], isLoading, error } = useJournalEntries(user?. id);
-
-  // Mutations
   const createEntry = useCreateJournalEntry(user?.id);
+  const updateEntry = useUpdateJournalEntry();
   const deleteEntry = useDeleteJournalEntry();
 
-  // Filter and sort entries
-  const filteredEntries = entries
-    .filter((entry) => {
-      if (! filters.searchQuery) return true;
-      const query = filters.searchQuery.toLowerCase();
-      return (
-        entry. title?. toLowerCase().includes(query) ||
-        entry.content?.toLowerCase().includes(query) ||
-        entry.tags?.some((tag) => tag.toLowerCase().includes(query))
-      );
-    })
-    .sort((a, b) => {
-  const order = filters.sortOrder === 'asc' ? 1 : -1;
-  if (filters.sortBy === 'created_at') {
-    return (new Date(a.created_at).getTime() - new Date(b.created_at).getTime()) * order;
-  }
-  if (filters.sortBy === 'mood_rating') {
-    return ((a.mood_rating || 0) - (b.mood_rating || 0)) * order;
-  }
-  return 0;
-});
-
   const handleSave = async (entryData) => {
-  try {
-    const result = await createEntry. mutateAsync(entryData);
-    
-    // Check if there are follow-up questions
-    if (result?. followUpQuestions && result.followUpQuestions.length > 0) {
-      // TODO: Show follow-up questions modal/dialog
-      console.log('Follow-up questions:', result.followUpQuestions);
-      // For now, just log them - we'll build the UI next
+    setIsSaving(true);
+    try {
+      const result = await createEntry.mutateAsync(entryData);
+      
+      // Auto-open the modal with AI insights and ephemeral follow-up questions
+      if (result?. entry) {
+        setTimeout(() => {
+          setViewingEntry({
+            ...result.entry,
+            follow_up_questions: result.followUpQuestions,
+          });
+        }, 300);
+      }
+    } catch (error) {
+      console.error('Failed to save entry:', error);
+      alert('Failed to save entry. Please try again.');
+    } finally {
+      setIsSaving(false);
     }
-    
-    setIsWriting(false);
-    setSelectedEntry(null);
-  } catch (error) {
-    console.error('Failed to save entry:', error);
-    alert('Failed to save entry. Please try again.');
-  }
-};
+  };
+
+  const handleSubmitFollowUp = async (entryId, answers) => {
+    try {
+      // Get the current entry
+      const currentEntry = entries.find((e) => e.id === entryId);
+      if (!currentEntry) throw new Error('Entry not found');
+
+      // Append answers to content (answers only, no questions)
+      const answersText = '\n\n' + answers.join('\n\n');
+      const updatedContent = currentEntry.content + answersText;
+
+      // Generate new embedding for updated content
+      const embeddingResponse = await fetch('/api/generate-embedding', {
+        method:  'POST',
+        headers:  { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: updatedContent }),
+      });
+
+      if (!embeddingResponse. ok) {
+        throw new Error('Failed to generate embedding');
+      }
+
+      const { embedding } = await embeddingResponse. json();
+
+      // Search for similar entries with new embedding
+      const similarResponse = await fetch('/api/search-similar-entries', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: user. id,
+          embedding,
+          limit: 15,
+        }),
+      });
+
+      if (!similarResponse.ok) {
+        throw new Error('Failed to search similar entries');
+      }
+
+      const { entries: similarEntries } = await similarResponse.json();
+
+      // Get user profile
+      let userProfile;
+      try {
+        const { data: profile } = await fetch(`/api/user-profile?user_id=${user.id}`);
+        userProfile = profile?. summary_text || 'No profile yet.  This is a new user.';
+      } catch (error) {
+        userProfile = 'No profile yet. This is a new user. ';
+      }
+
+      // Re-analyze with updated content
+      const analysisResponse = await fetch('/api/analyze-entry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          new_entry: updatedContent,
+          past_summaries: similarEntries.map(e => e.summary).filter(Boolean),
+          user_profile: userProfile,
+        }),
+      });
+
+      if (!analysisResponse. ok) {
+        throw new Error('Failed to analyze entry');
+      }
+
+      const analysis = await analysisResponse.json();
+
+      // Update the entry in the database
+      await updateEntry.mutateAsync({
+        entryId: entryId,
+        entryData: {
+          content:  updatedContent,
+          summary:  analysis.summary,
+          insights: analysis.insights,
+          embedding: embedding,
+        }
+      });
+
+      // Update the viewing entry to show new insights (no more follow-up questions)
+      setViewingEntry({
+        ... currentEntry,
+        content: updatedContent,
+        insights: analysis.insights,
+        follow_up_questions: null,
+      });
+    } catch (error) {
+      console.error('Failed to process follow-up:', error);
+      throw error;
+    }
+  };
 
   const handleDelete = async (entryId) => {
-    if (! confirm('Are you sure you want to delete this entry?')) return;
-
     try {
       await deleteEntry. mutateAsync(entryId);
+      if (viewingEntry?. id === entryId) {
+        setViewingEntry(null);
+      }
     } catch (error) {
       console.error('Failed to delete entry:', error);
       alert('Failed to delete entry. Please try again.');
@@ -76,12 +144,7 @@ export default function Journal() {
 
   const handleEdit = (entry) => {
     setSelectedEntry(entry);
-    setIsWriting(true);
-  };
-
-  const handleCancel = () => {
-    setIsWriting(false);
-    setSelectedEntry(null);
+    setViewingEntry(null);
   };
 
   if (isLoading) {
@@ -107,75 +170,36 @@ export default function Journal() {
   }
 
   return (
-    <div className="h-full flex flex-col">
-      {/* Header */}
-      <div className="bg-white border-b border-slate-200 px-8 py-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-slate-900">Journal</h1>
-            <p className="text-slate-600 mt-1">
-              {entries.length} {entries.length === 1 ? 'entry' : 'entries'}
-            </p>
-          </div>
-          <button
-            onClick={() => setIsWriting(true)}
-            disabled={isWriting}
-            className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium transition-colors"
-          >
-            ✍️ New Entry
-          </button>
-        </div>
+    <div className="h-full flex">
+      {/* Entry List Sidebar */}
+      <EntrySidebar
+        entries={entries}
+        selectedEntryId={viewingEntry?.id}
+        onSelectEntry={setViewingEntry}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+      />
+
+      {/* Main Content Area - Always show editor */}
+      <div className="flex-1 bg-slate-50">
+        <JournalEditor
+          entry={selectedEntry}
+          onSave={handleSave}
+          onCancel={() => setSelectedEntry(null)}
+          isSaving={isSaving}
+        />
       </div>
 
-      {/* Main Content */}
-      <div className="flex-1 overflow-hidden">
-        {isWriting ? (
-          <JournalEditor
-            entry={selectedEntry}
-            onSave={handleSave}
-            onCancel={handleCancel}
-            isSaving={createEntry.isPending}
-          />
-        ) : (
-          <div className="h-full flex flex-col">
-            {/* Filters */}
-            <JournalFilters filters={filters} onFiltersChange={setFilters} />
-
-            {/* Entries List */}
-            <div className="flex-1 overflow-y-auto">
-              {filteredEntries.length === 0 ? (
-                <div className="flex items-center justify-center h-full">
-                  <div className="text-center max-w-md">
-                    <div className="text-6xl mb-4">📔</div>
-                    <h2 className="text-2xl font-semibold text-slate-900 mb-2">
-                      {entries.length === 0 ? 'Start Your Journal' : 'No matching entries'}
-                    </h2>
-                    <p className="text-slate-600 mb-6">
-                      {entries.length === 0
-                        ? 'Write your first entry to begin your journey of self-reflection.'
-                        : 'Try adjusting your search or filters. '}
-                    </p>
-                    {entries.length === 0 && (
-                      <button
-                        onClick={() => setIsWriting(true)}
-                        className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
-                      >
-                        Write First Entry
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <JournalList
-                  entries={filteredEntries}
-                  onEdit={handleEdit}
-                  onDelete={handleDelete}
-                />
-              )}
-            </div>
-          </div>
-        )}
-      </div>
+      {/* Entry Detail Modal */}
+      {viewingEntry && (
+        <EntryDetailModal
+          entry={viewingEntry}
+          onClose={() => setViewingEntry(null)}
+          onEdit={handleEdit}
+          onDelete={handleDelete}
+          onSubmitFollowUp={handleSubmitFollowUp}
+        />
+      )}
     </div>
   );
 }

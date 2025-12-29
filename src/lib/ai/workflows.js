@@ -26,7 +26,7 @@ export const aiWorkflows = {
       // Step 4: Search for similar past entries
       const similarResponse = await fetch('/api/search-similar-entries', {
         method: 'POST',
-        headers: { 'Content-Type':  'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           user_id: userId,
           embedding,
@@ -49,13 +49,13 @@ export const aiWorkflows = {
         userProfile = 'No profile yet. This is a new user.';
       }
 
-      // Step 6: Analyze entry (get summary, insights, patterns, updated profile, follow-up questions)
+      // Step 6: Analyze entry
       const analysisResponse = await fetch('/api/analyze-entry', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:  JSON.stringify({
-          new_entry:  entryData.content,
-          past_summaries: similarEntries. map(e => e.summary).filter(Boolean),
+        headers: { 'Content-Type':  'application/json' },
+        body: JSON.stringify({
+          new_entry:  entryData. content,
+          past_summaries: similarEntries.map(e => e.summary).filter(Boolean),
           user_profile: userProfile,
         }),
       });
@@ -66,11 +66,10 @@ export const aiWorkflows = {
 
       const analysis = await analysisResponse.json();
 
-      // Step 7: Update entry with summary, insights, patterns
+      // Step 7: Update entry with summary and insights
       const updatedEntry = await journalHelpers.updateEntry(savedEntry.id, {
         summary: analysis.summary,
         insights: analysis.insights,
-        patterns: analysis.patterns,
       });
 
       // Step 8: Update user profile if needed
@@ -78,10 +77,10 @@ export const aiWorkflows = {
         await userProfileHelpers.updateSummary(userId, analysis.updated_profile);
       }
 
-      // Step 9: Return entry with follow-up questions (if any)
+      // Step 9: Return entry with ephemeral follow-up questions
       return {
         entry: updatedEntry,
-        followUpQuestions: analysis.follow_up_questions || null,
+        followUpQuestions: analysis. follow_up_questions || null,
       };
     } catch (error) {
       console.error('Error processing new entry:', error);

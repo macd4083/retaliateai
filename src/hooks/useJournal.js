@@ -36,8 +36,9 @@ export function useUpdateJournalEntry() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ entryId, entryData }) =>
-      journalHelpers. updateEntry(entryId, entryData),
+    mutationFn: async ({ entryId, entryData }) => {
+      return await journalHelpers.updateEntry(entryId, entryData);
+    },
     onSuccess: () => {
       queryClient. invalidateQueries({ queryKey:  ['journal'] });
     },

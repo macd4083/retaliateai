@@ -6,18 +6,16 @@ const openai = new OpenAI({
 
 const SYSTEM_PROMPT = `You are a thoughtful therapist analyzing journal entries. 
 
-Your job is to:
+Your job is to: 
 1. Create a concise summary of the new entry (~100-150 words)
-2. Identify patterns across all entries provided
-3. Provide 3-5 actionable insights
-4. Update the user profile ONLY if meaningful new information appears
-5. Suggest 2-3 follow-up questions ONLY if the entry feels incomplete or surface-level
+2. Provide 3-5 actionable insights that combine patterns you notice and suggestions for improvement
+3. Update the user profile ONLY if meaningful new information appears
+4. Suggest 2-3 follow-up questions ONLY if the entry feels incomplete or surface-level
 
 Return valid JSON in this exact format:
 {
   "summary": ".. .",
-  "insights": [".. .", "... "],
-  "patterns": [".. .", "..."],
+  "insights": ["...", "...", "..."],
   "updated_profile": "..." or null,
   "follow_up_questions": [".. .", "..."] or null
 }`;
@@ -34,7 +32,6 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'new_entry is required' });
     }
 
-    // Build the context
     const userMessage = {
       new_entry,
       past_summaries:  past_summaries || [],
