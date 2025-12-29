@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { useAuth } from '@/lib/AuthContext';
 import { useJournalEntries, useCreateJournalEntry, useUpdateJournalEntry, useDeleteJournalEntry } from '@/hooks';
+import SidebarNav from '@/components/journal/SidebarNav';
 import EntrySidebar from '@/components/journal/EntrySidebar';
 import JournalEditor from '@/components/journal/JournalEditor';
 import EntryDetailModal from '@/components/journal/EntryDetailModal';
-import { aiWorkflows } from '@/lib/ai/workflows';
 
 export default function Journal() {
   const { user } = useAuth();
@@ -12,8 +12,10 @@ export default function Journal() {
   const [viewingEntry, setViewingEntry] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const navUserIsAdmin = user && user.email === "admin@example.com";
+  const [nav, setNav] = useState('journal');
 
-  const { data: entries = [], isLoading, error } = useJournalEntries(user?. id);
+  const { data: entries = [], isLoading, error } = useJournalEntries(user?.id);
   const createEntry = useCreateJournalEntry(user?.id);
   const updateEntry = useUpdateJournalEntry();
   const deleteEntry = useDeleteJournalEntry();
@@ -22,9 +24,7 @@ export default function Journal() {
     setIsSaving(true);
     try {
       const result = await createEntry.mutateAsync(entryData);
-      
-      // Auto-open the modal with AI insights and ephemeral follow-up questions
-      if (result?. entry) {
+      if (result?.entry) {
         setTimeout(() => {
           setViewingEntry({
             ...result.entry,
@@ -42,33 +42,28 @@ export default function Journal() {
 
   const handleSubmitFollowUp = async (entryId, answers) => {
     try {
-      // Get the current entry
       const currentEntry = entries.find((e) => e.id === entryId);
       if (!currentEntry) throw new Error('Entry not found');
-
-      // Append answers to content (answers only, no questions)
       const answersText = '\n\n' + answers.join('\n\n');
       const updatedContent = currentEntry.content + answersText;
 
-      // Generate new embedding for updated content
       const embeddingResponse = await fetch('/api/generate-embedding', {
         method:  'POST',
         headers:  { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: updatedContent }),
       });
 
-      if (!embeddingResponse. ok) {
+      if (!embeddingResponse.ok) {
         throw new Error('Failed to generate embedding');
       }
 
-      const { embedding } = await embeddingResponse. json();
+      const { embedding } = await embeddingResponse.json();
 
-      // Search for similar entries with new embedding
       const similarResponse = await fetch('/api/search-similar-entries', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          user_id: user. id,
+          user_id: user.id,
           embedding,
           limit: 15,
         }),
@@ -80,17 +75,15 @@ export default function Journal() {
 
       const { entries: similarEntries } = await similarResponse.json();
 
-      // Get user profile
       let userProfile;
       try {
         const response = await fetch(`/api/user-profile?user_id=${user.id}`);
         const { data: profile } = await response.json();
-        userProfile = profile?. summary_text || 'No profile yet.  This is a new user.';
+        userProfile = profile?.summary_text || 'No profile yet.  This is a new user.';
       } catch (error) {
         userProfile = 'No profile yet. This is a new user. ';
       }
 
-      // Re-analyze with updated content
       const analysisResponse = await fetch('/api/analyze-entry', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -101,13 +94,12 @@ export default function Journal() {
         }),
       });
 
-      if (!analysisResponse. ok) {
+      if (!analysisResponse.ok) {
         throw new Error('Failed to analyze entry');
       }
 
       const analysis = await analysisResponse.json();
 
-      // Update the entry in the database
       await updateEntry.mutateAsync({
         entryId: entryId,
         entryData: {
@@ -118,9 +110,8 @@ export default function Journal() {
         }
       });
 
-      // Update the viewing entry to show new insights (no more follow-up questions)
       setViewingEntry({
-        ... currentEntry,
+        ...currentEntry,
         content: updatedContent,
         insights: analysis.insights,
         follow_up_questions: null,
@@ -133,8 +124,8 @@ export default function Journal() {
 
   const handleDelete = async (entryId) => {
     try {
-      await deleteEntry. mutateAsync(entryId);
-      if (viewingEntry?. id === entryId) {
+      await deleteEntry.mutateAsync(entryId);
+      if (viewingEntry?.id === entryId) {
         setViewingEntry(null);
       }
     } catch (error) {
@@ -171,17 +162,22 @@ export default function Journal() {
   }
 
   return (
-    <div className="h-full flex">
-      {/* Entry List Sidebar */}
-      <EntrySidebar
-        entries={entries}
-        selectedEntryId={viewingEntry?.id}
-        onSelectEntry={setViewingEntry}
-        searchQuery={searchQuery}
-        onSearchChange={setSearchQuery}
-      />
+    <div className="flex h-full min-h-screen">
+      {/* Button Sidebar */}
+      <SidebarNav current={nav} isAdmin={navUserIsAdmin} onNav={setNav} />
 
-      {/* Main Content Area - Always show editor */}
+      {/* Entry List Sidebar (Journal view only) */}
+      {nav === "journal" && (
+        <EntrySidebar
+          entries={entries}
+          selectedEntryId={viewingEntry?.id}
+          onSelectEntry={setViewingEntry}
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+        />
+      )}
+
+      {/* Main Content Area */}
       <div className="flex-1 bg-slate-50">
         <JournalEditor
           entry={selectedEntry}
