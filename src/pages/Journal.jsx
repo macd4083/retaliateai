@@ -83,7 +83,8 @@ export default function Journal() {
       // Get user profile
       let userProfile;
       try {
-        const { data: profile } = await fetch(`/api/user-profile?user_id=${user.id}`);
+        const response = await fetch(`/api/user-profile?user_id=${user.id}`);
+        const { data: profile } = await response.json();
         userProfile = profile?. summary_text || 'No profile yet.  This is a new user.';
       } catch (error) {
         userProfile = 'No profile yet. This is a new user. ';
