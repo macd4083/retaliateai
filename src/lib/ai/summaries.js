@@ -1,8 +1,8 @@
 export const summaryHelpers = {
   async summarizeEntry(content) {
     const response = await fetch('/api/generate-summary', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method:  'POST',
+      headers:  { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content }),
     });
 
@@ -23,7 +23,7 @@ export const summaryHelpers = {
     });
 
     if (!response.ok) {
-      const error = await response.json();
+      const error = await response. json();
       throw new Error(error.error || 'Failed to update user summary');
     }
 
