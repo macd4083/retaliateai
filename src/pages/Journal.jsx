@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '@/lib/AuthContext';
 import { useJournalEntries, useCreateJournalEntry, useUpdateJournalEntry, useDeleteJournalEntry } from '@/hooks';
-import EntrySidebar from '@/components/journal/EntrySidebar';
 import JournalEditor from '@/components/journal/JournalEditor';
 import EntryDetailModal from '@/components/journal/EntryDetailModal';
 
@@ -9,7 +8,6 @@ export default function Journal() {
   const { user } = useAuth();
   const [selectedEntry, setSelectedEntry] = useState(null);
   const [viewingEntry, setViewingEntry] = useState(null);
-  const [searchQuery, setSearchQuery] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
   const { data: entries = [], isLoading, error } = useJournalEntries(user?.id);
@@ -158,25 +156,15 @@ export default function Journal() {
     );
   }
 
+  // Only main content, NO sidebar or entry list here
   return (
-    <div className="h-full flex">
-      {/* Only show the entry sidebar and main content! */}
-      <EntrySidebar
-        entries={entries}
-        selectedEntryId={viewingEntry?.id}
-        onSelectEntry={setViewingEntry}
-        searchQuery={searchQuery}
-        onSearchChange={setSearchQuery}
+    <div className="flex-1 bg-slate-50">
+      <JournalEditor
+        entry={selectedEntry}
+        onSave={handleSave}
+        onCancel={() => setSelectedEntry(null)}
+        isSaving={isSaving}
       />
-
-      <div className="flex-1 bg-slate-50">
-        <JournalEditor
-          entry={selectedEntry}
-          onSave={handleSave}
-          onCancel={() => setSelectedEntry(null)}
-          isSaving={isSaving}
-        />
-      </div>
 
       {viewingEntry && (
         <EntryDetailModal
