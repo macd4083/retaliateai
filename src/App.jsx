@@ -1,86 +1,201 @@
-import './App.css'
-import { Toaster } from "@/components/ui/toaster"
-import { QueryClientProvider } from '@tanstack/react-query'
-import { queryClient } from '@/lib/query-client'
-import { pagesConfig } from './pages.config'
-import { Route, Routes, Navigate } from 'react-router-dom';
-import PageNotFound from './lib/PageNotFound';
-import { AuthProvider, useAuth } from '@/lib/AuthContext';
-import AuthCallback from './pages/AuthCallback';
+import React, { useState } from 'react';
+import { useJournalEntries, useCreateJournalEntry, useUpdateJournalEntry, useDeleteJournalEntry } from '@/hooks';
+import { useAuth } from '@/lib/AuthContext';
+import Sidebar from '@/components/layout/Sidebar';
+import JournalEditor from '@/components/journal/JournalEditor';
+import EntryDetailModal from '@/components/journal/EntryDetailModal';
 
-const { Pages, Layout, mainPage } = pagesConfig;
-const mainPageKey = mainPage ??  Object.keys(Pages)[0];
-const MainPage = mainPageKey ? Pages[mainPageKey] :  <></>;
-const LoginPage = Pages['Login'];
+export default function App() {
+  const { user } = useAuth();
+  const [activeTab, setActiveTab] = useState('journal');
+  const [selectedEntry, setSelectedEntry] = useState(null);
+  const [viewingEntry, setViewingEntry] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const { data: entries = [], isLoading, error } = useJournalEntries(user?.id);
+  const createEntry = useCreateJournalEntry(user?.id);
+  const updateEntry = useUpdateJournalEntry();
+  const deleteEntry = useDeleteJournalEntry();
 
-const LayoutWrapper = ({ children, currentPageName }) => Layout ? 
-  <Layout currentPageName={currentPageName}>{children}</Layout>
-  : <>{children}</>;
+  // Mutations/handlers
+  const handleSave = async (entryData) => {
+    setIsSaving(true);
+    try {
+      const result = await createEntry.mutateAsync(entryData);
+      if (result?.entry) {
+        setTimeout(() => {
+          setSelectedEntry(result.entry);
+          setViewingEntry({
+            ...result.entry,
+            follow_up_questions: result.followUpQuestions,
+          });
+        }, 300);
+      }
+    } catch (error) {
+      console.error('Failed to save entry:', error);
+      alert('Failed to save entry. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
-const AuthenticatedApp = () => {
-  const { isLoadingAuth, isAuthenticated } = useAuth();
+  const handleSubmitFollowUp = async (entryId, answers) => {
+    try {
+      const currentEntry = entries.find((e) => e.id === entryId);
+      if (!currentEntry) throw new Error('Entry not found');
+      const answersText = '\n\n' + answers.join('\n\n');
+      const updatedContent = currentEntry.content + answersText;
 
-  // Show loading spinner while checking auth
-  if (isLoadingAuth) {
+      const embeddingResponse = await fetch('/api/generate-embedding', {
+        method:  'POST',
+        headers:  { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: updatedContent }),
+      });
+
+      if (!embeddingResponse.ok) {
+        throw new Error('Failed to generate embedding');
+      }
+
+      const { embedding } = await embeddingResponse.json();
+
+      const similarResponse = await fetch('/api/search-similar-entries', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: user.id,
+          embedding,
+          limit: 15,
+        }),
+      });
+
+      if (!similarResponse.ok) {
+        throw new Error('Failed to search similar entries');
+      }
+
+      const { entries: similarEntries } = await similarResponse.json();
+
+      let userProfile;
+      try {
+        const response = await fetch(`/api/user-profile?user_id=${user.id}`);
+        const { data: profile } = await response.json();
+        userProfile = profile?.summary_text || 'No profile yet.  This is a new user.';
+      } catch (error) {
+        userProfile = 'No profile yet. This is a new user. ';
+      }
+
+      const analysisResponse = await fetch('/api/analyze-entry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          new_entry: updatedContent,
+          past_summaries: similarEntries.map(e => e.summary).filter(Boolean),
+          user_profile: userProfile,
+        }),
+      });
+
+      if (!analysisResponse.ok) {
+        throw new Error('Failed to analyze entry');
+      }
+
+      const analysis = await analysisResponse.json();
+
+      await updateEntry.mutateAsync({
+        entryId: entryId,
+        entryData: {
+          content: updatedContent,
+          summary: analysis.summary,
+          insights: analysis.insights,
+          embedding,
+        }
+      });
+
+      setViewingEntry({
+        ...currentEntry,
+        content: updatedContent,
+        insights: analysis.insights,
+        follow_up_questions: null,
+      });
+    } catch (error) {
+      console.error('Failed to process follow-up:', error);
+      throw error;
+    }
+  };
+
+  const handleDelete = async (entryId) => {
+    try {
+      await deleteEntry.mutateAsync(entryId);
+      if (viewingEntry?.id === entryId) {
+        setViewingEntry(null);
+      }
+      if (selectedEntry?.id === entryId) {
+        setSelectedEntry(null);
+      }
+    } catch (error) {
+      console.error('Failed to delete entry:', error);
+      alert('Failed to delete entry. Please try again.');
+    }
+  };
+
+  const handleEdit = (entry) => {
+    setSelectedEntry(entry);
+    setViewingEntry(null);
+  };
+
+  // If loading/error, show loader or error page
+  if (isLoading) {
     return (
-      <div className="fixed inset-0 flex items-center justify-center bg-slate-50">
+      <div className="flex items-center justify-center h-full">
         <div className="text-center">
-          <div className="w-12 h-12 border-4 border-slate-200 border-t-slate-800 rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-slate-600">Loading... </p>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-slate-600">Loading your journal...</p>
         </div>
       </div>
     );
   }
 
-  // If not authenticated, show login page
-  if (! isAuthenticated) {
+  if (error) {
     return (
-      <Routes>
-        <Route path="/Login" element={<LoginPage />} />
-        <Route path="*" element={<Navigate to="/Login" replace />} />
-      </Routes>
+      <div className="p-8">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-6">
+          <h2 className="text-red-800 font-semibold mb-2">Error loading journal</h2>
+          <p className="text-red-600">{error.message}</p>
+        </div>
+      </div>
     );
   }
 
-  // Render the main app for authenticated users
   return (
-    <Routes>
-      <Route path="/" element={
-        <LayoutWrapper currentPageName={mainPageKey}>
-          <MainPage />
-        </LayoutWrapper>
-      } />
-      {Object.entries(Pages).map(([path, Page]) => (
-        <Route
-          key={path}
-          path={`/${path}`}
-          element={
-            <LayoutWrapper currentPageName={path}>
-              <Page />
-            </LayoutWrapper>
-          }
-        />
-      ))}
-      <Route path="*" element={<PageNotFound />} />
-    </Routes>
+    <div className="flex h-screen">
+      <Sidebar
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        user={user}
+        entries={entries}
+        selectedEntryId={selectedEntry?.id}
+        onSelectEntry={setSelectedEntry}
+      />
+      <main className="flex-1">
+        {activeTab === 'journal' && (
+          <div className="flex-1 bg-slate-50">
+            <JournalEditor
+              entry={selectedEntry}
+              onSave={handleSave}
+              onCancel={() => setSelectedEntry(null)}
+              isSaving={isSaving}
+            />
+            {viewingEntry && (
+              <EntryDetailModal
+                entry={viewingEntry}
+                onClose={() => setViewingEntry(null)}
+                onEdit={handleEdit}
+                onDelete={handleDelete}
+                onSubmitFollowUp={handleSubmitFollowUp}
+              />
+            )}
+          </div>
+        )}
+        {/* Render other tabs/pages here */}
+        {/* e.g. {activeTab === 'goals' && <GoalsPage />} */}
+      </main>
+    </div>
   );
-};
-
-function App() {
-  return (
-    <AuthProvider>
-      <QueryClientProvider client={queryClient}>
-        <Routes>
-          {/* Public auth callback route - must be outside AuthenticatedApp */}
-          <Route path="/auth/callback" element={<AuthCallback />} />
-          
-          {/* All other routes */}
-          <Route path="*" element={<AuthenticatedApp />} />
-        </Routes>
-        <Toaster />
-      </QueryClientProvider>
-    </AuthProvider>
-  )
 }
-
-export default App

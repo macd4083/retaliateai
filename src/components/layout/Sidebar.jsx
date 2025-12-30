@@ -29,7 +29,7 @@ export default function Sidebar({
 
   return (
     <div className="w-64 bg-white border-r border-slate-200 flex flex-col h-full">
-      {/* Navigation Tabs at the top */}
+      {/* Nav buttons at top */}
       <div className="p-4 space-y-2">
         {tabs.map((tab) => {
           const Icon = tab.icon;
@@ -50,8 +50,8 @@ export default function Sidebar({
         })}
       </div>
       {/* Divider */}
-      <div className="border-b border-slate-100 my-2"></div>
-      {/* Entry search/list always below buttons */}
+      <div className="border-b border-slate-200 my-2"></div>
+      {/* Journal entry search/list below nav always */}
       <div className="flex-1 flex flex-col px-4 pb-4 overflow-y-auto">
         <input
           type="text"
