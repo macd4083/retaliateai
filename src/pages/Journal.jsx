@@ -4,10 +4,13 @@ import { useJournalEntries, useCreateJournalEntry, useUpdateJournalEntry, useDel
 import JournalEditor from '@/components/journal/JournalEditor';
 import EntryDetailModal from '@/components/journal/EntryDetailModal';
 
-export default function Journal() {
+export default function Journal({
+  selectedEntry,
+  setSelectedEntry,
+  viewingEntry,
+  setViewingEntry,
+}) {
   const { user } = useAuth();
-  const [selectedEntry, setSelectedEntry] = useState(null);
-  const [viewingEntry, setViewingEntry] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
 
   const { data: entries = [], isLoading, error } = useJournalEntries(user?.id);
@@ -21,6 +24,7 @@ export default function Journal() {
       const result = await createEntry.mutateAsync(entryData);
       if (result?.entry) {
         setTimeout(() => {
+          setSelectedEntry(result.entry);
           setViewingEntry({
             ...result.entry,
             follow_up_questions: result.followUpQuestions,
@@ -98,10 +102,10 @@ export default function Journal() {
       await updateEntry.mutateAsync({
         entryId: entryId,
         entryData: {
-          content:  updatedContent,
-          summary:  analysis.summary,
+          content: updatedContent,
+          summary: analysis.summary,
           insights: analysis.insights,
-          embedding: embedding,
+          embedding,
         }
       });
 
@@ -122,6 +126,9 @@ export default function Journal() {
       await deleteEntry.mutateAsync(entryId);
       if (viewingEntry?.id === entryId) {
         setViewingEntry(null);
+      }
+      if (selectedEntry?.id === entryId) {
+        setSelectedEntry(null);
       }
     } catch (error) {
       console.error('Failed to delete entry:', error);
@@ -156,7 +163,7 @@ export default function Journal() {
     );
   }
 
-  // Only main content, NO sidebar or entry list here
+  // NO SIDEBAR RENDERING HERE!
   return (
     <div className="flex-1 bg-slate-50">
       <JournalEditor
@@ -165,7 +172,6 @@ export default function Journal() {
         onCancel={() => setSelectedEntry(null)}
         isSaving={isSaving}
       />
-
       {viewingEntry && (
         <EntryDetailModal
           entry={viewingEntry}
