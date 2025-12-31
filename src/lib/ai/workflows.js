@@ -84,6 +84,21 @@ export const aiWorkflows = {
         summary: analysis. summary,
         insights: analysis. insights,
       });
+      // Step 9.5: Auto-link entry to goals
+      try {
+        await fetch('/api/link-entry-to-goals', {
+          method:  'POST',
+          headers:  { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            entry_id: savedEntry.id,
+            entry_content: entryData.content,
+            user_id: userId,
+         }),
+        });
+      } catch (error) {
+      console.error('Failed to link entry to goals:', error);
+      // Don't fail the whole flow if this fails
+      }
 
       // Step 10: Update user profile (now structured)
       if (analysis.updated_profile) {
