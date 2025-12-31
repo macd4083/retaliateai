@@ -1,8 +1,8 @@
 ﻿import React, { useState } from 'react';
-import { Target, Plus, CheckCircle2, Circle, Clock, TrendingUp, AlertCircle } from 'lucide-react';
+import { Target, Plus, TrendingUp, Clock, AlertCircle, MoreVertical, Archive, CheckCircle2, Edit, Trash2, RotateCcw } from 'lucide-react';
 
 export default function Goals() {
-  const [activeView, setActiveView] = useState('active'); // 'active', 'completed', 'all'
+  const [activeView, setActiveView] = useState('active'); // 'active', 'achieved', 'archived'
 
   return (
     <div className="h-full overflow-y-auto bg-slate-50">
@@ -16,7 +16,7 @@ export default function Goals() {
             </h1>
             <p className="text-slate-600 mt-1">Track progress.  Take action. Achieve results.</p>
           </div>
-          <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2">
+          <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 font-medium transition-colors">
             <Plus className="w-5 h-5" />
             New Goal
           </button>
@@ -24,17 +24,21 @@ export default function Goals() {
 
         {/* View Tabs */}
         <div className="flex gap-2 mb-6 border-b border-slate-200">
-          {['active', 'completed', 'all'].map((view) => (
+          {[
+            { id: 'active', label: 'Active' },
+            { id: 'achieved', label: 'Achieved' },
+            { id: 'archived', label: 'Archived' },
+          ].map((view) => (
             <button
-              key={view}
-              onClick={() => setActiveView(view)}
-              className={`px-4 py-2 font-medium capitalize transition-colors ${
-                activeView === view
+              key={view.id}
+              onClick={() => setActiveView(view.id)}
+              className={`px-4 py-2 font-medium transition-colors ${
+                activeView === view.id
                   ? 'text-blue-600 border-b-2 border-blue-600'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              {view}
+              {view.label}
             </button>
           ))}
         </div>
@@ -54,6 +58,12 @@ export default function Goals() {
             ]}
             recentActivity={3}
             daysActive={12}
+            status="active"
+            onEdit={() => console.log('Edit')}
+            onArchive={() => console.log('Archive')}
+            onAchieve={() => console.log('Mark as achieved')}
+            onDelete={() => console.log('Delete')}
+            onActivate={() => console.log('Activate')}
           />
         </div>
       </div>
@@ -61,7 +71,23 @@ export default function Goals() {
   );
 }
 
-function GoalCard({ title, description, progress, momentum, nextSteps, recentActivity, daysActive }) {
+function GoalCard({ 
+  title, 
+  description, 
+  progress, 
+  momentum, 
+  nextSteps, 
+  recentActivity, 
+  daysActive,
+  status,
+  onEdit,
+  onArchive,
+  onAchieve,
+  onDelete,
+  onActivate
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+
   const momentumConfig = {
     accelerating: { color: 'text-green-600', bg: 'bg-green-50', icon: TrendingUp },
     steady:  { color: 'text-blue-600', bg: 'bg-blue-50', icon: Clock },
@@ -72,32 +98,123 @@ function GoalCard({ title, description, progress, momentum, nextSteps, recentAct
   const MomentumIcon = config.icon;
 
   return (
-    <div className="bg-white rounded-lg border border-slate-200 p-6 hover:shadow-md transition-shadow">
+    <div className="bg-white rounded-lg border border-slate-200 p-6 hover: shadow-md transition-shadow relative">
       {/* Header */}
       <div className="flex items-start justify-between mb-4">
         <div className="flex-1">
           <h3 className="text-xl font-semibold text-slate-900 mb-1">{title}</h3>
           <p className="text-slate-600 text-sm">{description}</p>
         </div>
-        <div className={`flex items-center gap-2 px-3 py-1 rounded-full ${config.bg}`}>
-          <MomentumIcon className={`w-4 h-4 ${config.color}`} />
-          <span className={`text-sm font-medium ${config.color} capitalize`}>{momentum}</span>
+        <div className="flex items-center gap-2">
+          {status === 'active' && (
+            <div className={`flex items-center gap-2 px-3 py-1 rounded-full ${config.bg}`}>
+              <MomentumIcon className={`w-4 h-4 ${config. color}`} />
+              <span className={`text-sm font-medium ${config.color} capitalize`}>{momentum}</span>
+            </div>
+          )}
+          
+          {/* Dropdown Menu */}
+          <div className="relative">
+            <button
+              onClick={() => setMenuOpen(!menuOpen)}
+              className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+            >
+              <MoreVertical className="w-5 h-5 text-slate-600" />
+            </button>
+
+            {menuOpen && (
+              <>
+                {/* Backdrop to close menu */}
+                <div 
+                  className="fixed inset-0 z-10" 
+                  onClick={() => setMenuOpen(false)}
+                />
+                
+                {/* Dropdown */}
+                <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-slate-200 py-1 z-20">
+                  <button
+                    onClick={() => {
+                      onEdit();
+                      setMenuOpen(false);
+                    }}
+                    className="w-full px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                  >
+                    <Edit className="w-4 h-4" />
+                    Edit Goal
+                  </button>
+
+                  {status === 'active' && (
+                    <>
+                      <button
+                        onClick={() => {
+                          onAchieve();
+                          setMenuOpen(false);
+                        }}
+                        className="w-full px-4 py-2 text-left text-sm text-green-700 hover:bg-green-50 flex items-center gap-2"
+                      >
+                        <CheckCircle2 className="w-4 h-4" />
+                        Mark as Achieved
+                      </button>
+                      <button
+                        onClick={() => {
+                          onArchive();
+                          setMenuOpen(false);
+                        }}
+                        className="w-full px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                      >
+                        <Archive className="w-4 h-4" />
+                        Archive
+                      </button>
+                    </>
+                  )}
+
+                  {status === 'archived' && (
+                    <button
+                      onClick={() => {
+                        onActivate();
+                        setMenuOpen(false);
+                      }}
+                      className="w-full px-4 py-2 text-left text-sm text-blue-700 hover:bg-blue-50 flex items-center gap-2"
+                    >
+                      <RotateCcw className="w-4 h-4" />
+                      Activate
+                    </button>
+                  )}
+
+                  <div className="border-t border-slate-200 my-1" />
+                  
+                  <button
+                    onClick={() => {
+                      onDelete();
+                      setMenuOpen(false);
+                    }}
+                    className="w-full px-4 py-2 text-left text-sm text-red-700 hover:bg-red-50 flex items-center gap-2"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Delete
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Progress Bar */}
-      <div className="mb-4">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-sm font-medium text-slate-700">Progress</span>
-          <span className="text-sm font-semibold text-slate-900">{progress}%</span>
+      {/* Progress Bar - only show for active goals */}
+      {status === 'active' && (
+        <div className="mb-4">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-medium text-slate-700">Progress</span>
+            <span className="text-sm font-semibold text-slate-900">{progress}%</span>
+          </div>
+          <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-blue-600 transition-all duration-500"
+              style={{ width:  `${progress}%` }}
+            />
+          </div>
         </div>
-        <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
-          <div
-            className="h-full bg-blue-600 transition-all duration-500"
-            style={{ width: `${progress}%` }}
-          />
-        </div>
-      </div>
+      )}
 
       {/* Stats */}
       <div className="flex gap-4 mb-4 text-sm text-slate-600">
@@ -110,28 +227,22 @@ function GoalCard({ title, description, progress, momentum, nextSteps, recentAct
         </div>
       </div>
 
-      {/* Next Steps */}
-      <div>
-        <h4 className="text-sm font-semibold text-slate-700 mb-2">Next Steps</h4>
-        <div className="space-y-2">
-          {nextSteps. slice(0, 3).map((step, i) => (
-            <div key={i} className="flex items-center gap-2 text-sm">
-              <Circle className="w-4 h-4 text-slate-400" />
-              <span className="text-slate-700">{step}</span>
-            </div>
-          ))}
+      {/* Next Steps - only show for active goals */}
+      {status === 'active' && nextSteps && nextSteps.length > 0 && (
+        <div>
+          <h4 className="text-sm font-semibold text-slate-700 mb-2">Next Steps</h4>
+          <div className="space-y-2">
+            {nextSteps.slice(0, 3).map((step, i) => (
+              <div key={i} className="flex items-start gap-2 text-sm">
+                <div className="mt-0.5">
+                  <div className="w-4 h-4 rounded-full border-2 border-slate-300" />
+                </div>
+                <span className="text-slate-700">{step}</span>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
-
-      {/* Actions */}
-      <div className="mt-4 pt-4 border-t border-slate-200 flex gap-2">
-        <button className="flex-1 px-4 py-2 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 font-medium">
-          View Details
-        </button>
-        <button className="px-4 py-2 text-slate-600 hover:bg-slate-50 rounded-lg">
-          •••
-        </button>
-      </div>
+      )}
     </div>
   );
 }

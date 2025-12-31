@@ -1,12 +1,22 @@
 import React, { useState } from 'react';
 import { X, Sparkles, Calendar, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
+import GoalSuggestion from './GoalSuggestion';
 
-export default function EntryDetailModal({ entry, onClose, onEdit, onDelete, onSubmitFollowUp }) {
+export default function EntryDetailModal({ 
+  entry, 
+  onClose, 
+  onEdit, 
+  onDelete, 
+  onSubmitFollowUp,
+  suggestedGoal,
+  onAcceptGoal,
+  onDismissGoal
+}) {
   const [followUpAnswers, setFollowUpAnswers] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const hasFollowUpQuestions = entry. follow_up_questions && entry.follow_up_questions.length > 0;
+  const hasFollowUpQuestions = entry.follow_up_questions && entry.follow_up_questions.length > 0;
 
   const handleSubmitFollowUp = async () => {
     const answers = Object.values(followUpAnswers).filter(Boolean);
@@ -14,7 +24,7 @@ export default function EntryDetailModal({ entry, onClose, onEdit, onDelete, onS
 
     setIsSubmitting(true);
     try {
-      await onSubmitFollowUp(entry. id, answers);
+      await onSubmitFollowUp(entry.id, answers);
       setFollowUpAnswers({});
     } catch (error) {
       console.error('Failed to submit follow-up:', error);
@@ -34,11 +44,11 @@ export default function EntryDetailModal({ entry, onClose, onEdit, onDelete, onS
               <div className="flex items-center gap-3 mb-2">
                 <Calendar className="w-4 h-4 text-slate-500" />
                 <p className="text-sm text-slate-600">
-                  {format(new Date(entry.created_at), 'EEEE, MMMM d, yyyy · h:mm a')}
+                  {format(new Date(entry.created_at), 'EEEE, MMMM d, yyyy · h: mm a')}
                 </p>
               </div>
               <h2 className="text-2xl font-bold text-slate-900">
-                {entry.title || 'Journal Entry'}
+                {entry. title || 'Journal Entry'}
               </h2>
             </div>
             <button
@@ -63,7 +73,7 @@ export default function EntryDetailModal({ entry, onClose, onEdit, onDelete, onS
           </div>
 
           {/* AI Insights */}
-          {entry.insights && entry.insights.length > 0 && (
+          {entry.insights && entry. insights.length > 0 && (
             <div className="p-4 bg-violet-50 border border-violet-200 rounded-xl">
               <div className="flex items-center gap-2 mb-3">
                 <Sparkles className="w-4 h-4 text-violet-600" />
@@ -80,8 +90,14 @@ export default function EntryDetailModal({ entry, onClose, onEdit, onDelete, onS
             </div>
           )}
 
-          {/* Related Goals (placeholder for future) */}
-          {/* TODO: Add related goals section when goals feature is built */}
+          {/* Goal Suggestion */}
+          {suggestedGoal && (
+            <GoalSuggestion
+              suggestion={suggestedGoal}
+              onAccept={onAcceptGoal}
+              onDismiss={onDismissGoal}
+            />
+          )}
 
           {/* Follow-Up Questions */}
           {hasFollowUpQuestions && (
@@ -113,13 +129,13 @@ export default function EntryDetailModal({ entry, onClose, onEdit, onDelete, onS
               </div>
               <button
                 onClick={handleSubmitFollowUp}
-                disabled={isSubmitting || Object.values(followUpAnswers).every((a) => !a)}
-                className="mt-4 w-full px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium transition-colors flex items-center justify-center gap-2"
+                disabled={isSubmitting || Object. values(followUpAnswers).every((a) => !a)}
+                className="mt-4 w-full px-4 py-2 bg-amber-600 text-white rounded-lg hover: bg-amber-700 disabled: opacity-50 disabled:cursor-not-allowed font-medium transition-colors flex items-center justify-center gap-2"
               >
                 {isSubmitting ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    Analyzing...
+                    Analyzing... 
                   </>
                 ) : (
                   'Submit Deeper Reflection'

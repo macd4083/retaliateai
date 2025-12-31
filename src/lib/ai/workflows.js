@@ -11,7 +11,7 @@ export const aiWorkflows = {
       const embeddingResponse = await fetch('/api/generate-embedding', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON. stringify({ text: entryData.content }),
+        body: JSON.stringify({ text: entryData.content }),
       });
 
       if (!embeddingResponse.ok) {
@@ -45,19 +45,19 @@ export const aiWorkflows = {
         throw new Error('Failed to search similar entries');
       }
 
-      const { entries:  similarEntries } = await similarResponse.json();
+      const { entries: similarEntries } = await similarResponse.json();
 
       // Step 6: Enrich summaries with temporal context
       const enrichedSummaries = similarEntries.map(e => {
         const daysAgo = Math.floor((Date.now() - new Date(e.created_at).getTime()) / (1000 * 60 * 60 * 24));
-        return `[${daysAgo} days ago]:  ${e.summary}`;
+        return `[${daysAgo} days ago]: ${e.summary}`;
       });
 
       // Step 7: Get user profile
       let userProfile;
       try {
         const profile = await userProfileHelpers.getProfile(userId);
-        userProfile = profile?. summary_text || 'No profile yet.  This is a new user.';
+        userProfile = profile?.summary_text || 'No profile yet. This is a new user.';
       } catch (error) {
         userProfile = 'No profile yet. This is a new user.';
       }
@@ -67,7 +67,7 @@ export const aiWorkflows = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON. stringify({
-          new_entry: entryData. content,
+          new_entry:  entryData.content,
           past_summaries: enrichedSummaries,
           user_profile: userProfile,
         }),
@@ -81,34 +81,36 @@ export const aiWorkflows = {
 
       // Step 9: Update entry with summary and insights
       const updatedEntry = await journalHelpers.updateEntry(savedEntry.id, {
-        summary: analysis. summary,
-        insights: analysis. insights,
+        summary: analysis.summary,
+        insights: analysis.insights,
       });
-      // Step 9.5: Auto-link entry to goals
-      try {
-        await fetch('/api/link-entry-to-goals', {
-          method:  'POST',
-          headers:  { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            entry_id: savedEntry.id,
-            entry_content: entryData.content,
-            user_id: userId,
-         }),
-        });
-      } catch (error) {
-      console.error('Failed to link entry to goals:', error);
-      // Don't fail the whole flow if this fails
-      }
 
       // Step 10: Update user profile (now structured)
       if (analysis.updated_profile) {
         await userProfileHelpers.updateProfile(userId, analysis.updated_profile);
       }
 
-      // Step 11: Return entry with ephemeral follow-up questions
+      // Step 11: Auto-link entry to goals
+      try {
+        await fetch('/api/link-entry-to-goals', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON. stringify({
+            entry_id: savedEntry.id,
+            entry_content: entryData.content,
+            user_id: userId,
+          }),
+        });
+      } catch (error) {
+        console.error('Failed to link entry to goals:', error);
+        // Don't fail the whole flow if this fails
+      }
+
+      // Step 12: Return entry with ephemeral follow-up questions AND goal suggestion
       return {
         entry: updatedEntry,
         followUpQuestions: analysis.follow_up_questions || null,
+        suggestedGoal: analysis.suggested_goal || null,
       };
     } catch (error) {
       console.error('Error processing new entry:', error);

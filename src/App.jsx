@@ -5,7 +5,6 @@ import { useAuth } from '@/lib/AuthContext';
 import Sidebar from '@/components/layout/Sidebar';
 import JournalEditor from '@/components/journal/JournalEditor';
 import EntryDetailModal from '@/components/journal/EntryDetailModal';
-import Goals from '@/pages/Goals';
 
 export default function App() {
   const { user } = useAuth();
@@ -26,6 +25,7 @@ export default function App() {
 
   const [activeTab, setActiveTab] = useState(getTabFromPath(location.pathname));
   const [viewingEntry, setViewingEntry] = useState(null);
+  const [suggestedGoal, setSuggestedGoal] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
   const { data: entries = [], isLoading, error } = useJournalEntries(user?.id);
   const createEntry = useCreateJournalEntry(user?.id);
@@ -52,19 +52,24 @@ export default function App() {
   // When user clicks on an entry in the sidebar, show it in the modal
   const handleSelectEntry = (entry) => {
     setViewingEntry(entry);
+    setSuggestedGoal(null); // Clear any previous goal suggestions
   };
 
   // Mutations/handlers
   const handleSave = async (entryData) => {
     setIsSaving(true);
     try {
-      const result = await createEntry.mutateAsync(entryData);
+      const result = await createEntry. mutateAsync(entryData);
       if (result?. entry) {
         setTimeout(() => {
           setViewingEntry({
-            ...result.entry,
+            ... result.entry,
             follow_up_questions: result.followUpQuestions,
           });
+          // Set suggested goal if AI provided one
+          if (result. suggestedGoal) {
+            setSuggestedGoal(result.suggestedGoal);
+          }
         }, 300);
       }
     } catch (error) {
@@ -105,7 +110,7 @@ export default function App() {
         const newWeight = answersText.length;
         const totalWeight = originalWeight + newWeight;
 
-        combinedEmbedding = currentEntry.embedding.map((val, i) => 
+        combinedEmbedding = currentEntry.embedding. map((val, i) => 
           (val * originalWeight + newAnswersEmbedding[i] * newWeight) / totalWeight
         );
       } else {
@@ -113,7 +118,7 @@ export default function App() {
         const embeddingResponse = await fetch('/api/generate-embedding', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body:  JSON.stringify({ text: updatedContent }),
+          body: JSON.stringify({ text: updatedContent }),
         });
 
         if (embeddingResponse.ok) {
@@ -126,8 +131,8 @@ export default function App() {
       const similarResponse = await fetch('/api/search-similar-entries', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:  JSON.stringify({
-          user_id: user.id,
+        body: JSON.stringify({
+          user_id: user. id,
           embedding: combinedEmbedding,
           limit: 5,
         }),
@@ -141,26 +146,26 @@ export default function App() {
 
       // Add temporal context to summaries
       const enrichedSummaries = similarEntries.map(e => {
-        const daysAgo = Math.floor((Date.now() - new Date(e.created_at)) / (1000 * 60 * 60 * 24));
-        return `[${daysAgo} days ago]: ${e.summary}`;
+        const daysAgo = Math.floor((Date.now() - new Date(e.created_at).getTime()) / (1000 * 60 * 60 * 24));
+        return `[${daysAgo} days ago]:  ${e.summary}`;
       });
 
       // Get user profile
       let userProfile;
       try {
         const response = await fetch(`/api/user-profile? user_id=${user.id}`);
-        const { data: profile } = await response.json();
-        userProfile = profile?.summary_text || 'No profile yet.  This is a new user.';
+        const { data:  profile } = await response.json();
+        userProfile = profile?. summary_text || 'No profile yet.  This is a new user.';
       } catch (error) {
-        userProfile = 'No profile yet. This is a new user. ';
+        userProfile = 'No profile yet. This is a new user.';
       }
 
       // Analyze with enriched data
       const analysisResponse = await fetch('/api/analyze-entry', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type':  'application/json' },
         body: JSON.stringify({
-          new_entry: updatedContent,
+          new_entry:  updatedContent,
           past_summaries: enrichedSummaries,
           user_profile: userProfile,
         }),
@@ -174,7 +179,7 @@ export default function App() {
 
       // Update entry with new content and analysis
       const updateData = {
-        content:  updatedContent,
+        content: updatedContent,
         summary:  analysis.summary,
         insights: analysis.insights,
       };
@@ -185,7 +190,7 @@ export default function App() {
       }
 
       // Update the entry in the database
-      await updateEntry.mutateAsync({
+      await updateEntry. mutateAsync({
         entryId: entryId,
         entryData: updateData,
       });
@@ -198,6 +203,11 @@ export default function App() {
         insights: analysis.insights,
         follow_up_questions: null,
       });
+
+      // Check if new goal suggestion from follow-up analysis
+      if (analysis.suggested_goal) {
+        setSuggestedGoal(analysis.suggested_goal);
+      }
     } catch (error) {
       console.error('Failed to process follow-up:', error);
       alert('Failed to process reflection. Please try again.');
@@ -210,6 +220,7 @@ export default function App() {
       await deleteEntry.mutateAsync(entryId);
       if (viewingEntry?.id === entryId) {
         setViewingEntry(null);
+        setSuggestedGoal(null);
       }
     } catch (error) {
       console.error('Failed to delete entry:', error);
@@ -220,8 +231,42 @@ export default function App() {
   const handleEdit = (entry) => {
     // Close the modal and open the entry in the editor
     setViewingEntry(null);
+    setSuggestedGoal(null);
     // You could add editing functionality here if needed
     // For now, we'll just close the modal
+  };
+
+  const handleAcceptGoal = async () => {
+    try {
+      // TODO: Call API to create the goal in database
+      console.log('Accepting goal:', suggestedGoal);
+      
+      // For now, just show success message
+      alert(`Goal "${suggestedGoal. title}" will be added to your goals! `);
+      
+      // Clear the suggestion
+      setSuggestedGoal(null);
+      
+      // TODO: Implement goal creation API call here
+      // const response = await fetch('/api/create-goal', {
+      //   method: 'POST',
+      //   headers: { 'Content-Type': 'application/json' },
+      //   body:  JSON.stringify({
+      //     user_id: user.id,
+      //     title: suggestedGoal.title,
+      //     description: suggestedGoal.description,
+      //     why_it_matters: suggestedGoal.why_it_matters,
+      //     category: suggestedGoal.category,
+      //   }),
+      // });
+    } catch (error) {
+      console.error('Failed to accept goal:', error);
+      alert('Failed to create goal. Please try again.');
+    }
+  };
+
+  const handleDismissGoal = () => {
+    setSuggestedGoal(null);
   };
 
   // If loading/error, show loader or error page
@@ -269,10 +314,16 @@ export default function App() {
             {viewingEntry && (
               <EntryDetailModal
                 entry={viewingEntry}
-                onClose={() => setViewingEntry(null)}
+                onClose={() => {
+                  setViewingEntry(null);
+                  setSuggestedGoal(null);
+                }}
                 onEdit={handleEdit}
                 onDelete={handleDelete}
                 onSubmitFollowUp={handleSubmitFollowUp}
+                suggestedGoal={suggestedGoal}
+                onAcceptGoal={handleAcceptGoal}
+                onDismissGoal={handleDismissGoal}
               />
             )}
           </div>
@@ -283,7 +334,12 @@ export default function App() {
             <p className="text-slate-600 mt-2">Coming soon...</p>
           </div>
         )}
-        {activeTab === 'goals' && <Goals />}
+        {activeTab === 'goals' && (
+          <div className="p-8">
+            <h2 className="text-2xl font-bold text-slate-900">Goals</h2>
+            <p className="text-slate-600 mt-2">Coming soon...</p>
+          </div>
+        )}
         {activeTab === 'people' && (
           <div className="p-8">
             <h2 className="text-2xl font-bold text-slate-900">People</h2>
