@@ -12,6 +12,8 @@ import AuthGuard from './components/auth/AuthGaurd.jsx'; // Note: your file is n
 import { AuthProvider } from './lib/AuthContext';
 import { queryClient } from './lib/query-client';
 import './index.css';
+import PrivacyPolicy from './pages/PrivacyPolicy.jsx';
+import TermsOfService from './pages/TermsOfService.jsx';
 
 ReactDOM. createRoot(document.getElementById('root')).render(
   <React.StrictMode>
@@ -24,6 +26,8 @@ ReactDOM. createRoot(document.getElementById('root')).render(
             <Route path="/login" element={<Login />} />
             <Route path="/auth/callback" element={<AuthCallback />} />
             <Route path="/auth/reset-password" element={<ResetPassword />} />
+            <Route path="/privacy" element={<PrivacyPolicy />} />
+            <Route path="/terms" element={<TermsOfService />} />
             
             {/* Protected routes - require authentication */}
             <Route path="/Journal" element={<AuthGuard><App /></AuthGuard>} />
