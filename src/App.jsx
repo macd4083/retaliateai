@@ -24,7 +24,6 @@ export default function App() {
   };
 
   const [activeTab, setActiveTab] = useState(getTabFromPath(location.pathname));
-  const [selectedEntry, setSelectedEntry] = useState(null);
   const [viewingEntry, setViewingEntry] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
   const { data: entries = [], isLoading, error } = useJournalEntries(user?.id);
@@ -40,8 +39,8 @@ export default function App() {
   // Handle tab changes and update URL
   const handleTabChange = (newTab) => {
     const tabToPathMap = {
-      'journal': '/Journal',
-      'insights': '/Insights',
+      'journal':  '/Journal',
+      'insights':  '/Insights',
       'goals': '/Goals',
       'people': '/People',
       'users': '/Users',
@@ -49,14 +48,18 @@ export default function App() {
     navigate(tabToPathMap[newTab] || '/Journal');
   };
 
+  // When user clicks on an entry in the sidebar, show it in the modal
+  const handleSelectEntry = (entry) => {
+    setViewingEntry(entry);
+  };
+
   // Mutations/handlers
   const handleSave = async (entryData) => {
     setIsSaving(true);
     try {
       const result = await createEntry.mutateAsync(entryData);
-      if (result?. entry) {
+      if (result?.entry) {
         setTimeout(() => {
-          setSelectedEntry(result.entry);
           setViewingEntry({
             ...result.entry,
             follow_up_questions: result.followUpQuestions,
@@ -65,7 +68,7 @@ export default function App() {
       }
     } catch (error) {
       console.error('Failed to save entry:', error);
-      alert('Failed to save entry. Please try again.');
+      alert('Failed to save entry.  Please try again.');
     } finally {
       setIsSaving(false);
     }
@@ -73,18 +76,18 @@ export default function App() {
 
   const handleSubmitFollowUp = async (entryId, answers) => {
     try {
-      const currentEntry = entries.find((e) => e.id === entryId);
+      const currentEntry = entries. find((e) => e.id === entryId);
       if (!currentEntry) throw new Error('Entry not found');
       const answersText = '\n\n' + answers.join('\n\n');
       const updatedContent = currentEntry.content + answersText;
 
       const embeddingResponse = await fetch('/api/generate-embedding', {
-        method:   'POST',
-        headers:   { 'Content-Type':  'application/json' },
-        body:  JSON.stringify({ text: updatedContent }),
+        method:  'POST',
+        headers:  { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: updatedContent }),
       });
 
-      if (!embeddingResponse.ok) {
+      if (!embeddingResponse. ok) {
         throw new Error('Failed to generate embedding');
       }
 
@@ -93,7 +96,7 @@ export default function App() {
       const similarResponse = await fetch('/api/search-similar-entries', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body:  JSON.stringify({
           user_id: user.id,
           embedding,
           limit: 15,
@@ -104,15 +107,15 @@ export default function App() {
         throw new Error('Failed to search similar entries');
       }
 
-      const { entries: similarEntries } = await similarResponse. json();
+      const { entries: similarEntries } = await similarResponse.json();
 
       let userProfile;
       try {
-        const response = await fetch(`/api/user-profile?user_id=${user.id}`);
+        const response = await fetch(`/api/user-profile?user_id=${user. id}`);
         const { data: profile } = await response.json();
         userProfile = profile?. summary_text || 'No profile yet.  This is a new user.';
       } catch (error) {
-        userProfile = 'No profile yet.  This is a new user.  ';
+        userProfile = 'No profile yet. This is a new user. ';
       }
 
       const analysisResponse = await fetch('/api/analyze-entry', {
@@ -134,7 +137,7 @@ export default function App() {
       await updateEntry.mutateAsync({
         entryId:  entryId,
         entryData: {
-          content:  updatedContent,
+          content: updatedContent,
           summary: analysis.summary,
           insights: analysis.insights,
           embedding,
@@ -155,12 +158,9 @@ export default function App() {
 
   const handleDelete = async (entryId) => {
     try {
-      await deleteEntry. mutateAsync(entryId);
+      await deleteEntry.mutateAsync(entryId);
       if (viewingEntry?.id === entryId) {
         setViewingEntry(null);
-      }
-      if (selectedEntry?.id === entryId) {
-        setSelectedEntry(null);
       }
     } catch (error) {
       console.error('Failed to delete entry:', error);
@@ -169,8 +169,10 @@ export default function App() {
   };
 
   const handleEdit = (entry) => {
-    setSelectedEntry(entry);
+    // Close the modal and open the entry in the editor
     setViewingEntry(null);
+    // You could add editing functionality here if needed
+    // For now, we'll just close the modal
   };
 
   // If loading/error, show loader or error page
@@ -203,16 +205,16 @@ export default function App() {
         onTabChange={handleTabChange}
         user={user}
         entries={entries}
-        selectedEntryId={selectedEntry?.id}
-        onSelectEntry={setSelectedEntry}
+        selectedEntryId={viewingEntry?.id}
+        onSelectEntry={handleSelectEntry}
       />
       <main className="flex-1">
         {activeTab === 'journal' && (
           <div className="flex-1 bg-slate-50">
             <JournalEditor
-              entry={selectedEntry}
+              entry={null}
               onSave={handleSave}
-              onCancel={() => setSelectedEntry(null)}
+              onCancel={() => {}}
               isSaving={isSaving}
             />
             {viewingEntry && (
