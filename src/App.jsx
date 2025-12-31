@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useJournalEntries, useCreateJournalEntry, useUpdateJournalEntry, useDeleteJournalEntry } from '@/hooks';
 import { useAuth } from '@/lib/AuthContext';
 import Sidebar from '@/components/layout/Sidebar';
@@ -7,7 +8,22 @@ import EntryDetailModal from '@/components/journal/EntryDetailModal';
 
 export default function App() {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState('journal');
+  const location = useLocation();
+  const navigate = useNavigate();
+  
+  // Determine activeTab from URL
+  const getTabFromPath = (path) => {
+    const pathMap = {
+      '/Journal': 'journal',
+      '/Insights': 'insights',
+      '/Goals': 'goals',
+      '/People': 'people',
+      '/Users': 'users',
+    };
+    return pathMap[path] || 'journal';
+  };
+
+  const [activeTab, setActiveTab] = useState(getTabFromPath(location.pathname));
   const [selectedEntry, setSelectedEntry] = useState(null);
   const [viewingEntry, setViewingEntry] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -16,12 +32,29 @@ export default function App() {
   const updateEntry = useUpdateJournalEntry();
   const deleteEntry = useDeleteJournalEntry();
 
+  // Update activeTab when URL changes
+  useEffect(() => {
+    setActiveTab(getTabFromPath(location.pathname));
+  }, [location.pathname]);
+
+  // Handle tab changes and update URL
+  const handleTabChange = (newTab) => {
+    const tabToPathMap = {
+      'journal': '/Journal',
+      'insights': '/Insights',
+      'goals': '/Goals',
+      'people': '/People',
+      'users': '/Users',
+    };
+    navigate(tabToPathMap[newTab] || '/Journal');
+  };
+
   // Mutations/handlers
   const handleSave = async (entryData) => {
     setIsSaving(true);
     try {
       const result = await createEntry.mutateAsync(entryData);
-      if (result?.entry) {
+      if (result?. entry) {
         setTimeout(() => {
           setSelectedEntry(result.entry);
           setViewingEntry({
@@ -46,9 +79,9 @@ export default function App() {
       const updatedContent = currentEntry.content + answersText;
 
       const embeddingResponse = await fetch('/api/generate-embedding', {
-        method:  'POST',
-        headers:  { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: updatedContent }),
+        method:   'POST',
+        headers:   { 'Content-Type':  'application/json' },
+        body:  JSON.stringify({ text: updatedContent }),
       });
 
       if (!embeddingResponse.ok) {
@@ -71,15 +104,15 @@ export default function App() {
         throw new Error('Failed to search similar entries');
       }
 
-      const { entries: similarEntries } = await similarResponse.json();
+      const { entries: similarEntries } = await similarResponse. json();
 
       let userProfile;
       try {
         const response = await fetch(`/api/user-profile?user_id=${user.id}`);
         const { data: profile } = await response.json();
-        userProfile = profile?.summary_text || 'No profile yet.  This is a new user.';
+        userProfile = profile?. summary_text || 'No profile yet.  This is a new user.';
       } catch (error) {
-        userProfile = 'No profile yet. This is a new user. ';
+        userProfile = 'No profile yet.  This is a new user.  ';
       }
 
       const analysisResponse = await fetch('/api/analyze-entry', {
@@ -87,7 +120,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           new_entry: updatedContent,
-          past_summaries: similarEntries.map(e => e.summary).filter(Boolean),
+          past_summaries: similarEntries. map(e => e.summary).filter(Boolean),
           user_profile: userProfile,
         }),
       });
@@ -99,9 +132,9 @@ export default function App() {
       const analysis = await analysisResponse.json();
 
       await updateEntry.mutateAsync({
-        entryId: entryId,
+        entryId:  entryId,
         entryData: {
-          content: updatedContent,
+          content:  updatedContent,
           summary: analysis.summary,
           insights: analysis.insights,
           embedding,
@@ -122,7 +155,7 @@ export default function App() {
 
   const handleDelete = async (entryId) => {
     try {
-      await deleteEntry.mutateAsync(entryId);
+      await deleteEntry. mutateAsync(entryId);
       if (viewingEntry?.id === entryId) {
         setViewingEntry(null);
       }
@@ -167,7 +200,7 @@ export default function App() {
     <div className="flex h-screen">
       <Sidebar
         activeTab={activeTab}
-        onTabChange={setActiveTab}
+        onTabChange={handleTabChange}
         user={user}
         entries={entries}
         selectedEntryId={selectedEntry?.id}
@@ -193,8 +226,30 @@ export default function App() {
             )}
           </div>
         )}
-        {/* Render other tabs/pages here */}
-        {/* e.g. {activeTab === 'goals' && <GoalsPage />} */}
+        {activeTab === 'insights' && (
+          <div className="p-8">
+            <h2 className="text-2xl font-bold text-slate-900">Insights</h2>
+            <p className="text-slate-600 mt-2">Coming soon...</p>
+          </div>
+        )}
+        {activeTab === 'goals' && (
+          <div className="p-8">
+            <h2 className="text-2xl font-bold text-slate-900">Goals</h2>
+            <p className="text-slate-600 mt-2">Coming soon...</p>
+          </div>
+        )}
+        {activeTab === 'people' && (
+          <div className="p-8">
+            <h2 className="text-2xl font-bold text-slate-900">People</h2>
+            <p className="text-slate-600 mt-2">Coming soon...</p>
+          </div>
+        )}
+        {activeTab === 'users' && (
+          <div className="p-8">
+            <h2 className="text-2xl font-bold text-slate-900">Users</h2>
+            <p className="text-slate-600 mt-2">Coming soon...</p>
+          </div>
+        )}
       </main>
     </div>
   );
