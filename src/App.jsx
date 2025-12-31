@@ -6,6 +6,7 @@ import Sidebar from '@/components/layout/Sidebar';
 import JournalEditor from '@/components/journal/JournalEditor';
 import EntryDetailModal from '@/components/journal/EntryDetailModal';
 import Goals from '@/pages/Goals';
+import Insights from '@/pages/Insights';
 
 export default function App() {
   const { user } = useAuth();
@@ -329,12 +330,7 @@ export default function App() {
             )}
           </div>
         )}
-        {activeTab === 'insights' && (
-          <div className="p-8">
-            <h2 className="text-2xl font-bold text-slate-900">Insights</h2>
-            <p className="text-slate-600 mt-2">Coming soon...</p>
-          </div>
-        )}
+        {activeTab === 'insights' && <Insights />}
         {activeTab === 'goals' && <Goals />}
         {activeTab === 'people' && (
           <div className="p-8">
