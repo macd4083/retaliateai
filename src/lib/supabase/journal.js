@@ -28,14 +28,13 @@ export const journalHelpers = {
 
   // Create entry
   async createEntry(userId, entryData) {
-    const wordCount = entryData.content ?  entryData.content.split(/\s+/).length : 0;
-    
     const { data, error } = await supabase
       .from('journal_entries')
       .insert({
         user_id: userId,
-        ...entryData,
-        word_count: wordCount,
+        title: entryData.title || null,
+        content: entryData.content,
+        // Removed:  mood_rating, tags, word_count
       })
       .select()
       .single();
@@ -46,13 +45,10 @@ export const journalHelpers = {
 
   // Update entry
   async updateEntry(entryId, entryData) {
-    const wordCount = entryData.content ?  entryData.content.split(/\s+/).length : 0;
-    
     const { data, error } = await supabase
       .from('journal_entries')
       .update({
-        ...entryData,
-        word_count: wordCount,
+        ... entryData,
         updated_at: new Date().toISOString(),
       })
       .eq('id', entryId)
@@ -117,7 +113,7 @@ export const journalHelpers = {
   async semanticSearch(userId, queryEmbedding, limit = 10) {
     // This uses pgvector's <=> operator for cosine similarity
     const { data, error } = await supabase. rpc('match_journal_entries', {
-      query_embedding: queryEmbedding,
+      query_embedding:  queryEmbedding,
       match_user_id: userId,
       match_count: limit,
     });
