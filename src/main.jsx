@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import App from './App.jsx';
+import Landing from './pages/Landing.jsx';
 import { AuthProvider } from './lib/AuthContext';
 import { queryClient } from './lib/query-client';
 import './index.css';
@@ -14,7 +15,7 @@ ReactDOM. createRoot(document.getElementById('root')).render(
       <BrowserRouter>
         <AuthProvider>
           <Routes>
-            <Route path="/" element={<App />} />
+            <Route path="/" element={<Landing />} />
             <Route path="/Journal" element={<App />} />
             <Route path="/Insights" element={<App />} />
             <Route path="/Goals" element={<App />} />
