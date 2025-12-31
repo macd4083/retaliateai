@@ -39,8 +39,8 @@ export default function App() {
   // Handle tab changes and update URL
   const handleTabChange = (newTab) => {
     const tabToPathMap = {
-      'journal':  '/Journal',
-      'insights':  '/Insights',
+      'journal': '/Journal',
+      'insights': '/Insights',
       'goals': '/Goals',
       'people': '/People',
       'users': '/Users',
@@ -58,7 +58,7 @@ export default function App() {
     setIsSaving(true);
     try {
       const result = await createEntry.mutateAsync(entryData);
-      if (result?.entry) {
+      if (result?. entry) {
         setTimeout(() => {
           setViewingEntry({
             ...result.entry,
@@ -68,7 +68,7 @@ export default function App() {
       }
     } catch (error) {
       console.error('Failed to save entry:', error);
-      alert('Failed to save entry.  Please try again.');
+      alert('Failed to save entry. Please try again.');
     } finally {
       setIsSaving(false);
     }
@@ -76,30 +76,59 @@ export default function App() {
 
   const handleSubmitFollowUp = async (entryId, answers) => {
     try {
-      const currentEntry = entries. find((e) => e.id === entryId);
+      const currentEntry = entries.find((e) => e.id === entryId);
       if (!currentEntry) throw new Error('Entry not found');
-      const answersText = '\n\n' + answers.join('\n\n');
+      
+      const answersText = '\n\n--- Follow-up Reflections ---\n' + answers.join('\n\n');
       const updatedContent = currentEntry.content + answersText;
 
-      const embeddingResponse = await fetch('/api/generate-embedding', {
-        method:  'POST',
-        headers:  { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: updatedContent }),
-      });
+      // Only generate embedding if current entry has one
+      let combinedEmbedding = null;
+      
+      if (currentEntry.embedding) {
+        // Generate embedding for ONLY the new answers (more efficient)
+        const newAnswersResponse = await fetch('/api/generate-embedding', {
+          method:  'POST',
+          headers:  { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: answersText }),
+        });
 
-      if (!embeddingResponse. ok) {
-        throw new Error('Failed to generate embedding');
+        if (!newAnswersResponse. ok) {
+          throw new Error('Failed to generate embedding for answers');
+        }
+
+        const { embedding:  newAnswersEmbedding } = await newAnswersResponse.json();
+
+        // Combine embeddings (weighted by content length)
+        const originalWeight = currentEntry.content.length;
+        const newWeight = answersText.length;
+        const totalWeight = originalWeight + newWeight;
+
+        combinedEmbedding = currentEntry.embedding.map((val, i) => 
+          (val * originalWeight + newAnswersEmbedding[i] * newWeight) / totalWeight
+        );
+      } else {
+        // If no existing embedding, generate one for the full content
+        const embeddingResponse = await fetch('/api/generate-embedding', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:  JSON.stringify({ text: updatedContent }),
+        });
+
+        if (embeddingResponse.ok) {
+          const { embedding } = await embeddingResponse.json();
+          combinedEmbedding = embedding;
+        }
       }
 
-      const { embedding } = await embeddingResponse.json();
-
+      // Search with combined embedding
       const similarResponse = await fetch('/api/search-similar-entries', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body:  JSON.stringify({
           user_id: user.id,
-          embedding,
-          limit: 15,
+          embedding: combinedEmbedding,
+          limit: 5,
         }),
       });
 
@@ -109,21 +138,29 @@ export default function App() {
 
       const { entries: similarEntries } = await similarResponse.json();
 
+      // Add temporal context to summaries
+      const enrichedSummaries = similarEntries.map(e => {
+        const daysAgo = Math.floor((Date.now() - new Date(e.created_at)) / (1000 * 60 * 60 * 24));
+        return `[${daysAgo} days ago]: ${e.summary}`;
+      });
+
+      // Get user profile
       let userProfile;
       try {
-        const response = await fetch(`/api/user-profile?user_id=${user. id}`);
+        const response = await fetch(`/api/user-profile? user_id=${user.id}`);
         const { data: profile } = await response.json();
-        userProfile = profile?. summary_text || 'No profile yet.  This is a new user.';
+        userProfile = profile?.summary_text || 'No profile yet.  This is a new user.';
       } catch (error) {
         userProfile = 'No profile yet. This is a new user. ';
       }
 
+      // Analyze with enriched data
       const analysisResponse = await fetch('/api/analyze-entry', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           new_entry: updatedContent,
-          past_summaries: similarEntries. map(e => e.summary).filter(Boolean),
+          past_summaries: enrichedSummaries,
           user_profile: userProfile,
         }),
       });
@@ -134,24 +171,35 @@ export default function App() {
 
       const analysis = await analysisResponse.json();
 
+      // Update entry with new content and analysis
+      const updateData = {
+        content:  updatedContent,
+        summary:  analysis.summary,
+        insights: analysis.insights,
+      };
+
+      // Only include embedding if we have one
+      if (combinedEmbedding) {
+        updateData.embedding = combinedEmbedding;
+      }
+
+      // Update the entry in the database
       await updateEntry.mutateAsync({
-        entryId:  entryId,
-        entryData: {
-          content: updatedContent,
-          summary: analysis.summary,
-          insights: analysis.insights,
-          embedding,
-        }
+        entryId: entryId,
+        entryData: updateData,
       });
 
+      // Update the viewing entry to show new content
       setViewingEntry({
         ...currentEntry,
         content: updatedContent,
+        summary: analysis.summary,
         insights: analysis.insights,
         follow_up_questions: null,
       });
     } catch (error) {
       console.error('Failed to process follow-up:', error);
+      alert('Failed to process reflection. Please try again.');
       throw error;
     }
   };
@@ -178,7 +226,7 @@ export default function App() {
   // If loading/error, show loader or error page
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-full">
+      <div className="flex items-center justify-center h-screen">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
           <p className="text-slate-600">Loading your journal...</p>
@@ -189,8 +237,8 @@ export default function App() {
 
   if (error) {
     return (
-      <div className="p-8">
-        <div className="bg-red-50 border border-red-200 rounded-lg p-6">
+      <div className="flex items-center justify-center h-screen p-8">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-6 max-w-md">
           <h2 className="text-red-800 font-semibold mb-2">Error loading journal</h2>
           <p className="text-red-600">{error.message}</p>
         </div>
@@ -208,9 +256,9 @@ export default function App() {
         selectedEntryId={viewingEntry?.id}
         onSelectEntry={handleSelectEntry}
       />
-      <main className="flex-1">
+      <main className="flex-1 overflow-hidden">
         {activeTab === 'journal' && (
-          <div className="flex-1 bg-slate-50">
+          <div className="h-full bg-slate-50">
             <JournalEditor
               entry={null}
               onSave={handleSave}

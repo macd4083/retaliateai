@@ -5,13 +5,13 @@ export const aiWorkflows = {
   async processNewEntry(userId, entryData) {
     try {
       // Step 1: Save the raw entry first
-      const savedEntry = await journalHelpers.createEntry(userId, entryData);
+      const savedEntry = await journalHelpers. createEntry(userId, entryData);
 
       // Step 2: Generate embedding
       const embeddingResponse = await fetch('/api/generate-embedding', {
-        method:  'POST',
-        headers:  { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: entryData.content }),
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON. stringify({ text: entryData.content }),
       });
 
       if (!embeddingResponse.ok) {
@@ -23,14 +23,21 @@ export const aiWorkflows = {
       // Step 3: Update entry with embedding
       await journalHelpers.updateEntry(savedEntry.id, { embedding });
 
-      // Step 4: Search for similar past entries
+      // Step 4: Get entry count to determine search strategy
+      const allEntries = await journalHelpers.getEntries(userId);
+      const entryCount = allEntries.length;
+      
+      // Adaptive search limit based on user history
+      const searchLimit = entryCount < 10 ? Math.max(entryCount - 1, 3) : 5;
+
+      // Step 5: Search for similar past entries
       const similarResponse = await fetch('/api/search-similar-entries', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           user_id: userId,
           embedding,
-          limit: 15,
+          limit: searchLimit,
         }),
       });
 
@@ -40,7 +47,13 @@ export const aiWorkflows = {
 
       const { entries:  similarEntries } = await similarResponse.json();
 
-      // Step 5: Get user profile
+      // Step 6: Enrich summaries with temporal context
+      const enrichedSummaries = similarEntries.map(e => {
+        const daysAgo = Math.floor((Date.now() - new Date(e.created_at).getTime()) / (1000 * 60 * 60 * 24));
+        return `[${daysAgo} days ago]:  ${e.summary}`;
+      });
+
+      // Step 7: Get user profile
       let userProfile;
       try {
         const profile = await userProfileHelpers.getProfile(userId);
@@ -49,38 +62,38 @@ export const aiWorkflows = {
         userProfile = 'No profile yet. This is a new user.';
       }
 
-      // Step 6: Analyze entry
+      // Step 8: Analyze entry
       const analysisResponse = await fetch('/api/analyze-entry', {
         method: 'POST',
-        headers: { 'Content-Type':  'application/json' },
-        body: JSON.stringify({
-          new_entry:  entryData. content,
-          past_summaries: similarEntries.map(e => e.summary).filter(Boolean),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON. stringify({
+          new_entry: entryData. content,
+          past_summaries: enrichedSummaries,
           user_profile: userProfile,
         }),
       });
 
-      if (!analysisResponse. ok) {
+      if (!analysisResponse.ok) {
         throw new Error('Failed to analyze entry');
       }
 
       const analysis = await analysisResponse.json();
 
-      // Step 7: Update entry with summary and insights
+      // Step 9: Update entry with summary and insights
       const updatedEntry = await journalHelpers.updateEntry(savedEntry.id, {
-        summary: analysis.summary,
-        insights: analysis.insights,
+        summary: analysis. summary,
+        insights: analysis. insights,
       });
 
-      // Step 8: Update user profile if needed
+      // Step 10: Update user profile (now structured)
       if (analysis.updated_profile) {
-        await userProfileHelpers.updateSummary(userId, analysis.updated_profile);
+        await userProfileHelpers.updateProfile(userId, analysis.updated_profile);
       }
 
-      // Step 9: Return entry with ephemeral follow-up questions
+      // Step 11: Return entry with ephemeral follow-up questions
       return {
         entry: updatedEntry,
-        followUpQuestions: analysis. follow_up_questions || null,
+        followUpQuestions: analysis.follow_up_questions || null,
       };
     } catch (error) {
       console.error('Error processing new entry:', error);
