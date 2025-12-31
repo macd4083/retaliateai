@@ -5,6 +5,7 @@ import { useAuth } from '@/lib/AuthContext';
 import Sidebar from '@/components/layout/Sidebar';
 import JournalEditor from '@/components/journal/JournalEditor';
 import EntryDetailModal from '@/components/journal/EntryDetailModal';
+import Goals from '@/pages/Goals';
 
 export default function App() {
   const { user } = useAuth();
@@ -334,12 +335,7 @@ export default function App() {
             <p className="text-slate-600 mt-2">Coming soon...</p>
           </div>
         )}
-        {activeTab === 'goals' && (
-          <div className="p-8">
-            <h2 className="text-2xl font-bold text-slate-900">Goals</h2>
-            <p className="text-slate-600 mt-2">Coming soon...</p>
-          </div>
-        )}
+        {activeTab === 'goals' && <Goals />}
         {activeTab === 'people' && (
           <div className="p-8">
             <h2 className="text-2xl font-bold text-slate-900">People</h2>
