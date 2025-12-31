@@ -5,6 +5,10 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import App from './App.jsx';
 import Landing from './pages/Landing.jsx';
+import Login from './pages/Login.jsx';
+import ResetPassword from './pages/ResetPassword.jsx';
+import AuthCallback from './pages/AuthCallback.jsx';
+import AuthGuard from './components/auth/AuthGaurd.jsx'; // Note: your file is named "AuthGaurd" (typo in original)
 import { AuthProvider } from './lib/AuthContext';
 import { queryClient } from './lib/query-client';
 import './index.css';
@@ -15,12 +19,20 @@ ReactDOM. createRoot(document.getElementById('root')).render(
       <BrowserRouter>
         <AuthProvider>
           <Routes>
+            {/* Public routes */}
             <Route path="/" element={<Landing />} />
-            <Route path="/Journal" element={<App />} />
-            <Route path="/Insights" element={<App />} />
-            <Route path="/Goals" element={<App />} />
-            <Route path="/People" element={<App />} />
-            <Route path="/Users" element={<App />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/auth/callback" element={<AuthCallback />} />
+            <Route path="/auth/reset-password" element={<ResetPassword />} />
+            
+            {/* Protected routes - require authentication */}
+            <Route path="/Journal" element={<AuthGuard><App /></AuthGuard>} />
+            <Route path="/Insights" element={<AuthGuard><App /></AuthGuard>} />
+            <Route path="/Goals" element={<AuthGuard><App /></AuthGuard>} />
+            <Route path="/People" element={<AuthGuard><App /></AuthGuard>} />
+            <Route path="/Users" element={<AuthGuard><App /></AuthGuard>} />
+            
+            {/* Catch all - redirect to landing */}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </AuthProvider>

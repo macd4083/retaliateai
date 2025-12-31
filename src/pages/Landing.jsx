@@ -15,7 +15,7 @@ export default function Landing() {
   }, [user, navigate]);
 
   const handleGetStarted = () => {
-    navigate('/Journal'); // This will trigger auth
+    navigate('/login'); // Changed from '/Journal' to '/login'
   };
 
   return (
@@ -44,7 +44,7 @@ export default function Landing() {
             Stop Just Writing. 
             <br />
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-purple-600">
-              Start Improving. 
+              Start Improving.  
             </span>
           </h1>
           <p className="text-xl text-slate-600 mb-8 max-w-2xl mx-auto">
