@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { useJournalEntries, useCreateJournalEntry, useUpdateJournalEntry, useDeleteJournalEntry } from '@/hooks';
-import { useAuth } from '@/lib/AuthContext';
-import Sidebar from '@/components/layout/Sidebar';
-import JournalEditor from '@/components/journal/JournalEditor';
-import EntryDetailModal from '@/components/journal/EntryDetailModal';
-import Goals from '@/pages/Goals';
-import Insights from '@/pages/Insights';
+import Sidebar from './components/layout/Sidebar';
+import JournalEditor from './components/journal/JournalEditor';
+import EntryDetailModal from './components/journal/EntryDetailModal';
+import Insights from './pages/Insights';
+import Goals from './pages/Goals';
+import Users from './pages/Users';
+import { useAuth } from './lib/AuthContext';
+import { useJournalEntries, useCreateJournalEntry, useUpdateJournalEntry, useDeleteJournalEntry } from './hooks';
 
 export default function App() {
   const { user } = useAuth();
@@ -61,15 +62,15 @@ export default function App() {
   const handleSave = async (entryData) => {
     setIsSaving(true);
     try {
-      const result = await createEntry. mutateAsync(entryData);
+      const result = await createEntry.mutateAsync(entryData);
       if (result?. entry) {
         setTimeout(() => {
           setViewingEntry({
-            ... result.entry,
+            ...result.entry,
             follow_up_questions: result.followUpQuestions,
           });
           // Set suggested goal if AI provided one
-          if (result. suggestedGoal) {
+          if (result.suggestedGoal) {
             setSuggestedGoal(result.suggestedGoal);
           }
         }, 300);
@@ -90,33 +91,46 @@ export default function App() {
       const answersText = '\n\n--- Follow-up Reflections ---\n' + answers.join('\n\n');
       const updatedContent = currentEntry.content + answersText;
 
-      // Only generate embedding if current entry has one
+      // Generate embedding for the updated content
       let combinedEmbedding = null;
       
       if (currentEntry.embedding) {
-        // Generate embedding for ONLY the new answers (more efficient)
-        const newAnswersResponse = await fetch('/api/generate-embedding', {
-          method:  'POST',
-          headers:  { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: answersText }),
-        });
-
-        if (!newAnswersResponse. ok) {
-          throw new Error('Failed to generate embedding for answers');
+        // Check if embedding is an array or needs to be parsed
+        let currentEmbedding = currentEntry. embedding;
+        if (typeof currentEmbedding === 'string') {
+          try {
+            currentEmbedding = JSON.parse(currentEmbedding);
+          } catch (e) {
+            console.warn('Could not parse existing embedding, generating new one');
+            currentEmbedding = null;
+          }
         }
 
-        const { embedding:  newAnswersEmbedding } = await newAnswersResponse.json();
+        if (currentEmbedding && Array.isArray(currentEmbedding)) {
+          // Generate embedding for ONLY the new answers (more efficient)
+          const newAnswersResponse = await fetch('/api/generate-embedding', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: answersText }),
+          });
 
-        // Combine embeddings (weighted by content length)
-        const originalWeight = currentEntry.content.length;
-        const newWeight = answersText.length;
-        const totalWeight = originalWeight + newWeight;
+          if (newAnswersResponse. ok) {
+            const { embedding:  newAnswersEmbedding } = await newAnswersResponse.json();
 
-        combinedEmbedding = currentEntry.embedding. map((val, i) => 
-          (val * originalWeight + newAnswersEmbedding[i] * newWeight) / totalWeight
-        );
-      } else {
-        // If no existing embedding, generate one for the full content
+            // Combine embeddings (weighted by content length)
+            const originalWeight = currentEntry.content.length;
+            const newWeight = answersText.length;
+            const totalWeight = originalWeight + newWeight;
+
+            combinedEmbedding = currentEmbedding.map((val, i) => 
+              (val * originalWeight + newAnswersEmbedding[i] * newWeight) / totalWeight
+            );
+          }
+        }
+      }
+      
+      // If we couldn't combine embeddings, generate one for the full content
+      if (!combinedEmbedding) {
         const embeddingResponse = await fetch('/api/generate-embedding', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -129,60 +143,56 @@ export default function App() {
         }
       }
 
-      // Search with combined embedding
-      const similarResponse = await fetch('/api/search-similar-entries', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: user. id,
-          embedding: combinedEmbedding,
-          limit: 5,
-        }),
-      });
+      // Search for similar entries using the combined embedding
+      let similarEntries = [];
+      if (combinedEmbedding) {
+        const similarResponse = await fetch('/api/search-similar-entries', {
+          method:  'POST',
+          headers:  { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: user. id,
+            embedding: combinedEmbedding,
+            limit: 10,
+          }),
+        });
 
-      if (!similarResponse.ok) {
-        throw new Error('Failed to search similar entries');
+        if (similarResponse.ok) {
+          const { entries: similar } = await similarResponse.json();
+          similarEntries = similar;
+        }
       }
-
-      const { entries: similarEntries } = await similarResponse.json();
-
-      // Add temporal context to summaries
-      const enrichedSummaries = similarEntries.map(e => {
-        const daysAgo = Math.floor((Date.now() - new Date(e.created_at).getTime()) / (1000 * 60 * 60 * 24));
-        return `[${daysAgo} days ago]:  ${e.summary}`;
-      });
 
       // Get user profile
       let userProfile;
       try {
-        const response = await fetch(`/api/user-profile? user_id=${user.id}`);
-        const { data:  profile } = await response.json();
+        const response = await fetch(`/api/user-profile?user_id=${user.id}`);
+        const { data: profile } = await response. json();
         userProfile = profile?. summary_text || 'No profile yet.  This is a new user.';
       } catch (error) {
-        userProfile = 'No profile yet. This is a new user.';
+        userProfile = 'No profile yet.  This is a new user.';
       }
 
-      // Analyze with enriched data
+      // Analyze the updated entry
       const analysisResponse = await fetch('/api/analyze-entry', {
         method: 'POST',
-        headers: { 'Content-Type':  'application/json' },
-        body: JSON.stringify({
+        headers: { 'Content-Type': 'application/json' },
+        body:  JSON.stringify({
           new_entry:  updatedContent,
-          past_summaries: enrichedSummaries,
+          past_summaries: similarEntries. map(e => e.summary).filter(Boolean),
           user_profile: userProfile,
         }),
       });
 
-      if (!analysisResponse.ok) {
+      if (! analysisResponse.ok) {
         throw new Error('Failed to analyze entry');
       }
 
       const analysis = await analysisResponse.json();
 
-      // Update entry with new content and analysis
+      // Prepare update data
       const updateData = {
         content: updatedContent,
-        summary:  analysis.summary,
+        summary: analysis.summary,
         insights: analysis.insights,
       };
 
@@ -192,7 +202,7 @@ export default function App() {
       }
 
       // Update the entry in the database
-      await updateEntry. mutateAsync({
+      await updateEntry.mutateAsync({
         entryId: entryId,
         entryData: updateData,
       });
@@ -203,7 +213,7 @@ export default function App() {
         content: updatedContent,
         summary: analysis.summary,
         insights: analysis.insights,
-        follow_up_questions: null,
+        follow_up_questions: null, // Clear follow-up questions after answering
       });
 
       // Check if new goal suggestion from follow-up analysis
@@ -239,28 +249,39 @@ export default function App() {
   };
 
   const handleAcceptGoal = async () => {
+    if (!suggestedGoal || !user) {
+      console.error('No suggested goal or user');
+      return;
+    }
+
     try {
-      // TODO: Call API to create the goal in database
-      console.log('Accepting goal:', suggestedGoal);
+      // Call API to create the goal in database
+      const response = await fetch('/api/create-goal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: user.id,
+          title: suggestedGoal.title,
+          description: suggestedGoal.description,
+          why_it_matters: suggestedGoal.why_it_matters,
+          category: suggestedGoal.category,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to create goal');
+      }
+
+      const { goal } = await response.json();
       
-      // For now, just show success message
-      alert(`Goal "${suggestedGoal. title}" will be added to your goals! `);
+      // Show success message
+      alert(`Goal "${goal.title}" has been added to your goals!`);
       
       // Clear the suggestion
       setSuggestedGoal(null);
       
-      // TODO: Implement goal creation API call here
-      // const response = await fetch('/api/create-goal', {
-      //   method: 'POST',
-      //   headers: { 'Content-Type': 'application/json' },
-      //   body:  JSON.stringify({
-      //     user_id: user.id,
-      //     title: suggestedGoal.title,
-      //     description: suggestedGoal.description,
-      //     why_it_matters: suggestedGoal.why_it_matters,
-      //     category: suggestedGoal.category,
-      //   }),
-      // });
+      // Optionally navigate to goals page
+      // navigate('/Goals');
     } catch (error) {
       console.error('Failed to accept goal:', error);
       alert('Failed to create goal. Please try again.');
@@ -295,15 +316,17 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen">
+    <div className="flex h-screen bg-slate-50 overflow-hidden">
+      {/* Sidebar */}
       <Sidebar
         activeTab={activeTab}
         onTabChange={handleTabChange}
-        user={user}
         entries={entries}
-        selectedEntryId={viewingEntry?.id}
         onSelectEntry={handleSelectEntry}
+        user={user}
       />
+
+      {/* Main Content */}
       <main className="flex-1 overflow-hidden">
         {activeTab === 'journal' && (
           <div className="h-full bg-slate-50">
@@ -334,16 +357,11 @@ export default function App() {
         {activeTab === 'goals' && <Goals />}
         {activeTab === 'people' && (
           <div className="p-8">
-            <h2 className="text-2xl font-bold text-slate-900">People</h2>
-            <p className="text-slate-600 mt-2">Coming soon...</p>
+            <h1 className="text-2xl font-bold text-slate-900">People</h1>
+            <p className="text-slate-600 mt-2">Track the important people in your life. </p>
           </div>
         )}
-        {activeTab === 'users' && (
-          <div className="p-8">
-            <h2 className="text-2xl font-bold text-slate-900">Users</h2>
-            <p className="text-slate-600 mt-2">Coming soon...</p>
-          </div>
-        )}
+        {activeTab === 'users' && user?. role === 'admin' && <Users />}
       </main>
     </div>
   );
