@@ -5,7 +5,7 @@ export const aiWorkflows = {
   async processNewEntry(userId, entryData) {
     try {
       // Step 1: Save the raw entry first
-      const savedEntry = await journalHelpers. createEntry(userId, entryData);
+      const savedEntry = await journalHelpers.createEntry(userId, entryData);
 
       // Step 2: Generate embedding
       const embeddingResponse = await fetch('/api/generate-embedding', {
@@ -27,7 +27,7 @@ export const aiWorkflows = {
       const allEntries = await journalHelpers.getEntries(userId);
       const entryCount = allEntries.length;
       
-      // Adaptive search limit based on user history
+      // Adaptive search limit based on user history (reduced from 15 to 5 max)
       const searchLimit = entryCount < 10 ? Math.max(entryCount - 1, 3) : 5;
 
       // Step 5: Search for similar past entries
@@ -66,8 +66,8 @@ export const aiWorkflows = {
       const analysisResponse = await fetch('/api/analyze-entry', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON. stringify({
-          new_entry:  entryData.content,
+        body: JSON.stringify({
+          new_entry: entryData.content,
           past_summaries: enrichedSummaries,
           user_profile: userProfile,
         }),
@@ -95,7 +95,7 @@ export const aiWorkflows = {
         await fetch('/api/link-entry-to-goals', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON. stringify({
+          body: JSON.stringify({
             entry_id: savedEntry.id,
             entry_content: entryData.content,
             user_id: userId,

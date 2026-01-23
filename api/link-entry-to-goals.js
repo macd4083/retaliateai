@@ -7,7 +7,7 @@ const openai = new OpenAI({
 
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL,
-  process.env. SUPABASE_SERVICE_ROLE_KEY
+  process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
 const SYSTEM_PROMPT = `You are analyzing a journal entry to detect goal-related activity. 
@@ -26,7 +26,7 @@ Return JSON:
       "goal_id": "uuid",
       "relevance_score": 0.85,
       "sentiment": "motivated",
-      "progress_detected":  "Started working on the proposal",
+      "progress_detected": "Started working on the proposal",
       "blockers": ["Need more data"],
       "next_steps": ["Schedule meeting with stakeholders"]
     }
@@ -50,15 +50,15 @@ export default async function handler(req, res) {
 
     if (goalsError) throw goalsError;
 
-    if (! goals || goals.length === 0) {
+    if (!goals || goals.length === 0) {
       return res.status(200).json({ linked_goals: [] });
     }
 
-    // Ask AI to analyze
+    // Ask AI to analyze (using gpt-3.5-turbo for simple matching)
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: 'gpt-3.5-turbo',
       messages: [
-        { role: 'system', content:  SYSTEM_PROMPT },
+        { role: 'system', content: SYSTEM_PROMPT },
         {
           role: 'user',
           content: JSON.stringify({
@@ -69,13 +69,14 @@ export default async function handler(req, res) {
       ],
       response_format: { type: 'json_object' },
       temperature: 0.7,
+      max_tokens: 500,
     });
 
     const analysis = JSON.parse(response.choices[0].message.content);
 
     // Store links in database
     for (const link of analysis.linked_goals) {
-      await supabase. from('goal_journal_links').upsert({
+      await supabase.from('goal_journal_links').upsert({
         goal_id: link.goal_id,
         journal_entry_id: entry_id,
         relevance_score: link.relevance_score,

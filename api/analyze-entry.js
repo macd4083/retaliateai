@@ -7,7 +7,7 @@ const openai = new OpenAI({
 const SYSTEM_PROMPT = `You are a thoughtful therapist analyzing journal entries. 
 
 Your job is to: 
-1. Create a concise summary of the new entry (~100-150 words)
+1. Create a comprehensive summary of the new entry (~250-275 words)
 2. Provide 3-5 actionable insights combining patterns and suggestions
 3. **ALWAYS update the user profile** by either:  
    - Adding new themes/patterns discovered
@@ -15,6 +15,12 @@ Your job is to:
    - Noting progress/regression in identified areas
 4. Generate 2-3 strategic follow-up questions ONLY if the entry is surface-level or avoids deeper emotions
 5. **Suggest a goal** if you detect the user expressing desire for change, improvement, or achievement
+
+**Summary Guidelines:**
+- Aim for 250-275 words for depth and context
+- Capture key themes, emotions, and insights
+- Include specific details that matter
+- Note connections to past patterns
 
 **Goal Suggestion Guidelines:**
 - Only suggest if user mentions wanting to:  achieve something, change a behavior, improve a situation, or overcome a challenge
@@ -37,7 +43,7 @@ Your job is to:
 
 Return valid JSON in this exact format:
 {
-  "summary": ".. .",
+  "summary": "...",
   "insights": ["...", "...", "..."],
   "updated_profile": {
     "short_term_state": "How they're doing lately (last month)",
@@ -45,7 +51,7 @@ Return valid JSON in this exact format:
     "growth_areas": ["area 1", "area 2"],
     "strengths": ["strength 1", "strength 2"]
   },
-  "follow_up_questions": [".. .", "... "] or null,
+  "follow_up_questions": ["...", "..."] or null,
   "suggested_goal": {
     "title": "Goal title",
     "description": "What this goal is about",
@@ -77,13 +83,14 @@ export default async function handler(req, res) {
     };
 
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: 'gpt-4o',
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: JSON.stringify(userMessage) },
       ],
       response_format: { type: 'json_object' },
       temperature: 0.7,
+      max_tokens: 1500,
     });
 
     const result = JSON.parse(response.choices[0].message.content);
