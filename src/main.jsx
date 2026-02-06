@@ -8,14 +8,14 @@ import Landing from './pages/Landing.jsx';
 import Login from './pages/Login.jsx';
 import ResetPassword from './pages/ResetPassword.jsx';
 import AuthCallback from './pages/AuthCallback.jsx';
-import AuthGuard from './components/auth/AuthGaurd.jsx'; // Note: your file is named "AuthGaurd" (typo in original)
+import AuthGuard from './components/auth/AuthGaurd.jsx';
 import { AuthProvider } from './lib/AuthContext';
 import { queryClient } from './lib/query-client';
 import './index.css';
 import PrivacyPolicy from './pages/PrivacyPolicy.jsx';
 import TermsOfService from './pages/TermsOfService.jsx';
 
-ReactDOM. createRoot(document.getElementById('root')).render(
+ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
@@ -31,6 +31,8 @@ ReactDOM. createRoot(document.getElementById('root')).render(
             
             {/* Protected routes - require authentication */}
             <Route path="/Journal" element={<AuthGuard><App /></AuthGuard>} />
+            <Route path="/Clarity" element={<AuthGuard><App /></AuthGuard>} />
+            <Route path="/Gratitude" element={<AuthGuard><App /></AuthGuard>} />
             <Route path="/Insights" element={<AuthGuard><App /></AuthGuard>} />
             <Route path="/Goals" element={<AuthGuard><App /></AuthGuard>} />
             <Route path="/People" element={<AuthGuard><App /></AuthGuard>} />
