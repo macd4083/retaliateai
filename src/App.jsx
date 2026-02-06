@@ -348,22 +348,6 @@ export default function App() {
               onCancel={() => {}}
               isSaving={isSaving}
             />
-            {viewingEntry && (
-              <EntryDetailModal
-                entry={viewingEntry}
-                onClose={() => {
-                  setViewingEntry(null);
-                  setSelectedEntryId(null);
-                  setSuggestedGoal(null);
-                }}
-                onEdit={handleEdit}
-                onDelete={handleDelete}
-                onSubmitFollowUp={handleSubmitFollowUp}
-                suggestedGoal={suggestedGoal}
-                onAcceptGoal={handleAcceptGoal}
-                onDismissGoal={handleDismissGoal}
-              />
-            )}
           </div>
         )}
         
@@ -384,6 +368,24 @@ export default function App() {
         
         {activeTab === 'users' && user?.role === 'admin' && <Users />}
       </main>
+
+      {/* GLOBAL Entry Detail Modal - Shows on ANY tab */}
+      {viewingEntry && (
+        <EntryDetailModal
+          entry={viewingEntry}
+          onClose={() => {
+            setViewingEntry(null);
+            setSelectedEntryId(null);
+            setSuggestedGoal(null);
+          }}
+          onEdit={handleEdit}
+          onDelete={handleDelete}
+          onSubmitFollowUp={handleSubmitFollowUp}
+          suggestedGoal={suggestedGoal}
+          onAcceptGoal={handleAcceptGoal}
+          onDismissGoal={handleDismissGoal}
+        />
+      )}
     </div>
   );
 }
