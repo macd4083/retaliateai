@@ -32,6 +32,7 @@ export default function App() {
 
   const [activeTab, setActiveTab] = useState(getTabFromPath(location.pathname));
   const [viewingEntry, setViewingEntry] = useState(null);
+  const [selectedEntryId, setSelectedEntryId] = useState(null);
   const [suggestedGoal, setSuggestedGoal] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
   const { data: entries = [], isLoading, error } = useJournalEntries(user?.id);
@@ -61,6 +62,7 @@ export default function App() {
   // When user clicks on an entry in the sidebar, show it in the modal
   const handleSelectEntry = (entry) => {
     setViewingEntry(entry);
+    setSelectedEntryId(entry.id);
     setSuggestedGoal(null); // Clear any previous goal suggestions
   };
 
@@ -75,6 +77,7 @@ export default function App() {
             ...result.entry,
             follow_up_questions: result.followUpQuestions,
           });
+          setSelectedEntryId(result.entry.id);
           // Set suggested goal if AI provided one
           if (result.suggestedGoal) {
             setSuggestedGoal(result.suggestedGoal);
@@ -238,6 +241,7 @@ export default function App() {
       await deleteEntry.mutateAsync(entryId);
       if (viewingEntry?.id === entryId) {
         setViewingEntry(null);
+        setSelectedEntryId(null);
         setSuggestedGoal(null);
       }
     } catch (error) {
@@ -249,6 +253,7 @@ export default function App() {
   const handleEdit = (entry) => {
     // Close the modal and open the entry in the editor
     setViewingEntry(null);
+    setSelectedEntryId(null);
     setSuggestedGoal(null);
     // You could add editing functionality here if needed
     // For now, we'll just close the modal
@@ -323,16 +328,17 @@ export default function App() {
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden">
-      {/* Sidebar */}
+      {/* Sidebar - ALWAYS VISIBLE */}
       <Sidebar
         activeTab={activeTab}
         onTabChange={handleTabChange}
         entries={entries}
+        selectedEntryId={selectedEntryId}
         onSelectEntry={handleSelectEntry}
         user={user}
       />
 
-      {/* Main Content */}
+      {/* Main Content - CHANGES BASED ON ACTIVE TAB */}
       <main className="flex-1 overflow-hidden">
         {activeTab === 'journal' && (
           <div className="h-full bg-slate-50">
@@ -347,6 +353,7 @@ export default function App() {
                 entry={viewingEntry}
                 onClose={() => {
                   setViewingEntry(null);
+                  setSelectedEntryId(null);
                   setSuggestedGoal(null);
                 }}
                 onEdit={handleEdit}
@@ -359,16 +366,22 @@ export default function App() {
             )}
           </div>
         )}
+        
         {activeTab === 'clarity' && <Clarity />}
+        
         {activeTab === 'gratitude' && <Gratitude />}
+        
         {activeTab === 'insights' && <Insights />}
+        
         {activeTab === 'goals' && <Goals />}
+        
         {activeTab === 'people' && (
           <div className="p-8">
             <h1 className="text-2xl font-bold text-slate-900">People</h1>
             <p className="text-slate-600 mt-2">Track the important people in your life.</p>
           </div>
         )}
+        
         {activeTab === 'users' && user?.role === 'admin' && <Users />}
       </main>
     </div>
