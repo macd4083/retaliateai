@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { BookOpen, Lightbulb, Target, Users } from 'lucide-react';
+import { BookOpen, Lightbulb, Target, Users, Sparkles, Heart } from 'lucide-react';
 import { format } from 'date-fns';
 
 export default function Sidebar({
@@ -12,8 +12,11 @@ export default function Sidebar({
 }) {
   const isAdmin = user?.role === 'admin';
   const [search, setSearch] = useState('');
+  
   const tabs = [
     { id: 'journal', icon: BookOpen, label: 'Journal' },
+    { id: 'clarity', icon: Sparkles, label: 'Clarity' },
+    { id: 'gratitude', icon: Heart, label: 'Gratitude' },
     { id: 'insights', icon: Lightbulb, label: 'Insights' },
     { id: 'goals', icon: Target, label: 'Goals' },
   ];

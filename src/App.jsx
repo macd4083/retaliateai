@@ -3,6 +3,8 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import Sidebar from './components/layout/Sidebar';
 import JournalEditor from './components/journal/JournalEditor';
 import EntryDetailModal from './components/journal/EntryDetailModal';
+import Clarity from './pages/Clarity';
+import Gratitude from './pages/Gratitude';
 import Insights from './pages/Insights';
 import Goals from './pages/Goals';
 import Users from './pages/Users';
@@ -18,6 +20,8 @@ export default function App() {
   const getTabFromPath = (path) => {
     const pathMap = {
       '/Journal': 'journal',
+      '/Clarity': 'clarity',
+      '/Gratitude': 'gratitude',
       '/Insights': 'insights',
       '/Goals': 'goals',
       '/People': 'people',
@@ -44,6 +48,8 @@ export default function App() {
   const handleTabChange = (newTab) => {
     const tabToPathMap = {
       'journal': '/Journal',
+      'clarity': '/Clarity',
+      'gratitude': '/Gratitude',
       'insights': '/Insights',
       'goals': '/Goals',
       'people': '/People',
@@ -63,7 +69,7 @@ export default function App() {
     setIsSaving(true);
     try {
       const result = await createEntry.mutateAsync(entryData);
-      if (result?. entry) {
+      if (result?.entry) {
         setTimeout(() => {
           setViewingEntry({
             ...result.entry,
@@ -96,7 +102,7 @@ export default function App() {
       
       if (currentEntry.embedding) {
         // Check if embedding is an array or needs to be parsed
-        let currentEmbedding = currentEntry. embedding;
+        let currentEmbedding = currentEntry.embedding;
         if (typeof currentEmbedding === 'string') {
           try {
             currentEmbedding = JSON.parse(currentEmbedding);
@@ -114,8 +120,8 @@ export default function App() {
             body: JSON.stringify({ text: answersText }),
           });
 
-          if (newAnswersResponse. ok) {
-            const { embedding:  newAnswersEmbedding } = await newAnswersResponse.json();
+          if (newAnswersResponse.ok) {
+            const { embedding: newAnswersEmbedding } = await newAnswersResponse.json();
 
             // Combine embeddings (weighted by content length)
             const originalWeight = currentEntry.content.length;
@@ -147,10 +153,10 @@ export default function App() {
       let similarEntries = [];
       if (combinedEmbedding) {
         const similarResponse = await fetch('/api/search-similar-entries', {
-          method:  'POST',
-          headers:  { 'Content-Type': 'application/json' },
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            user_id: user. id,
+            user_id: user.id,
             embedding: combinedEmbedding,
             limit: 10,
           }),
@@ -166,8 +172,8 @@ export default function App() {
       let userProfile;
       try {
         const response = await fetch(`/api/user-profile?user_id=${user.id}`);
-        const { data: profile } = await response. json();
-        userProfile = profile?. summary_text || 'No profile yet.  This is a new user.';
+        const { data: profile } = await response.json();
+        userProfile = profile?.summary_text || 'No profile yet.  This is a new user.';
       } catch (error) {
         userProfile = 'No profile yet.  This is a new user.';
       }
@@ -176,14 +182,14 @@ export default function App() {
       const analysisResponse = await fetch('/api/analyze-entry', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:  JSON.stringify({
-          new_entry:  updatedContent,
-          past_summaries: similarEntries. map(e => e.summary).filter(Boolean),
+        body: JSON.stringify({
+          new_entry: updatedContent,
+          past_summaries: similarEntries.map(e => e.summary).filter(Boolean),
           user_profile: userProfile,
         }),
       });
 
-      if (! analysisResponse.ok) {
+      if (!analysisResponse.ok) {
         throw new Error('Failed to analyze entry');
       }
 
@@ -353,15 +359,17 @@ export default function App() {
             )}
           </div>
         )}
+        {activeTab === 'clarity' && <Clarity />}
+        {activeTab === 'gratitude' && <Gratitude />}
         {activeTab === 'insights' && <Insights />}
         {activeTab === 'goals' && <Goals />}
         {activeTab === 'people' && (
           <div className="p-8">
             <h1 className="text-2xl font-bold text-slate-900">People</h1>
-            <p className="text-slate-600 mt-2">Track the important people in your life. </p>
+            <p className="text-slate-600 mt-2">Track the important people in your life.</p>
           </div>
         )}
-        {activeTab === 'users' && user?. role === 'admin' && <Users />}
+        {activeTab === 'users' && user?.role === 'admin' && <Users />}
       </main>
     </div>
   );
