@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
-import { Brain, Target, TrendingUp, Sparkles, ArrowRight, CheckCircle, Zap, Award, Users } from 'lucide-react';
+import { Sparkles, Heart, Target, TrendingUp, ArrowRight, CheckCircle, Zap, Award, Users, Brain, Shield } from 'lucide-react';
 
 export default function Landing() {
   const navigate = useNavigate();
@@ -19,239 +19,276 @@ export default function Landing() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-purple-50">
-      {/* Hero Section */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg: px-8">
-        {/* Header */}
-        <header className="pt-8 pb-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Brain className="w-8 h-8 text-blue-600" />
-              <span className="text-2xl font-bold text-slate-900">Retaliate AI</span>
+    <div className="min-h-screen bg-black">
+      {/* Animated red glow background */}
+      <div className="fixed inset-0 bg-gradient-radial from-red-900/20 via-black to-black pointer-events-none" />
+      
+      {/* Content */}
+      <div className="relative z-10">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          {/* Header */}
+          <header className="pt-8 pb-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <img 
+                  src="/logo.png" 
+                  alt="Retaliate" 
+                  className="w-12 h-12 object-contain"
+                />
+                <span className="text-2xl font-bold tracking-tight text-white uppercase">
+                  Retaliate
+                </span>
+              </div>
+              <button
+                onClick={handleGetStarted}
+                className="px-6 py-2 text-red-500 hover:text-red-400 font-semibold transition-colors border border-red-900 hover:border-red-700 rounded"
+              >
+                Sign In
+              </button>
             </div>
-            <button
-              onClick={handleGetStarted}
-              className="px-4 py-2 text-blue-600 hover:text-blue-700 font-medium transition-colors"
-            >
-              Sign In
-            </button>
-          </div>
-        </header>
+          </header>
 
-        {/* Hero */}
-        <div className="pt-20 pb-32 text-center">
-          <div className="inline-block mb-4">
-            <span className="px-4 py-2 bg-blue-100 text-blue-700 rounded-full text-sm font-semibold">
-              AI-Powered Self-Improvement
-            </span>
-          </div>
-          <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold text-slate-900 mb-6 leading-tight">
-            Stop Just Writing. 
-            <br />
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600">
-              Start Improving. 
-            </span>
-          </h1>
-          <p className="text-xl md:text-2xl text-slate-600 mb-10 max-w-3xl mx-auto leading-relaxed">
-            AI-powered journaling that detects patterns, tracks goals, and gives you actionable insights—not just a blank page.
-          </p>
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-            <button
-              onClick={handleGetStarted}
-              className="px-8 py-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold text-lg transition-all shadow-lg hover:shadow-xl flex items-center gap-2"
-            >
-              Start Journaling Free
-              <ArrowRight className="w-5 h-5" />
-            </button>
-          </div>
-          <p className="text-sm text-slate-500 mt-4">No credit card required • Setup in 30 seconds • Free forever</p>
-        </div>
-
-        {/* Social Proof */}
-        <div className="pb-20">
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8">
-            <div className="grid md:grid-cols-3 gap-8 text-center">
-              <div>
-                <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                  <Users className="w-6 h-6 text-blue-600" />
-                </div>
-                <div className="text-3xl font-bold text-slate-900 mb-1">500+</div>
-                <div className="text-slate-600">Active Users</div>
-              </div>
-              <div>
-                <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                  <Zap className="w-6 h-6 text-purple-600" />
-                </div>
-                <div className="text-3xl font-bold text-slate-900 mb-1">10k+</div>
-                <div className="text-slate-600">Insights Generated</div>
-              </div>
-              <div>
-                <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                  <Award className="w-6 h-6 text-green-600" />
-                </div>
-                <div className="text-3xl font-bold text-slate-900 mb-1">95%</div>
-                <div className="text-slate-600">User Satisfaction</div>
-              </div>
+          {/* Hero */}
+          <div className="pt-20 pb-32 text-center">
+            <div className="inline-block mb-6">
+              <span className="px-6 py-2 bg-red-950/50 text-red-500 border border-red-900 rounded-full text-sm font-bold uppercase tracking-wider">
+                AI-Powered Self-Improvement
+              </span>
             </div>
-          </div>
-        </div>
 
-        {/* Features */}
-        <div className="pb-20">
-          <div className="text-center mb-12">
-            <h2 className="text-3xl md:text-4xl font-bold text-slate-900 mb-4">
-              Your Personal AI Growth Coach
-            </h2>
-            <p className="text-xl text-slate-600 max-w-2xl mx-auto">
-              Stop guessing.  Start knowing. Let AI reveal patterns you'd never spot alone.
+            <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold text-white mb-6 leading-[1.1] tracking-tight">
+              Stop Just Writing.
+              <br />
+              <span className="text-red-600">
+                Start Retaliating.
+              </span>
+            </h1>
+
+            <p className="text-xl md:text-2xl text-gray-400 mb-12 max-w-3xl mx-auto leading-relaxed">
+              AI-powered journaling that detects patterns, tracks goals, and gives you actionable insights—not just a blank page.
+            </p>
+
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+              <button
+                onClick={handleGetStarted}
+                className="px-10 py-5 bg-red-600 text-white rounded-lg hover:bg-red-700 font-bold text-lg transition-all shadow-2xl shadow-red-900/50 hover:shadow-red-900/70 flex items-center gap-3 uppercase tracking-wide group"
+              >
+                Start Free Now
+                <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+              </button>
+            </div>
+
+            <p className="text-sm text-gray-600 mt-6 uppercase tracking-wider">
+              No credit card required • Setup in 30 seconds • Free forever
             </p>
           </div>
-          <div className="grid md:grid-cols-3 gap-8">
-            <FeatureCard
-              icon={<Sparkles className="w-6 h-6" />}
-              title="AI Insights"
-              description="Get intelligent analysis of your thoughts, emotions, and behavioral patterns—automatically after every entry."
-              badge="Powered by GPT-4"
-            />
-            <FeatureCard
-              icon={<Target className="w-6 h-6" />}
-              title="Smart Goal Tracking"
-              description="AI auto-detects when you're working on goals and tracks your progress without manual checkboxes."
-              badge="Zero Effort"
-            />
-            <FeatureCard
-              icon={<TrendingUp className="w-6 h-6" />}
-              title="Pattern Detection"
-              description="See what's holding you back and what's working—backed by real data from your journal over time."
-              badge="Data-Driven"
-            />
-          </div>
-        </div>
 
-        {/* How It Works */}
-        <div className="pb-20">
-          <div className="text-center mb-12">
-            <h2 className="text-3xl md:text-4xl font-bold text-slate-900 mb-4">
-              Three Steps to Self-Awareness
-            </h2>
-            <p className="text-xl text-slate-600">
-              It's embarrassingly simple. That's the point. 
-            </p>
+          {/* Social Proof Stats */}
+          <div className="pb-20">
+            <div className="bg-gradient-to-b from-red-950/20 to-transparent border border-red-900/30 rounded-xl p-12 backdrop-blur-sm">
+              <div className="grid md:grid-cols-3 gap-12 text-center">
+                <div>
+                  <div className="w-12 h-12 bg-red-900/50 rounded-full flex items-center justify-center mx-auto mb-3">
+                    <Users className="w-6 h-6 text-red-500" />
+                  </div>
+                  <div className="text-5xl font-bold text-red-500 mb-2">500+</div>
+                  <div className="text-gray-400 uppercase tracking-wider text-sm">Active Warriors</div>
+                </div>
+                <div>
+                  <div className="w-12 h-12 bg-red-900/50 rounded-full flex items-center justify-center mx-auto mb-3">
+                    <Zap className="w-6 h-6 text-red-500" />
+                  </div>
+                  <div className="text-5xl font-bold text-red-500 mb-2">10k+</div>
+                  <div className="text-gray-400 uppercase tracking-wider text-sm">Insights Generated</div>
+                </div>
+                <div>
+                  <div className="w-12 h-12 bg-red-900/50 rounded-full flex items-center justify-center mx-auto mb-3">
+                    <Award className="w-6 h-6 text-red-500" />
+                  </div>
+                  <div className="text-5xl font-bold text-red-500 mb-2">95%</div>
+                  <div className="text-gray-400 uppercase tracking-wider text-sm">Satisfaction Rate</div>
+                </div>
+              </div>
+            </div>
           </div>
-          <div className="grid md:grid-cols-3 gap-8">
-            <StepCard
-              number="1"
-              title="Write Freely"
-              description="Journal naturally—no tags, no mood sliders, no checkboxes. Just write whatever is on your mind."
-            />
-            <StepCard
-              number="2"
-              title="AI Analyzes"
-              description="Our AI detects patterns, emotions, and progress automatically. No manual work required."
-            />
-            <StepCard
-              number="3"
-              title="Take Action"
-              description="Get clear, actionable insights and next steps. Turn reflection into real improvement."
-            />
-          </div>
-        </div>
 
-        {/* Benefits */}
-        <div className="pb-20">
-          <div className="bg-gradient-to-br from-blue-600 to-purple-600 rounded-3xl shadow-2xl p-8 md:p-12 text-white">
-            <div className="max-w-4xl mx-auto">
-              <h2 className="text-3xl md:text-4xl font-bold text-center mb-4">
-                Built for People Who Want Results
+          {/* Features Grid */}
+          <div className="pb-32">
+            <div className="text-center mb-16">
+              <h2 className="text-4xl md:text-5xl font-bold text-white mb-4 uppercase tracking-tight">
+                Your Arsenal
               </h2>
-              <p className="text-xl text-blue-100 text-center mb-10">
-                Not another productivity hack.  Actual self-improvement backed by AI.
+              <p className="text-xl text-gray-400 max-w-2xl mx-auto">
+                Stop guessing. Start knowing. Let AI reveal what you can't see.
               </p>
-              <div className="grid md:grid-cols-2 gap-6">
-                <BenefitItem text="No more staring at a blank page" light />
-                <BenefitItem text="Track goals without manual updates" light />
-                <BenefitItem text="See patterns you'd never notice alone" light />
-                <BenefitItem text="Get accountability from AI insights" light />
-                <BenefitItem text="Understand yourself faster" light />
-                <BenefitItem text="Turn reflection into action" light />
+            </div>
+            <div className="grid md:grid-cols-3 gap-8">
+              <FeatureCard
+                icon={<Brain className="w-7 h-7" />}
+                title="AI Insights"
+                description="Get intelligent analysis of your thoughts, emotions, and behavioral patterns—automatically after every entry."
+                badge="Powered by GPT-4"
+              />
+              <FeatureCard
+                icon={<Sparkles className="w-7 h-7" />}
+                title="Clarity"
+                description="7-stage deep-dive session that interrogates your goals. No surface-level bullshit. Find what you're really after."
+                badge="NEW"
+              />
+              <FeatureCard
+                icon={<Heart className="w-7 h-7" />}
+                title="Gratitude"
+                description="Build appreciation as a daily practice. What you focus on grows. Train your mind to see what's working."
+                badge="NEW"
+              />
+              <FeatureCard
+                icon={<Target className="w-7 h-7" />}
+                title="Goals"
+                description="AI auto-detects when you're working toward something and tracks progress. No manual checkboxes."
+                badge="Zero Effort"
+              />
+              <FeatureCard
+                icon={<TrendingUp className="w-7 h-7" />}
+                title="Pattern Detection"
+                description="See what's holding you back and what's working—backed by real data from your journal over time."
+                badge="Data-Driven"
+              />
+              <FeatureCard
+                icon={<Shield className="w-7 h-7" />}
+                title="Follow-Up Questions"
+                description="AI asks deeper questions when you're avoiding the real issue. Forces you to go deeper until you hit truth."
+                badge="NEW"
+              />
+            </div>
+          </div>
+
+          {/* How It Works */}
+          <div className="pb-32">
+            <div className="text-center mb-16">
+              <h2 className="text-4xl md:text-5xl font-bold text-white mb-4 uppercase tracking-tight">
+                How It Works
+              </h2>
+              <p className="text-xl text-gray-400">
+                Three steps. No complexity. Just results.
+              </p>
+            </div>
+            <div className="grid md:grid-cols-3 gap-8">
+              <StepCard
+                number="1"
+                title="Write Freely"
+                description="Journal naturally—no tags, no mood sliders, no checkboxes. Just write whatever is on your mind."
+              />
+              <StepCard
+                number="2"
+                title="AI Analyzes"
+                description="Pattern recognition, emotion detection, goal tracking—all automatic. No manual work required."
+              />
+              <StepCard
+                number="3"
+                title="Take Action"
+                description="Get clear, actionable insights and next steps. Turn reflection into real improvement."
+              />
+            </div>
+          </div>
+
+          {/* Benefits Section */}
+          <div className="pb-32">
+            <div className="bg-gradient-to-b from-red-950/40 to-transparent border-2 border-red-900 rounded-2xl p-16 backdrop-blur">
+              <div className="max-w-4xl mx-auto">
+                <h2 className="text-4xl md:text-5xl font-bold text-white text-center mb-4 uppercase tracking-tight">
+                  Built for People Who Want Results
+                </h2>
+                <p className="text-xl text-gray-400 text-center mb-12">
+                  Not another productivity hack. Actual self-improvement backed by AI.
+                </p>
+                <div className="grid md:grid-cols-2 gap-6">
+                  <BenefitItem text="No more staring at a blank page" />
+                  <BenefitItem text="Track goals without manual updates" />
+                  <BenefitItem text="See patterns you'd never notice alone" />
+                  <BenefitItem text="Get accountability from AI insights" />
+                  <BenefitItem text="Understand yourself faster" />
+                  <BenefitItem text="Turn reflection into action" />
+                </div>
               </div>
             </div>
           </div>
-        </div>
 
-        {/* Testimonials */}
-        <div className="pb-20">
-          <div className="text-center mb-12">
-            <h2 className="text-3xl md: text-4xl font-bold text-slate-900 mb-4">
-              What People Are Saying
-            </h2>
+          {/* Testimonials */}
+          <div className="pb-32">
+            <div className="text-center mb-16">
+              <h2 className="text-4xl md:text-5xl font-bold text-white mb-4 uppercase tracking-tight">
+                What People Are Saying
+              </h2>
+            </div>
+            <div className="grid md:grid-cols-3 gap-8">
+              <TestimonialCard
+                quote="This app actually changed how I think about my goals. The AI caught patterns I completely missed."
+                author="Sarah M."
+                role="Product Manager"
+              />
+              <TestimonialCard
+                quote="I've tried journaling apps before. This one actually keeps me accountable. The insights are scary accurate."
+                author="James K."
+                role="Entrepreneur"
+              />
+              <TestimonialCard
+                quote="Finally, a journal that doesn't just store my thoughts—it helps me understand them. Game changer."
+                author="Emily R."
+                role="Designer"
+              />
+            </div>
           </div>
-          <div className="grid md:grid-cols-3 gap-8">
-            <TestimonialCard
-              quote="This app actually changed how I think about my goals. The AI caught patterns I completely missed."
-              author="Sarah M."
-              role="Product Manager"
-            />
-            <TestimonialCard
-              quote="I've tried journaling apps before.  This one actually keeps me accountable. The insights are scary accurate."
-              author="James K."
-              role="Entrepreneur"
-            />
-            <TestimonialCard
-              quote="Finally, a journal that doesn't just store my thoughts—it helps me understand them. Game changer."
-              author="Emily R."
-              role="Designer"
-            />
-          </div>
-        </div>
 
-        {/* Final CTA */}
-        <div className="pb-20">
-          <div className="bg-white rounded-3xl shadow-xl border border-slate-200 p-8 md:p-12 text-center">
-            <h2 className="text-3xl md:text-4xl font-bold text-slate-900 mb-4">
-              Ready to Start Improving?
-            </h2>
-            <p className="text-xl text-slate-600 mb-8 max-w-2xl mx-auto">
-              Join hundreds of people using AI to turn journaling into real results.
-            </p>
-            <button
-              onClick={handleGetStarted}
-              className="px-8 py-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold text-lg transition-all shadow-lg hover:shadow-xl flex items-center gap-2 mx-auto"
-            >
-              Start Free Now
-              <ArrowRight className="w-5 h-5" />
-            </button>
-            <p className="text-sm text-slate-500 mt-4">
-              Free forever • No credit card • Cancel anytime
-            </p>
-          </div>
-        </div>
-
-        {/* Footer */}
-        <footer className="border-t border-slate-200 py-8">
-          <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-            <div className="flex items-center gap-2">
-              <Brain className="w-5 h-5 text-blue-600" />
-              <p className="text-slate-600 text-sm">
-                © 2025 Retaliate AI. All rights reserved.
+          {/* Final CTA */}
+          <div className="pb-32">
+            <div className="bg-gradient-to-b from-red-950/40 to-transparent border-2 border-red-900 rounded-2xl p-16 backdrop-blur text-center">
+              <h2 className="text-4xl md:text-5xl font-bold text-white mb-6 uppercase tracking-tight">
+                Your Enemies Don't Wait.
+                <br />
+                <span className="text-red-600">Why Are You?</span>
+              </h2>
+              <p className="text-xl text-gray-400 mb-10 max-w-2xl mx-auto">
+                Every day you hesitate, they get stronger. Every moment you make excuses, they take ground.
+              </p>
+              <button
+                onClick={handleGetStarted}
+                className="px-12 py-6 bg-red-600 text-white rounded-lg hover:bg-red-700 font-bold text-xl transition-all shadow-2xl shadow-red-900/60 uppercase tracking-wide inline-flex items-center gap-3 group"
+              >
+                Start Your Retaliation
+                <ArrowRight className="w-6 h-6 group-hover:translate-x-1 transition-transform" />
+              </button>
+              <p className="text-sm text-gray-600 mt-6 uppercase tracking-wider">
+                Free forever • No credit card • Cancel anytime
               </p>
             </div>
-            <div className="flex gap-6 text-sm text-slate-600">
-              <button 
-                onClick={() => navigate('/privacy')} 
-                className="hover:text-slate-900 transition-colors"
-              >
-                Privacy Policy
-              </button>
-              <button 
-                onClick={() => navigate('/terms')} 
-                className="hover:text-slate-900 transition-colors"
-              >
-                Terms of Service
-              </button>
-            </div>
           </div>
-        </footer>
+
+          {/* Footer */}
+          <footer className="border-t border-red-900/30 py-8">
+            <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+              <div className="flex items-center gap-2">
+                <img src="/logo.png" alt="Retaliate" className="w-5 h-5" />
+                <p className="text-gray-600 text-sm">
+                  © 2025 Retaliate. Built for warriors, not victims.
+                </p>
+              </div>
+              <div className="flex gap-6 text-sm text-gray-600">
+                <button 
+                  onClick={() => navigate('/privacy')} 
+                  className="hover:text-gray-400 transition-colors"
+                >
+                  Privacy Policy
+                </button>
+                <button 
+                  onClick={() => navigate('/terms')} 
+                  className="hover:text-gray-400 transition-colors"
+                >
+                  Terms of Service
+                </button>
+              </div>
+            </div>
+          </footer>
+        </div>
       </div>
     </div>
   );
@@ -259,19 +296,19 @@ export default function Landing() {
 
 function FeatureCard({ icon, title, description, badge }) {
   return (
-    <div className="bg-white rounded-xl p-6 shadow-md hover:shadow-xl transition-all border border-slate-200 group">
-      <div className="flex items-start justify-between mb-4">
-        <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center text-blue-600 group-hover:scale-110 transition-transform">
+    <div className="bg-gradient-to-b from-red-950/30 to-transparent border border-red-900/40 rounded-xl p-8 hover:border-red-700 transition-all group">
+      <div className="flex items-start justify-between mb-6">
+        <div className="w-14 h-14 bg-red-900/50 rounded-lg flex items-center justify-center text-red-500 group-hover:bg-red-900 transition-colors">
           {icon}
         </div>
         {badge && (
-          <span className="px-2 py-1 bg-blue-50 text-blue-700 text-xs font-semibold rounded-full">
+          <span className="px-3 py-1 bg-red-900/50 text-red-400 text-xs font-bold rounded-full uppercase tracking-wider border border-red-800">
             {badge}
           </span>
         )}
       </div>
-      <h3 className="text-xl font-semibold text-slate-900 mb-2">{title}</h3>
-      <p className="text-slate-600 leading-relaxed">{description}</p>
+      <h3 className="text-2xl font-bold text-white mb-3 uppercase tracking-wide">{title}</h3>
+      <p className="text-gray-400 leading-relaxed">{description}</p>
     </div>
   );
 }
@@ -279,40 +316,40 @@ function FeatureCard({ icon, title, description, badge }) {
 function StepCard({ number, title, description }) {
   return (
     <div className="text-center group">
-      <div className="w-16 h-16 bg-gradient-to-br from-blue-600 to-purple-600 text-white rounded-full flex items-center justify-center text-2xl font-bold mx-auto mb-4 shadow-lg group-hover:scale-110 transition-transform">
+      <div className="w-16 h-16 bg-gradient-to-br from-red-600 to-red-800 text-white rounded-lg flex items-center justify-center text-3xl font-bold mx-auto mb-6 shadow-lg shadow-red-900/50 group-hover:scale-110 transition-transform">
         {number}
       </div>
-      <h3 className="text-xl font-semibold text-slate-900 mb-2">{title}</h3>
-      <p className="text-slate-600 leading-relaxed">{description}</p>
+      <h3 className="text-2xl font-bold text-white mb-3 uppercase tracking-wide">{title}</h3>
+      <p className="text-gray-400 leading-relaxed">{description}</p>
     </div>
   );
 }
 
-function BenefitItem({ text, light }) {
+function BenefitItem({ text }) {
   return (
     <div className="flex items-center gap-3">
-      <CheckCircle className={`w-5 h-5 flex-shrink-0 ${light ? 'text-blue-200' : 'text-green-600'}`} />
-      <span className={light ? 'text-white' : 'text-slate-700'}>{text}</span>
+      <CheckCircle className="w-5 h-5 flex-shrink-0 text-red-500" />
+      <span className="text-white">{text}</span>
     </div>
   );
 }
 
 function TestimonialCard({ quote, author, role }) {
   return (
-    <div className="bg-white rounded-xl p-6 shadow-md border border-slate-200">
-      <div className="mb-4">
-        <div className="flex gap-1 mb-3">
+    <div className="bg-gradient-to-b from-red-950/30 to-transparent border border-red-900/40 rounded-xl p-8 backdrop-blur-sm">
+      <div className="mb-6">
+        <div className="flex gap-1 mb-4">
           {[...Array(5)].map((_, i) => (
-            <svg key={i} className="w-5 h-5 text-yellow-400 fill-current" viewBox="0 0 20 20">
+            <svg key={i} className="w-5 h-5 text-red-500 fill-current" viewBox="0 0 20 20">
               <path d="M10 15l-5.878 3.09 1.123-6.545L.489 6.91l6.572-.955L10 0l2.939 5.955 6.572.955-4.756 4.635 1.123 6.545z" />
             </svg>
           ))}
         </div>
-        <p className="text-slate-700 leading-relaxed italic">"{quote}"</p>
+        <p className="text-gray-300 leading-relaxed italic">"{quote}"</p>
       </div>
-      <div className="border-t border-slate-200 pt-4">
-        <p className="font-semibold text-slate-900">{author}</p>
-        <p className="text-sm text-slate-600">{role}</p>
+      <div className="border-t border-red-900/40 pt-4">
+        <p className="font-bold text-white">{author}</p>
+        <p className="text-sm text-gray-500">{role}</p>
       </div>
     </div>
   );
