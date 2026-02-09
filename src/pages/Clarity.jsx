@@ -390,8 +390,8 @@ ${clarityMap.this_week_commitment}
 
   // Welcome / Goal Input View
   return (
-    <div className="h-full flex items-center justify-center bg-gradient-to-br from-purple-50 to-blue-50">
-      <div className="text-center max-w-2xl px-8">
+    <div className="h-full overflow-y-auto bg-gradient-to-br from-purple-50 to-blue-50 py-12 px-8">
+      <div className="text-center max-w-2xl mx-auto">
         <div className="inline-flex items-center justify-center w-20 h-20 bg-purple-100 rounded-full mb-6">
           <Sparkles className="w-10 h-10 text-purple-600" />
         </div>
