@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { Sparkles, Heart, Target, TrendingUp, ArrowRight, CheckCircle, Zap, Award, Users, Brain, Shield } from 'lucide-react';
@@ -127,31 +127,55 @@ export default function Landing() {
                 icon={<Brain className="w-7 h-7" />}
                 title="AI Insights"
                 description="Get intelligent analysis of your thoughts, emotions, and behavioral patterns—automatically after every entry."
+                tooltip={{
+                  title: 'The Science',
+                  description: 'AI pattern recognition mimics your brain\'s Default Mode Network, identifying connections you\'d miss consciously. External analysis reduces cognitive bias—seeing yourself through data reveals blind spots your emotional brain filters out.'
+                }}
               />
               <FeatureCard
                 icon={<Sparkles className="w-7 h-7" />}
                 title="Clarity"
                 description="7-stage deep-dive session that interrogates your goals. No surface-level bullshit. Find what you're really after."
+                tooltip={{
+                  title: 'The Science',
+                  description: 'Structured questioning bypasses your brain\'s automatic defensive responses. Each layer activates deeper prefrontal cortex processing, moving from surface-level justifications to core motivations. Research shows iterative reflection increases goal clarity by 3x.'
+                }}
               />
               <FeatureCard
                 icon={<Heart className="w-7 h-7" />}
                 title="Gratitude"
                 description="Build appreciation as a daily practice. What you focus on grows. Train your mind to see what's working."
+                tooltip={{
+                  title: 'The Science',
+                  description: 'Gratitude journaling stimulates the hypothalamus (stress regulation) and ventral tegmental area (dopamine release). Consistent practice rewires your Reticular Activating System to notice positive stimuli, counteracting evolutionary negativity bias. 2 minutes daily shows measurable effects in 14 days.'
+                }}
               />
               <FeatureCard
                 icon={<Target className="w-7 h-7" />}
                 title="Goals"
                 description="AI auto-detects when you're working toward something and tracks progress. No manual checkboxes."
+                tooltip={{
+                  title: 'The Science',
+                  description: 'Writing goals activates your RAS—your brain\'s attention filter. This primes your visual cortex to spot relevant opportunities. Automated tracking provides external validation (reducing working memory load) and triggers dopamine when progress is detected, reinforcing the behavior loop.'
+                }}
               />
               <FeatureCard
                 icon={<TrendingUp className="w-7 h-7" />}
                 title="Pattern Detection"
                 description="See what's holding you back and what's working—backed by real data from your journal over time."
+                tooltip={{
+                  title: 'The Science',
+                  description: 'Longitudinal data analysis reveals patterns invisible to in-the-moment reflection. Your working memory can only hold 4-7 items—AI processes thousands of data points to identify behavioral trends, emotional triggers, and success predictors your conscious mind can\'t track.'
+                }}
               />
               <FeatureCard
                 icon={<Shield className="w-7 h-7" />}
                 title="Follow-Up Questions"
                 description="AI asks deeper questions when you're avoiding the real issue. Forces you to go deeper until you hit truth."
+                tooltip={{
+                  title: 'The Science',
+                  description: 'Socratic questioning activates the anterior cingulate cortex—your brain\'s conflict monitor. When surface answers conflict with deeper values, targeted questions create cognitive dissonance, forcing prefrontal cortex engagement to resolve the inconsistency. This breaks through amygdala-driven avoidance.'
+                }}
               />
             </div>
           </div>
@@ -285,14 +309,68 @@ export default function Landing() {
   );
 }
 
-function FeatureCard({ icon, title, description }) {
+function FeatureCard({ icon, title, description, tooltip }) {
+  const [hoveredCard, setHoveredCard] = useState(false);
+  const [showTooltip, setShowTooltip] = useState(false);
+  const hoverTimeoutRef = useRef(null);
+
+  const handleMouseEnter = () => {
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+    }
+    
+    setHoveredCard(true);
+    
+    // 500ms delay before showing tooltip
+    hoverTimeoutRef.current = setTimeout(() => {
+      setShowTooltip(true);
+    }, 500);
+  };
+
+  const handleMouseLeave = () => {
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+    }
+    
+    setHoveredCard(false);
+    setShowTooltip(false);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (hoverTimeoutRef.current) {
+        clearTimeout(hoverTimeoutRef.current);
+      }
+    };
+  }, []);
+
   return (
-    <div className="bg-gradient-to-b from-red-950/30 to-transparent border border-red-900/40 rounded-xl p-8 hover:border-red-700 transition-all group">
+    <div 
+      className="relative bg-gradient-to-b from-red-950/30 to-transparent border border-red-900/40 rounded-xl p-8 hover:border-red-700 transition-all group"
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+    >
       <div className="w-14 h-14 bg-red-900/50 rounded-lg flex items-center justify-center text-red-500 group-hover:bg-red-900 transition-colors mb-6">
         {icon}
       </div>
       <h3 className="text-2xl font-bold text-white mb-3 uppercase tracking-wide">{title}</h3>
       <p className="text-gray-400 leading-relaxed">{description}</p>
+      
+      {/* Hover tooltip with fade-in */}
+      {showTooltip && tooltip && (
+        <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-4 z-50 w-80 pointer-events-none animate-in fade-in duration-200">
+          <div className="bg-red-950/95 border border-red-900/60 rounded-lg shadow-2xl shadow-red-900/40 p-4 backdrop-blur-sm">
+            <div className="font-bold text-sm mb-2 text-red-400 uppercase tracking-wide">
+              {tooltip.title}
+            </div>
+            <div className="text-xs leading-relaxed text-gray-300">
+              {tooltip.description}
+            </div>
+          </div>
+          {/* Arrow pointing down */}
+          <div className="absolute left-1/2 -translate-x-1/2 -bottom-2 w-4 h-4 bg-red-950/95 border-r border-b border-red-900/60 rotate-45"></div>
+        </div>
+      )}
     </div>
   );
 }
