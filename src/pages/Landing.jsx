@@ -35,7 +35,7 @@ export default function Landing() {
                   alt="Retaliate AI" 
                   className="w-12 h-12 object-contain"
                 />
-                <span className="text-2xl font-bold tracking-tight text-white uppercase">
+                <span className="text-2xl font-blackletter tracking-tight text-white">
                   Retaliate AI
                 </span>
               </div>

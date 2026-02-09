@@ -14,6 +14,7 @@ export default {
       // Typography
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],
+        blackletter: ['UnifrakturMaguntia', 'serif'],
         serif: ['Georgia', 'serif'],
         mono: ['Monaco', 'Courier New', 'monospace'],
       },
