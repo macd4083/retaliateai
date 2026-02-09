@@ -32,11 +32,11 @@ export default function Landing() {
               <div className="flex items-center gap-3">
                 <img 
                   src="/logo.png" 
-                  alt="Retaliate" 
+                  alt="Retaliate AI" 
                   className="w-12 h-12 object-contain"
                 />
                 <span className="text-2xl font-bold tracking-tight text-white uppercase">
-                  Retaliate
+                  Retaliate AI
                 </span>
               </div>
               <button
@@ -65,7 +65,7 @@ export default function Landing() {
             </h1>
 
             <p className="text-xl md:text-2xl text-gray-400 mb-12 max-w-3xl mx-auto leading-relaxed">
-              AI-powered journaling that detects patterns, tracks goals, and gives you actionable insights—not just a blank page.
+              Retaliate AI makes sure the steps you're taking are carrying you in a direction you want to go.
             </p>
 
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
@@ -92,7 +92,7 @@ export default function Landing() {
                     <Users className="w-6 h-6 text-red-500" />
                   </div>
                   <div className="text-5xl font-bold text-red-500 mb-2">500+</div>
-                  <div className="text-gray-400 uppercase tracking-wider text-sm">Active Warriors</div>
+                  <div className="text-gray-400 uppercase tracking-wider text-sm">Active Users</div>
                 </div>
                 <div>
                   <div className="w-12 h-12 bg-red-900/50 rounded-full flex items-center justify-center mx-auto mb-3">
@@ -116,7 +116,7 @@ export default function Landing() {
           <div className="pb-32">
             <div className="text-center mb-16">
               <h2 className="text-4xl md:text-5xl font-bold text-white mb-4 uppercase tracking-tight">
-                Your Arsenal
+                Your Practices
               </h2>
               <p className="text-xl text-gray-400 max-w-2xl mx-auto">
                 Stop guessing. Start knowing. Let AI reveal what you can't see.
@@ -127,37 +127,31 @@ export default function Landing() {
                 icon={<Brain className="w-7 h-7" />}
                 title="AI Insights"
                 description="Get intelligent analysis of your thoughts, emotions, and behavioral patterns—automatically after every entry."
-                badge="Powered by GPT-4"
               />
               <FeatureCard
                 icon={<Sparkles className="w-7 h-7" />}
                 title="Clarity"
                 description="7-stage deep-dive session that interrogates your goals. No surface-level bullshit. Find what you're really after."
-                badge="NEW"
               />
               <FeatureCard
                 icon={<Heart className="w-7 h-7" />}
                 title="Gratitude"
                 description="Build appreciation as a daily practice. What you focus on grows. Train your mind to see what's working."
-                badge="NEW"
               />
               <FeatureCard
                 icon={<Target className="w-7 h-7" />}
                 title="Goals"
                 description="AI auto-detects when you're working toward something and tracks progress. No manual checkboxes."
-                badge="Zero Effort"
               />
               <FeatureCard
                 icon={<TrendingUp className="w-7 h-7" />}
                 title="Pattern Detection"
                 description="See what's holding you back and what's working—backed by real data from your journal over time."
-                badge="Data-Driven"
               />
               <FeatureCard
                 icon={<Shield className="w-7 h-7" />}
                 title="Follow-Up Questions"
                 description="AI asks deeper questions when you're avoiding the real issue. Forces you to go deeper until you hit truth."
-                badge="NEW"
               />
             </div>
           </div>
@@ -175,8 +169,8 @@ export default function Landing() {
             <div className="grid md:grid-cols-3 gap-8">
               <StepCard
                 number="1"
-                title="Write Freely"
-                description="Journal naturally—no tags, no mood sliders, no checkboxes. Just write whatever is on your mind."
+                title="Pick Your Practice"
+                description="Journal freely, dig deep with Clarity, or reflect with Gratitude—choose what fits your goal today."
               />
               <StepCard
                 number="2"
@@ -243,16 +237,13 @@ export default function Landing() {
           <div className="pb-32">
             <div className="bg-gradient-to-b from-red-950/40 to-transparent border-2 border-red-900 rounded-2xl p-16 backdrop-blur text-center">
               <h2 className="text-4xl md:text-5xl font-bold text-white mb-6 uppercase tracking-tight">
-                Your Enemies Don't Wait.
+                It's Only a Matter of Time Until You Reach Your Goals.
                 <br />
-                <span className="text-red-600">Why Are You?</span>
+                <span className="text-red-600">Start the Countdown.</span>
               </h2>
-              <p className="text-xl text-gray-400 mb-10 max-w-2xl mx-auto">
-                Every day you hesitate, they get stronger. Every moment you make excuses, they take ground.
-              </p>
               <button
                 onClick={handleGetStarted}
-                className="px-12 py-6 bg-red-600 text-white rounded-lg hover:bg-red-700 font-bold text-xl transition-all shadow-2xl shadow-red-900/60 uppercase tracking-wide inline-flex items-center gap-3 group"
+                className="px-12 py-6 bg-red-600 text-white rounded-lg hover:bg-red-700 font-bold text-xl transition-all shadow-2xl shadow-red-900/60 uppercase tracking-wide inline-flex items-center gap-3 group mt-8"
               >
                 Start Your Retaliation
                 <ArrowRight className="w-6 h-6 group-hover:translate-x-1 transition-transform" />
@@ -267,9 +258,9 @@ export default function Landing() {
           <footer className="border-t border-red-900/30 py-8">
             <div className="flex flex-col md:flex-row items-center justify-between gap-4">
               <div className="flex items-center gap-2">
-                <img src="/logo.png" alt="Retaliate" className="w-5 h-5" />
+                <img src="/logo.png" alt="Retaliate AI" className="w-5 h-5" />
                 <p className="text-gray-600 text-sm">
-                  © 2025 Retaliate. Built for warriors, not victims.
+                  © 2025 Retaliate AI. Built for warriors, not victims.
                 </p>
               </div>
               <div className="flex gap-6 text-sm text-gray-600">
@@ -294,18 +285,11 @@ export default function Landing() {
   );
 }
 
-function FeatureCard({ icon, title, description, badge }) {
+function FeatureCard({ icon, title, description }) {
   return (
     <div className="bg-gradient-to-b from-red-950/30 to-transparent border border-red-900/40 rounded-xl p-8 hover:border-red-700 transition-all group">
-      <div className="flex items-start justify-between mb-6">
-        <div className="w-14 h-14 bg-red-900/50 rounded-lg flex items-center justify-center text-red-500 group-hover:bg-red-900 transition-colors">
-          {icon}
-        </div>
-        {badge && (
-          <span className="px-3 py-1 bg-red-900/50 text-red-400 text-xs font-bold rounded-full uppercase tracking-wider border border-red-800">
-            {badge}
-          </span>
-        )}
+      <div className="w-14 h-14 bg-red-900/50 rounded-lg flex items-center justify-center text-red-500 group-hover:bg-red-900 transition-colors mb-6">
+        {icon}
       </div>
       <h3 className="text-2xl font-bold text-white mb-3 uppercase tracking-wide">{title}</h3>
       <p className="text-gray-400 leading-relaxed">{description}</p>
