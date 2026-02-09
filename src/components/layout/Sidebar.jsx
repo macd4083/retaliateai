@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { BookOpen, Lightbulb, Target, Users, Sparkles, Heart } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -13,6 +13,8 @@ export default function Sidebar({
   const isAdmin = user?.role === 'admin';
   const [search, setSearch] = useState('');
   const [hoveredTab, setHoveredTab] = useState(null);
+  const [showTooltip, setShowTooltip] = useState(false);
+  const hoverTimeoutRef = useRef(null);
   
   const tabs = [
     { 
@@ -63,6 +65,39 @@ export default function Sidebar({
   ];
   if (isAdmin) tabs.push({ id: 'users', icon: Users, label: 'Users', tooltip: null });
 
+  const handleMouseEnter = (tabId) => {
+    // Clear any existing timeout
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+    }
+    
+    setHoveredTab(tabId);
+    
+    // Set a 500ms delay before showing tooltip
+    hoverTimeoutRef.current = setTimeout(() => {
+      setShowTooltip(true);
+    }, 500);
+  };
+
+  const handleMouseLeave = () => {
+    // Clear the timeout if mouse leaves before 500ms
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+    }
+    
+    setHoveredTab(null);
+    setShowTooltip(false);
+  };
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (hoverTimeoutRef.current) {
+        clearTimeout(hoverTimeoutRef.current);
+      }
+    };
+  }, []);
+
   const filteredEntries = entries.filter((entry) => {
     if (!search) return true;
     const query = search.toLowerCase();
@@ -77,12 +112,15 @@ export default function Sidebar({
       <div className="p-4 space-y-2">
         {tabs.map((tab) => {
           const Icon = tab.icon;
+          const isHovered = hoveredTab === tab.id;
+          const shouldShowTooltip = isHovered && showTooltip && tab.tooltip;
+          
           return (
             <div 
               key={tab.id} 
               className="relative"
-              onMouseEnter={() => setHoveredTab(tab.id)}
-              onMouseLeave={() => setHoveredTab(null)}
+              onMouseEnter={() => handleMouseEnter(tab.id)}
+              onMouseLeave={handleMouseLeave}
             >
               <button
                 onClick={() => onTabChange(tab.id)}
@@ -96,9 +134,11 @@ export default function Sidebar({
                 <span>{tab.label}</span>
               </button>
               
-              {/* Hover tooltip */}
-              {hoveredTab === tab.id && tab.tooltip && (
-                <div className="absolute left-full ml-2 top-0 z-50 w-72 pointer-events-none">
+              {/* Hover tooltip with fade-in animation */}
+              {shouldShowTooltip && (
+                <div 
+                  className="absolute left-full ml-2 top-0 z-50 w-72 pointer-events-none animate-in fade-in duration-200"
+                >
                   <div className="bg-slate-50 border border-slate-200 rounded-lg shadow-lg p-4 text-slate-600">
                     <div className="font-semibold text-sm mb-2 text-slate-700">
                       {tab.tooltip.title}
