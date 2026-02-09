@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { BookOpen, Lightbulb, Target, Users, Sparkles, Heart } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -14,7 +15,9 @@ export default function Sidebar({
   const [search, setSearch] = useState('');
   const [hoveredTab, setHoveredTab] = useState(null);
   const [showTooltip, setShowTooltip] = useState(false);
+  const [tooltipPosition, setTooltipPosition] = useState({ top: 0, left: 0 });
   const hoverTimeoutRef = useRef(null);
+  const buttonRefs = useRef({});
   
   const tabs = [
     { 
@@ -73,6 +76,16 @@ export default function Sidebar({
     
     setHoveredTab(tabId);
     
+    // Calculate tooltip position
+    const buttonElement = buttonRefs.current[tabId];
+    if (buttonElement) {
+      const rect = buttonElement.getBoundingClientRect();
+      setTooltipPosition({
+        top: rect.top,
+        left: rect.right + 8 // 8px gap from button
+      });
+    }
+    
     // Set a 500ms delay before showing tooltip
     hoverTimeoutRef.current = setTimeout(() => {
       setShowTooltip(true);
@@ -106,91 +119,101 @@ export default function Sidebar({
     return title.includes(query) || dateStr.includes(query);
   });
 
+  const currentTooltip = tabs.find(t => t.id === hoveredTab)?.tooltip;
+  const shouldShowTooltip = showTooltip && currentTooltip;
+
   return (
-    <div className="w-64 bg-white border-r border-slate-200 flex flex-col h-full">
-      {/* Nav buttons at top */}
-      <div className="p-4 space-y-2">
-        {tabs.map((tab) => {
-          const Icon = tab.icon;
-          const isHovered = hoveredTab === tab.id;
-          const shouldShowTooltip = isHovered && showTooltip && tab.tooltip;
-          
-          return (
-            <div 
-              key={tab.id} 
-              className="relative"
-              onMouseEnter={() => handleMouseEnter(tab.id)}
-              onMouseLeave={handleMouseLeave}
-            >
-              <button
-                onClick={() => onTabChange(tab.id)}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-                  activeTab === tab.id
-                    ? 'bg-blue-50 text-blue-700 font-medium'
-                    : 'text-slate-600 hover:bg-slate-50'
-                }`}
+    <>
+      <div className="w-64 bg-white border-r border-slate-200 flex flex-col h-full">
+        {/* Nav buttons at top */}
+        <div className="p-4 space-y-2">
+          {tabs.map((tab) => {
+            const Icon = tab.icon;
+            
+            return (
+              <div 
+                key={tab.id} 
+                className="relative"
+                ref={(el) => (buttonRefs.current[tab.id] = el)}
+                onMouseEnter={() => handleMouseEnter(tab.id)}
+                onMouseLeave={handleMouseLeave}
               >
-                <Icon className="w-5 h-5" />
-                <span>{tab.label}</span>
-              </button>
-              
-              {/* Hover tooltip with fade-in animation */}
-              {shouldShowTooltip && (
-                <div 
-                  className="absolute left-full ml-2 top-0 z-50 w-72 pointer-events-none animate-in fade-in duration-200"
+                <button
+                  onClick={() => onTabChange(tab.id)}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
+                    activeTab === tab.id
+                      ? 'bg-blue-50 text-blue-700 font-medium'
+                      : 'text-slate-600 hover:bg-slate-50'
+                  }`}
                 >
-                  <div className="bg-slate-50 border border-slate-200 rounded-lg shadow-lg p-4 text-slate-600">
-                    <div className="font-semibold text-sm mb-2 text-slate-700">
-                      {tab.tooltip.title}
-                    </div>
-                    <div className="text-xs leading-relaxed">
-                      {tab.tooltip.description}
-                    </div>
+                  <Icon className="w-5 h-5" />
+                  <span>{tab.label}</span>
+                </button>
+              </div>
+            );
+          })}
+        </div>
+        {/* Divider */}
+        <div className="border-b border-slate-200 my-2"></div>
+        {/* Journal entry search/list below nav always */}
+        <div className="flex-1 flex flex-col px-4 pb-4 overflow-y-auto">
+          <input
+            type="text"
+            placeholder="Search by title or date..."
+            className="w-full px-3 py-2 border border-slate-300 rounded-md mb-2"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+          <div className="flex-1 overflow-y-auto">
+            {filteredEntries.length === 0 ? (
+              <div className="text-slate-400 py-8 text-center">
+                {search ? 'No matching entries found.' : 'No journal entries yet.'}
+              </div>
+            ) : (
+              filteredEntries.map((entry) => (
+                <button
+                  key={entry.id}
+                  className={`block w-full text-left mb-2 px-3 py-2 rounded-lg transition border ${
+                    selectedEntryId === entry.id
+                      ? "bg-blue-100 border-blue-300"
+                      : "bg-white border-slate-200 hover:bg-slate-100"
+                  }`}
+                  onClick={() => onSelectEntry(entry)}
+                >
+                  <div className="font-semibold text-sm truncate">
+                    {entry.title || "Untitled Entry"}
                   </div>
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-      {/* Divider */}
-      <div className="border-b border-slate-200 my-2"></div>
-      {/* Journal entry search/list below nav always */}
-      <div className="flex-1 flex flex-col px-4 pb-4 overflow-y-auto">
-        <input
-          type="text"
-          placeholder="Search by title or date..."
-          className="w-full px-3 py-2 border border-slate-300 rounded-md mb-2"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-        />
-        <div className="flex-1 overflow-y-auto">
-          {filteredEntries.length === 0 ? (
-            <div className="text-slate-400 py-8 text-center">
-              {search ? 'No matching entries found.' : 'No journal entries yet.'}
-            </div>
-          ) : (
-            filteredEntries.map((entry) => (
-              <button
-                key={entry.id}
-                className={`block w-full text-left mb-2 px-3 py-2 rounded-lg transition border ${
-                  selectedEntryId === entry.id
-                    ? "bg-blue-100 border-blue-300"
-                    : "bg-white border-slate-200 hover:bg-slate-100"
-                }`}
-                onClick={() => onSelectEntry(entry)}
-              >
-                <div className="font-semibold text-sm truncate">
-                  {entry.title || "Untitled Entry"}
-                </div>
-                <div className="text-xs text-slate-500">
-                  {entry.created_at ? format(new Date(entry.created_at), 'MMM d, yyyy') : ''}
-                </div>
-              </button>
-            ))
-          )}
+                  <div className="text-xs text-slate-500">
+                    {entry.created_at ? format(new Date(entry.created_at), 'MMM d, yyyy') : ''}
+                  </div>
+                </button>
+              ))
+            )}
+          </div>
         </div>
       </div>
-    </div>
+
+      {/* Portal tooltip - renders outside sidebar DOM hierarchy */}
+      {shouldShowTooltip && createPortal(
+        <div 
+          className="fixed w-72 pointer-events-none animate-in fade-in duration-200"
+          style={{
+            top: `${tooltipPosition.top}px`,
+            left: `${tooltipPosition.left}px`,
+            zIndex: 99999
+          }}
+        >
+          <div className="bg-slate-50 border border-slate-200 rounded-lg shadow-xl p-4 text-slate-600">
+            <div className="font-semibold text-sm mb-2 text-slate-700">
+              {currentTooltip.title}
+            </div>
+            <div className="text-xs leading-relaxed">
+              {currentTooltip.description}
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+    </>
   );
 }
