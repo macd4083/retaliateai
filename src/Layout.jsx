@@ -5,8 +5,8 @@ import { BookOpen, Sparkles, Target, Users, Menu, X, PanelLeftClose, PanelLeft, 
 import { useAuth } from '@/lib/AuthContext';
 
 const navItems = [
-  { name: 'Journal', icon:  BookOpen, page: 'Journal', color: 'text-slate-900' },
-  { name: 'Insights', icon:  Sparkles, page: 'Insights', color: 'text-violet-600' },
+  { name: 'Journal', icon: BookOpen, page: 'Journal', color: 'text-slate-900' },
+  { name: 'Insights', icon: Sparkles, page: 'Insights', color: 'text-violet-600' },
   { name: 'Goals', icon: Target, page: 'Goals', color: 'text-blue-600' },
   { name: 'People', icon: Users, page: 'People', color: 'text-purple-600' },
   { name: 'Users', icon: UserCog, page: 'Users', color: 'text-orange-600' },
@@ -21,8 +21,22 @@ export default function Layout({ children, currentPageName, sidebarContent }) {
 
   return (
     <div className="min-h-screen bg-slate-50">
+      {/* TOP BLACK HEADER - Small Rectangle */}
+      <header className="fixed top-0 left-0 right-0 h-20 bg-black z-50 flex items-center justify-center">
+        <div className="flex items-center gap-3">
+          <img 
+            src="/logo.png" 
+            alt="Retaliate AI" 
+            className="w-10 h-10 object-contain"
+          />
+          <span className="text-2xl font-blackletter text-white tracking-tight">
+            Retaliate AI
+          </span>
+        </div>
+      </header>
+
       {/* Desktop Sidebar */}
-      <aside className={`hidden md:flex fixed left-0 top-0 h-screen bg-white border-r border-slate-200 flex-col p-6 transition-transform duration-300 ${
+      <aside className={`hidden md:flex fixed left-0 top-20 h-[calc(100vh-5rem)] bg-white border-r border-slate-200 flex-col p-6 transition-transform duration-300 ${
         sidebarOpen ? 'translate-x-0 w-64' : '-translate-x-full w-64'
       }`}>
         <div className="mb-10 flex items-center justify-between">
@@ -52,7 +66,7 @@ export default function Layout({ children, currentPageName, sidebarContent }) {
             return (
               <Link
                 key={item.page}
-                to={createPageUrl(item. page)}
+                to={createPageUrl(item.page)}
                 className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${
                   isActive 
                     ? 'bg-slate-100 text-slate-900 font-medium' 
@@ -82,7 +96,7 @@ export default function Layout({ children, currentPageName, sidebarContent }) {
               <p className="text-xs text-slate-500 mb-2">{user.email}</p>
               <button
                 onClick={() => logout()}
-                className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg hover: bg-slate-50 transition-colors"
+                className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
               >
                 Logout
               </button>
@@ -95,14 +109,14 @@ export default function Layout({ children, currentPageName, sidebarContent }) {
       {!sidebarOpen && (
         <button
           onClick={() => setSidebarOpen(true)}
-          className="hidden md:flex fixed top-4 left-4 z-50 bg-white border border-slate-200 shadow-sm hover:shadow-md rounded-lg w-10 h-10 items-center justify-center"
+          className="hidden md:flex fixed top-24 left-4 z-50 bg-white border border-slate-200 shadow-sm hover:shadow-md rounded-lg w-10 h-10 items-center justify-center"
         >
           <PanelLeft className="w-5 h-5" />
         </button>
       )}
 
       {/* Mobile Header */}
-      <header className="md:hidden fixed top-0 left-0 right-0 bg-white border-b border-slate-200 z-50 px-4 py-3">
+      <header className="md:hidden fixed top-20 left-0 right-0 bg-white border-b border-slate-200 z-40 px-4 py-3">
         <div className="flex items-center justify-between">
           <h1 className="text-lg font-bold text-slate-900 flex items-center gap-2">
             <span className="p-1.5 bg-slate-900 rounded-lg">
@@ -144,8 +158,8 @@ export default function Layout({ children, currentPageName, sidebarContent }) {
       </header>
 
       {/* Main Content */}
-      <main className={`pt-16 md:pt-0 transition-all duration-300 ${
-        sidebarOpen ?  'md:ml-64' : 'md:ml-0'
+      <main className={`pt-20 transition-all duration-300 ${
+        sidebarOpen ? 'md:ml-64' : 'md:ml-0'
       }`}>
         {children}
       </main>
