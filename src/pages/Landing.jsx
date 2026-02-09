@@ -15,7 +15,7 @@ export default function Landing() {
   }, [user, navigate]);
 
   const handleGetStarted = () => {
-    navigate('/login');
+    navigate('/login?signup=true');
   };
 
   return (
@@ -40,7 +40,7 @@ export default function Landing() {
                 </span>
               </div>
               <button
-                onClick={handleGetStarted}
+                onClick={() => navigate('/login')}
                 className="px-6 py-2 text-red-500 hover:text-red-400 font-semibold transition-colors border border-red-900 hover:border-red-700 rounded"
               >
                 Sign In
