@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import Layout from './Layout';
 import Sidebar from './components/layout/Sidebar';
 import JournalEditor from './components/journal/JournalEditor';
 import EntryDetailModal from './components/journal/EntryDetailModal';
@@ -327,65 +328,82 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen bg-slate-50 overflow-hidden">
-      {/* Sidebar - ALWAYS VISIBLE */}
-      <Sidebar
-        activeTab={activeTab}
-        onTabChange={handleTabChange}
-        entries={entries}
-        selectedEntryId={selectedEntryId}
-        onSelectEntry={handleSelectEntry}
-        user={user}
-      />
+    <>
+      {/* TOP BLACK HEADER */}
+      <header className="fixed top-0 left-0 right-0 h-20 bg-black z-50 flex items-center justify-center">
+        <div className="flex items-center gap-3">
+          <img 
+            src="/logo.png" 
+            alt="Retaliate AI" 
+            className="w-10 h-10 object-contain"
+          />
+          <span className="text-2xl font-blackletter text-white tracking-tight">
+            Retaliate AI
+          </span>
+        </div>
+      </header>
 
-      {/* Main Content - CHANGES BASED ON ACTIVE TAB */}
-      <main className="flex-1 overflow-hidden">
-        {activeTab === 'journal' && (
-          <div className="h-full bg-slate-50">
-            <JournalEditor
-              entry={null}
-              onSave={handleSave}
-              onCancel={() => {}}
-              isSaving={isSaving}
-            />
-          </div>
-        )}
-        
-        {activeTab === 'clarity' && <Clarity />}
-        
-        {activeTab === 'gratitude' && <Gratitude />}
-        
-        {activeTab === 'insights' && <Insights />}
-        
-        {activeTab === 'goals' && <Goals />}
-        
-        {activeTab === 'people' && (
-          <div className="p-8">
-            <h1 className="text-2xl font-bold text-slate-900">People</h1>
-            <p className="text-slate-600 mt-2">Track the important people in your life.</p>
-          </div>
-        )}
-        
-        {activeTab === 'users' && user?.role === 'admin' && <Users />}
-      </main>
-
-      {/* GLOBAL Entry Detail Modal - Shows on ANY tab */}
-      {viewingEntry && (
-        <EntryDetailModal
-          entry={viewingEntry}
-          onClose={() => {
-            setViewingEntry(null);
-            setSelectedEntryId(null);
-            setSuggestedGoal(null);
-          }}
-          onEdit={handleEdit}
-          onDelete={handleDelete}
-          onSubmitFollowUp={handleSubmitFollowUp}
-          suggestedGoal={suggestedGoal}
-          onAcceptGoal={handleAcceptGoal}
-          onDismissGoal={handleDismissGoal}
+      {/* MAIN CONTENT WITH TOP PADDING */}
+      <div className="flex h-screen bg-slate-50 overflow-hidden pt-20">
+        {/* Sidebar - ALWAYS VISIBLE */}
+        <Sidebar
+          activeTab={activeTab}
+          onTabChange={handleTabChange}
+          entries={entries}
+          selectedEntryId={selectedEntryId}
+          onSelectEntry={handleSelectEntry}
+          user={user}
         />
-      )}
-    </div>
+
+        {/* Main Content - CHANGES BASED ON ACTIVE TAB */}
+        <main className="flex-1 overflow-hidden">
+          {activeTab === 'journal' && (
+            <div className="h-full bg-slate-50">
+              <JournalEditor
+                entry={null}
+                onSave={handleSave}
+                onCancel={() => {}}
+                isSaving={isSaving}
+              />
+            </div>
+          )}
+          
+          {activeTab === 'clarity' && <Clarity />}
+          
+          {activeTab === 'gratitude' && <Gratitude />}
+          
+          {activeTab === 'insights' && <Insights />}
+          
+          {activeTab === 'goals' && <Goals />}
+          
+          {activeTab === 'people' && (
+            <div className="p-8">
+              <h1 className="text-2xl font-bold text-slate-900">People</h1>
+              <p className="text-slate-600 mt-2">Track the important people in your life.</p>
+            </div>
+          )}
+          
+          {activeTab === 'users' && user?.role === 'admin' && <Users />}
+        </main>
+
+        {/* GLOBAL Entry Detail Modal - Shows on ANY tab */}
+        {viewingEntry && (
+          <EntryDetailModal
+            entry={viewingEntry}
+            onClose={() => {
+              setViewingEntry(null);
+              setSelectedEntryId(null);
+              setSuggestedGoal(null);
+            }}
+            onEdit={handleEdit}
+            onDelete={handleDelete}
+            onSubmitFollowUp={handleSubmitFollowUp}
+            suggestedGoal={suggestedGoal}
+            onAcceptGoal={handleAcceptGoal}
+            onDismissGoal={handleDismissGoal}
+          />
+        )}
+      </div>
+    </>
   );
 }
