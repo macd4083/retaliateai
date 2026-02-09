@@ -332,13 +332,13 @@ export default function App() {
       <div className="w-64 flex flex-col bg-white border-r border-slate-200">
         {/* WHITE HEADER BAR - Top Left */}
         <div className="h-16 bg-white border-b border-slate-200 flex items-center px-4">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <img 
               src="/inverselogo.png" 
               alt="Retaliate AI" 
-              className="w-8 h-8 object-contain"
+              className="w-12 h-12 object-contain"
             />
-            <span className="text-lg font-blackletter text-black tracking-tight">
+            <span className="text-xl font-blackletter text-black tracking-tight">
               Retaliate AI
             </span>
           </div>
