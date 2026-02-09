@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
-import { Sparkles, ArrowRight, Check, Loader2, Download } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Sparkles, ArrowRight, Check, Loader2, Download, ChevronDown } from 'lucide-react';
 import { useAuth } from '../lib/AuthContext';
 import { aiWorkflows } from '../lib/ai/workflows';
+import { useGoals } from '../hooks/useGoals';
 
 const STAGES = [
   { id: 'vision', name: 'Vision', emoji: '🎯', color: 'purple' },
@@ -49,6 +50,8 @@ export default function Clarity() {
   const { user } = useAuth();
   const [started, setStarted] = useState(false);
   const [goal, setGoal] = useState('');
+  const [selectedGoalId, setSelectedGoalId] = useState(null);
+  const [showDropdown, setShowDropdown] = useState(false);
   const [currentStage, setCurrentStage] = useState(0);
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [answer, setAnswer] = useState('');
@@ -59,6 +62,22 @@ export default function Clarity() {
   const [completed, setCompleted] = useState(false);
   const [clarityMap, setClarityMap] = useState(null);
   const [saving, setSaving] = useState(false);
+  
+  const dropdownRef = useRef(null);
+  
+  // Fetch user's active goals
+  const { data: userGoals = [], isLoading: goalsLoading } = useGoals(user?.id, 'active');
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setShowDropdown(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const handleStart = () => {
     if (!goal.trim()) {
@@ -66,6 +85,17 @@ export default function Clarity() {
       return;
     }
     setStarted(true);
+  };
+
+  const handleSelectGoal = (goalObj) => {
+    setGoal(goalObj.title);
+    setSelectedGoalId(goalObj.id);
+    setShowDropdown(false);
+  };
+
+  const handleGoalInputChange = (e) => {
+    setGoal(e.target.value);
+    setSelectedGoalId(null); // Clear selected goal if user types manually
   };
 
   const handleSubmitAnswer = async () => {
@@ -149,7 +179,7 @@ export default function Clarity() {
     try {
       const result = await aiWorkflows.processClaritySession(user.id, {
         goal_text: goal,
-        goal_id: null,
+        goal_id: selectedGoalId, // Link to existing goal if selected
         stage_responses: responses,
       });
 
@@ -414,18 +444,59 @@ ${clarityMap.this_week_commitment}
           </ul>
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6" ref={dropdownRef}>
           <label className="block text-left text-sm font-medium text-slate-700 mb-2">
             What goal do you want clarity on?
           </label>
-          <input
-            type="text"
-            value={goal}
-            onChange={(e) => setGoal(e.target.value)}
-            placeholder="e.g., Launch my startup, Get in shape, Build better relationships"
-            className="w-full px-4 py-3 border-2 border-slate-200 rounded-lg focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-colors"
-            onKeyPress={(e) => e.key === 'Enter' && handleStart()}
-          />
+          <div className="relative">
+            <input
+              type="text"
+              value={goal}
+              onChange={handleGoalInputChange}
+              onFocus={() => setShowDropdown(true)}
+              placeholder={goalsLoading ? "Loading your goals..." : "Choose from your goals or type a new one"}
+              className="w-full px-4 py-3 pr-10 border-2 border-slate-200 rounded-lg focus:border-purple-500 focus:ring-2 focus:ring-purple-200 transition-colors"
+              onKeyPress={(e) => e.key === 'Enter' && handleStart()}
+            />
+            <button
+              onClick={() => setShowDropdown(!showDropdown)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+              type="button"
+            >
+              <ChevronDown className={`w-5 h-5 transition-transform ${showDropdown ? 'rotate-180' : ''}`} />
+            </button>
+            
+            {/* Dropdown */}
+            {showDropdown && !goalsLoading && userGoals.length > 0 && (
+              <div className="absolute z-10 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                <div className="p-2">
+                  <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide px-3 py-2">
+                    Your Active Goals
+                  </div>
+                  {userGoals.map((goalObj) => (
+                    <button
+                      key={goalObj.id}
+                      onClick={() => handleSelectGoal(goalObj)}
+                      className="w-full text-left px-3 py-2 rounded-md hover:bg-purple-50 transition-colors"
+                    >
+                      <div className="font-medium text-slate-900">{goalObj.title}</div>
+                      {goalObj.description && (
+                        <div className="text-xs text-slate-500 mt-1 line-clamp-2">
+                          {goalObj.description}
+                        </div>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+          
+          {userGoals.length === 0 && !goalsLoading && (
+            <p className="text-xs text-slate-500 mt-2">
+              💡 You can type any goal here or create goals in the Goals section
+            </p>
+          )}
         </div>
 
         <button 
