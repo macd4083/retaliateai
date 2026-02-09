@@ -12,15 +12,56 @@ export default function Sidebar({
 }) {
   const isAdmin = user?.role === 'admin';
   const [search, setSearch] = useState('');
+  const [hoveredTab, setHoveredTab] = useState(null);
   
   const tabs = [
-    { id: 'journal', icon: BookOpen, label: 'Journal' },
-    { id: 'clarity', icon: Sparkles, label: 'Clarity' },
-    { id: 'gratitude', icon: Heart, label: 'Gratitude' },
-    { id: 'insights', icon: Lightbulb, label: 'Insights' },
-    { id: 'goals', icon: Target, label: 'Goals' },
+    { 
+      id: 'journal', 
+      icon: BookOpen, 
+      label: 'Journal',
+      tooltip: {
+        title: 'Why It Works',
+        description: 'Activates your Default Mode Network—your brain\'s introspection mode. Unstructured writing reduces cognitive filtering, allowing subconscious patterns to surface. Research shows 15-20 minutes of expressive writing improves emotional regulation and immune function.'
+      }
+    },
+    { 
+      id: 'clarity', 
+      icon: Sparkles, 
+      label: 'Clarity',
+      tooltip: {
+        title: 'Why It Works',
+        description: 'Writing externalizes problems from your limited working memory (4-7 items). Seeing thoughts on screen engages visual processing, allowing you to spot patterns and contradictions invisible when thoughts are swirling internally.'
+      }
+    },
+    { 
+      id: 'gratitude', 
+      icon: Heart, 
+      label: 'Gratitude',
+      tooltip: {
+        title: 'Why It Works',
+        description: 'Stimulates the hypothalamus (regulates stress) and releases dopamine. Your brain has a negativity bias—gratitude practices counteract this by training attention toward positive stimuli. Just 2 minutes daily measurably increases positive affect within 2 weeks.'
+      }
+    },
+    { 
+      id: 'insights', 
+      icon: Lightbulb, 
+      label: 'Insights',
+      tooltip: {
+        title: 'Why It Works',
+        description: 'Structured reflection builds metacognition—awareness of your own thought patterns. Specific questions activate focused neural pathways rather than diffuse anxiety circuits. Your brain is a question-answering machine.'
+      }
+    },
+    { 
+      id: 'goals', 
+      icon: Target, 
+      label: 'Goals',
+      tooltip: {
+        title: 'Why It Works',
+        description: 'Writing goals activates your Reticular Activating System (RAS)—your brain\'s filter that prioritizes what to notice. Creates a psychological contract with yourself. Implementation intentions ("When X, I will Y") increase follow-through by 2-3x.'
+      }
+    },
   ];
-  if (isAdmin) tabs.push({ id: 'users', icon: Users, label: 'Users' });
+  if (isAdmin) tabs.push({ id: 'users', icon: Users, label: 'Users', tooltip: null });
 
   const filteredEntries = entries.filter((entry) => {
     if (!search) return true;
@@ -37,18 +78,38 @@ export default function Sidebar({
         {tabs.map((tab) => {
           const Icon = tab.icon;
           return (
-            <button
-              key={tab.id}
-              onClick={() => onTabChange(tab.id)}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-                activeTab === tab.id
-                  ? 'bg-blue-50 text-blue-700 font-medium'
-                  : 'text-slate-600 hover:bg-slate-50'
-              }`}
+            <div 
+              key={tab.id} 
+              className="relative"
+              onMouseEnter={() => setHoveredTab(tab.id)}
+              onMouseLeave={() => setHoveredTab(null)}
             >
-              <Icon className="w-5 h-5" />
-              <span>{tab.label}</span>
-            </button>
+              <button
+                onClick={() => onTabChange(tab.id)}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
+                  activeTab === tab.id
+                    ? 'bg-blue-50 text-blue-700 font-medium'
+                    : 'text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                <Icon className="w-5 h-5" />
+                <span>{tab.label}</span>
+              </button>
+              
+              {/* Hover tooltip */}
+              {hoveredTab === tab.id && tab.tooltip && (
+                <div className="absolute left-full ml-2 top-0 z-50 w-72 pointer-events-none">
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg shadow-lg p-4 text-slate-600">
+                    <div className="font-semibold text-sm mb-2 text-slate-700">
+                      {tab.tooltip.title}
+                    </div>
+                    <div className="text-xs leading-relaxed">
+                      {tab.tooltip.description}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
           );
         })}
       </div>
