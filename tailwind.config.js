@@ -20,19 +20,58 @@ export default {
       
       // Custom colors - Red/Black theme
       colors: {
+        // CSS Variable-based colors (for your index.css)
+        border: 'hsl(var(--border))',
+        input: 'hsl(var(--input))',
+        ring: 'hsl(var(--ring))',
+        background: 'hsl(var(--background))',
+        foreground: 'hsl(var(--foreground))',
+        
         // Primary red (replaces blue)
         primary: {
+          DEFAULT: 'hsl(var(--primary))',
+          foreground: 'hsl(var(--primary-foreground))',
           50: '#fef2f2',
           100: '#fee2e2',
           200: '#fecaca',
           300: '#fca5a5',
           400: '#f87171',
-          500: '#dc2626',  // Main red
+          500: '#dc2626',
           600: '#b91c1c',
           700: '#991b1b',
           800: '#7f1d1d',
           900: '#450a0a',
           950: '#1a0000',
+        },
+        
+        secondary: {
+          DEFAULT: 'hsl(var(--secondary))',
+          foreground: 'hsl(var(--secondary-foreground))',
+        },
+        
+        destructive: {
+          DEFAULT: 'hsl(var(--destructive))',
+          foreground: 'hsl(var(--destructive-foreground))',
+        },
+        
+        muted: {
+          DEFAULT: 'hsl(var(--muted))',
+          foreground: 'hsl(var(--muted-foreground))',
+        },
+        
+        accent: {
+          DEFAULT: 'hsl(var(--accent))',
+          foreground: 'hsl(var(--accent-foreground))',
+        },
+        
+        popover: {
+          DEFAULT: 'hsl(var(--popover))',
+          foreground: 'hsl(var(--popover-foreground))',
+        },
+        
+        card: {
+          DEFAULT: 'hsl(var(--card))',
+          foreground: 'hsl(var(--card-foreground))',
         },
         
         // Override blue with red (so all blue-X becomes red)
@@ -58,7 +97,7 @@ export default {
           300: '#f9a8d4',
           400: '#f472b6',
           500: '#ec4899',
-          600: '#db2777',  // Dark pink/red
+          600: '#db2777',
           700: '#be185d',
           800: '#9f1239',
           900: '#831843',
@@ -140,6 +179,21 @@ export default {
           950: '#422006',
         },
         
+        // Pink (alternative to purple)
+        pink: {
+          50: '#fdf2f8',
+          100: '#fce7f3',
+          200: '#fbcfe8',
+          300: '#f9a8d4',
+          400: '#f472b6',
+          500: '#ec4899',
+          600: '#db2777',
+          700: '#be185d',
+          800: '#9f1239',
+          900: '#831843',
+          950: '#500724',
+        },
+        
         // Slate/Gray (for text, borders, backgrounds)
         slate: {
           50: '#f8fafc',
@@ -169,17 +223,41 @@ export default {
           900: '#111827',
           950: '#030712',
         },
+        
+        // Chart colors (for data visualization)
+        chart: {
+          1: 'hsl(var(--chart-1))',
+          2: 'hsl(var(--chart-2))',
+          3: 'hsl(var(--chart-3))',
+          4: 'hsl(var(--chart-4))',
+          5: 'hsl(var(--chart-5))',
+        },
+        
+        // Sidebar colors (for navigation)
+        sidebar: {
+          DEFAULT: 'hsl(var(--sidebar-background))',
+          foreground: 'hsl(var(--sidebar-foreground))',
+          primary: 'hsl(var(--sidebar-primary))',
+          'primary-foreground': 'hsl(var(--sidebar-primary-foreground))',
+          accent: 'hsl(var(--sidebar-accent))',
+          'accent-foreground': 'hsl(var(--sidebar-accent-foreground))',
+          border: 'hsl(var(--sidebar-border))',
+          ring: 'hsl(var(--sidebar-ring))',
+        },
       },
       
-      // Custom spacing (if needed)
+      // Border radius
+      borderRadius: {
+        lg: 'var(--radius)',
+        md: 'calc(var(--radius) - 2px)',
+        sm: 'calc(var(--radius) - 4px)',
+        '4xl': '2rem',
+      },
+      
+      // Custom spacing
       spacing: {
         '128': '32rem',
         '144': '36rem',
-      },
-      
-      // Custom border radius
-      borderRadius: {
-        '4xl': '2rem',
       },
       
       // Custom shadows
