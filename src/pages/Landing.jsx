@@ -112,6 +112,11 @@ export default function Landing() {
             </div>
           </div>
 
+          {/* 🔥 MOCKUP SLIDESHOW - NEW SECTION 🔥 */}
+          <div className="pb-32">
+            <MockupSlideshow />
+          </div>
+
           {/* Features Grid */}
           <div className="pb-32">
             <div className="text-center mb-16">
@@ -304,6 +309,82 @@ export default function Landing() {
             </div>
           </footer>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// 🔥 NEW SLIDESHOW COMPONENT 🔥
+function MockupSlideshow() {
+  const [currentSlide, setCurrentSlide] = useState(0);
+  const mockups = [
+    { png: '/mockup-1.png', webp: '/mockup-1.webp', alt: 'Retaliate AI Dashboard - Journal Interface' },
+    { png: '/mockup-2.png', webp: '/mockup-2.webp', alt: 'Retaliate AI - AI Insights Analysis' },
+    { png: '/mockup-3.png', webp: '/mockup-3.webp', alt: 'Retaliate AI - Goal Tracking Dashboard' }
+  ];
+
+  // Auto-advance slideshow every 4 seconds
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentSlide((prev) => (prev + 1) % mockups.length);
+    }, 4000);
+
+    return () => clearInterval(timer);
+  }, [mockups.length]);
+
+  return (
+    <div className="max-w-6xl mx-auto">
+      {/* Slideshow Container */}
+      <div className="relative aspect-[16/10] rounded-2xl overflow-hidden bg-gradient-to-br from-gray-100 to-white shadow-2xl shadow-red-900/30 border-2 border-red-900/20">
+        
+        {/* Red glow overlay to blend white backgrounds */}
+        <div className="absolute inset-0 bg-gradient-to-t from-red-900/10 via-transparent to-red-900/5 pointer-events-none z-10" />
+        
+        {/* Mockup Images */}
+        {mockups.map((mockup, index) => (
+          <div
+            key={index}
+            className={`absolute inset-0 transition-opacity duration-1000 ease-in-out ${
+              currentSlide === index ? 'opacity-100' : 'opacity-0'
+            }`}
+          >
+            <picture>
+              <source srcSet={mockup.webp} type="image/webp" />
+              <img 
+                src={mockup.png} 
+                alt={mockup.alt}
+                className="w-full h-full object-contain p-8"
+                loading={index === 0 ? "eager" : "lazy"}
+              />
+            </picture>
+          </div>
+        ))}
+
+        {/* Slide Indicators */}
+        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-3 z-20">
+          {mockups.map((_, index) => (
+            <button
+              key={index}
+              onClick={() => setCurrentSlide(index)}
+              className={`transition-all duration-300 rounded-full ${
+                currentSlide === index 
+                  ? 'w-8 h-3 bg-red-600' 
+                  : 'w-3 h-3 bg-gray-400 hover:bg-red-400'
+              }`}
+              aria-label={`Go to slide ${index + 1}`}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Slideshow Progress Bar */}
+      <div className="mt-6 h-1 bg-red-950/30 rounded-full overflow-hidden">
+        <div 
+          className="h-full bg-red-600 transition-all duration-1000 ease-linear"
+          style={{ 
+            width: `${((currentSlide + 1) / mockups.length) * 100}%` 
+          }}
+        />
       </div>
     </div>
   );
