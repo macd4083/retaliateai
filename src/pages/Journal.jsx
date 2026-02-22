@@ -1,6 +1,11 @@
 import React, { useState } from 'react';
 import { useAuth } from '@/lib/AuthContext';
-import { useJournalEntries, useCreateJournalEntry, useUpdateJournalEntry, useDeleteJournalEntry } from '@/hooks';
+import {
+  useJournalEntries,
+  useCreateJournalEntry,
+  useUpdateJournalEntry,
+  useDeleteJournalEntry,
+} from '@/hooks';
 import JournalEditor from '@/components/journal/JournalEditor';
 import EntryDetailModal from '@/components/journal/EntryDetailModal';
 
@@ -47,8 +52,8 @@ export default function Journal({
       const updatedContent = currentEntry.content + answersText;
 
       const embeddingResponse = await fetch('/api/generate-embedding', {
-        method:  'POST',
-        headers:  { 'Content-Type': 'application/json' },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: updatedContent }),
       });
 
@@ -88,7 +93,7 @@ export default function Journal({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           new_entry: updatedContent,
-          past_summaries: similarEntries.map(e => e.summary).filter(Boolean),
+          past_summaries: similarEntries.map((e) => e.summary).filter(Boolean),
           user_profile: userProfile,
         }),
       });
@@ -106,7 +111,7 @@ export default function Journal({
           summary: analysis.summary,
           insights: analysis.insights,
           embedding,
-        }
+        },
       });
 
       setViewingEntry({
@@ -142,14 +147,9 @@ export default function Journal({
   };
 
   if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-slate-600">Loading your journal...</p>
-        </div>
-      </div>
-    );
+    // App.jsx owns the full-screen animated loader/welcome.
+    // This placeholder prevents duplicate loaders.
+    return <div className="h-full bg-slate-50" />;
   }
 
   if (error) {
@@ -163,7 +163,6 @@ export default function Journal({
     );
   }
 
-  // NO SIDEBAR RENDERING HERE!
   return (
     <div className="flex-1 bg-slate-50">
       <JournalEditor

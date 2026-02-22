@@ -9,13 +9,22 @@ import Insights from './pages/Insights';
 import Goals from './pages/Goals';
 import Users from './pages/Users';
 import { useAuth } from './lib/AuthContext';
-import { useJournalEntries, useCreateJournalEntry, useUpdateJournalEntry, useDeleteJournalEntry } from './hooks';
+import {
+  useJournalEntries,
+  useCreateJournalEntry,
+  useUpdateJournalEntry,
+  useDeleteJournalEntry,
+} from './hooks';
+import SplashJournalLoader from './components/SplashJournalLoader';
 
 export default function App() {
   const { user } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
-  
+
+  // Top-left logo ref (destination for the animation)
+  const topLeftLogoRef = React.useRef(null);
+
   // Determine activeTab from URL
   const getTabFromPath = (path) => {
     const pathMap = {
@@ -35,6 +44,10 @@ export default function App() {
   const [selectedEntryId, setSelectedEntryId] = useState(null);
   const [suggestedGoal, setSuggestedGoal] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Welcome animation runs once per browser session
+  const [welcomeDone, setWelcomeDone] = React.useState(false);
+
   const { data: entries = [], isLoading, error } = useJournalEntries(user?.id);
   const createEntry = useCreateJournalEntry(user?.id);
   const updateEntry = useUpdateJournalEntry();
@@ -45,16 +58,23 @@ export default function App() {
     setActiveTab(getTabFromPath(location.pathname));
   }, [location.pathname]);
 
+  // One-time per session flag setup
+  useEffect(() => {
+    const key = 'retaliateai_welcome_done';
+    const already = sessionStorage.getItem(key) === '1';
+    if (already) setWelcomeDone(true);
+  }, []);
+
   // Handle tab changes and update URL
   const handleTabChange = (newTab) => {
     const tabToPathMap = {
-      'journal': '/Journal',
-      'clarity': '/Clarity',
-      'gratitude': '/Gratitude',
-      'insights': '/Insights',
-      'goals': '/Goals',
-      'people': '/People',
-      'users': '/Users',
+      journal: '/Journal',
+      clarity: '/Clarity',
+      gratitude: '/Gratitude',
+      insights: '/Insights',
+      goals: '/Goals',
+      people: '/People',
+      users: '/Users',
     };
     navigate(tabToPathMap[newTab] || '/Journal');
   };
@@ -96,13 +116,14 @@ export default function App() {
     try {
       const currentEntry = entries.find((e) => e.id === entryId);
       if (!currentEntry) throw new Error('Entry not found');
-      
-      const answersText = '\n\n--- Follow-up Reflections ---\n' + answers.join('\n\n');
+
+      const answersText =
+        '\n\n--- Follow-up Reflections ---\n' + answers.join('\n\n');
       const updatedContent = currentEntry.content + answersText;
 
       // Generate embedding for the updated content
       let combinedEmbedding = null;
-      
+
       if (currentEntry.embedding) {
         // Check if embedding is an array or needs to be parsed
         let currentEmbedding = currentEntry.embedding;
@@ -110,7 +131,9 @@ export default function App() {
           try {
             currentEmbedding = JSON.parse(currentEmbedding);
           } catch (e) {
-            console.warn('Could not parse existing embedding, generating new one');
+            console.warn(
+              'Could not parse existing embedding, generating new one'
+            );
             currentEmbedding = null;
           }
         }
@@ -124,20 +147,23 @@ export default function App() {
           });
 
           if (newAnswersResponse.ok) {
-            const { embedding: newAnswersEmbedding } = await newAnswersResponse.json();
+            const { embedding: newAnswersEmbedding } =
+              await newAnswersResponse.json();
 
             // Combine embeddings (weighted by content length)
             const originalWeight = currentEntry.content.length;
             const newWeight = answersText.length;
             const totalWeight = originalWeight + newWeight;
 
-            combinedEmbedding = currentEmbedding.map((val, i) => 
-              (val * originalWeight + newAnswersEmbedding[i] * newWeight) / totalWeight
+            combinedEmbedding = currentEmbedding.map(
+              (val, i) =>
+                (val * originalWeight + newAnswersEmbedding[i] * newWeight) /
+                totalWeight
             );
           }
         }
       }
-      
+
       // If we couldn't combine embeddings, generate one for the full content
       if (!combinedEmbedding) {
         const embeddingResponse = await fetch('/api/generate-embedding', {
@@ -187,7 +213,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           new_entry: updatedContent,
-          past_summaries: similarEntries.map(e => e.summary).filter(Boolean),
+          past_summaries: similarEntries.map((e) => e.summary).filter(Boolean),
           user_profile: userProfile,
         }),
       });
@@ -251,12 +277,9 @@ export default function App() {
   };
 
   const handleEdit = (entry) => {
-    // Close the modal and open the entry in the editor
     setViewingEntry(null);
     setSelectedEntryId(null);
     setSuggestedGoal(null);
-    // You could add editing functionality here if needed
-    // For now, we'll just close the modal
   };
 
   const handleAcceptGoal = async () => {
@@ -266,7 +289,6 @@ export default function App() {
     }
 
     try {
-      // Call API to create the goal in database
       const response = await fetch('/api/create-goal', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -284,15 +306,8 @@ export default function App() {
       }
 
       const { goal } = await response.json();
-      
-      // Show success message
       alert(`Goal "${goal.title}" has been added to your goals!`);
-      
-      // Clear the suggestion
       setSuggestedGoal(null);
-      
-      // Optionally navigate to goals page
-      // navigate('/Goals');
     } catch (error) {
       console.error('Failed to accept goal:', error);
       alert('Failed to create goal. Please try again.');
@@ -303,15 +318,75 @@ export default function App() {
     setSuggestedGoal(null);
   };
 
-  // If loading/error, show loader or error page
+  // LOADING: show animated welcome ONCE per session
   if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-slate-600">Loading your journal...</p>
+    const key = 'retaliateai_welcome_done';
+    const already = sessionStorage.getItem(key) === '1';
+
+    // After first animation in the session, use a simple light-red loader
+    if (already || welcomeDone) {
+      return (
+        <div className="flex items-center justify-center h-screen bg-red-50">
+          <div className="text-center">
+            <div className="relative mx-auto mb-4 h-20 w-20">
+              <div
+                className="absolute inset-0 rounded-full"
+                style={{
+                  borderWidth: 4,
+                  borderStyle: 'solid',
+                  borderColor: 'rgba(148,163,184,0.45)',
+                  borderTopColor: 'rgba(220,38,38,0.85)',
+                  animation: 'retaliate-spin 0.9s linear infinite',
+                }}
+              />
+              <img
+                src="/inverselogo.png"
+                alt="Retaliate AI"
+                className="absolute left-1/2 top-1/2 h-10 w-10 -translate-x-1/2 -translate-y-1/2 object-contain"
+                draggable="false"
+              />
+            </div>
+            <p className="text-slate-700 font-medium">Loading your journal...</p>
+          </div>
+
+          <style>{`
+            @keyframes retaliate-spin { to { transform: rotate(360deg); } }
+          `}</style>
         </div>
-      </div>
+      );
+    }
+
+    // First load this session: mount a minimal shell (hidden logo) so animation has a target
+    return (
+      <>
+        <div className="flex h-screen bg-slate-50 overflow-hidden">
+          <div className="w-64 flex flex-col bg-white border-r border-slate-200">
+            <div className="h-20 bg-white border-b border-slate-200 flex items-center px-4">
+              <div className="flex items-center gap-3">
+                <img
+                  ref={topLeftLogoRef}
+                  src="/inverselogo.png"
+                  alt="Retaliate AI"
+                  className="w-14 h-14 object-contain opacity-0"
+                />
+                <span className="text-2xl font-blackletter text-black tracking-tight opacity-0">
+                  Retaliate AI
+                </span>
+              </div>
+            </div>
+            <div className="flex-1 overflow-hidden" />
+          </div>
+          <main className="flex-1 overflow-hidden" />
+        </div>
+
+        <SplashJournalLoader
+          targetRef={topLeftLogoRef}
+          onDone={() => {
+            sessionStorage.setItem(key, '1');
+            setWelcomeDone(true);
+          }}
+        />
+      </>
     );
   }
 
@@ -333,9 +408,10 @@ export default function App() {
         {/* WHITE HEADER BAR - Top Left */}
         <div className="h-20 bg-white border-b border-slate-200 flex items-center px-4">
           <div className="flex items-center gap-3">
-            <img 
-              src="/inverselogo.png" 
-              alt="Retaliate AI" 
+            <img
+              ref={topLeftLogoRef}
+              src="/inverselogo.png"
+              alt="Retaliate AI"
               className="w-14 h-14 object-contain"
             />
             <span className="text-2xl font-blackletter text-black tracking-tight">
@@ -343,7 +419,7 @@ export default function App() {
             </span>
           </div>
         </div>
-        
+
         {/* Sidebar Content Below Header */}
         <div className="flex-1 overflow-hidden">
           <Sidebar
@@ -369,22 +445,22 @@ export default function App() {
             />
           </div>
         )}
-        
+
         {activeTab === 'clarity' && <Clarity />}
-        
+
         {activeTab === 'gratitude' && <Gratitude />}
-        
+
         {activeTab === 'insights' && <Insights />}
-        
+
         {activeTab === 'goals' && <Goals />}
-        
+
         {activeTab === 'people' && (
           <div className="p-8">
             <h1 className="text-2xl font-bold text-slate-900">People</h1>
             <p className="text-slate-600 mt-2">Track the important people in your life.</p>
           </div>
         )}
-        
+
         {activeTab === 'users' && user?.role === 'admin' && <Users />}
       </main>
 
