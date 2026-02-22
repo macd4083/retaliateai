@@ -146,10 +146,9 @@ export default function Journal({
     setViewingEntry(null);
   };
 
+  // Loading is handled by App.jsx (no duplicate loader here)
   if (isLoading) {
-    // App.jsx owns the full-screen animated loader/welcome.
-    // This placeholder prevents duplicate loaders.
-    return <div className="h-full bg-slate-50" />;
+    return null;
   }
 
   if (error) {

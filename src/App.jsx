@@ -323,40 +323,34 @@ export default function App() {
     const key = 'retaliateai_welcome_done';
     const already = sessionStorage.getItem(key) === '1';
 
-    // After first animation in the session, use a simple light-red loader
+    // If welcome animation already done this session, mount the app shell in background
+    // (no visible loader; animation component will handle the overlay if needed)
     if (already || welcomeDone) {
+      // Just mount the shell; no loader needed
       return (
-        <div className="flex items-center justify-center h-screen bg-red-50">
-          <div className="text-center">
-            <div className="relative mx-auto mb-4 h-20 w-20">
-              <div
-                className="absolute inset-0 rounded-full"
-                style={{
-                  borderWidth: 4,
-                  borderStyle: 'solid',
-                  borderColor: 'rgba(148,163,184,0.45)',
-                  borderTopColor: 'rgba(220,38,38,0.85)',
-                  animation: 'retaliate-spin 0.9s linear infinite',
-                }}
-              />
-              <img
-                src="/inverselogo.png"
-                alt="Retaliate AI"
-                className="absolute left-1/2 top-1/2 h-10 w-10 -translate-x-1/2 -translate-y-1/2 object-contain"
-                draggable="false"
-              />
+        <div className="flex h-screen bg-slate-50 overflow-hidden">
+          <div className="w-64 flex flex-col bg-white border-r border-slate-200">
+            <div className="h-20 bg-white border-b border-slate-200 flex items-center px-4">
+              <div className="flex items-center gap-3">
+                <img
+                  ref={topLeftLogoRef}
+                  src="/inverselogo.png"
+                  alt="Retaliate AI"
+                  className="w-14 h-14 object-contain"
+                />
+                <span className="text-2xl font-blackletter text-black tracking-tight">
+                  Retaliate AI
+                </span>
+              </div>
             </div>
-            <p className="text-slate-700 font-medium">Loading your journal...</p>
+            <div className="flex-1 overflow-hidden" />
           </div>
-
-          <style>{`
-            @keyframes retaliate-spin { to { transform: rotate(360deg); } }
-          `}</style>
+          <main className="flex-1 overflow-hidden bg-red-50" />
         </div>
       );
     }
 
-    // First load this session: mount a minimal shell (hidden logo) so animation has a target
+    // First load this session: mount the shell with hidden top-left logo, then overlay the animation
     return (
       <>
         <div className="flex h-screen bg-slate-50 overflow-hidden">
