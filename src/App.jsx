@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Sidebar from './components/layout/Sidebar';
 import JournalEditor from './components/journal/JournalEditor';
@@ -21,10 +21,8 @@ export default function App() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  // Top-left logo ref (destination for the animation)
-  const topLeftLogoRef = React.useRef(null);
+  const topLeftLogoRef = useRef(null);
 
-  // Determine activeTab from URL
   const getTabFromPath = (path) => {
     const pathMap = {
       '/Journal': 'journal',
@@ -45,46 +43,56 @@ export default function App() {
   const [isSaving, setIsSaving] = useState(false);
 
   // Animation state
-  const [animPhase, setAnimPhase] = useState('loading');
-  const [showAnim, setShowAnim] = useState(false);
+  const [animationPhase, setAnimationPhase] = useState('spinner'); // 'spinner' | 'fade' | 'fly' | 'done'
+  const [targetPosition, setTargetPosition] = useState({ x: 100, y: 50 });
 
   const { data: entries = [], isLoading, error } = useJournalEntries(user?.id);
   const createEntry = useCreateJournalEntry(user?.id);
   const updateEntry = useUpdateJournalEntry();
   const deleteEntry = useDeleteJournalEntry();
 
-  // Update activeTab when URL changes
   useEffect(() => {
     setActiveTab(getTabFromPath(location.pathname));
   }, [location.pathname]);
 
-  // Animation controller
+  // Handle animation on first session load
   useEffect(() => {
-    if (!isLoading || !showAnim) return;
+    if (!isLoading) return;
 
-    const fadeTimer = setTimeout(() => setAnimPhase('fadeOut'), 1500);
-    const closeTimer = setTimeout(() => setAnimPhase('closing'), 1750);
-    const doneTimer = setTimeout(() => {
-      setShowAnim(false);
+    const alreadyShown = sessionStorage.getItem('retaliateai_welcome_done');
+    if (alreadyShown === '1') {
+      setAnimationPhase('done');
+      return;
+    }
+
+    // Measure target logo position
+    const measureLogo = () => {
+      if (topLeftLogoRef.current) {
+        const rect = topLeftLogoRef.current.getBoundingClientRect();
+        setTargetPosition({
+          x: rect.left + rect.width / 2,
+          y: rect.top + rect.height / 2,
+        });
+      }
+    };
+
+    setTimeout(measureLogo, 100);
+
+    // Animation timeline
+    const timer1 = setTimeout(() => setAnimationPhase('fade'), 1500);
+    const timer2 = setTimeout(() => setAnimationPhase('fly'), 1750);
+    const timer3 = setTimeout(() => {
+      setAnimationPhase('done');
       sessionStorage.setItem('retaliateai_welcome_done', '1');
     }, 2750);
 
     return () => {
-      clearTimeout(fadeTimer);
-      clearTimeout(closeTimer);
-      clearTimeout(doneTimer);
+      clearTimeout(timer1);
+      clearTimeout(timer2);
+      clearTimeout(timer3);
     };
-  }, [isLoading, showAnim]);
-
-  // Check session on mount
-  useEffect(() => {
-    const already = sessionStorage.getItem('retaliateai_welcome_done') === '1';
-    if (!already && isLoading) {
-      setShowAnim(true);
-    }
   }, [isLoading]);
 
-  // Handle tab changes and update URL
   const handleTabChange = (newTab) => {
     const tabToPathMap = {
       journal: '/Journal',
@@ -98,14 +106,12 @@ export default function App() {
     navigate(tabToPathMap[newTab] || '/Journal');
   };
 
-  // When user clicks on an entry in the sidebar, show it in the modal
   const handleSelectEntry = (entry) => {
     setViewingEntry(entry);
     setSelectedEntryId(entry.id);
     setSuggestedGoal(null);
   };
 
-  // Mutations/handlers
   const handleSave = async (entryData) => {
     setIsSaving(true);
     try {
@@ -323,32 +329,17 @@ export default function App() {
     setSuggestedGoal(null);
   };
 
-  // Calculate animation positions
-  const getAnimationStyles = () => {
-    if (!topLeftLogoRef.current) return {};
-    
-    const rect = topLeftLogoRef.current.getBoundingClientRect();
-    const targetX = rect.left + rect.width / 2;
-    const targetY = rect.top + rect.height / 2;
-    const centerX = window.innerWidth / 2;
-    const centerY = window.innerHeight / 2;
-    
-    return {
-      targetX,
-      targetY,
-      translateX: targetX - centerX,
-      translateY: targetY - centerY,
-      scale: rect.width / 80
-    };
-  };
+  // RENDER LOADING WITH ANIMATION
+  if (isLoading && animationPhase !== 'done') {
+    const centerX = typeof window !== 'undefined' ? window.innerWidth / 2 : 960;
+    const centerY = typeof window !== 'undefined' ? window.innerHeight / 2 : 540;
+    const translateX = targetPosition.x - centerX;
+    const translateY = targetPosition.y - centerY;
+    const scale = 0.7;
 
-  const animStyles = getAnimationStyles();
-
-  // LOADING STATE
-  if (isLoading) {
     return (
       <>
-        {/* App shell (always rendered so logo target exists) */}
+        {/* Background app shell */}
         <div className="flex h-screen bg-slate-50 overflow-hidden">
           <div className="w-64 flex flex-col bg-white border-r border-slate-200">
             <div className="h-20 bg-white border-b border-slate-200 flex items-center px-4">
@@ -357,95 +348,102 @@ export default function App() {
                   ref={topLeftLogoRef}
                   src="/inverselogo.png"
                   alt="Retaliate AI"
-                  className="w-14 h-14 object-contain"
-                  style={{ opacity: showAnim ? 0 : 1 }}
+                  className="w-14 h-14 object-contain opacity-0"
                 />
-                <span 
-                  className="text-2xl font-blackletter text-black tracking-tight"
-                  style={{ opacity: showAnim ? 0 : 1 }}
-                >
+                <span className="text-2xl font-blackletter text-black tracking-tight opacity-0">
                   Retaliate AI
                 </span>
               </div>
             </div>
-            <div className="flex-1 overflow-hidden" />
+            <div className="flex-1" />
           </div>
-          <main className="flex-1 overflow-hidden" />
+          <main className="flex-1" />
         </div>
 
-        {/* Animation overlay (only first load per session) */}
-        {showAnim && (
+        {/* Animated red overlay */}
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 9999,
+            backgroundColor: '#fef2f2',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            clipPath: animationPhase === 'fly' 
+              ? `circle(0% at ${targetPosition.x}px ${targetPosition.y}px)` 
+              : 'circle(100%)',
+            transition: animationPhase === 'fly' ? 'clip-path 1s cubic-bezier(0.4, 0, 0.2, 1)' : 'none',
+          }}
+        >
+          {/* Spinner + Text (fades out) */}
           <div
-            className="fixed inset-0 z-[9999] bg-red-50 flex items-center justify-center overflow-hidden"
             style={{
-              clipPath:
-                animPhase === 'closing'
-                  ? `circle(0% at ${animStyles.targetX || 100}px ${animStyles.targetY || 50}px)`
-                  : 'circle(100%)',
-              transition: animPhase === 'closing' ? 'clip-path 1000ms cubic-bezier(0.4, 0, 0.2, 1)' : 'none',
+              textAlign: 'center',
+              opacity: animationPhase === 'spinner' ? 1 : 0,
+              transition: animationPhase === 'fade' ? 'opacity 0.25s ease-out' : 'none',
             }}
           >
-            {/* Spinner + text */}
-            <div
-              className="text-center"
-              style={{
-                opacity: animPhase === 'loading' ? 1 : 0,
-                transition: animPhase === 'fadeOut' ? 'opacity 250ms ease-out' : 'none',
-              }}
-            >
-              <div className="relative mx-auto mb-6 h-20 w-20">
-                <div
-                  className="absolute inset-0 rounded-full"
-                  style={{
-                    borderWidth: 4,
-                    borderStyle: 'solid',
-                    borderColor: 'rgba(148,163,184,0.45)',
-                    borderTopColor: 'rgba(220,38,38,0.85)',
-                    animation: 'retaliate-spin 0.9s linear infinite',
-                  }}
-                />
-                <img
-                  src="/inverselogo.png"
-                  alt="Retaliate AI"
-                  className="absolute left-1/2 top-1/2 h-12 w-12 -translate-x-1/2 -translate-y-1/2 object-contain"
-                  draggable="false"
-                />
-              </div>
-              <p className="text-slate-700 font-medium text-lg">Loading your journal...</p>
+            <div style={{ position: 'relative', width: '80px', height: '80px', margin: '0 auto 24px' }}>
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  borderRadius: '50%',
+                  border: '4px solid rgba(148,163,184,0.45)',
+                  borderTopColor: 'rgba(220,38,38,0.85)',
+                  animation: 'spin-animation 0.9s linear infinite',
+                }}
+              />
+              <img
+                src="/inverselogo.png"
+                alt=""
+                style={{
+                  position: 'absolute',
+                  left: '50%',
+                  top: '50%',
+                  width: '48px',
+                  height: '48px',
+                  transform: 'translate(-50%, -50%)',
+                  objectFit: 'contain',
+                }}
+              />
             </div>
-
-            {/* Flying logo */}
-            <img
-              src="/inverselogo.png"
-              alt=""
-              className="absolute object-contain pointer-events-none"
-              style={{
-                left: '50%',
-                top: '50%',
-                width: '80px',
-                height: '80px',
-                marginLeft: '-40px',
-                marginTop: '-40px',
-                opacity: animPhase === 'closing' ? 1 : 0,
-                transform:
-                  animPhase === 'closing'
-                    ? `translate(${animStyles.translateX || 0}px, ${animStyles.translateY || 0}px) scale(${animStyles.scale || 0.7})`
-                    : 'translate(0, 0) scale(1)',
-                transition:
-                  animPhase === 'closing'
-                    ? 'transform 1000ms cubic-bezier(0.4, 0, 0.2, 1), opacity 100ms ease-in'
-                    : 'none',
-              }}
-              draggable="false"
-            />
-
-            <style>{`
-              @keyframes retaliate-spin {
-                to { transform: rotate(360deg); }
-              }
-            `}</style>
+            <p style={{ color: '#334155', fontWeight: 500, fontSize: '18px' }}>
+              Loading your journal...
+            </p>
           </div>
-        )}
+
+          {/* Flying logo */}
+          <img
+            src="/inverselogo.png"
+            alt=""
+            style={{
+              position: 'absolute',
+              left: '50%',
+              top: '50%',
+              width: '80px',
+              height: '80px',
+              marginLeft: '-40px',
+              marginTop: '-40px',
+              objectFit: 'contain',
+              pointerEvents: 'none',
+              opacity: animationPhase === 'fly' ? 1 : 0,
+              transform: animationPhase === 'fly'
+                ? `translate(${translateX}px, ${translateY}px) scale(${scale})`
+                : 'translate(0, 0) scale(1)',
+              transition: animationPhase === 'fly'
+                ? 'transform 1s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.1s ease-in'
+                : 'none',
+            }}
+          />
+        </div>
+
+        <style>{`
+          @keyframes spin-animation {
+            to { transform: rotate(360deg); }
+          }
+        `}</style>
       </>
     );
   }
@@ -463,7 +461,6 @@ export default function App() {
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden">
-      {/* Sidebar with Header */}
       <div className="w-64 flex flex-col bg-white border-r border-slate-200">
         <div className="h-20 bg-white border-b border-slate-200 flex items-center px-4">
           <div className="flex items-center gap-3">
@@ -491,7 +488,6 @@ export default function App() {
         </div>
       </div>
 
-      {/* Main Content */}
       <main className="flex-1 overflow-hidden">
         {activeTab === 'journal' && (
           <div className="h-full bg-slate-50">
@@ -519,7 +515,6 @@ export default function App() {
         {activeTab === 'users' && user?.role === 'admin' && <Users />}
       </main>
 
-      {/* Entry Detail Modal */}
       {viewingEntry && (
         <EntryDetailModal
           entry={viewingEntry}
