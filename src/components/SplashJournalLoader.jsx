@@ -2,15 +2,12 @@ import React, { useEffect, useState } from 'react';
 
 export default function SplashJournalLoader({ targetRef, onDone }) {
   const [phase, setPhase] = useState('loading'); // 'loading' | 'fadeOut' | 'closing'
-  const [targetRect, setTargetRect] = useState(null);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    // Measure the destination logo position
-    if (targetRef?.current) {
-      const rect = targetRef.current.getBoundingClientRect();
-      setTargetRect(rect);
-    }
-
+    // Wait a tiny bit for DOM to be ready
+    setMounted(true);
+    
     // Timeline:
     // 0-1500ms: spinner + text visible
     // 1500-1750ms: fade out text/spinner
@@ -24,22 +21,27 @@ export default function SplashJournalLoader({ targetRef, onDone }) {
       clearTimeout(closeTimer);
       clearTimeout(doneTimer);
     };
-  }, [targetRef, onDone]);
+  }, [onDone]);
 
-  // Calculate logo final position (center of top-left logo)
-  const finalX = targetRect ? targetRect.left + targetRect.width / 2 : 0;
-  const finalY = targetRect ? targetRect.top + targetRect.height / 2 : 0;
+  // Calculate positions after mount
+  const getTargetPosition = () => {
+    if (!mounted || !targetRef?.current) {
+      return { x: 100, y: 50 }; // Fallback: approximate top-left position
+    }
+    const rect = targetRef.current.getBoundingClientRect();
+    return {
+      x: rect.left + rect.width / 2,
+      y: rect.top + rect.height / 2,
+      scale: rect.width / 80
+    };
+  };
 
-  // Center of screen (starting position)
+  const target = getTargetPosition();
   const centerX = typeof window !== 'undefined' ? window.innerWidth / 2 : 0;
   const centerY = typeof window !== 'undefined' ? window.innerHeight / 2 : 0;
-
-  // Translation needed to move center logo to top-left
-  const translateX = finalX - centerX;
-  const translateY = finalY - centerY;
-
-  // Scale factor to shrink logo from ~80px to ~56px (w-14 = 3.5rem = 56px)
-  const finalScale = targetRect ? targetRect.width / 80 : 0.7;
+  const translateX = target.x - centerX;
+  const translateY = target.y - centerY;
+  const finalScale = target.scale || 0.7;
 
   return (
     <div
@@ -47,7 +49,7 @@ export default function SplashJournalLoader({ targetRef, onDone }) {
       style={{
         clipPath:
           phase === 'closing'
-            ? `circle(0% at ${finalX}px ${finalY}px)`
+            ? `circle(0% at ${target.x}px ${target.y}px)`
             : 'circle(100%)',
         transition: phase === 'closing' ? 'clip-path 1000ms cubic-bezier(0.4, 0, 0.2, 1)' : 'none',
       }}
