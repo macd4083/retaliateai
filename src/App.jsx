@@ -15,7 +15,6 @@ import {
   useUpdateJournalEntry,
   useDeleteJournalEntry,
 } from './hooks';
-import SplashJournalLoader from './components/SplashJournalLoader';
 
 export default function App() {
   const { user } = useAuth();
@@ -45,8 +44,9 @@ export default function App() {
   const [suggestedGoal, setSuggestedGoal] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Welcome animation runs once per browser session
-  const [welcomeDone, setWelcomeDone] = React.useState(false);
+  // Animation state
+  const [animPhase, setAnimPhase] = useState('loading');
+  const [showAnim, setShowAnim] = useState(false);
 
   const { data: entries = [], isLoading, error } = useJournalEntries(user?.id);
   const createEntry = useCreateJournalEntry(user?.id);
@@ -58,12 +58,31 @@ export default function App() {
     setActiveTab(getTabFromPath(location.pathname));
   }, [location.pathname]);
 
-  // One-time per session flag setup
+  // Animation controller
   useEffect(() => {
-    const key = 'retaliateai_welcome_done';
-    const already = sessionStorage.getItem(key) === '1';
-    if (already) setWelcomeDone(true);
-  }, []);
+    if (!isLoading || !showAnim) return;
+
+    const fadeTimer = setTimeout(() => setAnimPhase('fadeOut'), 1500);
+    const closeTimer = setTimeout(() => setAnimPhase('closing'), 1750);
+    const doneTimer = setTimeout(() => {
+      setShowAnim(false);
+      sessionStorage.setItem('retaliateai_welcome_done', '1');
+    }, 2750);
+
+    return () => {
+      clearTimeout(fadeTimer);
+      clearTimeout(closeTimer);
+      clearTimeout(doneTimer);
+    };
+  }, [isLoading, showAnim]);
+
+  // Check session on mount
+  useEffect(() => {
+    const already = sessionStorage.getItem('retaliateai_welcome_done') === '1';
+    if (!already && isLoading) {
+      setShowAnim(true);
+    }
+  }, [isLoading]);
 
   // Handle tab changes and update URL
   const handleTabChange = (newTab) => {
@@ -83,7 +102,7 @@ export default function App() {
   const handleSelectEntry = (entry) => {
     setViewingEntry(entry);
     setSelectedEntryId(entry.id);
-    setSuggestedGoal(null); // Clear any previous goal suggestions
+    setSuggestedGoal(null);
   };
 
   // Mutations/handlers
@@ -98,7 +117,6 @@ export default function App() {
             follow_up_questions: result.followUpQuestions,
           });
           setSelectedEntryId(result.entry.id);
-          // Set suggested goal if AI provided one
           if (result.suggestedGoal) {
             setSuggestedGoal(result.suggestedGoal);
           }
@@ -121,11 +139,9 @@ export default function App() {
         '\n\n--- Follow-up Reflections ---\n' + answers.join('\n\n');
       const updatedContent = currentEntry.content + answersText;
 
-      // Generate embedding for the updated content
       let combinedEmbedding = null;
 
       if (currentEntry.embedding) {
-        // Check if embedding is an array or needs to be parsed
         let currentEmbedding = currentEntry.embedding;
         if (typeof currentEmbedding === 'string') {
           try {
@@ -139,7 +155,6 @@ export default function App() {
         }
 
         if (currentEmbedding && Array.isArray(currentEmbedding)) {
-          // Generate embedding for ONLY the new answers (more efficient)
           const newAnswersResponse = await fetch('/api/generate-embedding', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -150,7 +165,6 @@ export default function App() {
             const { embedding: newAnswersEmbedding } =
               await newAnswersResponse.json();
 
-            // Combine embeddings (weighted by content length)
             const originalWeight = currentEntry.content.length;
             const newWeight = answersText.length;
             const totalWeight = originalWeight + newWeight;
@@ -164,7 +178,6 @@ export default function App() {
         }
       }
 
-      // If we couldn't combine embeddings, generate one for the full content
       if (!combinedEmbedding) {
         const embeddingResponse = await fetch('/api/generate-embedding', {
           method: 'POST',
@@ -178,7 +191,6 @@ export default function App() {
         }
       }
 
-      // Search for similar entries using the combined embedding
       let similarEntries = [];
       if (combinedEmbedding) {
         const similarResponse = await fetch('/api/search-similar-entries', {
@@ -197,7 +209,6 @@ export default function App() {
         }
       }
 
-      // Get user profile
       let userProfile;
       try {
         const response = await fetch(`/api/user-profile?user_id=${user.id}`);
@@ -207,7 +218,6 @@ export default function App() {
         userProfile = 'No profile yet.  This is a new user.';
       }
 
-      // Analyze the updated entry
       const analysisResponse = await fetch('/api/analyze-entry', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -224,34 +234,29 @@ export default function App() {
 
       const analysis = await analysisResponse.json();
 
-      // Prepare update data
       const updateData = {
         content: updatedContent,
         summary: analysis.summary,
         insights: analysis.insights,
       };
 
-      // Only include embedding if we have one
       if (combinedEmbedding) {
         updateData.embedding = combinedEmbedding;
       }
 
-      // Update the entry in the database
       await updateEntry.mutateAsync({
         entryId: entryId,
         entryData: updateData,
       });
 
-      // Update the viewing entry to show new content
       setViewingEntry({
         ...currentEntry,
         content: updatedContent,
         summary: analysis.summary,
         insights: analysis.insights,
-        follow_up_questions: null, // Clear follow-up questions after answering
+        follow_up_questions: null,
       });
 
-      // Check if new goal suggestion from follow-up analysis
       if (analysis.suggested_goal) {
         setSuggestedGoal(analysis.suggested_goal);
       }
@@ -318,59 +323,47 @@ export default function App() {
     setSuggestedGoal(null);
   };
 
-  // LOADING: show animated welcome ONCE per session
+  // Calculate animation positions
+  const getAnimationStyles = () => {
+    if (!topLeftLogoRef.current) return {};
+    
+    const rect = topLeftLogoRef.current.getBoundingClientRect();
+    const targetX = rect.left + rect.width / 2;
+    const targetY = rect.top + rect.height / 2;
+    const centerX = window.innerWidth / 2;
+    const centerY = window.innerHeight / 2;
+    
+    return {
+      targetX,
+      targetY,
+      translateX: targetX - centerX,
+      translateY: targetY - centerY,
+      scale: rect.width / 80
+    };
+  };
+
+  const animStyles = getAnimationStyles();
+
+  // LOADING STATE
   if (isLoading) {
-    const key = 'retaliateai_welcome_done';
-    const already = sessionStorage.getItem(key) === '1';
-
-    // After first animation in the session, use a simple light-red loader
-    if (already || welcomeDone) {
-      return (
-        <div className="flex items-center justify-center h-screen bg-red-50">
-          <div className="text-center">
-            <div className="relative mx-auto mb-4 h-20 w-20">
-              <div
-                className="absolute inset-0 rounded-full"
-                style={{
-                  borderWidth: 4,
-                  borderStyle: 'solid',
-                  borderColor: 'rgba(148,163,184,0.45)',
-                  borderTopColor: 'rgba(220,38,38,0.85)',
-                  animation: 'retaliate-spin 0.9s linear infinite',
-                }}
-              />
-              <img
-                src="/inverselogo.png"
-                alt="Retaliate AI"
-                className="absolute left-1/2 top-1/2 h-10 w-10 -translate-x-1/2 -translate-y-1/2 object-contain"
-                draggable="false"
-              />
-            </div>
-            <p className="text-slate-700 font-medium">Loading your journal...</p>
-          </div>
-
-          <style>{`
-            @keyframes retaliate-spin { to { transform: rotate(360deg); } }
-          `}</style>
-        </div>
-      );
-    }
-
-    // First load this session: mount shell behind + show animation overlay
     return (
       <>
+        {/* App shell (always rendered so logo target exists) */}
         <div className="flex h-screen bg-slate-50 overflow-hidden">
           <div className="w-64 flex flex-col bg-white border-r border-slate-200">
             <div className="h-20 bg-white border-b border-slate-200 flex items-center px-4">
               <div className="flex items-center gap-3">
                 <img
                   ref={topLeftLogoRef}
-                  data-top-left-logo
                   src="/inverselogo.png"
                   alt="Retaliate AI"
-                  className="w-14 h-14 object-contain opacity-0"
+                  className="w-14 h-14 object-contain"
+                  style={{ opacity: showAnim ? 0 : 1 }}
                 />
-                <span className="text-2xl font-blackletter text-black tracking-tight opacity-0">
+                <span 
+                  className="text-2xl font-blackletter text-black tracking-tight"
+                  style={{ opacity: showAnim ? 0 : 1 }}
+                >
                   Retaliate AI
                 </span>
               </div>
@@ -380,12 +373,79 @@ export default function App() {
           <main className="flex-1 overflow-hidden" />
         </div>
 
-        <SplashJournalLoader
-          onDone={() => {
-            sessionStorage.setItem(key, '1');
-            setWelcomeDone(true);
-          }}
-        />
+        {/* Animation overlay (only first load per session) */}
+        {showAnim && (
+          <div
+            className="fixed inset-0 z-[9999] bg-red-50 flex items-center justify-center overflow-hidden"
+            style={{
+              clipPath:
+                animPhase === 'closing'
+                  ? `circle(0% at ${animStyles.targetX || 100}px ${animStyles.targetY || 50}px)`
+                  : 'circle(100%)',
+              transition: animPhase === 'closing' ? 'clip-path 1000ms cubic-bezier(0.4, 0, 0.2, 1)' : 'none',
+            }}
+          >
+            {/* Spinner + text */}
+            <div
+              className="text-center"
+              style={{
+                opacity: animPhase === 'loading' ? 1 : 0,
+                transition: animPhase === 'fadeOut' ? 'opacity 250ms ease-out' : 'none',
+              }}
+            >
+              <div className="relative mx-auto mb-6 h-20 w-20">
+                <div
+                  className="absolute inset-0 rounded-full"
+                  style={{
+                    borderWidth: 4,
+                    borderStyle: 'solid',
+                    borderColor: 'rgba(148,163,184,0.45)',
+                    borderTopColor: 'rgba(220,38,38,0.85)',
+                    animation: 'retaliate-spin 0.9s linear infinite',
+                  }}
+                />
+                <img
+                  src="/inverselogo.png"
+                  alt="Retaliate AI"
+                  className="absolute left-1/2 top-1/2 h-12 w-12 -translate-x-1/2 -translate-y-1/2 object-contain"
+                  draggable="false"
+                />
+              </div>
+              <p className="text-slate-700 font-medium text-lg">Loading your journal...</p>
+            </div>
+
+            {/* Flying logo */}
+            <img
+              src="/inverselogo.png"
+              alt=""
+              className="absolute object-contain pointer-events-none"
+              style={{
+                left: '50%',
+                top: '50%',
+                width: '80px',
+                height: '80px',
+                marginLeft: '-40px',
+                marginTop: '-40px',
+                opacity: animPhase === 'closing' ? 1 : 0,
+                transform:
+                  animPhase === 'closing'
+                    ? `translate(${animStyles.translateX || 0}px, ${animStyles.translateY || 0}px) scale(${animStyles.scale || 0.7})`
+                    : 'translate(0, 0) scale(1)',
+                transition:
+                  animPhase === 'closing'
+                    ? 'transform 1000ms cubic-bezier(0.4, 0, 0.2, 1), opacity 100ms ease-in'
+                    : 'none',
+              }}
+              draggable="false"
+            />
+
+            <style>{`
+              @keyframes retaliate-spin {
+                to { transform: rotate(360deg); }
+              }
+            `}</style>
+          </div>
+        )}
       </>
     );
   }
@@ -403,14 +463,12 @@ export default function App() {
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden">
-      {/* Sidebar with Header - ALWAYS VISIBLE */}
+      {/* Sidebar with Header */}
       <div className="w-64 flex flex-col bg-white border-r border-slate-200">
-        {/* WHITE HEADER BAR - Top Left */}
         <div className="h-20 bg-white border-b border-slate-200 flex items-center px-4">
           <div className="flex items-center gap-3">
             <img
               ref={topLeftLogoRef}
-              data-top-left-logo
               src="/inverselogo.png"
               alt="Retaliate AI"
               className="w-14 h-14 object-contain"
@@ -421,7 +479,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* Sidebar Content Below Header */}
         <div className="flex-1 overflow-hidden">
           <Sidebar
             activeTab={activeTab}
@@ -434,7 +491,7 @@ export default function App() {
         </div>
       </div>
 
-      {/* Main Content - CHANGES BASED ON ACTIVE TAB */}
+      {/* Main Content */}
       <main className="flex-1 overflow-hidden">
         {activeTab === 'journal' && (
           <div className="h-full bg-slate-50">
@@ -448,11 +505,8 @@ export default function App() {
         )}
 
         {activeTab === 'clarity' && <Clarity />}
-
         {activeTab === 'gratitude' && <Gratitude />}
-
         {activeTab === 'insights' && <Insights />}
-
         {activeTab === 'goals' && <Goals />}
 
         {activeTab === 'people' && (
@@ -465,7 +519,7 @@ export default function App() {
         {activeTab === 'users' && user?.role === 'admin' && <Users />}
       </main>
 
-      {/* GLOBAL Entry Detail Modal - Shows on ANY tab */}
+      {/* Entry Detail Modal */}
       {viewingEntry && (
         <EntryDetailModal
           entry={viewingEntry}
