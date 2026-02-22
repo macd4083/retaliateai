@@ -323,7 +323,40 @@ export default function App() {
     const key = 'retaliateai_welcome_done';
     const already = sessionStorage.getItem(key) === '1';
 
-    // Mount the app shell in the background (needed for animation target)
+    // After first animation in the session, use a simple light-red loader
+    if (already || welcomeDone) {
+      return (
+        <div className="flex items-center justify-center h-screen bg-red-50">
+          <div className="text-center">
+            <div className="relative mx-auto mb-4 h-20 w-20">
+              <div
+                className="absolute inset-0 rounded-full"
+                style={{
+                  borderWidth: 4,
+                  borderStyle: 'solid',
+                  borderColor: 'rgba(148,163,184,0.45)',
+                  borderTopColor: 'rgba(220,38,38,0.85)',
+                  animation: 'retaliate-spin 0.9s linear infinite',
+                }}
+              />
+              <img
+                src="/inverselogo.png"
+                alt="Retaliate AI"
+                className="absolute left-1/2 top-1/2 h-10 w-10 -translate-x-1/2 -translate-y-1/2 object-contain"
+                draggable="false"
+              />
+            </div>
+            <p className="text-slate-700 font-medium">Loading your journal...</p>
+          </div>
+
+          <style>{`
+            @keyframes retaliate-spin { to { transform: rotate(360deg); } }
+          `}</style>
+        </div>
+      );
+    }
+
+    // First load this session: mount a minimal shell (hidden logo) so animation has a target
     return (
       <>
         <div className="flex h-screen bg-slate-50 overflow-hidden">
@@ -334,13 +367,9 @@ export default function App() {
                   ref={topLeftLogoRef}
                   src="/inverselogo.png"
                   alt="Retaliate AI"
-                  className="w-14 h-14 object-contain"
-                  style={{ opacity: already || welcomeDone ? 1 : 0 }}
+                  className="w-14 h-14 object-contain opacity-0"
                 />
-                <span 
-                  className="text-2xl font-blackletter text-black tracking-tight"
-                  style={{ opacity: already || welcomeDone ? 1 : 0 }}
-                >
+                <span className="text-2xl font-blackletter text-black tracking-tight opacity-0">
                   Retaliate AI
                 </span>
               </div>
@@ -350,16 +379,13 @@ export default function App() {
           <main className="flex-1 overflow-hidden" />
         </div>
 
-        {/* Only show animation on first load this session */}
-        {!already && !welcomeDone && (
-          <SplashJournalLoader
-            targetRef={topLeftLogoRef}
-            onDone={() => {
-              sessionStorage.setItem(key, '1');
-              setWelcomeDone(true);
-            }}
-          />
-        )}
+        <SplashJournalLoader
+          targetRef={topLeftLogoRef}
+          onDone={() => {
+            sessionStorage.setItem(key, '1');
+            setWelcomeDone(true);
+          }}
+        />
       </>
     );
   }
