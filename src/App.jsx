@@ -395,6 +395,15 @@ export default function App() {
                   animation: 'spin-animation 0.9s linear infinite',
                 }}
               />
+              {/* White circle background */}
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: '4px',
+                  borderRadius: '50%',
+                  backgroundColor: 'white',
+                }}
+              />
               <img
                 src="/inverselogo.png"
                 alt=""
@@ -406,6 +415,7 @@ export default function App() {
                   height: '48px',
                   transform: 'translate(-50%, -50%)',
                   objectFit: 'contain',
+                  zIndex: 1,
                 }}
               />
             </div>
