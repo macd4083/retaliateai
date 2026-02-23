@@ -384,13 +384,13 @@ export default function App() {
               transition: animationPhase === 'fade' ? 'opacity 0.25s ease-out' : 'none',
             }}
           >
-            <div style={{ position: 'relative', width: '80px', height: '80px', margin: '0 auto 24px' }}>
+            <div style={{ position: 'relative', width: '96px', height: '96px', margin: '0 auto 24px' }}>
               <div
                 style={{
                   position: 'absolute',
                   inset: 0,
                   borderRadius: '50%',
-                  border: '4px solid rgba(148,163,184,0.45)',
+                  border: '5px solid rgba(148,163,184,0.45)',
                   borderTopColor: 'rgba(220,38,38,0.85)',
                   animation: 'spin-animation 0.9s linear infinite',
                 }}
@@ -399,7 +399,7 @@ export default function App() {
               <div
                 style={{
                   position: 'absolute',
-                  inset: '4px',
+                  inset: '5px',
                   borderRadius: '50%',
                   backgroundColor: 'white',
                 }}
