@@ -79,7 +79,7 @@ export default function Login() {
     } else {
       setSignupEmail(email);
       setShowOtpInput(true);
-      setMessage('Check your email for the 6-digit verification code!');
+      setMessage('Check your email! Click the verification link or enter the code if provided.');
       setMessageType('success');
     }
     setLoading(false);
@@ -158,28 +158,27 @@ export default function Login() {
               <Mail className="w-8 h-8 text-blue-600" />
             </div>
             <h1 className="text-2xl font-bold text-slate-900 mb-2">Verify your email</h1>
-            <p className="text-slate-600">
-              Enter the 6-digit code sent to <strong>{signupEmail}</strong>
+            <p className="text-slate-600 mb-2">
+              We sent a verification email to <strong>{signupEmail}</strong>
             </p>
-            <p className="text-xs text-slate-500 mt-2">
-              Or click the link in your email to verify on another device
+            <p className="text-xs text-slate-500">
+              Click the link in your email, or enter the verification code below if one was provided. This page will auto-refresh when you verify.
             </p>
           </div>
 
           <form onSubmit={handleVerifyOtp} className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-2">
-                Verification Code
+                Verification Code (if provided)
               </label>
               <input
                 type="text"
                 value={otp}
                 onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                placeholder="000000"
+                placeholder="Enter code"
                 maxLength={6}
                 className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-center text-2xl tracking-widest"
                 disabled={loading}
-                required
               />
             </div>
 
@@ -198,9 +197,18 @@ export default function Login() {
               disabled={loading || otp.length !== 6}
               className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
             >
-              {loading ? 'Verifying...' : 'Verify Email'}
+              {loading ? 'Verifying...' : 'Verify Code'}
             </button>
           </form>
+
+          <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <p className="text-sm text-blue-800 font-semibold mb-2">Can't find the email?</p>
+            <ul className="text-sm text-blue-700 space-y-1 ml-4 list-disc">
+              <li>Check your spam/junk folder</li>
+              <li>Wait a few minutes - emails can be delayed</li>
+              <li>Click the verification link in the email instead</li>
+            </ul>
+          </div>
         </div>
       </div>
     );
