@@ -74,15 +74,28 @@ export default function Login() {
     });
 
     if (error) {
-      setMessage(error.message);
-      setMessageType('error');
+      // Check if user already exists
+      if (error.message.includes('already registered') || error.message.includes('already exists') || error.status === 422) {
+        setMessage('');
+        setMessageType('info');
+        setIsSignUp(false);
+        // Show a friendly message
+        setTimeout(() => {
+          setMessage('We found an existing account with this email. Please sign in below.');
+          setMessageType('info');
+        }, 100);
+      } else {
+        setMessage(error.message);
+        setMessageType('error');
+      }
+      setLoading(false);
     } else {
       setSignupEmail(email);
       setShowOtpInput(true);
       setMessage('Check your email! Click the verification link or enter the code if provided.');
       setMessageType('success');
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleVerifyOtp = async (e) => {
@@ -354,6 +367,8 @@ export default function Login() {
             <div className={`p-3 rounded-lg text-sm ${
               messageType === 'success' 
                 ? 'bg-green-50 text-green-700 border border-green-200' 
+                : messageType === 'info'
+                ? 'bg-blue-50 text-blue-700 border border-blue-200'
                 : 'bg-red-50 text-red-700 border border-red-200'
             }`}>
               {message}
