@@ -6,7 +6,6 @@ import { CheckCircle, X } from 'lucide-react';
 export default function EmailConfirmed() {
   const navigate = useNavigate();
   const [status, setStatus] = useState('verifying');
-  const [countdown, setCountdown] = useState(5);
 
   useEffect(() => {
     const handleEmailConfirmation = async () => {
@@ -22,20 +21,6 @@ export default function EmailConfirmed() {
 
         if (data.session) {
           setStatus('success');
-          
-          // Start countdown
-          const timer = setInterval(() => {
-            setCountdown((prev) => {
-              if (prev <= 1) {
-                clearInterval(timer);
-                window.close(); // Try to close the tab
-                return 0;
-              }
-              return prev - 1;
-            });
-          }, 1000);
-
-          return () => clearInterval(timer);
         } else {
           setStatus('error');
         }
@@ -78,34 +63,19 @@ export default function EmailConfirmed() {
             <div className="mx-auto mb-6 w-20 h-20 bg-green-100 rounded-full flex items-center justify-center">
               <CheckCircle className="w-12 h-12 text-green-600" />
             </div>
-            <h1 className="text-2xl font-bold text-slate-900 mb-3">Email Verified!</h1>
+            <h1 className="text-2xl font-bold text-slate-900 mb-4">Email Verified!</h1>
             <p className="text-slate-600 mb-6">
               Your account has been successfully verified.
             </p>
             
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-              <p className="text-sm text-blue-800 mb-2">
-                This tab will close automatically in <strong>{countdown}</strong> seconds
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
+              <p className="text-blue-800 font-medium mb-2">
+                You're all set!
               </p>
-              <p className="text-xs text-blue-600">
-                Go back to your original tab to continue
+              <p className="text-sm text-blue-700">
+                Close this tab and return to the previous tab to continue using Retaliate AI.
               </p>
             </div>
-
-            <button
-              onClick={() => window.close()}
-              className="w-full bg-slate-600 text-white py-3 rounded-lg hover:bg-slate-700 transition-colors font-medium flex items-center justify-center gap-2"
-            >
-              <X className="w-5 h-5" />
-              Close This Tab
-            </button>
-
-            <button
-              onClick={() => navigate('/Journal')}
-              className="w-full mt-3 bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 transition-colors font-medium"
-            >
-              Or Continue Here
-            </button>
           </>
         )}
         
