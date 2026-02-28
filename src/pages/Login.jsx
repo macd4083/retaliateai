@@ -294,16 +294,24 @@ export default function Login() {
   );
 }
 
-// REALTIME LISTENER - Listens for verification events from other devices
+// IMPROVED: Realtime + Polling fallback
 function VerificationWaitingScreen({ signupEmail, onBack, navigate }) {
   const [dots, setDots] = useState('');
+  const [debugLog, setDebugLog] = useState([]);
+
+  const addLog = (msg) => {
+    console.log(msg);
+    setDebugLog(prev => [...prev.slice(-4), `${new Date().toLocaleTimeString()}: ${msg}`]);
+  };
 
   useEffect(() => {
     const dotsInterval = setInterval(() => {
       setDots(prev => prev.length >= 3 ? '' : prev + '.');
     }, 500);
 
-    // Subscribe to realtime verification events
+    addLog('🔄 Setting up verification listeners...');
+
+    // METHOD 1: Realtime listener
     const channel = supabase
       .channel('verification-events')
       .on(
@@ -315,30 +323,65 @@ function VerificationWaitingScreen({ signupEmail, onBack, navigate }) {
           filter: `email=eq.${signupEmail}`,
         },
         async (payload) => {
-          console.log('✅ Verification detected from other device!', payload);
+          addLog('✅ REALTIME EVENT RECEIVED!');
+          addLog(JSON.stringify(payload));
           
-          // Get fresh session
-          const { data: { session } } = await supabase.auth.getSession();
-          
-          if (session) {
-            clearInterval(dotsInterval);
-            navigate('/Journal');
-          } else {
-            // Try refreshing session
-            await supabase.auth.refreshSession();
-            const { data: { session: newSession } } = await supabase.auth.getSession();
-            if (newSession) {
-              clearInterval(dotsInterval);
+          // Wait a bit for Supabase to sync
+          setTimeout(async () => {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session) {
+              addLog('🎉 Session found! Redirecting...');
               navigate('/Journal');
+            } else {
+              addLog('⚠️ No session yet, trying refresh...');
+              await supabase.auth.refreshSession();
+              const { data: { session: newSession } } = await supabase.auth.getSession();
+              if (newSession) {
+                addLog('🎉 Session refreshed! Redirecting...');
+                navigate('/Journal');
+              } else {
+                addLog('❌ Still no session');
+              }
             }
-          }
+          }, 1000);
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        addLog(`📡 Realtime status: ${status}`);
+      });
+
+    // METHOD 2: Polling fallback (every 3 seconds)
+    const pollInterval = setInterval(async () => {
+      addLog('🔍 Polling for verification...');
+      
+      // Check if verification event exists in database
+      const { data: events, error } = await supabase
+        .from('verification_events')
+        .select('*')
+        .eq('email', signupEmail)
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (events && events.length > 0) {
+        addLog('✅ Verification event found in database!');
+        
+        // Try to get session
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          clearInterval(pollInterval);
+          addLog('🎉 Session found! Redirecting...');
+          navigate('/Journal');
+        } else {
+          addLog('⚠️ Event exists but no session, waiting...');
+        }
+      }
+    }, 3000);
 
     return () => {
       clearInterval(dotsInterval);
+      clearInterval(pollInterval);
       supabase.removeChannel(channel);
+      addLog('🛑 Cleaned up listeners');
     };
   }, [signupEmail, navigate]);
 
@@ -374,8 +417,15 @@ function VerificationWaitingScreen({ signupEmail, onBack, navigate }) {
           <ul className="text-sm text-blue-700 space-y-1 ml-4 list-disc">
             <li>Check your spam/junk folder</li>
             <li>Wait a few minutes - emails can be delayed</li>
-            <li>You can verify on any device - this page will auto-update instantly</li>
+            <li>You can verify on any device - this page will auto-update</li>
           </ul>
+        </div>
+
+        {/* Debug Console */}
+        <div className="bg-slate-900 text-green-400 rounded-lg p-3 mb-4 font-mono text-xs max-h-32 overflow-y-auto">
+          {debugLog.map((log, i) => (
+            <div key={i}>{log}</div>
+          ))}
         </div>
 
         <div className="relative mx-auto mb-4 h-12 w-12">
