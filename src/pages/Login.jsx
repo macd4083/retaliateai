@@ -109,12 +109,10 @@ export default function Login() {
     setSignupEmail('');
   };
 
-  // OTP Verification View with Cross-Device Polling
   if (showOtpInput) {
     return <VerificationWaitingScreen signupEmail={signupEmail} onBack={() => { setShowOtpInput(false); resetForm(); }} navigate={navigate} />;
   }
 
-  // Forgot Password View
   if (isForgotPassword) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-purple-50 px-4">
@@ -180,7 +178,6 @@ export default function Login() {
     );
   }
 
-  // Main Login/Signup View
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-purple-50 px-4">
       <div className="max-w-md w-full bg-white p-8 rounded-2xl shadow-lg border border-slate-200">
@@ -297,42 +294,51 @@ export default function Login() {
   );
 }
 
-// NEW: Separate component that checks the DATABASE for email confirmation
+// REALTIME LISTENER - Listens for verification events from other devices
 function VerificationWaitingScreen({ signupEmail, onBack, navigate }) {
   const [dots, setDots] = useState('');
 
   useEffect(() => {
-    // Animated dots
     const dotsInterval = setInterval(() => {
       setDots(prev => prev.length >= 3 ? '' : prev + '.');
     }, 500);
 
-    // Poll the auth.users table in Supabase to check if email is confirmed
-    const pollInterval = setInterval(async () => {
-      try {
-        // Try to sign in with the credentials - if email is verified, this will work
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email: signupEmail,
-          password: 'dummy-check-12345', // This will fail, but we just need to trigger a check
-        });
-
-        // Check if there's a session (user is verified)
-        const { data: { session } } = await supabase.auth.getSession();
-        
-        if (session && session.user.email === signupEmail) {
-          clearInterval(pollInterval);
-          clearInterval(dotsInterval);
-          navigate('/Journal');
+    // Subscribe to realtime verification events
+    const channel = supabase
+      .channel('verification-events')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'verification_events',
+          filter: `email=eq.${signupEmail}`,
+        },
+        async (payload) => {
+          console.log('✅ Verification detected from other device!', payload);
+          
+          // Get fresh session
+          const { data: { session } } = await supabase.auth.getSession();
+          
+          if (session) {
+            clearInterval(dotsInterval);
+            navigate('/Journal');
+          } else {
+            // Try refreshing session
+            await supabase.auth.refreshSession();
+            const { data: { session: newSession } } = await supabase.auth.getSession();
+            if (newSession) {
+              clearInterval(dotsInterval);
+              navigate('/Journal');
+            }
+          }
         }
-      } catch (err) {
-        // Expected to fail - just checking state
-        console.log('Still waiting for verification...');
-      }
-    }, 3000); // Check every 3 seconds
+      )
+      .subscribe();
 
     return () => {
       clearInterval(dotsInterval);
-      clearInterval(pollInterval);
+      supabase.removeChannel(channel);
     };
   }, [signupEmail, navigate]);
 
@@ -368,7 +374,7 @@ function VerificationWaitingScreen({ signupEmail, onBack, navigate }) {
           <ul className="text-sm text-blue-700 space-y-1 ml-4 list-disc">
             <li>Check your spam/junk folder</li>
             <li>Wait a few minutes - emails can be delayed</li>
-            <li>You can verify on any device - this page will auto-update</li>
+            <li>You can verify on any device - this page will auto-update instantly</li>
           </ul>
         </div>
 

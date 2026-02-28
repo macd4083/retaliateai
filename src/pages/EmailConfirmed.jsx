@@ -20,6 +20,18 @@ export default function EmailConfirmed() {
 
         if (session) {
           setStatus('success');
+          
+          // TRIGGER: Write to database to notify other devices
+          try {
+            await supabase.from('verification_events').insert({
+              user_id: session.user.id,
+              email: session.user.email,
+            });
+            console.log('✅ Verification event triggered for other devices');
+          } catch (dbError) {
+            console.error('Failed to trigger verification event:', dbError);
+          }
+          
         } else {
           setStatus('error');
         }
