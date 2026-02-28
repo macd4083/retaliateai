@@ -7,7 +7,6 @@ export default function Login() {
   const [searchParams] = useSearchParams();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [otp, setOtp] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
@@ -81,28 +80,6 @@ export default function Login() {
     }
   };
 
-  const handleVerifyOtp = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    setMessage('');
-
-    const { data, error } = await supabase.auth.verifyOtp({
-      email: signupEmail,
-      token: otp,
-      type: 'signup'
-    });
-
-    if (error) {
-      setMessage(error.message);
-      setMessageType('error');
-    } else {
-      setMessage('Email verified! Redirecting...');
-      setMessageType('success');
-      setTimeout(() => navigate('/Journal'), 1500);
-    }
-    setLoading(false);
-  };
-
   const handleForgotPassword = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -125,7 +102,6 @@ export default function Login() {
   const resetForm = () => {
     setEmail('');
     setPassword('');
-    setOtp('');
     setMessage('');
     setMessageType('');
     setShowPassword(false);
