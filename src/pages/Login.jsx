@@ -24,8 +24,9 @@ export default function Login() {
     }
   }, [searchParams]);
 
-  // Listen for auth state changes (for when user verifies on another device)
+  // Listen for auth state changes (for when user verifies on another device/tab)
   useEffect(() => {
+    // Supabase auth listener
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_IN' && session) {
         setMessage('Email verified! Redirecting...');
@@ -34,8 +35,25 @@ export default function Login() {
       }
     });
 
+    // Storage event listener for cross-tab communication
+    const handleStorageChange = (e) => {
+      if (e.key === 'supabase.auth.verified' && e.newValue) {
+        // Force check session when other tab verifies
+        supabase.auth.getSession().then(({ data, error }) => {
+          if (data.session) {
+            setMessage('Email verified! Redirecting...');
+            setMessageType('success');
+            setTimeout(() => navigate('/Journal'), 1500);
+          }
+        });
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+
     return () => {
       authListener.subscription.unsubscribe();
+      window.removeEventListener('storage', handleStorageChange);
     };
   }, [navigate]);
 

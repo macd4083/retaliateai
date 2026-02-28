@@ -7,8 +7,7 @@ import App from './App.jsx';
 import Landing from './pages/Landing.jsx';
 import Login from './pages/Login.jsx';
 import ResetPassword from './pages/ResetPassword.jsx';
-import AuthCallback from './pages/AuthCallback.jsx';
-import EmailConfirmed from './pages/EmailConfirmed.jsx'; // ADD THIS
+import EmailConfirmed from './pages/EmailConfirmed.jsx';
 import AuthGuard from './components/auth/AuthGaurd.jsx';
 import { AuthProvider } from './lib/AuthContext';
 import { queryClient } from './lib/query-client';
@@ -25,7 +24,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             {/* Public routes */}
             <Route path="/" element={<Landing />} />
             <Route path="/login" element={<Login />} />
-            <Route path="/auth/callback" element={<EmailConfirmed />} /> {/* CHANGE THIS LINE */}
+            <Route path="/auth/callback" element={<EmailConfirmed />} />
             <Route path="/auth/reset-password" element={<ResetPassword />} />
             <Route path="/privacy" element={<PrivacyPolicy />} />
             <Route path="/terms" element={<TermsOfService />} />

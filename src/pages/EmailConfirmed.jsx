@@ -21,6 +21,14 @@ export default function EmailConfirmed() {
 
         if (data.session) {
           setStatus('success');
+          
+          // Broadcast verification success to other tabs
+          localStorage.setItem('supabase.auth.verified', Date.now().toString());
+          
+          // Optional: Auto-close after 3 seconds
+          setTimeout(() => {
+            window.close();
+          }, 3000);
         } else {
           setStatus('error');
         }
@@ -73,7 +81,7 @@ export default function EmailConfirmed() {
                 You're all set!
               </p>
               <p className="text-sm text-blue-700">
-                Close this tab and return to the previous tab to continue using Retaliate AI.
+                This tab will close automatically. Return to the previous tab to continue using Retaliate AI.
               </p>
             </div>
           </>
