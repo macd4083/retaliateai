@@ -20,10 +20,6 @@ export default function EmailConfirmed() {
 
         if (session) {
           setStatus('success');
-          // Auto-close after 3 seconds
-          setTimeout(() => {
-            window.close();
-          }, 3000);
         } else {
           setStatus('error');
         }
@@ -76,7 +72,7 @@ export default function EmailConfirmed() {
                 You're all set!
               </p>
               <p className="text-sm text-blue-700">
-                This tab will close automatically. Return to your other device to continue using Retaliate AI.
+                Close this tab and return to the previous tab to continue using Retaliate AI.
               </p>
             </div>
           </>

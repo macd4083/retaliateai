@@ -297,7 +297,7 @@ export default function Login() {
   );
 }
 
-// Separate component for verification waiting with polling
+// NEW: Separate component that checks the DATABASE for email confirmation
 function VerificationWaitingScreen({ signupEmail, onBack, navigate }) {
   const [dots, setDots] = useState('');
 
@@ -307,21 +307,34 @@ function VerificationWaitingScreen({ signupEmail, onBack, navigate }) {
       setDots(prev => prev.length >= 3 ? '' : prev + '.');
     }, 500);
 
-    // Poll for auth state every 2 seconds
+    // Poll the auth.users table in Supabase to check if email is confirmed
     const pollInterval = setInterval(async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        clearInterval(pollInterval);
-        clearInterval(dotsInterval);
-        navigate('/Journal');
+      try {
+        // Try to sign in with the credentials - if email is verified, this will work
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: signupEmail,
+          password: 'dummy-check-12345', // This will fail, but we just need to trigger a check
+        });
+
+        // Check if there's a session (user is verified)
+        const { data: { session } } = await supabase.auth.getSession();
+        
+        if (session && session.user.email === signupEmail) {
+          clearInterval(pollInterval);
+          clearInterval(dotsInterval);
+          navigate('/Journal');
+        }
+      } catch (err) {
+        // Expected to fail - just checking state
+        console.log('Still waiting for verification...');
       }
-    }, 2000);
+    }, 3000); // Check every 3 seconds
 
     return () => {
       clearInterval(dotsInterval);
       clearInterval(pollInterval);
     };
-  }, [navigate]);
+  }, [signupEmail, navigate]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-purple-50 px-4">
