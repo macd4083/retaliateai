@@ -24,39 +24,6 @@ export default function Login() {
     }
   }, [searchParams]);
 
-  // Listen for auth state changes (for when user verifies on another device/tab)
-  useEffect(() => {
-    // Supabase auth listener
-    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_IN' && session) {
-        setMessage('Email verified! Redirecting...');
-        setMessageType('success');
-        setTimeout(() => navigate('/Journal'), 1500);
-      }
-    });
-
-    // Storage event listener for cross-tab communication
-    const handleStorageChange = (e) => {
-      if (e.key === 'supabase.auth.verified' && e.newValue) {
-        // Force check session when other tab verifies
-        supabase.auth.getSession().then(({ data, error }) => {
-          if (data.session) {
-            setMessage('Email verified! Redirecting...');
-            setMessageType('success');
-            setTimeout(() => navigate('/Journal'), 1500);
-          }
-        });
-      }
-    };
-
-    window.addEventListener('storage', handleStorageChange);
-
-    return () => {
-      authListener.subscription.unsubscribe();
-      window.removeEventListener('storage', handleStorageChange);
-    };
-  }, [navigate]);
-
   const handleLogin = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -92,12 +59,10 @@ export default function Login() {
     });
 
     if (error) {
-      // Check if user already exists
       if (error.message.includes('already registered') || error.message.includes('already exists') || error.status === 422) {
         setMessage('');
         setMessageType('info');
         setIsSignUp(false);
-        // Show a friendly message
         setTimeout(() => {
           setMessage('We found an existing account with this email. Please sign in below.');
           setMessageType('info');
@@ -110,7 +75,7 @@ export default function Login() {
     } else {
       setSignupEmail(email);
       setShowOtpInput(true);
-      setMessage('Check your email! Click the verification link or enter the code if provided.');
+      setMessage('Check your email! Click the verification link.');
       setMessageType('success');
       setLoading(false);
     }
@@ -168,81 +133,9 @@ export default function Login() {
     setSignupEmail('');
   };
 
-  // OTP Verification View
+  // OTP Verification View with Cross-Device Polling
   if (showOtpInput) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-purple-50 px-4">
-        <div className="max-w-md w-full bg-white p-8 rounded-2xl shadow-lg border border-slate-200">
-          <button
-            onClick={() => {
-              setShowOtpInput(false);
-              resetForm();
-            }}
-            className="flex items-center gap-2 text-slate-600 hover:text-slate-900 mb-6 transition-colors"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            Back to sign up
-          </button>
-
-          <div className="text-center mb-8">
-            <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Mail className="w-8 h-8 text-blue-600" />
-            </div>
-            <h1 className="text-2xl font-bold text-slate-900 mb-2">Verify your email</h1>
-            <p className="text-slate-600 mb-2">
-              We sent a verification email to <strong>{signupEmail}</strong>
-            </p>
-            <p className="text-xs text-slate-500">
-              Click the link in your email, or enter the verification code below if one was provided. This page will auto-refresh when you verify.
-            </p>
-          </div>
-
-          <form onSubmit={handleVerifyOtp} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">
-                Verification Code (if provided)
-              </label>
-              <input
-                type="text"
-                value={otp}
-                onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                placeholder="Enter code"
-                maxLength={6}
-                className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-center text-2xl tracking-widest"
-                disabled={loading}
-              />
-            </div>
-
-            {message && (
-              <div className={`p-3 rounded-lg text-sm ${
-                messageType === 'success' 
-                  ? 'bg-green-50 text-green-700 border border-green-200' 
-                  : 'bg-red-50 text-red-700 border border-red-200'
-              }`}>
-                {message}
-              </div>
-            )}
-
-            <button
-              type="submit"
-              disabled={loading || otp.length !== 6}
-              className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
-            >
-              {loading ? 'Verifying...' : 'Verify Code'}
-            </button>
-          </form>
-
-          <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-            <p className="text-sm text-blue-800 font-semibold mb-2">Can't find the email?</p>
-            <ul className="text-sm text-blue-700 space-y-1 ml-4 list-disc">
-              <li>Check your spam/junk folder</li>
-              <li>Wait a few minutes - emails can be delayed</li>
-              <li>Click the verification link in the email instead</li>
-            </ul>
-          </div>
-        </div>
-      </div>
-    );
+    return <VerificationWaitingScreen signupEmail={signupEmail} onBack={() => { setShowOtpInput(false); resetForm(); }} navigate={navigate} />;
   }
 
   // Forgot Password View
@@ -423,6 +316,88 @@ export default function Login() {
             Back to home
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Separate component for verification waiting with polling
+function VerificationWaitingScreen({ signupEmail, onBack, navigate }) {
+  const [dots, setDots] = useState('');
+
+  useEffect(() => {
+    // Animated dots
+    const dotsInterval = setInterval(() => {
+      setDots(prev => prev.length >= 3 ? '' : prev + '.');
+    }, 500);
+
+    // Poll for auth state every 2 seconds
+    const pollInterval = setInterval(async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        clearInterval(pollInterval);
+        clearInterval(dotsInterval);
+        navigate('/Journal');
+      }
+    }, 2000);
+
+    return () => {
+      clearInterval(dotsInterval);
+      clearInterval(pollInterval);
+    };
+  }, [navigate]);
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-purple-50 px-4">
+      <div className="max-w-md w-full bg-white p-8 rounded-2xl shadow-lg border border-slate-200">
+        <button
+          onClick={onBack}
+          className="flex items-center gap-2 text-slate-600 hover:text-slate-900 mb-6 transition-colors"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Back to sign up
+        </button>
+
+        <div className="text-center mb-8">
+          <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <Mail className="w-8 h-8 text-blue-600" />
+          </div>
+          <h1 className="text-2xl font-bold text-slate-900 mb-2">Check your email</h1>
+          <p className="text-slate-600 mb-4">
+            We sent a verification link to <strong>{signupEmail}</strong>
+          </p>
+          <p className="text-sm text-slate-500 mb-2">
+            Click the link in your email to verify your account.
+          </p>
+          <p className="text-sm text-green-600 font-medium">
+            Waiting for verification{dots}
+          </p>
+        </div>
+
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+          <p className="text-sm text-blue-800 font-semibold mb-2">Can't find the email?</p>
+          <ul className="text-sm text-blue-700 space-y-1 ml-4 list-disc">
+            <li>Check your spam/junk folder</li>
+            <li>Wait a few minutes - emails can be delayed</li>
+            <li>You can verify on any device - this page will auto-update</li>
+          </ul>
+        </div>
+
+        <div className="relative mx-auto mb-4 h-12 w-12">
+          <div
+            className="absolute inset-0 rounded-full"
+            style={{
+              borderWidth: 3,
+              borderStyle: 'solid',
+              borderColor: 'rgba(148,163,184,0.3)',
+              borderTopColor: 'rgba(59,130,246,0.8)',
+              animation: 'spin 1s linear infinite',
+            }}
+          />
+        </div>
+        <style>{`
+          @keyframes spin { to { transform: rotate(360deg); } }
+        `}</style>
       </div>
     </div>
   );
