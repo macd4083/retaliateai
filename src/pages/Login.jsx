@@ -76,7 +76,7 @@ export default function Login() {
       setSignupEmail(email);
       setSignupPassword(password);
       setShowOtpInput(true);
-      setMessage('Check your email! Click the verification link.');
+      setMessage('Check your email! Click the verification link or enter the code.');
       setMessageType('success');
       setLoading(false);
     }
@@ -306,8 +306,10 @@ export default function Login() {
 
 function VerificationWaitingScreen({ signupEmail, signupPassword, onBack, navigate }) {
   const [dots, setDots] = useState('');
-  const [attemptCount, setAttemptCount] = useState(0);
-  const [lastCheck, setLastCheck] = useState('Initializing...');
+  const [otp, setOtp] = useState('');
+  const [otpLoading, setOtpLoading] = useState(false);
+  const [otpMessage, setOtpMessage] = useState('');
+  const [otpMessageType, setOtpMessageType] = useState('');
 
   useEffect(() => {
     const dotsInterval = setInterval(() => {
@@ -316,49 +318,26 @@ function VerificationWaitingScreen({ signupEmail, signupPassword, onBack, naviga
 
     // Poll database for verification event every 2 seconds
     const checkInterval = setInterval(async () => {
-      setAttemptCount(prev => prev + 1);
-      const now = new Date().toLocaleTimeString();
-      
-      console.log(`[${now}] Checking verification status...`);
-      setLastCheck(now);
-      
       try {
-        // Check if verification event exists in database
-        const { data: events, error: dbError } = await supabase
+        const { data: events } = await supabase
           .from('verification_events')
           .select('*')
           .eq('email', signupEmail)
           .order('created_at', { ascending: false })
           .limit(1);
 
-        if (dbError) {
-          console.error('Database error:', dbError);
-          return;
-        }
-
         if (events && events.length > 0) {
-          console.log('✅ Verification event found! Attempting sign in...');
-          
-          // Event exists, user is verified! Now sign them in
-          const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+          // Event exists, user is verified! Sign them in
+          const { data: signInData } = await supabase.auth.signInWithPassword({
             email: signupEmail,
             password: signupPassword,
           });
 
           if (signInData?.session) {
-            console.log('🎉 Sign in successful! Redirecting...');
             clearInterval(checkInterval);
             clearInterval(dotsInterval);
             navigate('/Journal');
-          } else if (signInError) {
-            console.error('Sign in failed:', signInError.message);
-            // If still getting "Email not confirmed", wait a bit more
-            if (!signInError.message.includes('Email not confirmed')) {
-              console.error('Unexpected error:', signInError);
-            }
           }
-        } else {
-          console.log('⏳ No verification event yet, waiting...');
         }
       } catch (err) {
         console.error('Check failed:', err);
@@ -370,6 +349,38 @@ function VerificationWaitingScreen({ signupEmail, signupPassword, onBack, naviga
       clearInterval(checkInterval);
     };
   }, [signupEmail, signupPassword, navigate]);
+
+  const handleVerifyOtp = async (e) => {
+    e.preventDefault();
+    setOtpLoading(true);
+    setOtpMessage('');
+
+    const { data, error } = await supabase.auth.verifyOtp({
+      email: signupEmail,
+      token: otp,
+      type: 'signup'
+    });
+
+    if (error) {
+      setOtpMessage(error.message);
+      setOtpMessageType('error');
+      setOtpLoading(false);
+    } else {
+      // Verification successful! Write to database to notify other devices
+      try {
+        await supabase.from('verification_events').insert({
+          user_id: data.user.id,
+          email: signupEmail,
+        });
+      } catch (dbError) {
+        console.error('Failed to write verification event:', dbError);
+      }
+      
+      setOtpMessage('Email verified! Redirecting...');
+      setOtpMessageType('success');
+      setTimeout(() => navigate('/Journal'), 1500);
+    }
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-purple-50 px-4">
@@ -388,30 +399,62 @@ function VerificationWaitingScreen({ signupEmail, signupPassword, onBack, naviga
           </div>
           <h1 className="text-2xl font-bold text-slate-900 mb-2">Check your email</h1>
           <p className="text-slate-600 mb-4">
-            We sent a verification link to <strong>{signupEmail}</strong>
+            We sent a verification email to <strong>{signupEmail}</strong>
           </p>
           <p className="text-sm text-slate-500 mb-2">
-            Click the link in your email to verify your account.
+            Click the link in your email or enter the 8-digit code below.
           </p>
           <p className="text-sm text-green-600 font-medium">
             Waiting for verification{dots}
           </p>
-          <p className="text-xs text-slate-400 mt-2">
-            Check #{attemptCount} • Last: {lastCheck}
-          </p>
         </div>
 
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-          <p className="text-sm text-blue-800 font-semibold mb-2">Instructions:</p>
+        <form onSubmit={handleVerifyOtp} className="space-y-4 mb-6">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2 text-center">
+              Or enter verification code
+            </label>
+            <input
+              type="text"
+              value={otp}
+              onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 8))}
+              placeholder="00000000"
+              maxLength={8}
+              className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-center text-2xl tracking-widest font-mono"
+              disabled={otpLoading}
+            />
+          </div>
+
+          {otpMessage && (
+            <div className={`p-3 rounded-lg text-sm ${
+              otpMessageType === 'success' 
+                ? 'bg-green-50 text-green-700 border border-green-200' 
+                : 'bg-red-50 text-red-700 border border-red-200'
+            }`}>
+              {otpMessage}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={otpLoading || otp.length !== 8}
+            className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+          >
+            {otpLoading ? 'Verifying...' : 'Verify Code'}
+          </button>
+        </form>
+
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <p className="text-sm text-blue-800 font-semibold mb-2">Can't find the email?</p>
           <ul className="text-sm text-blue-700 space-y-1 ml-4 list-disc">
             <li>Check your spam/junk folder</li>
+            <li>Wait a few minutes - emails can be delayed</li>
             <li>Click the link on ANY device (phone, tablet, etc.)</li>
-            <li>This page checks automatically every 2 seconds</li>
-            <li>When you verify, you'll be signed in automatically</li>
+            <li>This page detects verification automatically</li>
           </ul>
         </div>
 
-        <div className="relative mx-auto mb-4 h-12 w-12">
+        <div className="relative mx-auto mt-6 h-12 w-12">
           <div
             className="absolute inset-0 rounded-full"
             style={{
