@@ -15,6 +15,7 @@ export default function Login() {
   const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [showOtpInput, setShowOtpInput] = useState(false);
   const [signupEmail, setSignupEmail] = useState('');
+  const [signupPassword, setSignupPassword] = useState('');
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -73,6 +74,7 @@ export default function Login() {
       setLoading(false);
     } else {
       setSignupEmail(email);
+      setSignupPassword(password);
       setShowOtpInput(true);
       setMessage('Check your email! Click the verification link.');
       setMessageType('success');
@@ -107,10 +109,18 @@ export default function Login() {
     setShowPassword(false);
     setShowOtpInput(false);
     setSignupEmail('');
+    setSignupPassword('');
   };
 
   if (showOtpInput) {
-    return <VerificationWaitingScreen signupEmail={signupEmail} onBack={() => { setShowOtpInput(false); resetForm(); }} navigate={navigate} />;
+    return (
+      <VerificationWaitingScreen 
+        signupEmail={signupEmail} 
+        signupPassword={signupPassword}
+        onBack={() => { setShowOtpInput(false); resetForm(); }} 
+        navigate={navigate} 
+      />
+    );
   }
 
   if (isForgotPassword) {
@@ -294,45 +304,64 @@ export default function Login() {
   );
 }
 
-function VerificationWaitingScreen({ signupEmail, onBack, navigate }) {
+function VerificationWaitingScreen({ signupEmail, signupPassword, onBack, navigate }) {
   const [dots, setDots] = useState('');
   const [attemptCount, setAttemptCount] = useState(0);
+  const [lastCheck, setLastCheck] = useState('Initializing...');
 
   useEffect(() => {
     const dotsInterval = setInterval(() => {
       setDots(prev => prev.length >= 3 ? '' : prev + '.');
     }, 500);
 
-    // Poll auth every 2 seconds
+    // Poll database for verification event every 2 seconds
     const checkInterval = setInterval(async () => {
       setAttemptCount(prev => prev + 1);
-      console.log(`[Attempt ${attemptCount}] Checking for verified session...`);
+      const now = new Date().toLocaleTimeString();
+      
+      console.log(`[${now}] Checking verification status...`);
+      setLastCheck(now);
       
       try {
-        // Force refresh the session from Supabase servers
-        const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
-        
-        if (refreshData?.session) {
-          console.log('✅ Session found after refresh!');
-          clearInterval(checkInterval);
-          clearInterval(dotsInterval);
-          navigate('/Journal');
+        // Check if verification event exists in database
+        const { data: events, error: dbError } = await supabase
+          .from('verification_events')
+          .select('*')
+          .eq('email', signupEmail)
+          .order('created_at', { ascending: false })
+          .limit(1);
+
+        if (dbError) {
+          console.error('Database error:', dbError);
           return;
         }
-        
-        // Also check getSession as backup
-        const { data: { session }, error } = await supabase.auth.getSession();
-        
-        if (session) {
-          console.log('✅ Session found!');
-          clearInterval(checkInterval);
-          clearInterval(dotsInterval);
-          navigate('/Journal');
+
+        if (events && events.length > 0) {
+          console.log('✅ Verification event found! Attempting sign in...');
+          
+          // Event exists, user is verified! Now sign them in
+          const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+            email: signupEmail,
+            password: signupPassword,
+          });
+
+          if (signInData?.session) {
+            console.log('🎉 Sign in successful! Redirecting...');
+            clearInterval(checkInterval);
+            clearInterval(dotsInterval);
+            navigate('/Journal');
+          } else if (signInError) {
+            console.error('Sign in failed:', signInError.message);
+            // If still getting "Email not confirmed", wait a bit more
+            if (!signInError.message.includes('Email not confirmed')) {
+              console.error('Unexpected error:', signInError);
+            }
+          }
         } else {
-          console.log('⏳ No session yet, waiting...');
+          console.log('⏳ No verification event yet, waiting...');
         }
       } catch (err) {
-        console.error('Error checking session:', err);
+        console.error('Check failed:', err);
       }
     }, 2000);
 
@@ -340,7 +369,7 @@ function VerificationWaitingScreen({ signupEmail, onBack, navigate }) {
       clearInterval(dotsInterval);
       clearInterval(checkInterval);
     };
-  }, [signupEmail, navigate, attemptCount]);
+  }, [signupEmail, signupPassword, navigate]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-purple-50 px-4">
@@ -368,17 +397,17 @@ function VerificationWaitingScreen({ signupEmail, onBack, navigate }) {
             Waiting for verification{dots}
           </p>
           <p className="text-xs text-slate-400 mt-2">
-            Checking... (attempt {attemptCount})
+            Check #{attemptCount} • Last: {lastCheck}
           </p>
         </div>
 
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-          <p className="text-sm text-blue-800 font-semibold mb-2">Can't find the email?</p>
+          <p className="text-sm text-blue-800 font-semibold mb-2">Instructions:</p>
           <ul className="text-sm text-blue-700 space-y-1 ml-4 list-disc">
             <li>Check your spam/junk folder</li>
-            <li>Wait a few minutes - emails can be delayed</li>
-            <li>Make sure you clicked the link on your phone</li>
+            <li>Click the link on ANY device (phone, tablet, etc.)</li>
             <li>This page checks automatically every 2 seconds</li>
+            <li>When you verify, you'll be signed in automatically</li>
           </ul>
         </div>
 
