@@ -294,96 +294,53 @@ export default function Login() {
   );
 }
 
-// IMPROVED: Realtime + Polling fallback
 function VerificationWaitingScreen({ signupEmail, onBack, navigate }) {
   const [dots, setDots] = useState('');
-  const [debugLog, setDebugLog] = useState([]);
-
-  const addLog = (msg) => {
-    console.log(msg);
-    setDebugLog(prev => [...prev.slice(-4), `${new Date().toLocaleTimeString()}: ${msg}`]);
-  };
+  const [attemptCount, setAttemptCount] = useState(0);
 
   useEffect(() => {
     const dotsInterval = setInterval(() => {
       setDots(prev => prev.length >= 3 ? '' : prev + '.');
     }, 500);
 
-    addLog('🔄 Setting up verification listeners...');
-
-    // METHOD 1: Realtime listener
-    const channel = supabase
-      .channel('verification-events')
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'verification_events',
-          filter: `email=eq.${signupEmail}`,
-        },
-        async (payload) => {
-          addLog('✅ REALTIME EVENT RECEIVED!');
-          addLog(JSON.stringify(payload));
-          
-          // Wait a bit for Supabase to sync
-          setTimeout(async () => {
-            const { data: { session } } = await supabase.auth.getSession();
-            if (session) {
-              addLog('🎉 Session found! Redirecting...');
-              navigate('/Journal');
-            } else {
-              addLog('⚠️ No session yet, trying refresh...');
-              await supabase.auth.refreshSession();
-              const { data: { session: newSession } } = await supabase.auth.getSession();
-              if (newSession) {
-                addLog('🎉 Session refreshed! Redirecting...');
-                navigate('/Journal');
-              } else {
-                addLog('❌ Still no session');
-              }
-            }
-          }, 1000);
-        }
-      )
-      .subscribe((status) => {
-        addLog(`📡 Realtime status: ${status}`);
-      });
-
-    // METHOD 2: Polling fallback (every 3 seconds)
-    const pollInterval = setInterval(async () => {
-      addLog('🔍 Polling for verification...');
+    // Poll auth every 2 seconds
+    const checkInterval = setInterval(async () => {
+      setAttemptCount(prev => prev + 1);
+      console.log(`[Attempt ${attemptCount}] Checking for verified session...`);
       
-      // Check if verification event exists in database
-      const { data: events, error } = await supabase
-        .from('verification_events')
-        .select('*')
-        .eq('email', signupEmail)
-        .order('created_at', { ascending: false })
-        .limit(1);
-
-      if (events && events.length > 0) {
-        addLog('✅ Verification event found in database!');
+      try {
+        // Force refresh the session from Supabase servers
+        const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
         
-        // Try to get session
-        const { data: { session } } = await supabase.auth.getSession();
+        if (refreshData?.session) {
+          console.log('✅ Session found after refresh!');
+          clearInterval(checkInterval);
+          clearInterval(dotsInterval);
+          navigate('/Journal');
+          return;
+        }
+        
+        // Also check getSession as backup
+        const { data: { session }, error } = await supabase.auth.getSession();
+        
         if (session) {
-          clearInterval(pollInterval);
-          addLog('🎉 Session found! Redirecting...');
+          console.log('✅ Session found!');
+          clearInterval(checkInterval);
+          clearInterval(dotsInterval);
           navigate('/Journal');
         } else {
-          addLog('⚠️ Event exists but no session, waiting...');
+          console.log('⏳ No session yet, waiting...');
         }
+      } catch (err) {
+        console.error('Error checking session:', err);
       }
-    }, 3000);
+    }, 2000);
 
     return () => {
       clearInterval(dotsInterval);
-      clearInterval(pollInterval);
-      supabase.removeChannel(channel);
-      addLog('🛑 Cleaned up listeners');
+      clearInterval(checkInterval);
     };
-  }, [signupEmail, navigate]);
+  }, [signupEmail, navigate, attemptCount]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-purple-50 px-4">
@@ -410,6 +367,9 @@ function VerificationWaitingScreen({ signupEmail, onBack, navigate }) {
           <p className="text-sm text-green-600 font-medium">
             Waiting for verification{dots}
           </p>
+          <p className="text-xs text-slate-400 mt-2">
+            Checking... (attempt {attemptCount})
+          </p>
         </div>
 
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
@@ -417,15 +377,9 @@ function VerificationWaitingScreen({ signupEmail, onBack, navigate }) {
           <ul className="text-sm text-blue-700 space-y-1 ml-4 list-disc">
             <li>Check your spam/junk folder</li>
             <li>Wait a few minutes - emails can be delayed</li>
-            <li>You can verify on any device - this page will auto-update</li>
+            <li>Make sure you clicked the link on your phone</li>
+            <li>This page checks automatically every 2 seconds</li>
           </ul>
-        </div>
-
-        {/* Debug Console */}
-        <div className="bg-slate-900 text-green-400 rounded-lg p-3 mb-4 font-mono text-xs max-h-32 overflow-y-auto">
-          {debugLog.map((log, i) => (
-            <div key={i}>{log}</div>
-          ))}
         </div>
 
         <div className="relative mx-auto mb-4 h-12 w-12">
