@@ -8,7 +8,6 @@ import Landing from './pages/Landing.jsx';
 import Login from './pages/Login.jsx';
 import ResetPassword from './pages/ResetPassword.jsx';
 import EmailConfirmed from './pages/EmailConfirmed.jsx';
-import GoalDetail from './pages/GoalDetail.jsx'; // NEW
 import AuthGuard from './components/auth/AuthGaurd.jsx';
 import { AuthProvider } from './lib/AuthContext';
 import { queryClient } from './lib/query-client';
@@ -30,25 +29,15 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             <Route path="/privacy" element={<PrivacyPolicy />} />
             <Route path="/terms" element={<TermsOfService />} />
 
-            {/* Protected routes */}
+            {/* Protected routes - ALL go through App component */}
             <Route
-              path="/journal"
+              path="/*"
               element={
                 <AuthGuard>
                   <App />
                 </AuthGuard>
               }
             />
-            <Route
-              path="/goals/:goalId"
-              element={
-                <AuthGuard>
-                  <GoalDetail />
-                </AuthGuard>
-              }
-            />
-            <Route path="/Journal" element={<Navigate to="/journal" replace />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </AuthProvider>
       </BrowserRouter>

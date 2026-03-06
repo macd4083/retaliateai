@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import Sidebar from './components/layout/Sidebar';
 import JournalEditor from './components/journal/JournalEditor';
 import EntryDetailModal from './components/journal/EntryDetailModal';
@@ -7,6 +7,7 @@ import Clarity from './pages/Clarity';
 import Gratitude from './pages/Gratitude';
 import Insights from './pages/Insights';
 import Goals from './pages/Goals';
+import GoalDetail from './pages/GoalDetail';
 import Users from './pages/Users';
 import { useAuth } from './lib/AuthContext';
 import {
@@ -24,16 +25,13 @@ export default function App() {
   const topLeftLogoRef = useRef(null);
 
   const getTabFromPath = (path) => {
-    const pathMap = {
-      '/Journal': 'journal',
-      '/Clarity': 'clarity',
-      '/Gratitude': 'gratitude',
-      '/Insights': 'insights',
-      '/Goals': 'goals',
-      '/People': 'people',
-      '/Users': 'users',
-    };
-    return pathMap[path] || 'journal';
+    if (path.startsWith('/goals')) return 'goals';
+    if (path.startsWith('/insights')) return 'insights';
+    if (path.startsWith('/clarity')) return 'clarity';
+    if (path.startsWith('/gratitude')) return 'gratitude';
+    if (path.startsWith('/users')) return 'users';
+    if (path.startsWith('/people')) return 'people';
+    return 'journal';
   };
 
   const [activeTab, setActiveTab] = useState(getTabFromPath(location.pathname));
@@ -95,15 +93,15 @@ export default function App() {
 
   const handleTabChange = (newTab) => {
     const tabToPathMap = {
-      journal: '/Journal',
-      clarity: '/Clarity',
-      gratitude: '/Gratitude',
-      insights: '/Insights',
-      goals: '/Goals',
-      people: '/People',
-      users: '/Users',
+      journal: '/journal',
+      clarity: '/clarity',
+      gratitude: '/gratitude',
+      insights: '/insights',
+      goals: '/goals',
+      people: '/people',
+      users: '/users',
     };
-    navigate(tabToPathMap[newTab] || '/Journal');
+    navigate(tabToPathMap[newTab] || '/journal');
   };
 
   const handleSelectEntry = (entry) => {
@@ -499,30 +497,37 @@ export default function App() {
       </div>
 
       <main className="flex-1 overflow-hidden">
-        {activeTab === 'journal' && (
-          <div className="h-full bg-slate-50">
-            <JournalEditor
-              entry={null}
-              onSave={handleSave}
-              onCancel={() => {}}
-              isSaving={isSaving}
-            />
-          </div>
-        )}
-
-        {activeTab === 'clarity' && <Clarity />}
-        {activeTab === 'gratitude' && <Gratitude />}
-        {activeTab === 'insights' && <Insights />}
-        {activeTab === 'goals' && <Goals />}
-
-        {activeTab === 'people' && (
-          <div className="p-8">
-            <h1 className="text-2xl font-bold text-slate-900">People</h1>
-            <p className="text-slate-600 mt-2">Track the important people in your life.</p>
-          </div>
-        )}
-
-        {activeTab === 'users' && user?.role === 'admin' && <Users />}
+        <Routes>
+          <Route
+            path="/journal"
+            element={
+              <div className="h-full bg-slate-50">
+                <JournalEditor
+                  entry={null}
+                  onSave={handleSave}
+                  onCancel={() => {}}
+                  isSaving={isSaving}
+                />
+              </div>
+            }
+          />
+          <Route path="/clarity" element={<Clarity />} />
+          <Route path="/gratitude" element={<Gratitude />} />
+          <Route path="/insights" element={<Insights />} />
+          <Route path="/goals" element={<Goals />} />
+          <Route path="/goals/:goalId" element={<GoalDetail />} />
+          <Route
+            path="/people"
+            element={
+              <div className="p-8">
+                <h1 className="text-2xl font-bold text-slate-900">People</h1>
+                <p className="text-slate-600 mt-2">Track the important people in your life.</p>
+              </div>
+            }
+          />
+          {user?.role === 'admin' && <Route path="/users" element={<Users />} />}
+          <Route path="/" element={<Navigate to="/journal" replace />} />
+        </Routes>
       </main>
 
       {viewingEntry && (
