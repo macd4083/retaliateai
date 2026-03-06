@@ -8,6 +8,7 @@ import Landing from './pages/Landing.jsx';
 import Login from './pages/Login.jsx';
 import ResetPassword from './pages/ResetPassword.jsx';
 import EmailConfirmed from './pages/EmailConfirmed.jsx';
+import GoalDetail from './pages/GoalDetail.jsx'; // NEW
 import AuthGuard from './components/auth/AuthGaurd.jsx';
 import { AuthProvider } from './lib/AuthContext';
 import { queryClient } from './lib/query-client';
@@ -24,21 +25,29 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             {/* Public routes */}
             <Route path="/" element={<Landing />} />
             <Route path="/login" element={<Login />} />
-            <Route path="/auth/callback" element={<EmailConfirmed />} />
             <Route path="/auth/reset-password" element={<ResetPassword />} />
+            <Route path="/auth/callback" element={<EmailConfirmed />} />
             <Route path="/privacy" element={<PrivacyPolicy />} />
             <Route path="/terms" element={<TermsOfService />} />
-            
-            {/* Protected routes - require authentication */}
-            <Route path="/Journal" element={<AuthGuard><App /></AuthGuard>} />
-            <Route path="/Clarity" element={<AuthGuard><App /></AuthGuard>} />
-            <Route path="/Gratitude" element={<AuthGuard><App /></AuthGuard>} />
-            <Route path="/Insights" element={<AuthGuard><App /></AuthGuard>} />
-            <Route path="/Goals" element={<AuthGuard><App /></AuthGuard>} />
-            <Route path="/People" element={<AuthGuard><App /></AuthGuard>} />
-            <Route path="/Users" element={<AuthGuard><App /></AuthGuard>} />
-            
-            {/* Catch all - redirect to landing */}
+
+            {/* Protected routes */}
+            <Route
+              path="/journal"
+              element={
+                <AuthGuard>
+                  <App />
+                </AuthGuard>
+              }
+            />
+            <Route
+              path="/goals/:goalId"
+              element={
+                <AuthGuard>
+                  <GoalDetail />
+                </AuthGuard>
+              }
+            />
+            <Route path="/Journal" element={<Navigate to="/journal" replace />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </AuthProvider>

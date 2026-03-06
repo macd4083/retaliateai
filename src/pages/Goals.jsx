@@ -1,17 +1,25 @@
 ﻿import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
-import { useGoals } from '@/hooks/useGoals';
-import { Target, Plus, TrendingUp, Clock, AlertCircle, MoreVertical, Archive, CheckCircle2, Edit, Trash2, RotateCcw } from 'lucide-react';
+import { useGoals, useCreateGoal, useUpdateGoal, useDeleteGoal } from '@/hooks/useGoals';
+import { Target, Plus, ChevronRight } from 'lucide-react';
 
 export default function Goals() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [activeView, setActiveView] = useState('active');
+  const [showNewGoalModal, setShowNewGoalModal] = useState(false);
   
   // Map 'achieved' to 'completed' for the database query
   const statusFilter = activeView === 'achieved' ? 'completed' : activeView;
   
   // Fetch goals from database based on active view
   const { data: goals = [], isLoading, error } = useGoals(user?.id, statusFilter);
+  const createGoal = useCreateGoal(user?.id);
+
+  const handleCardClick = (goalId) => {
+    navigate(`/goals/${goalId}`);
+  };
 
   if (isLoading) {
     return (
@@ -45,9 +53,12 @@ export default function Goals() {
               <Target className="w-8 h-8 text-blue-600" />
               Goals
             </h1>
-            <p className="text-slate-600 mt-1">Track progress.  Take action.  Achieve results.</p>
+            <p className="text-slate-600 mt-1">Your life areas and commitments</p>
           </div>
-          <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 font-medium transition-colors">
+          <button 
+            onClick={() => setShowNewGoalModal(true)}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 font-medium transition-colors"
+          >
             <Plus className="w-5 h-5" />
             New Goal
           </button>
@@ -75,184 +86,143 @@ export default function Goals() {
         </div>
 
         {/* Goals Grid */}
-        <div className="grid gap-6">
-          {goals. length === 0 ? (
-            <div className="text-center py-12">
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {goals.length === 0 ? (
+            <div className="col-span-full text-center py-12">
               <Target className="w-16 h-16 text-slate-300 mx-auto mb-4" />
-              <h3 className="text-lg font-semibold text-slate-700 mb-2">
-                No {activeView} goals yet
+              <h3 className="text-lg font-semibold text-slate-600 mb-2">
+                {activeView === 'active' ? 'No active goals yet' : `No ${activeView} goals`}
               </h3>
-              <p className="text-slate-500">
-                {activeView === 'active' && "Create a goal to start tracking your progress"}
-                {activeView === 'achieved' && "Complete a goal to see it here"}
-                {activeView === 'archived' && "Archive a goal to see it here"}
+              <p className="text-slate-500 mb-4">
+                {activeView === 'active' ? 'Create your first goal to get started' : ''}
               </p>
+              {activeView === 'active' && (
+                <button
+                  onClick={() => setShowNewGoalModal(true)}
+                  className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors"
+                >
+                  Create Goal
+                </button>
+              )}
             </div>
           ) : (
             goals.map((goal) => (
-              <GoalCard
+              <button
                 key={goal.id}
-                goal={goal}
-                onEdit={() => console.log('Edit', goal. id)}
-                onArchive={() => console.log('Archive', goal.id)}
-                onAchieve={() => console.log('Mark as achieved', goal.id)}
-                onDelete={() => console.log('Delete', goal.id)}
-                onActivate={() => console.log('Activate', goal.id)}
-              />
+                onClick={() => handleCardClick(goal.id)}
+                className="bg-white rounded-xl border-2 border-slate-200 p-6 hover:border-blue-500 hover:shadow-lg transition-all text-left group"
+              >
+                <div className="flex items-start justify-between mb-3">
+                  <h3 className="text-xl font-bold text-slate-900 group-hover:text-blue-600 transition-colors">
+                    {goal.title}
+                  </h3>
+                  <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-blue-600 group-hover:translate-x-1 transition-all" />
+                </div>
+                
+                {goal.description && (
+                  <p className="text-sm text-slate-600 line-clamp-2 mb-3">
+                    {goal.description}
+                  </p>
+                )}
+
+                {goal.category && (
+                  <span className="inline-block px-2 py-1 text-xs font-medium bg-slate-100 text-slate-700 rounded">
+                    {goal.category}
+                  </span>
+                )}
+              </button>
             ))
           )}
         </div>
+
+        {/* New Goal Modal */}
+        {showNewGoalModal && (
+          <NewGoalModal
+            onClose={() => setShowNewGoalModal(false)}
+            onCreate={(goalData) => {
+              createGoal.mutate(goalData, {
+                onSuccess: (newGoal) => {
+                  setShowNewGoalModal(false);
+                  navigate(`/goals/${newGoal.id}`);
+                },
+              });
+            }}
+            isLoading={createGoal.isPending}
+          />
+        )}
       </div>
     </div>
   );
 }
 
-function GoalCard({ goal, onEdit, onArchive, onAchieve, onDelete, onActivate }) {
-  const [menuOpen, setMenuOpen] = useState(false);
+// Simple modal for creating new goal
+function NewGoalModal({ onClose, onCreate, isLoading }) {
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
 
-  const momentumConfig = {
-    accelerating: { color: 'text-green-600', bg: 'bg-green-50', icon: TrendingUp },
-    steady: { color: 'text-blue-600', bg: 'bg-blue-50', icon:  Clock },
-    stalled: { color: 'text-orange-600', bg: 'bg-orange-50', icon: AlertCircle },
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!title.trim()) return;
+    
+    onCreate({
+      title: title.trim(),
+      description: description.trim() || null,
+      status: 'active',
+    });
   };
 
-  const momentum = goal.momentum || 'steady';
-  const config = momentumConfig[momentum] || momentumConfig.steady;
-  const MomentumIcon = config.icon;
-
   return (
-    <div className="bg-white rounded-lg border border-slate-200 p-6 hover:shadow-md transition-shadow relative">
-      {/* Header */}
-      <div className="flex items-start justify-between mb-4">
-        <div className="flex-1">
-          <h3 className="text-xl font-semibold text-slate-900 mb-1">{goal.title}</h3>
-          {goal.description && (
-            <p className="text-slate-600 text-sm whitespace-pre-wrap">{goal.description}</p>
-          )}
-          {goal.category && (
-            <span className="inline-block mt-2 px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded-full">
-              {goal.category}
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          {goal.status === 'active' && (
-            <div className={`flex items-center gap-2 px-3 py-1 rounded-full ${config.bg}`}>
-              <MomentumIcon className={`w-4 h-4 ${config. color}`} />
-              <span className={`text-sm font-medium ${config.color} capitalize`}>{momentum}</span>
-            </div>
-          )}
-          
-          {/* Dropdown Menu */}
-          <div className="relative">
-            <button
-              onClick={() => setMenuOpen(!menuOpen)}
-              className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
-            >
-              <MoreVertical className="w-5 h-5 text-slate-600" />
-            </button>
-
-            {menuOpen && (
-              <>
-                <div 
-                  className="fixed inset-0 z-10" 
-                  onClick={() => setMenuOpen(false)}
-                />
-                
-                <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-slate-200 py-1 z-20">
-                  <button
-                    onClick={() => {
-                      onEdit();
-                      setMenuOpen(false);
-                    }}
-                    className="w-full px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2"
-                  >
-                    <Edit className="w-4 h-4" />
-                    Edit Goal
-                  </button>
-
-                  {goal.status === 'active' && (
-                    <>
-                      <button
-                        onClick={() => {
-                          onAchieve();
-                          setMenuOpen(false);
-                        }}
-                        className="w-full px-4 py-2 text-left text-sm text-green-700 hover:bg-green-50 flex items-center gap-2"
-                      >
-                        <CheckCircle2 className="w-4 h-4" />
-                        Mark as Achieved
-                      </button>
-                      <button
-                        onClick={() => {
-                          onArchive();
-                          setMenuOpen(false);
-                        }}
-                        className="w-full px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2"
-                      >
-                        <Archive className="w-4 h-4" />
-                        Archive
-                      </button>
-                    </>
-                  )}
-
-                  {goal. status === 'archived' && (
-                    <button
-                      onClick={() => {
-                        onActivate();
-                        setMenuOpen(false);
-                      }}
-                      className="w-full px-4 py-2 text-left text-sm text-blue-700 hover:bg-blue-50 flex items-center gap-2"
-                    >
-                      <RotateCcw className="w-4 h-4" />
-                      Activate
-                    </button>
-                  )}
-
-                  <div className="border-t border-slate-200 my-1" />
-                  
-                  <button
-                    onClick={() => {
-                      onDelete();
-                      setMenuOpen(false);
-                    }}
-                    className="w-full px-4 py-2 text-left text-sm text-red-700 hover:bg-red-50 flex items-center gap-2"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                    Delete
-                  </button>
-                </div>
-              </>
-            )}
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl max-w-lg w-full p-6">
+        <h2 className="text-2xl font-bold mb-4">Create New Goal</h2>
+        
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">
+              Goal Title *
+            </label>
+            <input
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="e.g., Health & Fitness, Career Growth..."
+              className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+              required
+              autoFocus
+            />
           </div>
-        </div>
-      </div>
 
-      {/* Metadata */}
-      <div className="text-sm text-slate-500">
-        Created {new Date(goal.created_at).toLocaleDateString('en-US', { 
-          month: 'short', 
-          day: 'numeric', 
-          year: 'numeric' 
-        })}
-        {goal.completed_at && (
-          <span className="ml-2">
-            • Completed {new Date(goal.completed_at).toLocaleDateString('en-US', { 
-              month: 'short', 
-              day: 'numeric', 
-              year: 'numeric' 
-            })}
-          </span>
-        )}
-        {goal.target_date && goal.status === 'active' && (
-          <span className="ml-2">
-            • Target: {new Date(goal.target_date).toLocaleDateString('en-US', { 
-              month: 'short', 
-              day: 'numeric', 
-              year:  'numeric' 
-            })}
-          </span>
-        )}
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">
+              Description (optional)
+            </label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="What does this goal represent?"
+              rows={3}
+              className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none"
+            />
+          </div>
+
+          <div className="flex gap-3 pt-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 font-medium transition-colors"
+              disabled={isLoading}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors disabled:opacity-50"
+              disabled={isLoading || !title.trim()}
+            >
+              {isLoading ? 'Creating...' : 'Create Goal'}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );
