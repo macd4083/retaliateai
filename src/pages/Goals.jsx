@@ -2,23 +2,73 @@
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { useGoals, useCreateGoal, useUpdateGoal, useDeleteGoal } from '@/hooks/useGoals';
-import { Target, Plus, ChevronRight } from 'lucide-react';
+import { Target, Plus, MoreVertical, Archive, Trash2 } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Button } from '@/components/ui/button';
 
 export default function Goals() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [activeView, setActiveView] = useState('active');
   const [showNewGoalModal, setShowNewGoalModal] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
   
-  // Map 'achieved' to 'completed' for the database query
-  const statusFilter = activeView === 'achieved' ? 'completed' : activeView;
+  // Fetch active goals
+  const { data: activeGoals = [], isLoading, error } = useGoals(user?.id, 'active');
   
-  // Fetch goals from database based on active view
-  const { data: goals = [], isLoading, error } = useGoals(user?.id, statusFilter);
+  // Fetch archived goals
+  const { data: archivedGoals = [] } = useGoals(user?.id, 'archived');
+  
   const createGoal = useCreateGoal(user?.id);
+  const updateGoal = useUpdateGoal();
+  const deleteGoal = useDeleteGoal();
 
   const handleCardClick = (goalId) => {
     navigate(`/goals/${goalId}`);
+  };
+
+  const handleArchive = async (e, goalId) => {
+    e.stopPropagation(); // Prevent card click
+    if (confirm('Archive this goal? You can restore it later.')) {
+      try {
+        await updateGoal.mutateAsync({
+          goalId,
+          goalData: { status: 'archived' },
+        });
+      } catch (error) {
+        console.error('Error archiving goal:', error);
+        alert('Failed to archive goal. Please try again.');
+      }
+    }
+  };
+
+  const handleDelete = async (e, goalId) => {
+    e.stopPropagation(); // Prevent card click
+    if (confirm('Are you sure you want to delete this goal? This cannot be undone.')) {
+      try {
+        await deleteGoal.mutateAsync(goalId);
+      } catch (error) {
+        console.error('Error deleting goal:', error);
+        alert('Failed to delete goal. Please try again.');
+      }
+    }
+  };
+
+  const handleRestore = async (e, goalId) => {
+    e.stopPropagation();
+    try {
+      await updateGoal.mutateAsync({
+        goalId,
+        goalData: { status: 'active' },
+      });
+    } catch (error) {
+      console.error('Error restoring goal:', error);
+      alert('Failed to restore goal. Please try again.');
+    }
   };
 
   if (isLoading) {
@@ -45,7 +95,7 @@ export default function Goals() {
 
   return (
     <div className="h-full overflow-y-auto bg-slate-50">
-      <div className="max-w-6xl mx-auto p-8">
+      <div className="max-w-4xl mx-auto p-8">
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div>
@@ -57,83 +107,143 @@ export default function Goals() {
           </div>
           <button 
             onClick={() => setShowNewGoalModal(true)}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 font-medium transition-colors"
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 font-medium transition-colors shadow-sm"
           >
             <Plus className="w-5 h-5" />
             New Goal
           </button>
         </div>
 
-        {/* View Tabs */}
-        <div className="flex gap-2 mb-6 border-b border-slate-200">
-          {[
-            { id: 'active', label: 'Active' },
-            { id: 'achieved', label: 'Achieved' },
-            { id: 'archived', label: 'Archived' },
-          ].map((view) => (
-            <button
-              key={view.id}
-              onClick={() => setActiveView(view.id)}
-              className={`px-4 py-2 font-medium transition-colors ${
-                activeView === view.id
-                  ? 'text-blue-600 border-b-2 border-blue-600'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              {view.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Goals Grid */}
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {goals.length === 0 ? (
-            <div className="col-span-full text-center py-12">
+        {/* Active Goals List */}
+        <div className="space-y-3">
+          {activeGoals.length === 0 ? (
+            <div className="text-center py-16 bg-white rounded-xl border-2 border-dashed border-slate-300">
               <Target className="w-16 h-16 text-slate-300 mx-auto mb-4" />
               <h3 className="text-lg font-semibold text-slate-600 mb-2">
-                {activeView === 'active' ? 'No active goals yet' : `No ${activeView} goals`}
+                No goals yet
               </h3>
-              <p className="text-slate-500 mb-4">
-                {activeView === 'active' ? 'Create your first goal to get started' : ''}
+              <p className="text-slate-500 mb-6">
+                Create your first goal to get started
               </p>
-              {activeView === 'active' && (
-                <button
-                  onClick={() => setShowNewGoalModal(true)}
-                  className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors"
-                >
-                  Create Goal
-                </button>
-              )}
+              <button
+                onClick={() => setShowNewGoalModal(true)}
+                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors"
+              >
+                Create Goal
+              </button>
             </div>
           ) : (
-            goals.map((goal) => (
+            activeGoals.map((goal) => (
               <button
                 key={goal.id}
                 onClick={() => handleCardClick(goal.id)}
-                className="bg-white rounded-xl border-2 border-slate-200 p-6 hover:border-blue-500 hover:shadow-lg transition-all text-left group"
+                className="w-full bg-white rounded-lg border-2 border-slate-200 p-5 hover:border-blue-500 hover:shadow-md transition-all text-left group flex items-center justify-between"
               >
-                <div className="flex items-start justify-between mb-3">
-                  <h3 className="text-xl font-bold text-slate-900 group-hover:text-blue-600 transition-colors">
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-xl font-bold text-slate-900 group-hover:text-blue-600 transition-colors mb-1 truncate">
                     {goal.title}
                   </h3>
-                  <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-blue-600 group-hover:translate-x-1 transition-all" />
+                  {goal.description && (
+                    <p className="text-sm text-slate-600 line-clamp-1">
+                      {goal.description}
+                    </p>
+                  )}
                 </div>
-                
-                {goal.description && (
-                  <p className="text-sm text-slate-600 line-clamp-2 mb-3">
-                    {goal.description}
-                  </p>
-                )}
 
-                {goal.category && (
-                  <span className="inline-block px-2 py-1 text-xs font-medium bg-slate-100 text-slate-700 rounded">
-                    {goal.category}
-                  </span>
-                )}
+                {/* 3-dot menu */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="ml-4 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <MoreVertical className="w-5 h-5 text-slate-400" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={(e) => handleArchive(e, goal.id)}>
+                      <Archive className="w-4 h-4 mr-2" />
+                      Archive
+                    </DropdownMenuItem>
+                    <DropdownMenuItem 
+                      onClick={(e) => handleDelete(e, goal.id)}
+                      className="text-red-600 focus:text-red-600 focus:bg-red-50"
+                    >
+                      <Trash2 className="w-4 h-4 mr-2" />
+                      Delete
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </button>
             ))
           )}
         </div>
+
+        {/* Show Archived Toggle */}
+        {archivedGoals.length > 0 && (
+          <div className="mt-8 pt-6 border-t border-slate-200">
+            <button
+              onClick={() => setShowArchived(!showArchived)}
+              className="text-slate-600 hover:text-slate-900 font-medium text-sm transition-colors flex items-center gap-2"
+            >
+              <Archive className="w-4 h-4" />
+              {showArchived ? 'Hide' : 'Show'} Archived ({archivedGoals.length})
+            </button>
+
+            {/* Archived Goals */}
+            {showArchived && (
+              <div className="mt-4 space-y-3">
+                {archivedGoals.map((goal) => (
+                  <button
+                    key={goal.id}
+                    onClick={() => handleCardClick(goal.id)}
+                    className="w-full bg-slate-50 rounded-lg border-2 border-slate-200 p-5 hover:border-slate-400 hover:shadow-sm transition-all text-left group flex items-center justify-between opacity-60 hover:opacity-100"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <h3 className="text-xl font-bold text-slate-700 mb-1 truncate">
+                        {goal.title}
+                      </h3>
+                      {goal.description && (
+                        <p className="text-sm text-slate-500 line-clamp-1">
+                          {goal.description}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Archived menu */}
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className="ml-4 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <MoreVertical className="w-5 h-5 text-slate-400" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={(e) => handleRestore(e, goal.id)}>
+                          <Archive className="w-4 h-4 mr-2" />
+                          Restore
+                        </DropdownMenuItem>
+                        <DropdownMenuItem 
+                          onClick={(e) => handleDelete(e, goal.id)}
+                          className="text-red-600 focus:text-red-600 focus:bg-red-50"
+                        >
+                          <Trash2 className="w-4 h-4 mr-2" />
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* New Goal Modal */}
         {showNewGoalModal && (
@@ -185,7 +295,7 @@ function NewGoalModal({ onClose, onCreate, isLoading }) {
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g., Health & Fitness, Career Growth..."
+              placeholder="e.g., Academics, Boxing, Photography..."
               className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
               required
               autoFocus
