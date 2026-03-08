@@ -2,7 +2,7 @@
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { useGoals, useCreateGoal, useUpdateGoal, useDeleteGoal } from '@/hooks/useGoals';
-import { Target, Plus, MoreVertical, Archive, Trash2, GripVertical } from 'lucide-react';
+import { Target, Plus, MoreVertical, Archive, Trash2, GripVertical, Pencil } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -34,6 +34,7 @@ export default function Goals() {
   const [showNewGoalModal, setShowNewGoalModal] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const [activeId, setActiveId] = useState(null);
+  const [editingGoal, setEditingGoal] = useState(null);
   
   // Fetch active goals
   const { data: activeGoals = [], isLoading, error } = useGoals(user?.id, 'active');
@@ -100,7 +101,7 @@ export default function Goals() {
         goalData: { display_order: index },
       }));
 
-      // Execute updates (you might want to batch these in a real app)
+      // Execute updates
       for (const update of updates) {
         await updateGoal.mutateAsync(update);
       }
@@ -113,6 +114,11 @@ export default function Goals() {
 
   const handleCardClick = (goalId) => {
     navigate(`/goals/${goalId}`);
+  };
+
+  const handleEdit = (e, goal) => {
+    e.stopPropagation();
+    setEditingGoal(goal);
   };
 
   const handleArchive = async (e, goalId) => {
@@ -234,6 +240,7 @@ export default function Goals() {
                     key={goal.id}
                     goal={goal}
                     onCardClick={handleCardClick}
+                    onEdit={handleEdit}
                     onArchive={handleArchive}
                     onDelete={handleDelete}
                     isDragging={activeId === goal.id}
@@ -249,6 +256,7 @@ export default function Goals() {
               <GoalCard
                 goal={activeGoal}
                 onCardClick={() => {}}
+                onEdit={() => {}}
                 onArchive={() => {}}
                 onDelete={() => {}}
                 isDragging={true}
@@ -277,6 +285,7 @@ export default function Goals() {
                     key={goal.id}
                     goal={goal}
                     onCardClick={handleCardClick}
+                    onEdit={handleEdit}
                     onArchive={handleRestore}
                     onDelete={handleDelete}
                     isArchived={true}
@@ -289,9 +298,9 @@ export default function Goals() {
 
         {/* New Goal Modal */}
         {showNewGoalModal && (
-          <NewGoalModal
+          <GoalModal
             onClose={() => setShowNewGoalModal(false)}
-            onCreate={(goalData) => {
+            onSave={(goalData) => {
               createGoal.mutate(goalData, {
                 onSuccess: (newGoal) => {
                   setShowNewGoalModal(false);
@@ -302,13 +311,35 @@ export default function Goals() {
             isLoading={createGoal.isPending}
           />
         )}
+
+        {/* Edit Goal Modal */}
+        {editingGoal && (
+          <GoalModal
+            goal={editingGoal}
+            onClose={() => setEditingGoal(null)}
+            onSave={(goalData) => {
+              updateGoal.mutate(
+                {
+                  goalId: editingGoal.id,
+                  goalData,
+                },
+                {
+                  onSuccess: () => {
+                    setEditingGoal(null);
+                  },
+                }
+              );
+            }}
+            isLoading={updateGoal.isPending}
+          />
+        )}
       </div>
     </div>
   );
 }
 
 // Sortable wrapper for drag & drop
-function SortableGoalCard({ goal, onCardClick, onArchive, onDelete, isDragging }) {
+function SortableGoalCard({ goal, onCardClick, onEdit, onArchive, onDelete, isDragging }) {
   const {
     attributes,
     listeners,
@@ -329,6 +360,7 @@ function SortableGoalCard({ goal, onCardClick, onArchive, onDelete, isDragging }
       <GoalCard
         goal={goal}
         onCardClick={onCardClick}
+        onEdit={onEdit}
         onArchive={onArchive}
         onDelete={onDelete}
         isDragging={isDragging}
@@ -339,7 +371,7 @@ function SortableGoalCard({ goal, onCardClick, onArchive, onDelete, isDragging }
 }
 
 // Goal card component
-function GoalCard({ goal, onCardClick, onArchive, onDelete, isArchived = false, isDragging = false, isOverlay = false, dragHandleProps = {} }) {
+function GoalCard({ goal, onCardClick, onEdit, onArchive, onDelete, isArchived = false, isDragging = false, isOverlay = false, dragHandleProps = {} }) {
   return (
     <button
       onClick={() => !isDragging && onCardClick(goal.id)}
@@ -393,6 +425,10 @@ function GoalCard({ goal, onCardClick, onArchive, onDelete, isArchived = false, 
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={(e) => onEdit(e, goal)}>
+              <Pencil className="w-4 h-4 mr-2" />
+              Edit
+            </DropdownMenuItem>
             <DropdownMenuItem onClick={(e) => onArchive(e, goal.id)}>
               <Archive className="w-4 h-4 mr-2" />
               {isArchived ? 'Restore' : 'Archive'}
@@ -411,37 +447,41 @@ function GoalCard({ goal, onCardClick, onArchive, onDelete, isArchived = false, 
   );
 }
 
-// Modal component (unchanged)
-function NewGoalModal({ onClose, onCreate, isLoading }) {
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
+// Goal Modal (for both create and edit)
+function GoalModal({ goal = null, onClose, onSave, isLoading }) {
+  const [title, setTitle] = useState(goal?.title || '');
+  const [description, setDescription] = useState(goal?.description || '');
+
+  const isEditing = !!goal;
 
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!title.trim()) return;
     
-    onCreate({
+    onSave({
       title: title.trim(),
       description: description.trim() || null,
-      status: 'active',
+      status: goal?.status || 'active',
     });
   };
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-xl max-w-lg w-full p-6">
-        <h2 className="text-2xl font-bold mb-4">Create New Goal</h2>
+        <h2 className="text-2xl font-bold mb-4">
+          {isEditing ? 'Edit Goal' : 'Create New Goal'}
+        </h2>
         
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-2">
-              Goal Title *
+              Goal Name
             </label>
             <input
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g., Academics, Boxing, Photography..."
+              placeholder="What are you looking to improve? e.g., Academics, Health, Career"
               className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
               required
               autoFocus
@@ -455,7 +495,7 @@ function NewGoalModal({ onClose, onCreate, isLoading }) {
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="What does this goal represent?"
+              placeholder="What specifically are you working on?"
               rows={3}
               className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none"
             />
@@ -475,7 +515,7 @@ function NewGoalModal({ onClose, onCreate, isLoading }) {
               className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors disabled:opacity-50"
               disabled={isLoading || !title.trim()}
             >
-              {isLoading ? 'Creating...' : 'Create Goal'}
+              {isLoading ? 'Saving...' : isEditing ? 'Save Changes' : 'Create Goal'}
             </button>
           </div>
         </form>

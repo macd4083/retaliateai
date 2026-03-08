@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
-import { useGoal } from '@/hooks/useGoals';
+import { useGoal, useUpdateGoal, useDeleteGoal } from '@/hooks/useGoals';
 import { useGoalActions, useCreateGoalAction, useUpdateGoalAction, useCompleteGoalAction, useArchiveGoalAction, useDeleteGoalAction } from '@/hooks/useGoalActions';
-import { ArrowLeft, Plus, CheckCircle, Archive, Trash2, MoreVertical } from 'lucide-react';
+import { ArrowLeft, Plus, CheckCircle, Archive, Trash2, MoreVertical, Pencil } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
 
@@ -13,8 +13,12 @@ export default function GoalDetail() {
   const { user } = useAuth();
   const [activeView, setActiveView] = useState('active');
   const [showNewActionModal, setShowNewActionModal] = useState(false);
+  const [editingGoal, setEditingGoal] = useState(false);
 
   const { data: goal, isLoading: goalLoading } = useGoal(goalId);
+  const updateGoal = useUpdateGoal();
+  const deleteGoal = useDeleteGoal();
+  
   const statusFilter = activeView === 'achieved' ? 'achieved' : activeView;
   const { data: actions = [], isLoading: actionsLoading } = useGoalActions(goalId, statusFilter);
 
@@ -62,7 +66,49 @@ export default function GoalDetail() {
 
         {/* Goal Header */}
         <div className="bg-white rounded-xl border border-slate-200 p-6 mb-6">
-          <h1 className="text-3xl font-bold text-slate-900 mb-2">{goal.title}</h1>
+          <div className="flex items-start justify-between mb-2">
+            <h1 className="text-3xl font-bold text-slate-900 flex-1">{goal.title}</h1>
+            
+            {/* 3-dot menu */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="flex-shrink-0">
+                  <MoreVertical className="w-5 h-5 text-slate-400" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => setEditingGoal(true)}>
+                  <Pencil className="w-4 h-4 mr-2" />
+                  Edit
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => {
+                  if (confirm('Archive this goal? You can restore it later.')) {
+                    updateGoal.mutate(
+                      { goalId: goal.id, goalData: { status: 'archived' } },
+                      { onSuccess: () => navigate('/goals') }
+                    );
+                  }
+                }}>
+                  <Archive className="w-4 h-4 mr-2" />
+                  Archive
+                </DropdownMenuItem>
+                <DropdownMenuItem 
+                  onClick={() => {
+                    if (confirm('Delete this goal permanently? This cannot be undone.')) {
+                      deleteGoal.mutate(goal.id, {
+                        onSuccess: () => navigate('/goals')
+                      });
+                    }
+                  }}
+                  className="text-red-600 focus:text-red-600 focus:bg-red-50"
+                >
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Delete
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+          
           {goal.description && (
             <p className="text-slate-600">{goal.description}</p>
           )}
@@ -164,7 +210,7 @@ export default function GoalDetail() {
                       )}
                       <DropdownMenuItem
                         onClick={() => deleteAction.mutate(action.id)}
-                        className="text-red-600"
+                        className="text-red-600 focus:text-red-600 focus:bg-red-50"
                       >
                         <Trash2 className="w-4 h-4 mr-2" />
                         Delete
@@ -187,6 +233,21 @@ export default function GoalDetail() {
               });
             }}
             isLoading={createAction.isPending}
+          />
+        )}
+
+        {/* Edit Goal Modal */}
+        {editingGoal && (
+          <EditGoalModal
+            goal={goal}
+            onClose={() => setEditingGoal(false)}
+            onSave={(goalData) => {
+              updateGoal.mutate(
+                { goalId: goal.id, goalData },
+                { onSuccess: () => setEditingGoal(false) }
+              );
+            }}
+            isLoading={updateGoal.isPending}
           />
         )}
       </div>
@@ -258,6 +319,78 @@ function NewActionModal({ onClose, onCreate, isLoading }) {
               disabled={isLoading || !title.trim()}
             >
               {isLoading ? 'Creating...' : 'Create Action'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// Modal for editing goal
+function EditGoalModal({ goal, onClose, onSave, isLoading }) {
+  const [title, setTitle] = useState(goal.title);
+  const [description, setDescription] = useState(goal.description || '');
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!title.trim()) return;
+    
+    onSave({
+      title: title.trim(),
+      description: description.trim() || null,
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl max-w-lg w-full p-6">
+        <h2 className="text-2xl font-bold mb-4">Edit Goal</h2>
+        
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">
+              Goal Name
+            </label>
+            <input
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="What are you looking to improve? e.g., Academics, Health, Career"
+              className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+              required
+              autoFocus
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">
+              Description (optional)
+            </label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="What specifically are you working on?"
+              rows={3}
+              className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none"
+            />
+          </div>
+
+          <div className="flex gap-3 pt-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 font-medium transition-colors"
+              disabled={isLoading}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors disabled:opacity-50"
+              disabled={isLoading || !title.trim()}
+            >
+              {isLoading ? 'Saving...' : 'Save Changes'}
             </button>
           </div>
         </form>
