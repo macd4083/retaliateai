@@ -397,4 +397,4 @@ function EditGoalModal({ goal, onClose, onSave, isLoading }) {
       </div>
     </div>
   );
-}
+} 
