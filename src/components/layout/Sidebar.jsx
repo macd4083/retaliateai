@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { BookOpen, Lightbulb, Target, Users, Sparkles, Heart } from 'lucide-react';
+import { BookOpen, Lightbulb, Target, Users, Sparkles, Heart, Moon } from 'lucide-react';
 import { format } from 'date-fns';
 
 export default function Sidebar({
@@ -63,6 +63,15 @@ export default function Sidebar({
       tooltip: {
         title: 'Why It Works',
         description: 'Writing goals activates your Reticular Activating System (RAS)—your brain\'s filter that prioritizes what to notice. Creates a psychological contract with yourself. Implementation intentions ("When X, I will Y") increase follow-through by 2-3x.'
+      }
+    },
+    { 
+      id: 'reflection', 
+      icon: Moon, 
+      label: 'Reflection',
+      tooltip: {
+        title: 'Why It Works',
+        description: 'A nightly guided check-in that builds self-awareness through honest reflection. You review what went well, what didn\'t, and make a concrete plan for tomorrow — helping you improve consistently without guilt.'
       }
     },
   ];

@@ -8,3 +8,4 @@ export { peopleHelpers } from './people';
 export { todosHelpers } from './todos';
 export { habitsHelpers } from './habits';
 export { insightsHelpers } from './insights';
+export { reflectionHelpers } from './reflection';
