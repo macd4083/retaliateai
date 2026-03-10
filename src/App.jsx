@@ -9,6 +9,7 @@ import Insights from './pages/Insights';
 import Goals from './pages/Goals';
 import GoalDetail from './pages/GoalDetail';
 import Users from './pages/Users';
+import Reflection from './pages/Reflection';
 import { useAuth } from './lib/AuthContext';
 import {
   useJournalEntries,
@@ -31,6 +32,7 @@ export default function App() {
     if (path.startsWith('/gratitude')) return 'gratitude';
     if (path.startsWith('/users')) return 'users';
     if (path.startsWith('/people')) return 'people';
+    if (path.startsWith('/reflection')) return 'reflection';
     return 'journal';
   };
 
@@ -100,6 +102,7 @@ export default function App() {
       goals: '/goals',
       people: '/people',
       users: '/users',
+      reflection: '/reflection',
     };
     navigate(tabToPathMap[newTab] || '/journal');
   };
@@ -326,6 +329,15 @@ export default function App() {
   const handleDismissGoal = () => {
     setSuggestedGoal(null);
   };
+
+  // Render reflection page OUTSIDE sidebar layout (full-screen, no sidebar)
+  if (location.pathname.startsWith('/reflection')) {
+    return (
+      <Routes>
+        <Route path="/reflection" element={<Reflection />} />
+      </Routes>
+    );
+  }
 
   // RENDER LOADING WITH ANIMATION
   if (isLoading && animationPhase !== 'done') {
