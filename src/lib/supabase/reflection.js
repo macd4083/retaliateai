@@ -161,16 +161,16 @@ export const reflectionHelpers = {
     if (!data || data.length === 0) return 0;
 
     let streak = 0;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const todayTime = new Date();
+    todayTime.setHours(0, 0, 0, 0);
+    const oneDayMs = 24 * 60 * 60 * 1000;
 
     for (let i = 0; i < data.length; i++) {
       const sessionDate = new Date(data[i].date);
       sessionDate.setHours(0, 0, 0, 0);
-      const expected = new Date(today);
-      expected.setDate(expected.getDate() - i);
+      const expectedTime = todayTime.getTime() - i * oneDayMs;
 
-      if (sessionDate.getTime() === expected.getTime()) {
+      if (sessionDate.getTime() === expectedTime) {
         streak++;
       } else {
         break;

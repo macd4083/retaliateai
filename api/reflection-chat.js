@@ -278,6 +278,7 @@ function getTimeOfDay() {
   if (hour >= 12 && hour < 18) return 'afternoon';
   if (hour >= 18 && hour < 23) return 'evening';
   if (hour >= 23 || hour < 2) return 'late_night';
+  if (hour >= 2 && hour < 6) return 'early_morning';
   return 'late';
 }
 
@@ -287,5 +288,6 @@ function getTimeGreeting() {
   if (hour >= 12 && hour < 18) return 'Good afternoon';
   if (hour >= 18 && hour < 23) return 'Good evening';
   if (hour >= 23 || hour < 2) return "Still up?";
+  if (hour >= 2 && hour < 6) return "Can't sleep?";
   return 'Hey';
 }

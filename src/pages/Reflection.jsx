@@ -12,6 +12,7 @@ function getTimeContext() {
   if (hour >= 12 && hour < 18) return { period: 'afternoon', greeting: 'Good afternoon' };
   if (hour >= 18 && hour < 23) return { period: 'evening', greeting: 'Good evening' };
   if (hour >= 23 || hour < 2) return { period: 'late_night', greeting: 'Still up?' };
+  if (hour >= 2 && hour < 6) return { period: 'early_morning', greeting: "Can't sleep?" };
   return { period: 'late', greeting: 'Hey' };
 }
 
@@ -168,7 +169,7 @@ function ChatMessage({ message, onChipSelect, chipsDisabled, streak }) {
           <Moon className="w-4 h-4 text-red-400" />
         </div>
       )}
-      <div className={`max-w-[75%] ${isUser ? '' : ''}`}>
+      <div className={`max-w-[75%]`}>
         <div
           className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
             isUser
@@ -247,8 +248,8 @@ export default function Reflection() {
 
   useEffect(() => {
     if (!user?.id) return;
-    initSession();
-  }, [user?.id]);
+    initSession(); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [user?.id]); // initSession is defined in component scope and only needs to run on user change
 
   async function initSession() {
     setIsInitializing(true);
