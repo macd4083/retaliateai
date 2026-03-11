@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase/client';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Mail, Lock, ArrowLeft, Eye, EyeOff } from 'lucide-react';
+import { Mail, Lock, ArrowLeft, Eye, EyeOff, RefreshCw } from 'lucide-react';
 
 export default function Login() {
   const [searchParams] = useSearchParams();
@@ -310,6 +310,18 @@ function VerificationWaitingScreen({ signupEmail, signupPassword, onBack, naviga
   const [otpLoading, setOtpLoading] = useState(false);
   const [otpMessage, setOtpMessage] = useState('');
   const [otpMessageType, setOtpMessageType] = useState('');
+  const [resendLoading, setResendLoading] = useState(false);
+  const [resendMessage, setResendMessage] = useState('');
+  const [resendMessageType, setResendMessageType] = useState('');
+  const [resendCooldown, setResendCooldown] = useState(0);
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = setTimeout(() => {
+      setResendCooldown(prev => prev - 1);
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [resendCooldown]);
 
   useEffect(() => {
     const dotsInterval = setInterval(() => {
@@ -382,6 +394,28 @@ function VerificationWaitingScreen({ signupEmail, signupPassword, onBack, naviga
     }
   };
 
+  const handleResendEmail = async () => {
+    if (resendCooldown > 0 || resendLoading) return;
+    setResendLoading(true);
+    setResendMessage('');
+
+    const { error } = await supabase.auth.resend({
+      type: 'signup',
+      email: signupEmail,
+      options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+    });
+
+    if (error) {
+      setResendMessage(error.message);
+      setResendMessageType('error');
+    } else {
+      setResendMessage('Verification email resent! Check your inbox.');
+      setResendMessageType('success');
+      setResendCooldown(60);
+    }
+    setResendLoading(false);
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-purple-50 px-4">
       <div className="max-w-md w-full bg-white p-8 rounded-2xl shadow-lg border border-slate-200">
@@ -444,13 +478,37 @@ function VerificationWaitingScreen({ signupEmail, signupPassword, onBack, naviga
           </button>
         </form>
 
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <p className="text-sm text-blue-800 font-semibold mb-2">Can't find the email?</p>
-          <ul className="text-sm text-blue-700 space-y-1 ml-4 list-disc">
+        <div className="border border-slate-200 rounded-lg p-4">
+          <p className="text-sm text-slate-700 font-semibold mb-3">Didn't get the email?</p>
+
+          {resendMessage && (
+            <div className={`p-3 rounded-lg text-sm mb-3 ${
+              resendMessageType === 'success'
+                ? 'bg-green-50 text-green-700 border border-green-200'
+                : 'bg-red-50 text-red-700 border border-red-200'
+            }`}>
+              {resendMessage}
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={handleResendEmail}
+            disabled={resendLoading || resendCooldown > 0}
+            className="flex items-center justify-center gap-2 w-full py-2 px-4 rounded-lg border border-slate-300 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed mb-3"
+          >
+            <RefreshCw className={`w-4 h-4 ${resendLoading ? 'animate-spin' : ''}`} />
+            {resendLoading
+              ? 'Sending...'
+              : resendCooldown > 0
+              ? `Resend email (${resendCooldown}s)`
+              : 'Resend verification email'}
+          </button>
+
+          <ul className="text-sm text-slate-600 space-y-1 ml-4 list-disc">
             <li>Check your spam/junk folder</li>
-            <li>Wait a few minutes - emails can be delayed</li>
-            <li>Click the link on ANY device (phone, tablet, etc.)</li>
-            <li>This page detects verification automatically</li>
+            <li>Emails can take a few minutes to arrive</li>
+            <li>The link works on any device</li>
           </ul>
         </div>
 
