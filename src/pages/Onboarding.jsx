@@ -71,7 +71,8 @@ export default function Onboarding({ onComplete }) {
     try {
       const { error } = await supabase
         .from('user_profiles')
-        .upsert({ id: user.id, display_name: name.trim(), age: parseInt(age) }, { onConflict: 'id' });
+        .update({ display_name: name.trim(), age: parseInt(age) })
+        .eq('id', user.id);
       if (error) throw error;
       setStep(2);
     } catch (error) {
@@ -95,7 +96,8 @@ export default function Onboarding({ onComplete }) {
     try {
       const { error } = await supabase
         .from('user_profiles')
-        .upsert({ id: user.id, life_areas: selectedAreas, primary_life_area: primaryArea }, { onConflict: 'id' });
+        .update({ life_areas: selectedAreas, primary_life_area: primaryArea })
+        .eq('id', user.id);
       if (error) throw error;
       setStep(3);
     } catch (error) {
@@ -116,7 +118,8 @@ export default function Onboarding({ onComplete }) {
     try {
       const { error } = await supabase
         .from('user_profiles')
-        .upsert({ id: user.id, future_self_vision: trimmedVision }, { onConflict: 'id' });
+        .update({ future_self_vision: trimmedVision })
+        .eq('id', user.id);
       if (error) throw error;
       setStep(4);
     } catch (error) {
@@ -140,10 +143,8 @@ export default function Onboarding({ onComplete }) {
     try {
       const { error } = await supabase
         .from('user_profiles')
-        .upsert(
-          { id: user.id, core_why: coreWhy.trim(), identity_statement: identityStatement.trim() },
-          { onConflict: 'id' }
-        );
+        .update({ core_why: coreWhy.trim(), identity_statement: identityStatement.trim() })
+        .eq('id', user.id);
       if (error) throw error;
       setStep(5);
     } catch (error) {
@@ -165,9 +166,7 @@ export default function Onboarding({ onComplete }) {
     try {
       const { error } = await supabase
         .from('user_profiles')
-        .upsert(
-          {
-            id: user.id,
+        .update({
             journaling_goal: finalGoal,
             preferred_reminder_time: finalTime,
             reminder_enabled: reminderEnabled,
@@ -179,9 +178,8 @@ export default function Onboarding({ onComplete }) {
               identity_statement: identityStatement,
               journaling_goal: finalGoal,
             },
-          },
-          { onConflict: 'id' }
-        );
+          })
+        .eq('id', user.id);
       if (error) throw error;
       setStep(6);
     } catch (error) {
@@ -197,7 +195,8 @@ export default function Onboarding({ onComplete }) {
     try {
       const { error } = await supabase
         .from('user_profiles')
-        .upsert({ id: user.id, onboarding_completed: true }, { onConflict: 'id' });
+        .update({ onboarding_completed: true })
+        .eq('id', user.id);
       if (error) throw error;
       onComplete();
     } catch (error) {
