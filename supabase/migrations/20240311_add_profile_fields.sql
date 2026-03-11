@@ -1,0 +1,11 @@
+ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS full_name text;
+ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS bio text;
+ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS identity_statement text;
+ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS big_goal text;
+ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS why text;
+ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS future_self text;
+ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS life_areas text[];
+ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS blockers text[];
+ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS preferred_reflection_time time;
+ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS timezone text DEFAULT 'America/New_York';
+ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS onboarding_step integer DEFAULT 1;

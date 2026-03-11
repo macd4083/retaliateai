@@ -1,0 +1,339 @@
+import React, { useEffect, useState } from 'react';
+import { useAuth } from '../lib/AuthContext';
+import { supabase } from '../lib/supabase/client';
+import AppShellV2 from '../components/v2/AppShellV2';
+
+const TIMEZONES = [
+  { label: 'Eastern (ET)', value: 'America/New_York' },
+  { label: 'Central (CT)', value: 'America/Chicago' },
+  { label: 'Mountain (MT)', value: 'America/Denver' },
+  { label: 'Pacific (PT)', value: 'America/Los_Angeles' },
+  { label: 'Alaska (AKT)', value: 'America/Anchorage' },
+  { label: 'Hawaii (HT)', value: 'Pacific/Honolulu' },
+  { label: 'UTC', value: 'UTC' },
+];
+
+const LIFE_AREA_EMOJI = {
+  'Career & Business': '💼',
+  'Health & Fitness': '🏋️',
+  'Relationships': '❤️',
+  'Personal Growth': '🧠',
+  'Money & Finance': '💰',
+  'Creativity': '🎨',
+  'Spirituality': '🙏',
+  'Education': '🎓',
+};
+
+export default function SettingsV2() {
+  const { user, signOut } = useAuth();
+
+  const [profile, setProfile] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  // Editable fields
+  const [editingName, setEditingName] = useState(false);
+  const [nameValue, setNameValue] = useState('');
+  const [nameSaving, setNameSaving] = useState(false);
+
+  const [editingTime, setEditingTime] = useState(false);
+  const [timeValue, setTimeValue] = useState('21:00');
+  const [tzValue, setTzValue] = useState('America/New_York');
+  const [timeSaving, setTimeSaving] = useState(false);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    loadProfile();
+  }, [user?.id]);
+
+  async function loadProfile() {
+    setLoading(true);
+    const { data } = await supabase
+      .from('user_profiles')
+      .select(
+        'display_name, full_name, identity_statement, big_goal, why, future_self, life_areas, preferred_reflection_time, timezone'
+      )
+      .eq('id', user.id)
+      .maybeSingle();
+    setProfile(data);
+    setNameValue(data?.display_name || data?.full_name || '');
+    setTimeValue(data?.preferred_reflection_time || '21:00');
+    setTzValue(data?.timezone || 'America/New_York');
+    setLoading(false);
+  }
+
+  const saveProfile = async (updates) => {
+    await supabase
+      .from('user_profiles')
+      .update({ ...updates, updated_at: new Date().toISOString() })
+      .eq('id', user.id);
+  };
+
+  const handleSaveName = async () => {
+    if (!nameValue.trim()) return;
+    setNameSaving(true);
+    try {
+      await saveProfile({ display_name: nameValue.trim(), full_name: nameValue.trim() });
+      setProfile((p) => ({ ...p, display_name: nameValue.trim(), full_name: nameValue.trim() }));
+      setEditingName(false);
+    } finally {
+      setNameSaving(false);
+    }
+  };
+
+  const handleSaveTime = async () => {
+    setTimeSaving(true);
+    try {
+      await saveProfile({ preferred_reflection_time: timeValue, timezone: tzValue });
+      setProfile((p) => ({ ...p, preferred_reflection_time: timeValue, timezone: tzValue }));
+      setEditingTime(false);
+    } finally {
+      setTimeSaving(false);
+    }
+  };
+
+  const handleSignOut = async () => {
+    await signOut();
+  };
+
+  if (loading) {
+    return (
+      <AppShellV2 title="Settings">
+        <div className="h-full overflow-y-auto flex items-center justify-center">
+          <div className="w-8 h-8 border-2 border-zinc-700 border-t-red-500 rounded-full animate-spin" />
+        </div>
+      </AppShellV2>
+    );
+  }
+
+  const displayName = profile?.display_name || profile?.full_name || 'You';
+
+  return (
+    <AppShellV2 title="Settings">
+      <div className="h-full overflow-y-auto">
+        <div className="max-w-md mx-auto px-4 py-6 space-y-6">
+
+          {/* ── Profile ─────────────────────────────────────────────── */}
+          <section className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
+            <h2 className="text-white font-semibold text-sm uppercase tracking-wider mb-4">Profile</h2>
+
+            {/* Name */}
+            <div className="mb-4">
+              <p className="text-zinc-500 text-xs mb-1">Name</p>
+              {editingName ? (
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={nameValue}
+                    onChange={(e) => setNameValue(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSaveName()}
+                    autoFocus
+                    className="flex-1 bg-zinc-800 border border-zinc-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-red-600"
+                  />
+                  <button
+                    onClick={handleSaveName}
+                    disabled={nameSaving}
+                    className="px-3 py-2 bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors"
+                  >
+                    {nameSaving ? '...' : 'Save'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setNameValue(profile?.display_name || profile?.full_name || '');
+                      setEditingName(false);
+                    }}
+                    className="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 text-sm rounded-lg transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between">
+                  <p className="text-white font-medium">{displayName}</p>
+                  <button
+                    onClick={() => setEditingName(true)}
+                    className="text-zinc-500 hover:text-white text-xs transition-colors"
+                  >
+                    Edit
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Email */}
+            <div>
+              <p className="text-zinc-500 text-xs mb-1">Email</p>
+              <p className="text-zinc-300 text-sm">{user?.email}</p>
+            </div>
+          </section>
+
+          {/* ── Reflection Time ──────────────────────────────────────── */}
+          <section className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
+            <h2 className="text-white font-semibold text-sm uppercase tracking-wider mb-4">
+              Reflection Time
+            </h2>
+
+            {editingTime ? (
+              <div className="space-y-3">
+                <div>
+                  <label className="text-zinc-500 text-xs mb-1 block">Time</label>
+                  <input
+                    type="time"
+                    value={timeValue}
+                    onChange={(e) => setTimeValue(e.target.value)}
+                    className="bg-zinc-800 border border-zinc-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-red-600"
+                  />
+                </div>
+                <div>
+                  <label className="text-zinc-500 text-xs mb-1 block">Timezone</label>
+                  <select
+                    value={tzValue}
+                    onChange={(e) => setTzValue(e.target.value)}
+                    className="bg-zinc-800 border border-zinc-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-red-600 appearance-none"
+                  >
+                    {TIMEZONES.map((tz) => (
+                      <option key={tz.value} value={tz.value}>
+                        {tz.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <button
+                    onClick={handleSaveTime}
+                    disabled={timeSaving}
+                    className="px-4 py-2 bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white text-sm rounded-lg transition-colors"
+                  >
+                    {timeSaving ? 'Saving...' : 'Save'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setTimeValue(profile?.preferred_reflection_time || '21:00');
+                      setTzValue(profile?.timezone || 'America/New_York');
+                      setEditingTime(false);
+                    }}
+                    className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 text-sm rounded-lg transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-white font-medium">
+                      {profile?.preferred_reflection_time || '9:00 PM'}
+                    </p>
+                    <p className="text-zinc-500 text-xs mt-0.5">
+                      {profile?.timezone || 'America/New_York'}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setEditingTime(true)}
+                    className="text-zinc-500 hover:text-white text-xs transition-colors"
+                  >
+                    Edit
+                  </button>
+                </div>
+                <p className="text-zinc-600 text-xs mt-3">Notifications coming soon.</p>
+              </div>
+            )}
+          </section>
+
+          {/* ── Your Why ────────────────────────────────────────────── */}
+          <section className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-white font-semibold text-sm uppercase tracking-wider">Your Why</h2>
+              <button
+                onClick={() => alert('Coming soon')}
+                className="text-zinc-500 hover:text-white text-xs transition-colors"
+              >
+                Update
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              {profile?.identity_statement && (
+                <div>
+                  <p className="text-zinc-500 text-xs mb-0.5">Identity</p>
+                  <p className="text-zinc-200 text-sm italic">"{profile.identity_statement}"</p>
+                </div>
+              )}
+              {profile?.big_goal && (
+                <div>
+                  <p className="text-zinc-500 text-xs mb-0.5">Big Goal</p>
+                  <p className="text-zinc-200 text-sm">{profile.big_goal}</p>
+                </div>
+              )}
+              {profile?.why && (
+                <div>
+                  <p className="text-zinc-500 text-xs mb-0.5">Deep Why</p>
+                  <p className="text-zinc-200 text-sm">{profile.why}</p>
+                </div>
+              )}
+              {profile?.future_self && (
+                <div>
+                  <p className="text-zinc-500 text-xs mb-0.5">Future Self</p>
+                  <p className="text-zinc-200 text-sm italic">"{profile.future_self}"</p>
+                </div>
+              )}
+              {!profile?.identity_statement && !profile?.big_goal && (
+                <p className="text-zinc-600 text-sm">
+                  Complete onboarding to set your why.
+                </p>
+              )}
+            </div>
+          </section>
+
+          {/* ── Focus Areas ─────────────────────────────────────────── */}
+          <section className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-white font-semibold text-sm uppercase tracking-wider">
+                Focus Areas
+              </h2>
+              <button
+                onClick={() => alert('Coming soon')}
+                className="text-zinc-500 hover:text-white text-xs transition-colors"
+              >
+                Update
+              </button>
+            </div>
+
+            {profile?.life_areas && profile.life_areas.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {profile.life_areas.map((area) => (
+                  <span
+                    key={area}
+                    className="px-3 py-1.5 rounded-full bg-red-900/30 border border-red-800/50 text-red-300 text-xs"
+                  >
+                    {LIFE_AREA_EMOJI[area] || ''} {area}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p className="text-zinc-600 text-sm">
+                Complete onboarding to set your focus areas.
+              </p>
+            )}
+          </section>
+
+          {/* ── Danger Zone ─────────────────────────────────────────── */}
+          <section className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
+            <h2 className="text-zinc-500 font-semibold text-sm uppercase tracking-wider mb-4">
+              Account
+            </h2>
+            <button
+              onClick={handleSignOut}
+              className="w-full py-3 rounded-xl bg-red-950 border border-red-800 text-red-400 hover:bg-red-900 hover:text-red-300 transition-colors text-sm font-medium"
+            >
+              Sign Out
+            </button>
+          </section>
+
+          {/* Bottom padding */}
+          <div className="h-4" />
+        </div>
+      </div>
+    </AppShellV2>
+  );
+}
