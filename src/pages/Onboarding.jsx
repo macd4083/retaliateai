@@ -21,11 +21,11 @@ export default function Onboarding({ onComplete }) {
     try {
       const { error } = await supabase
         .from('user_profiles')
-        .update({
+        .upsert({
+          id: user.id,
           display_name: name.trim(),
           age: parseInt(age),
-        })
-        .eq('id', user.id);
+        }, { onConflict: 'id' });
 
       if (error) throw error;
 
@@ -47,8 +47,10 @@ export default function Onboarding({ onComplete }) {
     try {
       const { error } = await supabase
         .from('user_profiles')
-        .update({ onboarding_completed: true })
-        .eq('id', user.id);
+        .upsert({
+          id: user.id,
+          onboarding_completed: true,
+        }, { onConflict: 'id' });
 
       if (error) throw error;
 
@@ -114,7 +116,7 @@ export default function Onboarding({ onComplete }) {
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="w-full bg-red-600 text-white py-3 rounded-lg font-medium hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full bg-red-600 text-white py-3 rounded-lg font-medium hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-not-allowed"
               >
                 {isSubmitting ? 'Saving...' : 'Continue'}
               </button>
