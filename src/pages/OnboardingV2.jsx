@@ -57,7 +57,7 @@ function ProgressDots({ step }) {
   );
 }
 
-export default function OnboardingV2() {
+export default function OnboardingV2({ onOnboardingComplete } = {}) {
   const { user } = useAuth();
   const navigate = useNavigate();
 
@@ -269,9 +269,11 @@ export default function OnboardingV2() {
     setSaving(true);
     try {
       await saveProfile({ onboarding_completed: true, onboarding_step: 7 });
-      navigate('/reflection');
+      // Signal parent (AuthGuardV2) that onboarding is done — avoids stale cache issue
+      if (onOnboardingComplete) onOnboardingComplete();
+      else navigate('/reflection');
     } catch (_e) {
-      alert('Failed to save. Please try again.');
+      alert('Failed to complete setup. Please try again.');
     } finally {
       setSaving(false);
     }
