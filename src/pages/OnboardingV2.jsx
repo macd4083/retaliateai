@@ -92,13 +92,13 @@ export default function OnboardingV2() {
     if (!user?.id) return;
     const { error } = await supabase
       .from('user_profiles')
-      .update({ ...updates, updated_at: new Date().toISOString() })
-      .eq('id', user.id);
+      .upsert(
+        { id: user.id, ...updates, updated_at: new Date().toISOString() },
+        { onConflict: 'id' }
+      );
     if (error) {
-      // try insert in case row doesn't exist
-      await supabase
-        .from('user_profiles')
-        .upsert({ id: user.id, ...updates, updated_at: new Date().toISOString() });
+      console.error('saveProfile error:', error);
+      throw error;
     }
   };
 
@@ -110,6 +110,8 @@ export default function OnboardingV2() {
     try {
       await saveProfile({ full_name: fullName.trim(), display_name: fullName.trim(), onboarding_step: 2 });
       setStep(2);
+    } catch (_e) {
+      alert('Failed to save. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -121,6 +123,8 @@ export default function OnboardingV2() {
     try {
       await saveProfile({ future_self: futureSelf.trim(), onboarding_step: 3 });
       setStep(3);
+    } catch (_e) {
+      alert('Failed to save. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -158,6 +162,8 @@ export default function OnboardingV2() {
       });
       setStep(4);
       setWhySubStep(1);
+    } catch (_e) {
+      alert('Failed to save. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -201,6 +207,8 @@ export default function OnboardingV2() {
       }
 
       setStep(5);
+    } catch (_e) {
+      alert('Failed to save. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -234,6 +242,8 @@ export default function OnboardingV2() {
       }
 
       setStep(6);
+    } catch (_e) {
+      alert('Failed to save. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -248,6 +258,8 @@ export default function OnboardingV2() {
         onboarding_step: 7,
       });
       setStep(7);
+    } catch (_e) {
+      alert('Failed to save. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -258,6 +270,8 @@ export default function OnboardingV2() {
     try {
       await saveProfile({ onboarding_completed: true, onboarding_step: 7 });
       navigate('/reflection');
+    } catch (_e) {
+      alert('Failed to save. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -486,26 +500,21 @@ export default function OnboardingV2() {
             <h2 className="text-2xl font-bold text-white mb-2">
               Which areas of life matter most to you right now?
             </h2>
-            <p className="text-zinc-400 text-sm mb-6">Select up to 4.</p>
+            <p className="text-zinc-400 text-sm mb-6">Select all that apply.</p>
             <div className="grid grid-cols-2 gap-3 mb-auto">
               {LIFE_AREA_OPTIONS.map(({ emoji, label }) => {
                 const selected = selectedLifeAreas.includes(label);
-                const atMax = selectedLifeAreas.length >= 4 && !selected;
                 return (
                   <button
                     key={label}
                     onClick={() => {
-                      if (atMax) return;
                       setSelectedLifeAreas((prev) =>
                         selected ? prev.filter((x) => x !== label) : [...prev, label]
                       );
                     }}
-                    disabled={atMax}
                     className={`flex flex-col items-center gap-2 p-4 rounded-2xl border transition-colors ${
                       selected
                         ? 'bg-red-900/40 border-red-600 text-white'
-                        : atMax
-                        ? 'bg-zinc-900 border-zinc-800 text-zinc-600 cursor-not-allowed'
                         : 'bg-zinc-900 border-zinc-700 text-zinc-300 hover:border-zinc-500'
                     }`}
                   >
@@ -540,7 +549,7 @@ export default function OnboardingV2() {
               type="time"
               value={reflectionTime}
               onChange={(e) => setReflectionTime(e.target.value)}
-              className="bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-red-600 transition-colors mb-4"
+              className="bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-red-600 transition-colors mb-4 [color-scheme:dark]"
             />
 
             <label className="block text-zinc-400 text-xs uppercase tracking-wider mb-2">
