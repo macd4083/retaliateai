@@ -66,7 +66,13 @@ function AuthGuardV2({ children }) {
 
   if (!user) return <Navigate to="/login" replace />;
 
-  if (!onboardingCompleted) return <OnboardingV2 />;
+  if (!onboardingCompleted) {
+    return (
+      <OnboardingV2
+        onOnboardingComplete={() => setOnboardingCompleted(true)}
+      />
+    );
+  }
 
   return children;
 }
