@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Settings, Moon, BarChart2, X } from 'lucide-react';
+import { Settings, Moon, BarChart2, X, Database } from 'lucide-react';
 import { useAuth } from '../../lib/AuthContext';
+import { supabase } from '../../lib/supabase/client';
 
 const NAV_LINKS = [
   { label: 'Reflection', path: '/reflection', icon: Moon },
@@ -14,12 +15,26 @@ export default function AppShellV2({ title, children }) {
   const location = useLocation();
   const { user, signOut } = useAuth();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   const displayName =
     user?.user_metadata?.display_name ||
     user?.user_metadata?.full_name ||
     user?.email?.split('@')[0] ||
     'You';
+
+  useEffect(() => {
+    if (!user?.id) return;
+    supabase
+      .from('user_profiles')
+      .select('role')
+      .eq('id', user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        setIsAdmin(data?.role === 'admin');
+      })
+      .catch(() => {});
+  }, [user?.id]);
 
   const handleSignOut = async () => {
     await signOut();
@@ -112,6 +127,23 @@ export default function AppShellV2({ title, children }) {
               </button>
             );
           })}
+          {isAdmin && (
+            <button
+              onClick={() => {
+                navigate('/admin');
+                setDrawerOpen(false);
+              }}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-colors mt-2 ${
+                location.pathname === '/admin'
+                  ? 'bg-red-900 text-red-300 border border-red-700'
+                  : 'text-red-500 hover:text-red-300 hover:bg-red-900/30 border border-transparent'
+              }`}
+            >
+              <Database className="w-4 h-4 flex-shrink-0" />
+              Admin
+              <span className="ml-auto px-1.5 py-0.5 rounded text-xs font-bold bg-red-900/60 border border-red-800 text-red-400">DEV</span>
+            </button>
+          )}
         </nav>
 
         {/* Sign out */}
