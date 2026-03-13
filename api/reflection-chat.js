@@ -68,6 +68,7 @@ CONTEXT YOU WILL RECEIVE EACH MESSAGE:
 - recent_patterns: recurring blockers/themes from the past 7 days
 - active_goals: their goals and why they matter to them
 - user_profile: who they are, what they're building
+- user_identity: structured identity data (name, big_goal, why, future_self, life_areas, blockers)
 - reflection_streak: how many nights in a row
 - time_of_day: morning/afternoon/evening/night
 - session_state: where we are, what's been collected so far
@@ -178,19 +179,47 @@ export default async function handler(req, res) {
     let userProfileText = '';
     if (user_id) {
       try {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('full_name, bio, identity_statement, target_market, big_goal, why')
-          .eq('id', user_id)
-          .maybeSingle();
-        if (profile) {
+        // Use new profile fields from context (sent by ReflectionV2) if available,
+        // otherwise fall back to querying the DB
+        const ctxName = context.display_name || null;
+        const ctxIdentity = context.identity_statement || null;
+        const ctxBigGoal = context.big_goal || null;
+        const ctxWhy = context.why || null;
+        const ctxFutureSelf = context.future_self || null;
+        const ctxLifeAreas = Array.isArray(context.life_areas) ? context.life_areas : [];
+        const ctxBlockers = Array.isArray(context.blockers) ? context.blockers : [];
+
+        if (ctxName || ctxIdentity || ctxBigGoal) {
+          // Context already provided by frontend — use it directly
           const parts = [];
-          if (profile.full_name) parts.push(`Name: ${profile.full_name}`);
-          if (profile.bio) parts.push(`About: ${profile.bio}`);
-          if (profile.identity_statement) parts.push(`Identity: ${profile.identity_statement}`);
-          if (profile.big_goal) parts.push(`Big goal: ${profile.big_goal}`);
-          if (profile.why) parts.push(`Their why: ${profile.why}`);
+          if (ctxName) parts.push(`Name: ${ctxName}`);
+          if (ctxIdentity) parts.push(`Identity: ${ctxIdentity}`);
+          if (ctxBigGoal) parts.push(`Big goal: ${ctxBigGoal}`);
+          if (ctxWhy) parts.push(`Their why: ${ctxWhy}`);
+          if (ctxFutureSelf) parts.push(`Future self vision: ${ctxFutureSelf}`);
+          if (ctxLifeAreas.length) parts.push(`Life focus areas: ${ctxLifeAreas.join(', ')}`);
+          if (ctxBlockers.length) parts.push(`Known blockers: ${ctxBlockers.join(', ')}`);
           userProfileText = parts.join('. ');
+        } else {
+          // Fall back to DB query
+          const { data: profile } = await supabase
+            .from('user_profiles')
+            .select('full_name, display_name, bio, identity_statement, big_goal, why, future_self, life_areas, blockers')
+            .eq('id', user_id)
+            .maybeSingle();
+          if (profile) {
+            const parts = [];
+            const name = profile.display_name || profile.full_name;
+            if (name) parts.push(`Name: ${name}`);
+            if (profile.bio) parts.push(`About: ${profile.bio}`);
+            if (profile.identity_statement) parts.push(`Identity: ${profile.identity_statement}`);
+            if (profile.big_goal) parts.push(`Big goal: ${profile.big_goal}`);
+            if (profile.why) parts.push(`Their why: ${profile.why}`);
+            if (profile.future_self) parts.push(`Future self vision: ${profile.future_self}`);
+            if (profile.life_areas?.length) parts.push(`Life focus areas: ${profile.life_areas.join(', ')}`);
+            if (profile.blockers?.length) parts.push(`Known blockers: ${profile.blockers.join(', ')}`);
+            userProfileText = parts.join('. ');
+          }
         }
       } catch (_e) {}
     }
@@ -222,12 +251,23 @@ export default async function handler(req, res) {
           recent_patterns: recentPatternsText || 'No patterns yet — this is early data.',
           user_profile: userProfileText || 'No profile set up yet.',
           active_goals: activeGoalsText || 'No active goals set yet.',
-          reflection_streak: context.reflection_streak || 0,
+          reflection_streak: context.reflection_streak || context.streak || 0,
           time_of_day: context.time_of_day || getTimeOfDay(),
+        },
+        user_identity: {
+          name: context.display_name || null,
+          identity_statement: context.identity_statement || null,
+          big_goal: context.big_goal || null,
+          why: context.why || null,
+          future_self: context.future_self || null,
+          life_areas: Array.isArray(context.life_areas) ? context.life_areas.join(', ') : '',
+          blockers: Array.isArray(context.blockers) ? context.blockers.join(', ') : '',
+          yesterday_commitment: yesterdayCommitment || 'none',
+          streak: context.reflection_streak || context.streak || 0,
         },
         session_state: session_state || {},
         instruction:
-          'Use the context above deeply. Reference their actual goals. Notice their patterns. Ask one question at a time. Be personal, not generic.',
+          'Use the context and user_identity above deeply. Reference their actual goals, why, and identity. Notice their patterns. Ask one question at a time. Be personal, not generic.',
       }),
     };
 

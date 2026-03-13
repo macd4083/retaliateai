@@ -1,0 +1,55 @@
+name: Create v1-legacy branch
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  create-v1-legacy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check if v1-legacy already exists
+        id: check-branch
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            https://api.github.com/repos/${{ github.repository }}/branches/v1-legacy)
+          echo "status=$STATUS" >> $GITHUB_OUTPUT
+
+      - name: Create v1-legacy from V1 main SHA
+        if: steps.check-branch.outputs.status == '404'
+        run: |
+          curl -s -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/${{ github.repository }}/git/refs \
+            -d '{"ref":"refs/heads/v1-legacy","sha":"9b71da357e857ff21b0b09540722a2917bd87e79"}'
+
+      - name: Checkout v1-legacy
+        if: steps.check-branch.outputs.status == '404'
+        uses: actions/checkout@v4
+        with:
+          ref: v1-legacy
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update domain references on v1-legacy
+        if: steps.check-branch.outputs.status == '404'
+        run: |
+          for file in index.html public/robots.txt public/sitemap.xml src/pages/PrivacyPolicy.jsx src/pages/TermsOfService.jsx; do
+            sed -i 's|retaliateai\.com|old.retaliateai.com|g' "$file"
+          done
+          # Fix the display-text typo in PrivacyPolicy.jsx (original has a space: "retaliateai. com")
+          sed -i 's|retaliateai\. com|old.retaliateai.com|g' src/pages/PrivacyPolicy.jsx
+
+      - name: Commit domain changes to v1-legacy
+        if: steps.check-branch.outputs.status == '404'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add index.html public/robots.txt public/sitemap.xml src/pages/PrivacyPolicy.jsx src/pages/TermsOfService.jsx
+          git diff --cached --quiet || git commit -m "Update domain references: retaliateai.com → old.retaliateai.com for v1-legacy"
+          git push origin v1-legacy
