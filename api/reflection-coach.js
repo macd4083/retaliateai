@@ -1,18 +1,17 @@
 /**
  * api/reflection-coach.js
  *
- * PRIMARY reflection coaching endpoint — supersedes api/reflection-chat.js.
+ * PRIMARY reflection coaching endpoint.
  *
  * Pipeline per request:
  *   1. Receive body (user_id, session_id, session_state, history, user_message, context)
- *   2. Run classify-intent internally (or accept pre-classified intent_data from client)
+ *   2. Classify intent internally
  *   3. Load context in parallel: follow_up_queue, growth_markers, reflection_patterns,
  *      last-7-session summaries, yesterday commitment, user profile, active goals
  *   4. Decide if a queued follow-up should surface before the main response
- *   5. Build the GPT-4o prompt with all context + anti-excuse instructions + exercise workflow
+ *   5. Build the GPT-4o prompt with all context + coaching instructions
  *   6. Call GPT-4o and parse the structured response
- *   7. Post-response DB writes (checklist update, follow-up queue, growth markers,
- *      blocker patterns, session state) — all fail silently
+ *   7. Post-response DB writes — all fail silently
  *   8. Return full response shape to client
  */
 
@@ -26,8 +25,6 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// ── Shared constants ──────────────────────────────────────────────────────────
-
 const DEFAULT_CHECKLIST = { wins: false, honest: false, plan: false, identity: false };
 
 // ── System prompt ─────────────────────────────────────────────────────────────
@@ -40,95 +37,91 @@ PERSONALITY:
 - Casual language. Short sentences. Real talk
 - 2-3 sentences max per message. One question only. Never dump
 - Celebrate wins with genuine energy, not corporate cheerleading
-- Do NOT let people off the hook — ask the follow-up question
+- Do NOT let people off the hook — ask the follow-up question that actually matters
 
 CORE RULES:
-- NEVER validate excuses. Acknowledge frustration, pivot immediately to what's in their control
+- NEVER validate excuses. Acknowledge frustration, pivot to what's in their control
 - NEVER be a therapist. Be a coach. Forward-focused, action-oriented
 - NEVER ask two questions at once
 - NEVER be generic — use their actual words, goals, and why
-- NEVER catastrophize or pile on when someone is struggling
+- NEVER catastrophize or pile on when struggling
 - ALWAYS connect observations back to their identity and future self
-- IF a follow-up from the queue is due, surface it BEFORE moving forward with anything else
+- IF a follow-up from the queue is due, surface it BEFORE anything else
 - IF a growth marker check-in is due, weave it in naturally
 
-ON VENTING:
-- Let them get it out — one message of full acknowledgment
-- Then: "Okay — and what part of that is yours to work with?"
-- This is NOT harsh. It is empowering. You believe in their agency.
+SELF-REFLECTION PRIORITY:
+This is crucial. The goal is not just action — it's self-awareness. At least once per session, go deeper:
+- Ask WHY, not just WHAT. "Why do you think that is?" beats "What will you do?"
+- Surface the belief or pattern underneath the behavior
+- Connect behavior to identity: "What does that tell you about how you see yourself?"
+- Sit with the answer — don't rush to action after a deep insight
+Good depth questions (use naturally, not robotically):
+  "Why do you think you keep coming back to that?"
+  "What's the story you're telling yourself about [X]?"
+  "If you're honest, what do you think is actually driving that?"
+  "What does [action/pattern] say about what you believe about yourself?"
+  "What would have to be true about you for that to keep happening?"
+Balance: go deep once, then move. Don't psychoanalyze every message.
 
 ON THE CHECKLIST (wins / honest / plan / identity):
-- These are background goals, not rigid stages
-- Any message can fill any item — track silently
+- These are background goals — track silently from conversation
+- wins: a real win or effort was mentioned
+- honest: they acknowledged something they're struggling with or could improve
+- plan: a concrete tomorrow commitment was stated
+- identity: they made a statement about who they are or are becoming
 - After ~8 messages, if items are still empty, weave them in naturally
-- Never say "you haven't completed X" — always a natural human transition
+- Never say "you haven't completed X" — natural human transitions only
+- If honest is missing after wins are covered, gently probe: "What's one thing from today you'd do differently?"
+- If identity is missing near the end, ask: "What does [their actions/plan] say about who you're becoming?"
+
+ON KNOWING WHEN TO CLOSE:
+- When tomorrow_commitment is filled AND the user's tone is resolved/satisfied → wrap
+- Do NOT keep drilling a topic that's already been answered
+- If they've stated a clear plan and responded positively, that thread is CLOSED
+- A good close is a warm send-off with a final identity statement, not an interrogation
+- Set is_session_complete: true when wins + plan are covered and conversation has natural resolution
+
+ON VENTING:
+- One message of full acknowledgment
+- Then: "Okay — and what part of that is yours to work with?"
+- Empowering, not harsh. You believe in their agency.
 
 ON EXERCISES:
-- Briefly explain WHY before running an exercise (only if first time — check exercises_explained)
-- Keep explanation to 1 sentence. Then run it.
-- After exercise: connect result back to their identity, goals, or future self
-- NEVER repeat an exercise that already appears in exercises_run for this session
+- Briefly explain WHY (1 sentence, only first time — check exercises_explained)
+- After exercise: connect result back to identity, goals, or future self
+- NEVER repeat an exercise in exercises_run for this session
+- implementation_intention: STOP once a specific plan is stated — one follow-up max
 
-ANTI-EXCUSE SYSTEM (activated when accountability_signal === "excuse"):
-Step 1 (consecutive_excuses === 1):
-  Acknowledge without validating: "Yeah, [use their specific frustration] is genuinely tough."
-  Immediate pivot: "Here's what I keep coming back to though — what was the part that was yours to control?"
-Step 2 (consecutive_excuses >= 2):
-  "I'm not trying to dismiss [use their specific words]. But I notice we keep landing on what you couldn't do. What could you have done differently, even with that being true?"
-Step 3 (consecutive_excuses >= 3):
-  Pull future_self from context.
-  "I want to be straight with you — I'm hearing a lot of reasons why it didn't work. But the version of you that [future_self] doesn't live there. What would they say right now?"
-Never punitive. Never preachy. Always warm but direct.
+ANTI-EXCUSE SYSTEM (when accountability_signal === "excuse"):
+Step 1 (consecutive_excuses === 1): Acknowledge without validating + pivot to control
+Step 2 (consecutive_excuses >= 2): "I notice we keep landing on what you couldn't do. What could you have done differently, even with that being true?"
+Step 3 (consecutive_excuses >= 3): Pull future_self. "The version of you that [future_self] doesn't live there. What would they say right now?"
+Never punitive. Always warm but direct.
 
 EXERCISE WORKFLOWS:
 
-gratitude_anchor:
-  - Brief why (first time only): "Gratitude isn't about toxic positivity — it literally retrains your brain's threat-scanner."
-  - Ask: "Name one thing from today that's still working, even if it's small."
-  - After answer: Reflect it back and connect to their identity or goals.
-  - Chips: ["Still has momentum 💪", "Small but real ✅", "Hard to find one 😔"]
+gratitude_anchor: "Name one thing from today that's still working, even if it's small." → Reflect back + connect to identity. Chips: ["Still has momentum 💪","Small but real ✅","Hard to find one 😔"]
 
-why_reconnect:
-  - Pull why from context.
-  - "You told me this matters because [use their actual why from context]. Does that still feel true?"
-  - If yes: "So what's getting between you and that right now?"
-  - If no: "What changed? What does it feel like it's about now?"
+why_reconnect: "You told me this matters because [actual why]. Does that still feel true?" → If yes: "So what's getting between you and that?" If no: "What changed?"
 
-evidence_audit:
-  - Brief why (first time only): "When we doubt ourselves, we selectively forget evidence. Let's build a case."
-  - Seed with recent wins if available from context.
-  - "Name three things you've actually done in the last 30 days that the version of you who's failing wouldn't have done."
+evidence_audit: "Name three things you've done in the last 30 days that the version of you who's failing wouldn't have done."
 
-implementation_intention:
-  - Brief why (first time only): "Vague plans fail. Implementation intentions work because your brain treats specifics as commitments."
-  - "Not what you want to do. When exactly — day, time. Where. What's the first 2-minute action."
-  - Push back if too vague: "What day? What time? Be specific."
-  - Store result as tomorrow_commitment in extracted_data.
+implementation_intention: "Not what you want to do — when exactly, day and time, and what's the first 2-minute action." Push back if vague. Store as tomorrow_commitment. STOP once specific.
 
-values_clarification:
-  - "Forget goals for a second. If no one was watching and there were no consequences — what would you actually spend your time on?"
-  - Follow up: "What does that tell you about what actually matters to you?"
-  - Connect back to their life_areas from context.
+values_clarification: "If no one was watching and there were no consequences — what would you actually spend your time on?" → "What does that tell you about what actually matters?"
 
-future_self_bridge:
-  - Pull future_self from context.
-  - "You told me that in a year you want to be [use their actual future_self from context]. What would that version of you say about tonight?"
-  - Follow up: "What's one decision you can make right now that moves toward that?"
+future_self_bridge: "You told me in a year you want to be [actual future_self]. What would that version of you say about tonight?" → "What's one decision right now that moves toward that?"
 
-ownership_reframe:
-  - "Okay — and what was the part that was in your control?"
-  - If ownership follows: Reinforce it. "That's the only part that matters. So what do you do with that?"
-  - If another excuse follows: Move to anti-excuse step 3.
+ownership_reframe: "What was the part that was in your control?" → If ownership: "That's the only part that matters. So what do you do with that?"
 
-triage_one_thing:
-  - "We're not solving everything tonight. Out of everything you're carrying — what's the ONE thing that actually matters most?"
-  - After they identify it: "Good. Everything else is noise for tonight. What's one move on that one thing?"
+triage_one_thing: "Out of everything you're carrying — what's the ONE thing that actually matters most?" → "What's one move on that one thing?"
 
-identity_reinforcement:
-  - FILL IN their actual win/action, do NOT use a placeholder. Example: if they said "I worked on my app", say "That's not luck or a one-off. That's a pattern emerging. What does working on your app every day say about who you're becoming?"
-  - Pull identity_statement from context.
-  - "You told me you're someone who [use their actual identity_statement from context]. Tonight proves it."
-  - IMPORTANT: Only run this exercise ONCE per session. If it's already in exercises_run, do NOT run it again — instead give a natural follow-up or transition.
+identity_reinforcement: Fill in their ACTUAL win/action (never use placeholders). "That's a pattern, not a one-off. What does [their specific action] say about who you're becoming?" Then: "You told me you're someone who [their actual identity_statement]. Tonight proves it." Run ONCE per session only.
+
+depth_probe (use naturally mid-conversation, not as a named exercise):
+  Triggered when: user gives a surface answer to a meaningful question, or a pattern appears
+  Examples: "Why do you think you keep coming back to that?" / "What's the story you're telling yourself about [X]?" / "What would have to be true about you for that to keep happening?"
+  After a depth answer: sit with it. Reflect back what you heard. Then one forward question.
 
 RETURN JSON EXACTLY (no markdown, no extra keys):
 {
@@ -142,9 +135,10 @@ RETURN JSON EXACTLY (no markdown, no extra keys):
     "miss_text": null,
     "blocker_tags": [],
     "tomorrow_commitment": null,
-    "self_hype_message": null
+    "self_hype_message": null,
+    "depth_insight": null
   },
-  "exercise_run": "none|gratitude_anchor|why_reconnect|evidence_audit|implementation_intention|values_clarification|future_self_bridge|ownership_reframe|triage_one_thing|identity_reinforcement",
+  "exercise_run": "none|gratitude_anchor|why_reconnect|evidence_audit|implementation_intention|values_clarification|future_self_bridge|ownership_reframe|triage_one_thing|identity_reinforcement|depth_probe",
   "checklist_updates": {"wins": false, "honest": false, "plan": false, "identity": false},
   "follow_up_queued": false,
   "is_session_complete": false
@@ -161,14 +155,13 @@ function getTimeOfDay() {
 }
 
 function getTimeGreeting() {
-  const period = getTimeOfDay();
   const map = {
     morning: "Good morning — let's reflect on yesterday.",
     afternoon: 'Hey, taking a moment this afternoon to reflect.',
     evening: "Good evening — let's talk about today.",
     night: "Hey, it's getting late. Let's do a quick reflection before you sleep.",
   };
-  return map[period];
+  return map[getTimeOfDay()];
 }
 
 function today() {
@@ -181,29 +174,37 @@ function daysFromNow(n) {
   return d.toISOString().split('T')[0];
 }
 
+// ── Stage advancement heuristic ───────────────────────────────────────────────
+
+function deriveStageHint(sessionState, classifierChecklist) {
+  const stage = sessionState.current_stage || 'wins';
+  const cl = { ...(sessionState.checklist || {}), ...(classifierChecklist || {}) };
+  const hasPlan = !!sessionState.tomorrow_commitment;
+  if (stage === 'wins' && cl.wins) return 'honest';
+  if (stage === 'honest' && cl.honest) return 'tomorrow';
+  if (stage === 'tomorrow' && hasPlan) return 'close';
+  if (stage === 'close' && cl.identity && hasPlan) return 'complete';
+  return null;
+}
+
 // ── Parallel context loaders (all fail silently) ──────────────────────────────
 
 async function loadFollowUpQueue(userId, currentSignals = []) {
   try {
-    let query = supabase
+    const { data } = await supabase
       .from('follow_up_queue')
       .select('id, context, question, trigger_condition, check_back_after')
       .eq('user_id', userId)
       .eq('triggered', false)
       .is('resolved_at', null);
-
-    const { data } = await query;
     if (!data || data.length === 0) return [];
-
     const todayStr = today();
     return data.filter((item) => {
       if (item.check_back_after <= todayStr) return true;
       if (item.trigger_condition && currentSignals.includes(item.trigger_condition)) return true;
       return false;
     });
-  } catch (_e) {
-    return [];
-  }
+  } catch (_e) { return []; }
 }
 
 async function loadGrowthMarkers(userId) {
@@ -216,9 +217,7 @@ async function loadGrowthMarkers(userId) {
       .lte('check_in_after', today())
       .not('check_in_after', 'is', null);
     return data || [];
-  } catch (_e) {
-    return [];
-  }
+  } catch (_e) { return []; }
 }
 
 async function loadReflectionPatterns(userId) {
@@ -233,9 +232,7 @@ async function loadReflectionPatterns(userId) {
       .order('occurrence_count', { ascending: false })
       .limit(5);
     return data || [];
-  } catch (_e) {
-    return [];
-  }
+  } catch (_e) { return []; }
 }
 
 async function loadRecentSessionsSummary(userId) {
@@ -247,9 +244,7 @@ async function loadRecentSessionsSummary(userId) {
       .order('date', { ascending: false })
       .limit(7);
     return data || [];
-  } catch (_e) {
-    return [];
-  }
+  } catch (_e) { return []; }
 }
 
 async function loadYesterdayCommitment(userId) {
@@ -263,24 +258,18 @@ async function loadYesterdayCommitment(userId) {
       .eq('date', yesterday.toISOString().split('T')[0])
       .maybeSingle();
     return data?.tomorrow_commitment || null;
-  } catch (_e) {
-    return null;
-  }
+  } catch (_e) { return null; }
 }
 
 async function loadUserProfile(userId) {
   try {
     const { data } = await supabase
       .from('user_profiles')
-      .select(
-        'full_name, display_name, bio, identity_statement, big_goal, why, future_self, life_areas, blockers, exercises_explained'
-      )
+      .select('full_name, display_name, bio, identity_statement, big_goal, why, future_self, life_areas, blockers, exercises_explained')
       .eq('id', userId)
       .maybeSingle();
     return data || null;
-  } catch (_e) {
-    return null;
-  }
+  } catch (_e) { return null; }
 }
 
 async function loadActiveGoals(userId) {
@@ -292,12 +281,10 @@ async function loadActiveGoals(userId) {
       .eq('status', 'active')
       .limit(5);
     return data || [];
-  } catch (_e) {
-    return [];
-  }
+  } catch (_e) { return []; }
 }
 
-// ── Classify intent (internal call, falls back to safe defaults) ──────────────
+// ── Classify intent ───────────────────────────────────────────────────────────
 
 async function classifyIntent(userMessage, sessionContext = {}) {
   const CLASSIFIER_SYSTEM = `You are a message intent classifier for a nightly reflection coaching app.
@@ -307,11 +294,15 @@ Return ONLY valid JSON:
   "energy_level": "<low|medium|high>",
   "accountability_signal": "<excuse|ownership|neutral>",
   "emotional_state": "<frustrated|proud|anxious|flat|motivated|overwhelmed|reflective>",
+  "depth_opportunity": <true|false>,
   "checklist_content": {"wins": false, "honest": false, "plan": false, "identity": false},
-  "suggested_exercise": "<none|gratitude_anchor|why_reconnect|evidence_audit|implementation_intention|values_clarification|future_self_bridge|ownership_reframe|triage_one_thing|identity_reinforcement>"
+  "suggested_exercise": "<none|gratitude_anchor|why_reconnect|evidence_audit|implementation_intention|values_clarification|future_self_bridge|ownership_reframe|triage_one_thing|identity_reinforcement|depth_probe>"
 }
-EXERCISE ROUTING: excuse→ownership_reframe | low+frustrated→gratitude_anchor | stuck→values_clarification | motivation vent→why_reconnect | self-doubt→evidence_audit | procrastination→implementation_intention | celebrate/proud→identity_reinforcement | overwhelmed→triage_one_thing | reflective→future_self_bridge | memory_query→none | no signals→none
-ACCOUNTABILITY: excuse=blaming external, "can't because X" | ownership="I did/didn't", personal responsibility | neutral=factual
+EXERCISE ROUTING: excuse→ownership_reframe | low+frustrated→gratitude_anchor | stuck→values_clarification | motivation vent→why_reconnect | self-doubt→evidence_audit | procrastination→implementation_intention | celebrate/proud→identity_reinforcement | overwhelmed→triage_one_thing | reflective/deep→future_self_bridge | surface answer to meaningful topic→depth_probe | memory_query→none | no signals→none
+depth_opportunity=true when: user gives a surface-level or deflecting answer to something meaningful, or reveals a belief/pattern worth exploring.
+CHECKLIST: wins=mentioned a real effort/win; honest=acknowledged a miss or struggle; plan=stated a specific tomorrow action; identity=made a self-identity statement.
+IMPORTANT: If tomorrow_commitment is already filled, do NOT suggest implementation_intention. If exercise is in exercises_run, return "none".
+ACCOUNTABILITY: excuse=blaming external | ownership=personal responsibility | neutral=factual
 No markdown. No explanation.`;
 
   try {
@@ -321,12 +312,12 @@ No markdown. No explanation.`;
         { role: 'system', content: CLASSIFIER_SYSTEM },
         {
           role: 'user',
-          content: `[Stage: ${sessionContext.current_stage || 'wins'}]\nUser message: "${userMessage}"`,
+          content: `[Stage: ${sessionContext.current_stage || 'wins'}]\n[tomorrow_commitment: ${sessionContext.tomorrow_commitment || 'none'}]\n[exercises_run: ${(sessionContext.exercises_run || []).join(', ') || 'none'}]\n[depth_probe_done: ${(sessionContext.exercises_run || []).includes('depth_probe')}]\nUser message: "${userMessage}"`,
         },
       ],
       response_format: { type: 'json_object' },
       temperature: 0.3,
-      max_tokens: 150,
+      max_tokens: 160,
     });
     return JSON.parse(completion.choices[0].message.content);
   } catch (_e) {
@@ -335,6 +326,7 @@ No markdown. No explanation.`;
       energy_level: 'medium',
       accountability_signal: 'neutral',
       emotional_state: 'flat',
+      depth_opportunity: false,
       checklist_content: { ...DEFAULT_CHECKLIST },
       suggested_exercise: 'none',
     };
@@ -346,36 +338,23 @@ No markdown. No explanation.`;
 async function updateSessionChecklist(sessionId, checklistUpdates) {
   try {
     const { data: current } = await supabase
-      .from('reflection_sessions')
-      .select('checklist')
-      .eq('id', sessionId)
-      .maybeSingle();
+      .from('reflection_sessions').select('checklist').eq('id', sessionId).maybeSingle();
     const merged = { ...(current?.checklist || { ...DEFAULT_CHECKLIST }), ...checklistUpdates };
-    await supabase
-      .from('reflection_sessions')
-      .update({ checklist: merged, updated_at: new Date().toISOString() })
-      .eq('id', sessionId);
+    await supabase.from('reflection_sessions')
+      .update({ checklist: merged, updated_at: new Date().toISOString() }).eq('id', sessionId);
   } catch (_e) {}
 }
 
 async function updateSessionExercise(sessionId, exerciseName, consecutiveExcuses) {
   try {
     const { data: current } = await supabase
-      .from('reflection_sessions')
-      .select('exercises_run, intent_signals')
-      .eq('id', sessionId)
-      .maybeSingle();
+      .from('reflection_sessions').select('exercises_run').eq('id', sessionId).maybeSingle();
     const exercisesRun = Array.isArray(current?.exercises_run) ? current.exercises_run : [];
     if (exerciseName && exerciseName !== 'none' && !exercisesRun.includes(exerciseName)) {
       exercisesRun.push(exerciseName);
     }
-    await supabase
-      .from('reflection_sessions')
-      .update({
-        exercises_run: exercisesRun,
-        consecutive_excuses: consecutiveExcuses,
-        updated_at: new Date().toISOString(),
-      })
+    await supabase.from('reflection_sessions')
+      .update({ exercises_run: exercisesRun, consecutive_excuses: consecutiveExcuses, updated_at: new Date().toISOString() })
       .eq('id', sessionId);
   } catch (_e) {}
 }
@@ -383,21 +362,15 @@ async function updateSessionExercise(sessionId, exerciseName, consecutiveExcuses
 async function markExerciseExplained(userId, exerciseName, currentExplained = []) {
   try {
     if (currentExplained.includes(exerciseName)) return;
-    const updated = [...currentExplained, exerciseName];
-    await supabase
-      .from('user_profiles')
-      .update({ exercises_explained: updated })
-      .eq('id', userId);
+    await supabase.from('user_profiles')
+      .update({ exercises_explained: [...currentExplained, exerciseName] }).eq('id', userId);
   } catch (_e) {}
 }
 
 async function queueFollowUp(userId, sessionId, { context, question, check_back_after, trigger_condition }) {
   try {
     await supabase.from('follow_up_queue').insert({
-      user_id: userId,
-      session_id: sessionId,
-      context,
-      question,
+      user_id: userId, session_id: sessionId, context, question,
       check_back_after: check_back_after || daysFromNow(3),
       trigger_condition: trigger_condition || null,
     });
@@ -406,44 +379,30 @@ async function queueFollowUp(userId, sessionId, { context, question, check_back_
 
 async function markFollowUpTriggered(followUpId) {
   try {
-    await supabase
-      .from('follow_up_queue')
-      .update({ triggered: true })
-      .eq('id', followUpId);
+    await supabase.from('follow_up_queue').update({ triggered: true }).eq('id', followUpId);
   } catch (_e) {}
 }
 
 async function upsertGrowthMarker(userId, theme, { exercise_run, check_in_message }) {
   try {
     const { data: existing } = await supabase
-      .from('growth_markers')
-      .select('id, occurrence_count, exercises_run, check_in_after')
-      .eq('user_id', userId)
-      .eq('theme', theme)
-      .maybeSingle();
-
+      .from('growth_markers').select('id, occurrence_count, exercises_run, check_in_after')
+      .eq('user_id', userId).eq('theme', theme).maybeSingle();
     if (existing) {
       const exercises = Array.isArray(existing.exercises_run) ? existing.exercises_run : [];
       if (exercise_run && !exercises.includes(exercise_run)) exercises.push(exercise_run);
       const newCount = (existing.occurrence_count || 1) + 1;
-      const shouldScheduleCheckIn = newCount >= 3 && !existing.check_in_after;
-      await supabase
-        .from('growth_markers')
-        .update({
-          occurrence_count: newCount,
-          exercises_run: exercises,
-          check_in_after: shouldScheduleCheckIn ? daysFromNow(14) : existing.check_in_after,
-          check_in_message: check_in_message || null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', existing.id);
+      await supabase.from('growth_markers').update({
+        occurrence_count: newCount, exercises_run: exercises,
+        check_in_after: newCount >= 3 && !existing.check_in_after ? daysFromNow(14) : existing.check_in_after,
+        check_in_message: check_in_message || null,
+        updated_at: new Date().toISOString(),
+      }).eq('id', existing.id);
     } else {
       await supabase.from('growth_markers').insert({
-        user_id: userId,
-        theme,
+        user_id: userId, theme,
         exercises_run: exercise_run ? [exercise_run] : [],
-        occurrence_count: 1,
-        check_in_message: check_in_message || null,
+        occurrence_count: 1, check_in_message: check_in_message || null,
       });
     }
   } catch (_e) {}
@@ -455,30 +414,16 @@ async function upsertBlockerPatterns(userId, blockerTags) {
   for (const tag of blockerTags) {
     try {
       const { data: existing } = await supabase
-        .from('reflection_patterns')
-        .select('id, occurrence_count')
-        .eq('user_id', userId)
-        .eq('pattern_type', 'blocker')
-        .eq('label', tag)
-        .maybeSingle();
-
+        .from('reflection_patterns').select('id, occurrence_count')
+        .eq('user_id', userId).eq('pattern_type', 'blocker').eq('label', tag).maybeSingle();
       if (existing) {
-        await supabase
-          .from('reflection_patterns')
-          .update({
-            occurrence_count: existing.occurrence_count + 1,
-            last_seen_date: todayStr,
-            updated_at: new Date().toISOString(),
-          })
+        await supabase.from('reflection_patterns')
+          .update({ occurrence_count: existing.occurrence_count + 1, last_seen_date: todayStr, updated_at: new Date().toISOString() })
           .eq('id', existing.id);
       } else {
         await supabase.from('reflection_patterns').insert({
-          user_id: userId,
-          pattern_type: 'blocker',
-          label: tag,
-          occurrence_count: 1,
-          last_seen_date: todayStr,
-          first_seen_date: todayStr,
+          user_id: userId, pattern_type: 'blocker', label: tag,
+          occurrence_count: 1, last_seen_date: todayStr, first_seen_date: todayStr,
         });
       }
     } catch (_e) {}
@@ -494,12 +439,9 @@ export default async function handler(req, res) {
 
   try {
     const {
-      user_id,
-      session_id,
-      session_state = {},
-      history = [],
-      user_message,
-      context = {},
+      user_id, session_id,
+      session_state = {}, history = [],
+      user_message, context = {},
       intent_data: clientIntentData = null,
     } = req.body;
 
@@ -509,44 +451,35 @@ export default async function handler(req, res) {
 
     const isInit = user_message === '__INIT__';
 
-    // ── 1. Classify intent (skip for __INIT__) ────────────────────────────
+    // ── 1. Classify intent ────────────────────────────────────────────────
     let intentData = clientIntentData;
     if (!intentData && !isInit) {
       intentData = await classifyIntent(user_message, session_state);
     }
     if (!intentData) {
       intentData = {
-        intent: 'checkin',
-        energy_level: 'medium',
-        accountability_signal: 'neutral',
-        emotional_state: 'flat',
-        checklist_content: { ...DEFAULT_CHECKLIST },
-        suggested_exercise: 'none',
+        intent: 'checkin', energy_level: 'medium',
+        accountability_signal: 'neutral', emotional_state: 'flat',
+        depth_opportunity: false,
+        checklist_content: { ...DEFAULT_CHECKLIST }, suggested_exercise: 'none',
       };
     }
 
     // ── 2. Load context in parallel ───────────────────────────────────────
     const currentSignals = [intentData?.intent, intentData?.emotional_state, intentData?.accountability_signal].filter(Boolean);
 
-    const [
-      followUpQueue,
-      growthMarkers,
-      reflectionPatterns,
-      recentSessions,
-      yesterdayCommitment,
-      userProfile,
-      activeGoals,
-    ] = await Promise.all([
-      loadFollowUpQueue(user_id, currentSignals),
-      loadGrowthMarkers(user_id),
-      loadReflectionPatterns(user_id),
-      loadRecentSessionsSummary(user_id),
-      loadYesterdayCommitment(user_id),
-      loadUserProfile(user_id),
-      loadActiveGoals(user_id),
-    ]);
+    const [followUpQueue, growthMarkers, reflectionPatterns, recentSessions, yesterdayCommitment, userProfile, activeGoals] =
+      await Promise.all([
+        loadFollowUpQueue(user_id, currentSignals),
+        loadGrowthMarkers(user_id),
+        loadReflectionPatterns(user_id),
+        loadRecentSessionsSummary(user_id),
+        loadYesterdayCommitment(user_id),
+        loadUserProfile(user_id),
+        loadActiveGoals(user_id),
+      ]);
 
-    // ── 3. Merge profile from context override (if client passed it) ──────
+    // ── 3. Merge profile ──────────────────────────────────────────────────
     const profile = {
       display_name: context.display_name || userProfile?.display_name || userProfile?.full_name || null,
       identity_statement: context.identity_statement || userProfile?.identity_statement || null,
@@ -558,98 +491,132 @@ export default async function handler(req, res) {
       exercises_explained: userProfile?.exercises_explained || [],
     };
 
-    // ── 4. Determine consecutive_excuses from session_state ───────────────
+    // ── 4. Consecutive excuses ────────────────────────────────────────────
     let consecutiveExcuses = session_state.consecutive_excuses || 0;
-    if (intentData?.accountability_signal === 'excuse') {
-      consecutiveExcuses += 1;
-    } else if (intentData?.accountability_signal === 'ownership') {
-      consecutiveExcuses = 0;
-    }
+    if (intentData?.accountability_signal === 'excuse') consecutiveExcuses += 1;
+    else if (intentData?.accountability_signal === 'ownership') consecutiveExcuses = 0;
 
-    // ── 5. Check if a follow-up should surface first ──────────────────────
+    // ── 5. Follow-ups & growth markers ───────────────────────────────────
     const dueFollowUp = followUpQueue.length > 0 ? followUpQueue[0] : null;
     const dueGrowthMarker = growthMarkers.length > 0 ? growthMarkers[0] : null;
 
-    // ── 6. Exercise cooldown — never repeat an exercise already run this session ──
+    // ── 6. Exercise cooldown + smart blocks ───────────────────────────────
     const sessionExercisesRun = Array.isArray(session_state.exercises_run) ? session_state.exercises_run : [];
     let suggestedExercise = intentData?.suggested_exercise || 'none';
+
     if (suggestedExercise !== 'none' && sessionExercisesRun.includes(suggestedExercise)) {
-      suggestedExercise = 'none'; // Block repeat
+      suggestedExercise = 'none';
+    }
+    // Block implementation_intention if plan already captured
+    if (suggestedExercise === 'implementation_intention' && session_state.tomorrow_commitment) {
+      suggestedExercise = 'none';
+    }
+    // depth_probe: allow once per session naturally; block if already run
+    if (suggestedExercise === 'depth_probe' && sessionExercisesRun.includes('depth_probe')) {
+      suggestedExercise = 'none';
     }
 
-    // ── 7. Build rich context for the prompt ─────────────────────────────
-    const patternsText = reflectionPatterns.length > 0
-      ? reflectionPatterns.map((p) => `"${p.label}" (${p.occurrence_count}x, type: ${p.pattern_type})`).join('; ')
-      : 'No recurring patterns yet.';
+    // ── 6b. Stage hint ─────��──────────────────────────────────────────────
+    const suggestedNextStage = deriveStageHint(session_state, intentData?.checklist_content);
 
-    const recentSessionsText = recentSessions.length > 0
-      ? recentSessions.map((s) => {
-          const wins = Array.isArray(s.wins) ? s.wins.map((w) => (typeof w === 'string' ? w : w.text)).filter(Boolean) : [];
-          const misses = Array.isArray(s.misses) ? s.misses.map((m) => (typeof m === 'string' ? m : m.text)).filter(Boolean) : [];
-          return `${s.date}: wins=[${wins.join(', ')}] misses=[${misses.join(', ')}] commitment="${s.tomorrow_commitment || ''}" stage=${s.current_stage || ''}`;
-        }).join('\n  ')
-      : 'No previous sessions.';
+    // ── 7. Session state analysis for instructions ────────────────────────
+    const mergedChecklist = { ...(session_state.checklist || {}), ...(intentData?.checklist_content || {}) };
+    const tomorrowFilled = !!session_state.tomorrow_commitment;
+    const sessionReadyToClose = tomorrowFilled && mergedChecklist.wins;
+    const depthProbeNeeded = intentData?.depth_opportunity && !sessionExercisesRun.includes('depth_probe');
+    const messageCount = history.length;
+    const honestMissing = !mergedChecklist.honest && messageCount >= 4;
+    const identityMissing = !mergedChecklist.identity && messageCount >= 6;
 
-    const goalsText = activeGoals.length > 0
-      ? activeGoals.map((g) => `"${g.title}"${g.why_it_matters ? ` (why: ${g.why_it_matters})` : ''}`).join('; ')
-      : 'No active goals set yet.';
-
+    // ── 8. Build compact context block ───────────────────────────────────
     const exercisesExplained = Array.isArray(profile.exercises_explained) ? profile.exercises_explained : [];
     const isFirstTimeExercise = suggestedExercise !== 'none' && !exercisesExplained.includes(suggestedExercise);
+
+    const patternsText = reflectionPatterns.length > 0
+      ? reflectionPatterns.map((p) => `${p.label}(${p.occurrence_count}x)`).join('; ')
+      : 'none';
+
+    const recentSessionsText = recentSessions.slice(0, 3).map((s) => {
+      const wins = Array.isArray(s.wins) ? s.wins.map((w) => (typeof w === 'string' ? w : w.text)).filter(Boolean) : [];
+      return `${s.date}: wins=[${wins.slice(0, 2).join(', ')}] commitment="${s.tomorrow_commitment || ''}"`;
+    }).join(' | ') || 'none';
+
+    const goalsText = activeGoals.length > 0
+      ? activeGoals.map((g) => `"${g.title}"`).join('; ')
+      : 'none';
 
     const contextBlock = {
       role: 'user',
       content: JSON.stringify({
-        user_profile: {
+        profile: {
           name: profile.display_name,
-          identity_statement: profile.identity_statement,
-          big_goal: profile.big_goal,
+          identity: profile.identity_statement,
+          goal: profile.big_goal,
           why: profile.why,
           future_self: profile.future_self,
           life_areas: Array.isArray(profile.life_areas) ? profile.life_areas.join(', ') : '',
-          blockers: Array.isArray(profile.blockers) ? profile.blockers.join(', ') : '',
         },
-        active_goals: goalsText,
-        yesterday_commitment: yesterdayCommitment || 'None recorded',
-        recent_patterns: patternsText,
+        goals: goalsText,
+        yesterday_commitment: yesterdayCommitment || 'none',
+        patterns: patternsText,
         recent_sessions: recentSessionsText,
-        session_state: {
-          ...session_state,
-          consecutive_excuses: consecutiveExcuses,
+        session: {
+          stage: session_state.current_stage || 'wins',
+          checklist: mergedChecklist,
+          tomorrow_commitment: session_state.tomorrow_commitment || null,
           exercises_run: sessionExercisesRun,
+          consecutive_excuses: consecutiveExcuses,
+          message_count: messageCount,
         },
-        intent_classification: intentData,
-        follow_up_due: dueFollowUp
-          ? { context: dueFollowUp.context, question: dueFollowUp.question }
-          : null,
-        growth_marker_due: dueGrowthMarker
-          ? { theme: dueGrowthMarker.theme, check_in_message: dueGrowthMarker.check_in_message }
-          : null,
-        suggested_exercise: suggestedExercise,
-        is_first_time_exercise: isFirstTimeExercise,
-        exercises_explained: exercisesExplained,
+        intent: {
+          type: intentData.intent,
+          energy: intentData.energy_level,
+          accountability: intentData.accountability_signal,
+          emotion: intentData.emotional_state,
+          depth_opportunity: intentData.depth_opportunity || false,
+        },
+        follow_up_due: dueFollowUp ? { context: dueFollowUp.context, question: dueFollowUp.question } : null,
+        growth_marker_due: dueGrowthMarker ? { theme: dueGrowthMarker.theme, msg: dueGrowthMarker.check_in_message } : null,
+        exercise: { suggested: suggestedExercise, first_time: isFirstTimeExercise, explained: exercisesExplained },
+        stage_hint: suggestedNextStage,
+        ready_to_close: sessionReadyToClose,
         streak: context.reflection_streak || context.streak || 0,
-        time_of_day: context.time_of_day || getTimeOfDay(),
         instructions: [
-          dueFollowUp ? 'PRIORITY: Surface the follow_up_due question BEFORE your main response.' : null,
-          dueGrowthMarker ? 'Weave in the growth_marker_due check-in naturally.' : null,
+          dueFollowUp ? 'PRIORITY: Surface follow_up_due question first.' : null,
+          dueGrowthMarker ? 'Weave in growth_marker_due check-in naturally.' : null,
           intentData?.accountability_signal === 'excuse'
-            ? `ANTI-EXCUSE: consecutive_excuses=${consecutiveExcuses}. Follow the anti-excuse protocol for this count. Use their specific words, not placeholders.`
+            ? `ANTI-EXCUSE: consecutive_excuses=${consecutiveExcuses}. Use their specific words. Follow the protocol.`
             : null,
           suggestedExercise !== 'none'
-            ? `RUN EXERCISE: ${suggestedExercise}. is_first_time=${isFirstTimeExercise} (explain in 1 sentence if first time). IMPORTANT: Fill in ALL placeholders with the user's actual words from context and the conversation — never output literal bracket placeholders like [that] or [X]. Set exercise_run="${suggestedExercise}" in response.`
+            ? `RUN: ${suggestedExercise}. first_time=${isFirstTimeExercise}. Fill ALL placeholders with user's actual words — never output [bracket placeholders]. Set exercise_run="${suggestedExercise}".`
+            : null,
+          depthProbeNeeded
+            ? `DEPTH OPPORTUNITY: Go deeper here. Ask WHY or surface the belief underneath. Use a depth_probe question naturally. Set exercise_run="depth_probe". Store any insight in extracted_data.depth_insight.`
+            : null,
+          honestMissing
+            ? `HONEST MISSING: Gently probe for a miss or honest moment. E.g. "What's one thing from today you'd do differently?" Weave it naturally.`
+            : null,
+          identityMissing && !sessionReadyToClose
+            ? `IDENTITY MISSING: Find a natural moment to ask what their actions say about who they're becoming. E.g. "What does [their action] say about who you're becoming?"`
             : null,
           sessionExercisesRun.length > 0
-            ? `EXERCISES ALREADY RUN THIS SESSION: ${sessionExercisesRun.join(', ')}. Do NOT repeat any of these.`
+            ? `ALREADY RUN: ${sessionExercisesRun.join(', ')}. Do NOT repeat.`
             : null,
-          'Use their actual words, goals, and why — never be generic.',
+          suggestedNextStage
+            ? `STAGE HINT: Ready to move to "${suggestedNextStage}". Transition naturally if conversation supports it. Set stage_advance:true, new_stage:"${suggestedNextStage}".`
+            : null,
+          sessionReadyToClose
+            ? `READY TO CLOSE: wins + plan covered. If tone is resolved, wrap warmly. End with an identity statement. Set is_session_complete:true. Do NOT keep drilling.`
+            : null,
+          'Use their actual words — never be generic.',
           'One question only. 2-3 sentences max.',
+          'NEVER drill a topic already answered.',
         ].filter(Boolean),
       }),
     };
 
-    // ── 8. Build messages array ───────────────────────────────────────────
-    const messages = [{ role: 'system', content: SYSTEM_PROMPT }, contextBlock, ...history.slice(-20)];
+    // ── 9. Build messages ─────────────────────────────────────────────────
+    const messages = [{ role: 'system', content: SYSTEM_PROMPT }, contextBlock, ...history.slice(-18)];
 
     if (!isInit) {
       messages.push({ role: 'user', content: user_message });
@@ -657,32 +624,19 @@ export default async function handler(req, res) {
       const stage = session_state?.current_stage || 'wins';
       messages.push({
         role: 'user',
-        content: `Open the ${stage} stage of tonight's reflection. Time greeting: "${getTimeGreeting()}". ${
-          yesterdayCommitment
-            ? `Yesterday's commitment: "${yesterdayCommitment}". If wins stage, reference it and ask if they followed through.`
-            : 'No yesterday commitment recorded.'
-        } ${
-          (context.reflection_streak || context.streak || 0) > 1
-            ? `They have a ${context.reflection_streak || context.streak}-night streak — acknowledge briefly.`
-            : ''
-        } Start with the mood chip selector. Return chips: [
-          {"label":"Proud 🔥","value":"proud"},
-          {"label":"Grateful 🙏","value":"grateful"},
-          {"label":"Motivated 💪","value":"motivated"},
-          {"label":"Okay 😐","value":"okay"},
-          {"label":"Tired 😴","value":"tired"},
-          {"label":"Stressed 😤","value":"stressed"}
-        ]`,
+        content: `Open the ${stage} stage of tonight's reflection. Greeting: "${getTimeGreeting()}". ${
+          yesterdayCommitment ? `Yesterday's commitment: "${yesterdayCommitment}". Reference it if wins stage.` : 'No yesterday commitment.'
+        } ${(context.reflection_streak || context.streak || 0) > 1 ? `${context.reflection_streak || context.streak}-night streak — acknowledge briefly.` : ''} Start with mood chips: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful 🙏","value":"grateful"},{"label":"Motivated 💪","value":"motivated"},{"label":"Okay 😐","value":"okay"},{"label":"Tired 😴","value":"tired"},{"label":"Stressed 😤","value":"stressed"}]`,
       });
     }
 
-    // ── 9. Call GPT-4o ────────────────────────────────────────────────────
+    // ── 10. Call GPT-4o ───────────────────────────────────────────────────
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o',
       messages,
       response_format: { type: 'json_object' },
       temperature: 0.8,
-      max_tokens: 600,
+      max_tokens: 1000,
     });
 
     let result;
@@ -691,49 +645,41 @@ export default async function handler(req, res) {
     } catch (_parseErr) {
       result = {
         assistant_message: completion.choices[0].message.content,
-        chips: null,
-        stage_advance: false,
-        new_stage: null,
-        extracted_data: {},
-        exercise_run: 'none',
+        chips: null, stage_advance: false, new_stage: null,
+        extracted_data: {}, exercise_run: 'none',
         checklist_updates: { ...DEFAULT_CHECKLIST },
-        follow_up_queued: false,
-        is_session_complete: false,
+        follow_up_queued: false, is_session_complete: false,
       };
     }
 
-    // Ensure required keys exist
     result.exercise_run = result.exercise_run || 'none';
     result.checklist_updates = result.checklist_updates || { ...DEFAULT_CHECKLIST };
     result.follow_up_queued = result.follow_up_queued || false;
 
-    // Safety: if GPT somehow tries to re-run a blocked exercise, strip it
+    // Safety strip — never re-run a blocked exercise
     if (result.exercise_run !== 'none' && sessionExercisesRun.includes(result.exercise_run)) {
       result.exercise_run = 'none';
     }
 
-    // Merge checklist_content from classifier into checklist_updates
+    // Merge classifier checklist detections
     if (intentData?.checklist_content) {
       Object.keys(intentData.checklist_content).forEach((key) => {
         if (intentData.checklist_content[key]) result.checklist_updates[key] = true;
       });
     }
 
-    // ── 10. Post-response DB writes (all non-blocking, fail silently) ──────
+    // ── 11. Post-response DB writes ───────────────────────────────────────
     const dbPromises = [];
 
     if (session_id && Object.values(result.checklist_updates).some(Boolean)) {
       dbPromises.push(updateSessionChecklist(session_id, result.checklist_updates));
     }
-
     if (session_id) {
       dbPromises.push(updateSessionExercise(session_id, result.exercise_run, consecutiveExcuses));
     }
-
     if (result.exercise_run && result.exercise_run !== 'none' && isFirstTimeExercise) {
       dbPromises.push(markExerciseExplained(user_id, result.exercise_run, exercisesExplained));
     }
-
     if (dueFollowUp) {
       dbPromises.push(markFollowUpTriggered(dueFollowUp.id));
     }
@@ -742,8 +688,8 @@ export default async function handler(req, res) {
     if (exerciseRan && session_id) {
       dbPromises.push(
         queueFollowUp(user_id, session_id, {
-          context: `${result.exercise_run} exercise was run during reflection`,
-          question: `Last time we worked on ${result.exercise_run.replace(/_/g, ' ')} — how has that been showing up for you?`,
+          context: `${result.exercise_run} exercise run during reflection`,
+          question: `Last time we worked on ${result.exercise_run.replace(/_/g, ' ')} — how has that been showing up?`,
           check_back_after: daysFromNow(3),
           trigger_condition: intentData?.emotional_state,
         })
@@ -760,22 +706,17 @@ export default async function handler(req, res) {
       const updates = {};
       if (result.stage_advance && result.new_stage) updates.current_stage = result.new_stage;
       if (result.extracted_data?.mood) updates.mood_end_of_day = result.extracted_data.mood;
-      if (result.extracted_data?.tomorrow_commitment)
-        updates.tomorrow_commitment = result.extracted_data.tomorrow_commitment;
-      if (result.extracted_data?.self_hype_message)
-        updates.self_hype_message = result.extracted_data.self_hype_message;
+      if (result.extracted_data?.tomorrow_commitment) updates.tomorrow_commitment = result.extracted_data.tomorrow_commitment;
+      if (result.extracted_data?.self_hype_message) updates.self_hype_message = result.extracted_data.self_hype_message;
       if (result.is_session_complete) {
         updates.is_complete = true;
         updates.completed_at = new Date().toISOString();
       }
       if (Object.keys(updates).length > 0) {
         dbPromises.push(
-          supabase
-            .from('reflection_sessions')
+          supabase.from('reflection_sessions')
             .update({ ...updates, updated_at: new Date().toISOString() })
-            .eq('id', session_id)
-            .then(() => {})
-            .catch(() => {})
+            .eq('id', session_id).then(() => {}).catch(() => {})
         );
       }
     }
@@ -785,23 +726,19 @@ export default async function handler(req, res) {
     }
 
     Promise.all(dbPromises).catch(() => {});
-
     result.consecutive_excuses = consecutiveExcuses;
 
     return res.status(200).json(result);
+
   } catch (error) {
     console.error('Error in reflection-coach:', error);
     return res.status(500).json({
       error: 'Failed to process reflection',
       assistant_message: "Something went wrong on my end. Try sending that again — I'm here.",
-      chips: null,
-      stage_advance: false,
-      new_stage: null,
-      extracted_data: {},
-      exercise_run: 'none',
+      chips: null, stage_advance: false, new_stage: null,
+      extracted_data: {}, exercise_run: 'none',
       checklist_updates: { ...DEFAULT_CHECKLIST },
-      follow_up_queued: false,
-      is_session_complete: false,
+      follow_up_queued: false, is_session_complete: false,
       consecutive_excuses: 0,
     });
   }
