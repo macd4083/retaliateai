@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Send, Moon, CheckCircle, Circle } from 'lucide-react';
+import { Send, Moon, CheckCircle, Circle, RefreshCw } from 'lucide-react';
 import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase/client';
 import { reflectionHelpers } from '../lib/supabase/reflection';
@@ -229,6 +229,7 @@ export default function ReflectionV2() {
     exercises_run: [],
   });
   const [summaryCardData, setSummaryCardData] = useState({});
+  const [isAdmin, setIsAdmin] = useState(false);
 
   const timeContext = getTimeContext();
 
@@ -236,6 +237,21 @@ export default function ReflectionV2() {
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
+
+  // ── Admin check ───────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!user?.id) return;
+    supabase
+      .from('user_profiles')
+      .select('role')
+      .eq('id', user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        setIsAdmin(data?.role === 'admin');
+      })
+      .catch(() => {});
+  }, [user?.id]);
 
   // ── Scroll to bottom ──────────────────────────────────────────────────────
 
@@ -555,6 +571,48 @@ export default function ReflectionV2() {
     }
   }
 
+  // ── Admin reset ───────────────────────────────────────────────────────────
+
+  async function handleAdminReset() {
+    if (!confirm("Reset today's session? This deletes it from the database and reinitializes.")) return;
+    try {
+      const res = await fetch('/api/admin-reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: user.id,
+          admin_secret: import.meta.env.VITE_ADMIN_SECRET,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        messagesRef.current = [];
+        setMessages([]);
+        setSessionId(null);
+        setIsComplete(false);
+        setSummaryCardData({});
+        setUsedChipMessageIds(new Set());
+        setSessionState({
+          current_stage: 'wins',
+          mood_end_of_day: null,
+          steps_completed: [],
+          wins: [],
+          misses: [],
+          blocker_tags: [],
+          tomorrow_commitment: null,
+          self_hype_message: null,
+          consecutive_excuses: 0,
+          checklist: { ...DEFAULT_CHECKLIST },
+          exercises_run: [],
+        });
+        initCalledRef.current = false;
+        setIsInitializing(true);
+        initSession();
+      }
+    } catch (_e) {}
+  }
+
+
   // ── Handle chip selection ─────────────────────────────────────────────���───
 
   function handleChipSelect(chip, messageId) {
@@ -632,7 +690,19 @@ export default function ReflectionV2() {
               <p className="text-zinc-500 text-sm">Tonight's reflection is complete. ✨</p>
             </div>
           ) : (
-            <div className="flex items-end gap-3">
+            <div className="space-y-2">
+              {isAdmin && (
+                <div className="flex justify-end">
+                  <button
+                    onClick={handleAdminReset}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 border border-zinc-800 transition-colors"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                    Reset Session
+                  </button>
+                </div>
+              )}
+              <div className="flex items-end gap-3">
               <textarea
                 ref={textareaRef}
                 value={inputValue}
@@ -651,6 +721,7 @@ export default function ReflectionV2() {
               >
                 <Send className="w-4 h-4 text-white" />
               </button>
+              </div>
             </div>
           )}
         </div>
