@@ -35,13 +35,11 @@ const STAGE_PLACEHOLDERS = {
 
 function ProgressBar({ currentStage }) {
   const stageIndex = STAGES.findIndex((s) => s.id === currentStage);
-
   return (
     <div className="flex items-center justify-center gap-3 py-3">
       {STAGES.map((stage, i) => {
         const isComplete = i < stageIndex;
         const isActive = i === stageIndex;
-
         return (
           <div key={stage.id} className="flex items-center gap-2">
             <div className="flex flex-col items-center gap-1">
@@ -52,18 +50,12 @@ function ProgressBar({ currentStage }) {
               ) : (
                 <Circle className="w-4 h-4 text-zinc-600" />
               )}
-              <span
-                className={`text-xs ${
-                  isActive ? 'text-red-400 font-medium' : isComplete ? 'text-red-600' : 'text-zinc-600'
-                }`}
-              >
+              <span className={`text-xs ${isActive ? 'text-red-400 font-medium' : isComplete ? 'text-red-600' : 'text-zinc-600'}`}>
                 {stage.label}
               </span>
             </div>
             {i < STAGES.length - 1 && (
-              <div
-                className={`w-8 h-px mb-4 ${i < stageIndex ? 'bg-red-600' : 'bg-zinc-700'}`}
-              />
+              <div className={`w-8 h-px mb-4 ${i < stageIndex ? 'bg-red-600' : 'bg-zinc-700'}`} />
             )}
           </div>
         );
@@ -147,9 +139,7 @@ function SummaryCard({ data, streak }) {
 
 function ChatMessage({ message, onChipSelect, chipsDisabled, streak }) {
   const isUser = message.role === 'user';
-
   if (message.isTyping) return <TypingIndicator />;
-
   if (message.message_type === 'summary_card' && message.card_data) {
     return (
       <div className="flex items-start gap-3 mb-4">
@@ -162,7 +152,6 @@ function ChatMessage({ message, onChipSelect, chipsDisabled, streak }) {
       </div>
     );
   }
-
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'items-start gap-3'} mb-4`}>
       {!isUser && (
@@ -171,17 +160,13 @@ function ChatMessage({ message, onChipSelect, chipsDisabled, streak }) {
         </div>
       )}
       <div className="max-w-[75%]">
-        <div
-          className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
-            isUser
-              ? 'bg-red-600 text-white rounded-tr-sm'
-              : 'bg-zinc-800 border border-zinc-700 text-white rounded-tl-sm'
-          }`}
-        >
+        <div className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+          isUser
+            ? 'bg-red-600 text-white rounded-tr-sm'
+            : 'bg-zinc-800 border border-zinc-700 text-white rounded-tl-sm'
+        }`}>
           {message.content}
         </div>
-
-        {/* Quick-reply chips */}
         {!isUser && message.chips && message.chips.length > 0 && (
           <div className="flex flex-wrap gap-2 mt-2">
             {message.chips.map((chip) => (
@@ -212,10 +197,14 @@ export default function ReflectionV2() {
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
 
-  // FIX: Guard ref to ensure initSession only ever runs ONCE per mount,
-  // even if user?.id changes multiple times due to Supabase auth events
-  // firing INITIAL_SESSION then SIGNED_IN back-to-back on load.
+  // FIX 1: Guard ref — initSession only ever runs once per mount
   const initCalledRef = useRef(false);
+
+  // FIX 2: messagesRef always holds the latest messages array so sendMessage
+  // never closes over a stale snapshot. This was causing the AI reply to
+  // disappear — the functional setMessages updater was filtering against
+  // a stale prev that didn't include the user bubble.
+  const messagesRef = useRef([]);
 
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState('');
@@ -240,6 +229,11 @@ export default function ReflectionV2() {
 
   const timeContext = getTimeContext();
 
+  // Keep messagesRef in sync with messages state
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
   // ── Scroll to bottom ──────────────────────────────────────────────────────
 
   const scrollToBottom = useCallback(() => {
@@ -254,9 +248,6 @@ export default function ReflectionV2() {
 
   useEffect(() => {
     if (!user?.id) return;
-    // FIX: Only run once. Supabase fires auth events multiple times on mount
-    // which caused initSession() → sendMessage('__INIT__') to run twice,
-    // producing two duplicate opening messages from the AI.
     if (initCalledRef.current) return;
     initCalledRef.current = true;
     initSession();
@@ -265,24 +256,19 @@ export default function ReflectionV2() {
   async function initSession() {
     setIsInitializing(true);
     try {
-      // Load user profile
       try {
         const { data: profile } = await supabase
           .from('user_profiles')
-          .select(
-            'display_name, full_name, identity_statement, big_goal, why, future_self, life_areas, blockers'
-          )
+          .select('display_name, full_name, identity_statement, big_goal, why, future_self, life_areas, blockers')
           .eq('id', user.id)
           .maybeSingle();
         setUserProfile(profile);
       } catch (_e) {}
 
-      // Load or create today's session
       const session = await reflectionHelpers.getTodaySession(user.id);
       setSessionId(session.id);
       setIsComplete(session.is_complete);
 
-      // Restore session state
       const restoredState = {
         current_stage: session.current_stage || 'wins',
         mood_end_of_day: session.mood_end_of_day || null,
@@ -295,15 +281,23 @@ export default function ReflectionV2() {
       };
       setSessionState(restoredState);
 
-      // Load streak
       const currentStreak = await reflectionHelpers.getReflectionStreak(user.id);
       setStreak(currentStreak);
 
-      // Load existing messages
       const existingMessages = await reflectionHelpers.getSessionMessages(session.id);
 
       if (existingMessages.length > 0) {
-        const restored = existingMessages.map((m) => ({
+        // FIX 3: Deduplicate messages loaded from DB by content+role to handle
+        // any duplicate rows that got saved before the init guard was in place.
+        const seen = new Set();
+        const deduped = existingMessages.filter((m) => {
+          const key = `${m.role}::${m.content}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+
+        const restored = deduped.map((m) => ({
           id: m.id,
           role: m.role,
           content: m.content,
@@ -312,30 +306,28 @@ export default function ReflectionV2() {
           card_data: m.extracted_data?.card_data || null,
           isTyping: false,
         }));
+        messagesRef.current = restored;
         setMessages(restored);
 
         const usedIds = new Set(
-          existingMessages
-            .filter((m) => m.role === 'assistant' && m.chips)
-            .map((m) => m.id)
+          deduped.filter((m) => m.role === 'assistant' && m.chips).map((m) => m.id)
         );
         setUsedChipMessageIds(usedIds);
       } else {
-        // Brand new session — get opening AI message
         await sendMessage('__INIT__', session.id, restoredState);
       }
     } catch (error) {
       console.error('Failed to init reflection session:', error);
-      setMessages([
-        {
-          id: Date.now(),
-          role: 'assistant',
-          content: "Couldn't load your session. Please refresh and try again.",
-          chips: null,
-          message_type: 'question',
-          isTyping: false,
-        },
-      ]);
+      const errMsg = [{
+        id: Date.now(),
+        role: 'assistant',
+        content: "Couldn't load your session. Please refresh and try again.",
+        chips: null,
+        message_type: 'question',
+        isTyping: false,
+      }];
+      messagesRef.current = errMsg;
+      setMessages(errMsg);
     } finally {
       setIsInitializing(false);
     }
@@ -343,8 +335,8 @@ export default function ReflectionV2() {
 
   // ── Build history for API ─────────────────────────────────────────────────
 
-  function buildHistory(currentMessages) {
-    return currentMessages
+  function buildHistory(msgs) {
+    return msgs
       .filter((m) => !m.isTyping && m.role !== 'system')
       .map((m) => ({ role: m.role, content: m.content }));
   }
@@ -358,8 +350,10 @@ export default function ReflectionV2() {
 
     const isInit = userText === '__INIT__';
 
-    // Optimistically add user bubble (except for init)
-    let updatedMessages = [...messages];
+    // FIX 4: Always read from messagesRef.current — never from the stale
+    // messages closure. This is what was causing the AI reply to vanish.
+    let currentMsgs = messagesRef.current;
+
     if (!isInit) {
       const userMsg = {
         id: `user-${Date.now()}`,
@@ -369,10 +363,10 @@ export default function ReflectionV2() {
         message_type: null,
         isTyping: false,
       };
-      updatedMessages = [...messages, userMsg];
-      setMessages(updatedMessages);
+      currentMsgs = [...currentMsgs, userMsg];
+      messagesRef.current = currentMsgs;
+      setMessages(currentMsgs);
 
-      // Save user message to DB (client-side, fire-and-forget)
       reflectionHelpers
         .saveMessage(sid, user.id, {
           role: 'user',
@@ -382,30 +376,24 @@ export default function ReflectionV2() {
         .catch(() => {});
     }
 
-    // Show typing indicator
-    const typingId = `typing-${Date.now()}`;
-    setMessages((prev) => [
-      ...prev.filter((m) => !m.isTyping),
-      { id: typingId, role: 'assistant', isTyping: true },
-    ]);
+    // Add typing indicator
+    const withTyping = [...currentMsgs, { id: `typing-${Date.now()}`, role: 'assistant', isTyping: true }];
+    messagesRef.current = withTyping;
+    setMessages(withTyping);
     setIsLoading(true);
 
     try {
-      // Get yesterday's commitment
       let yesterdayCommitment = null;
       try {
         yesterdayCommitment = await reflectionHelpers.getYesterdayCommitment(user.id);
       } catch (_e) {}
 
-      // Fetch latest profile if we don't have it yet
       let profile = userProfile;
       if (!profile) {
         try {
           const { data } = await supabase
             .from('user_profiles')
-            .select(
-              'display_name, full_name, identity_statement, big_goal, why, future_self, life_areas, blockers'
-            )
+            .select('display_name, full_name, identity_statement, big_goal, why, future_self, life_areas, blockers')
             .eq('id', user.id)
             .maybeSingle();
           profile = data;
@@ -413,7 +401,6 @@ export default function ReflectionV2() {
         } catch (_e) {}
       }
 
-      // Added AbortController with 25s timeout to prevent silent hangs
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 25000);
 
@@ -431,7 +418,7 @@ export default function ReflectionV2() {
               is_first_message: isInit,
               yesterday_commitment: yesterdayCommitment,
             },
-            history: isInit ? [] : buildHistory(updatedMessages),
+            history: isInit ? [] : buildHistory(currentMsgs),
             user_message: userText,
             context: {
               streak,
@@ -455,7 +442,6 @@ export default function ReflectionV2() {
 
       const data = await response.json();
 
-      const aiMsgId = `ai-${Date.now()}`;
       const isSessionComplete = !!data.is_session_complete;
       const isSummaryCard = isSessionComplete || data.new_stage === 'complete';
 
@@ -466,7 +452,7 @@ export default function ReflectionV2() {
       }
 
       const aiMessage = {
-        id: aiMsgId,
+        id: `ai-${Date.now()}`,
         role: 'assistant',
         content: data.assistant_message || '',
         chips: data.chips || null,
@@ -475,32 +461,28 @@ export default function ReflectionV2() {
         isTyping: false,
       };
 
-      setMessages((prev) => {
-        const without = prev.filter((m) => !m.isTyping);
-        return [...without, aiMessage];
-      });
+      // FIX 5: Build the final list by taking messagesRef (which has the user
+      // bubble), stripping the typing indicator, and appending the AI reply.
+      // Never rely on React's prev in setMessages for this — it can be stale.
+      const finalMsgs = [...messagesRef.current.filter((m) => !m.isTyping), aiMessage];
+      messagesRef.current = finalMsgs;
+      setMessages(finalMsgs);
 
       if (data.extracted_data || data.stage_advance) {
         const newState = { ...state };
-
         if (data.extracted_data?.mood) newState.mood_end_of_day = data.extracted_data.mood;
         if (data.extracted_data?.win_text)
           newState.wins = [...(newState.wins || []), { text: data.extracted_data.win_text }];
         if (data.extracted_data?.miss_text)
           newState.misses = [...(newState.misses || []), { text: data.extracted_data.miss_text }];
         if (data.extracted_data?.blocker_tags)
-          newState.blocker_tags = [
-            ...new Set([...(newState.blocker_tags || []), ...data.extracted_data.blocker_tags]),
-          ];
+          newState.blocker_tags = [...new Set([...(newState.blocker_tags || []), ...data.extracted_data.blocker_tags])];
         if (data.extracted_data?.tomorrow_commitment)
           newState.tomorrow_commitment = data.extracted_data.tomorrow_commitment;
         if (data.extracted_data?.self_hype_message)
           newState.self_hype_message = data.extracted_data.self_hype_message;
-
-        if (data.stage_advance && data.new_stage) {
+        if (data.stage_advance && data.new_stage)
           newState.current_stage = data.new_stage;
-        }
-
         setSessionState(newState);
 
         const dbUpdates = {};
@@ -510,44 +492,37 @@ export default function ReflectionV2() {
         if (data.extracted_data?.self_hype_message)
           dbUpdates.self_hype_message = data.extracted_data.self_hype_message;
         if (data.stage_advance && data.new_stage) dbUpdates.current_stage = data.new_stage;
-
-        if (Object.keys(dbUpdates).length > 0) {
+        if (Object.keys(dbUpdates).length > 0)
           reflectionHelpers.updateSession(sid, dbUpdates).catch(() => {});
-        }
       }
 
       if (isSessionComplete) {
         setIsComplete(true);
         const finalStreak = streak + 1;
         setStreak(finalStreak);
-        reflectionHelpers
-          .updateSession(sid, {
-            is_complete: true,
-            current_stage: 'complete',
-            completed_at: new Date().toISOString(),
-            reflection_streak: finalStreak,
-          })
-          .catch(() => {});
+        reflectionHelpers.updateSession(sid, {
+          is_complete: true,
+          current_stage: 'complete',
+          completed_at: new Date().toISOString(),
+          reflection_streak: finalStreak,
+        }).catch(() => {});
       }
     } catch (error) {
       console.error('Failed to send message:', error);
       const isTimeout = error.name === 'AbortError';
-      setMessages((prev) => {
-        const without = prev.filter((m) => !m.isTyping);
-        return [
-          ...without,
-          {
-            id: `err-${Date.now()}`,
-            role: 'assistant',
-            content: isTimeout
-              ? "That took too long on my end. Try sending that again — I'm here."
-              : 'Something went wrong. Try sending that again.',
-            chips: null,
-            message_type: 'question',
-            isTyping: false,
-          },
-        ];
-      });
+      const errMsg = {
+        id: `err-${Date.now()}`,
+        role: 'assistant',
+        content: isTimeout
+          ? "That took too long on my end. Try sending that again — I'm here."
+          : 'Something went wrong. Try sending that again.',
+        chips: null,
+        message_type: 'question',
+        isTyping: false,
+      };
+      const withErr = [...messagesRef.current.filter((m) => !m.isTyping), errMsg];
+      messagesRef.current = withErr;
+      setMessages(withErr);
     } finally {
       setIsLoading(false);
     }
@@ -561,16 +536,14 @@ export default function ReflectionV2() {
     sendMessage(chip.label);
   }
 
-  // ── Handle send ────────────────────────���──────────────────────────────────
+  // ── Handle send ───────────────────────────────────────────────────────────
 
   function handleSend() {
     const text = inputValue.trim();
     if (!text || isLoading || isComplete) return;
     setInputValue('');
     sendMessage(text);
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-    }
+    if (textareaRef.current) textareaRef.current.style.height = 'auto';
   }
 
   function handleKeyDown(e) {
@@ -598,12 +571,10 @@ export default function ReflectionV2() {
   return (
     <AppShellV2 title="Nightly Reflection">
       <div className="flex flex-col h-full">
-        {/* Progress Bar */}
         <div className="flex-shrink-0 border-b border-zinc-800 bg-zinc-950">
           <ProgressBar currentStage={isComplete ? 'complete' : sessionState.current_stage} />
         </div>
 
-        {/* Chat Area */}
         <div className="flex-1 overflow-y-auto px-4 py-4">
           {isInitializing ? (
             <div className="flex items-center justify-center h-full">
@@ -628,7 +599,6 @@ export default function ReflectionV2() {
           )}
         </div>
 
-        {/* Input Bar */}
         <div className="flex-shrink-0 border-t border-zinc-800 bg-zinc-950 px-4 py-3">
           {isComplete ? (
             <div className="text-center py-2">
