@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabase/client';
 import { reflectionHelpers } from '../lib/supabase/reflection';
 import AppShellV2 from '../components/v2/AppShellV2';
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function getTimeContext() {
   const hour = new Date().getHours();
@@ -31,7 +31,7 @@ const STAGE_PLACEHOLDERS = {
   close: 'Write yourself a message...',
 };
 
-// ─── Sub-components ──────────────────────────────────────────────────────────
+// ─── Sub-components ───────────────────────────────────────────────────────────
 
 function ProgressBar({ currentStage }) {
   const stageIndex = STAGES.findIndex((s) => s.id === currentStage);
@@ -255,7 +255,7 @@ export default function ReflectionV2() {
   async function initSession() {
     setIsInitializing(true);
     try {
-      // Load user profile (new fields included)
+      // Load user profile
       try {
         const { data: profile } = await supabase
           .from('user_profiles')
@@ -362,6 +362,7 @@ export default function ReflectionV2() {
       updatedMessages = [...messages, userMsg];
       setMessages(updatedMessages);
 
+      // Save user message to DB (client-side, fire-and-forget)
       reflectionHelpers
         .saveMessage(sid, user.id, {
           role: 'user',
@@ -402,33 +403,44 @@ export default function ReflectionV2() {
         } catch (_e) {}
       }
 
-      const response = await fetch('/api/reflection-chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: user.id,
-          session_id: sid,
-          session_state: {
-            ...state,
-            is_first_message: isInit,
-            yesterday_commitment: yesterdayCommitment,
-          },
-          history: isInit ? [] : buildHistory(updatedMessages),
-          user_message: userText,
-          context: {
-            streak,
-            time_of_day: timeContext.greeting,
-            yesterday_commitment: yesterdayCommitment,
-            identity_statement: profile?.identity_statement || null,
-            big_goal: profile?.big_goal || null,
-            why: profile?.why || null,
-            future_self: profile?.future_self || null,
-            life_areas: profile?.life_areas || [],
-            blockers: profile?.blockers || [],
-            display_name: profile?.display_name || profile?.full_name || null,
-          },
-        }),
-      });
+      // FIX: Added AbortController with 25s timeout to prevent silent hangs
+      // when the Vercel function or OpenAI takes too long to respond.
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 25000);
+
+      let response;
+      try {
+        response = await fetch('/api/reflection-chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({
+            user_id: user.id,
+            session_id: sid,
+            session_state: {
+              ...state,
+              is_first_message: isInit,
+              yesterday_commitment: yesterdayCommitment,
+            },
+            history: isInit ? [] : buildHistory(updatedMessages),
+            user_message: userText,
+            context: {
+              streak,
+              time_of_day: timeContext.greeting,
+              yesterday_commitment: yesterdayCommitment,
+              identity_statement: profile?.identity_statement || null,
+              big_goal: profile?.big_goal || null,
+              why: profile?.why || null,
+              future_self: profile?.future_self || null,
+              life_areas: profile?.life_areas || [],
+              blockers: profile?.blockers || [],
+              display_name: profile?.display_name || profile?.full_name || null,
+            },
+          }),
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
 
       if (!response.ok) throw new Error('API error');
 
@@ -459,18 +471,9 @@ export default function ReflectionV2() {
         return [...without, aiMessage];
       });
 
-      reflectionHelpers
-        .saveMessage(sid, user.id, {
-          role: 'assistant',
-          content: data.assistant_message || '',
-          stage: data.new_stage || state.current_stage,
-          message_type: aiMessage.message_type,
-          chips: data.chips || null,
-          extracted_data: isSummaryCard
-            ? { ...data.extracted_data, card_data: newSummaryData }
-            : data.extracted_data,
-        })
-        .catch(() => {});
+      // FIX: Removed client-side assistant message save here.
+      // The API (api/reflection-chat.js step 8) already saves it server-side.
+      // Saving here too was creating duplicate rows in reflection_messages.
 
       if (data.extracted_data || data.stage_advance) {
         const newState = { ...state };
@@ -523,6 +526,8 @@ export default function ReflectionV2() {
       }
     } catch (error) {
       console.error('Failed to send message:', error);
+      // FIX: Distinguish between timeout/abort and other errors for better UX
+      const isTimeout = error.name === 'AbortError';
       setMessages((prev) => {
         const without = prev.filter((m) => !m.isTyping);
         return [
@@ -530,7 +535,9 @@ export default function ReflectionV2() {
           {
             id: `err-${Date.now()}`,
             role: 'assistant',
-            content: 'Something went wrong. Try sending that again.',
+            content: isTimeout
+              ? "That took too long on my end. Try sending that again — I'm here."
+              : 'Something went wrong. Try sending that again.',
             chips: null,
             message_type: 'question',
             isTyping: false,

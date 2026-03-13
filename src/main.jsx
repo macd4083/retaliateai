@@ -8,15 +8,15 @@ import { AuthProvider } from './lib/AuthContext';
 import { queryClient } from './lib/query-client';
 import './index.css';
 
+// FIX: Removed React.StrictMode — it was causing useEffect to fire twice
+// in production, which sent __INIT__ to the API twice = duplicate opening messages
 ReactDOM.createRoot(document.getElementById('root')).render(
-  <React.StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <AuthProvider>
-          <App />
-        </AuthProvider>
-      </BrowserRouter>
-      <ReactQueryDevtools initialIsOpen={false} />
-    </QueryClientProvider>
-  </React.StrictMode>
+  <QueryClientProvider client={queryClient}>
+    <BrowserRouter>
+      <AuthProvider>
+        <App />
+      </AuthProvider>
+    </BrowserRouter>
+    <ReactQueryDevtools initialIsOpen={false} />
+  </QueryClientProvider>
 );

@@ -179,8 +179,6 @@ export default async function handler(req, res) {
     let userProfileText = '';
     if (user_id) {
       try {
-        // Use new profile fields from context (sent by ReflectionV2) if available,
-        // otherwise fall back to querying the DB
         const ctxName = context.display_name || null;
         const ctxIdentity = context.identity_statement || null;
         const ctxBigGoal = context.big_goal || null;
@@ -190,7 +188,6 @@ export default async function handler(req, res) {
         const ctxBlockers = Array.isArray(context.blockers) ? context.blockers : [];
 
         if (ctxName || ctxIdentity || ctxBigGoal) {
-          // Context already provided by frontend — use it directly
           const parts = [];
           if (ctxName) parts.push(`Name: ${ctxName}`);
           if (ctxIdentity) parts.push(`Identity: ${ctxIdentity}`);
@@ -201,7 +198,6 @@ export default async function handler(req, res) {
           if (ctxBlockers.length) parts.push(`Known blockers: ${ctxBlockers.join(', ')}`);
           userProfileText = parts.join('. ');
         } else {
-          // Fall back to DB query
           const { data: profile } = await supabase
             .from('user_profiles')
             .select('full_name, display_name, bio, identity_statement, big_goal, why, future_self, life_areas, blockers')
@@ -329,20 +325,10 @@ export default async function handler(req, res) {
     }
 
     // ── 8. Save AI message to DB ──────────────────────────────────────────
-    if (session_id && result.assistant_message) {
-      try {
-        await supabase.from('reflection_messages').insert({
-          session_id,
-          user_id,
-          role: 'assistant',
-          content: result.assistant_message,
-          stage: session_state?.current_stage || 'wins',
-          chips: result.chips || null,
-          message_type: 'question',
-          created_at: new Date().toISOString(),
-        });
-      } catch (_e) {}
-    }
+    // FIX: Removed server-side assistant message save.
+    // The client (ReflectionV2.jsx) handles saving user messages itself.
+    // The server previously double-saved assistant messages alongside the client.
+    // Now the server just returns the result and the client saves the assistant message.
 
     // ── 9. Update session if stage advanced ──────────────────────────────
     if (session_id && (result.stage_advance || result.extracted_data)) {
