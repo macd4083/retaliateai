@@ -199,13 +199,11 @@ export default function ReflectionV2() {
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
 
-  // FIX 1: Guard ref — initSession only ever runs once per mount
+  // Guard ref — initSession only ever runs once per mount
   const initCalledRef = useRef(false);
 
-  // FIX 2: messagesRef always holds the latest messages array so sendMessage
-  // never closes over a stale snapshot. This was causing the AI reply to
-  // disappear — the functional setMessages updater was filtering against
-  // a stale prev that didn't include the user bubble.
+  // messagesRef always holds the latest messages array so sendMessage
+  // never closes over a stale snapshot.
   const messagesRef = useRef([]);
 
   const [messages, setMessages] = useState([]);
@@ -226,7 +224,6 @@ export default function ReflectionV2() {
     blocker_tags: [],
     tomorrow_commitment: null,
     self_hype_message: null,
-    // Intelligent coaching fields
     consecutive_excuses: 0,
     checklist: { ...DEFAULT_CHECKLIST },
     exercises_run: [],
@@ -250,7 +247,7 @@ export default function ReflectionV2() {
     scrollToBottom();
   }, [messages, scrollToBottom]);
 
-  // ── Initialize session ────────────────────────────────────────────────────
+  // ── Initialize session ──────────────────────────────���─────────────────────
 
   useEffect(() => {
     if (!user?.id) return;
@@ -284,7 +281,6 @@ export default function ReflectionV2() {
         blocker_tags: session.blocker_tags || [],
         tomorrow_commitment: session.tomorrow_commitment || null,
         self_hype_message: session.self_hype_message || null,
-        // Intelligent coaching fields
         consecutive_excuses: session.consecutive_excuses || 0,
         checklist: session.checklist || { ...DEFAULT_CHECKLIST },
         exercises_run: Array.isArray(session.exercises_run) ? session.exercises_run : [],
@@ -297,8 +293,7 @@ export default function ReflectionV2() {
       const existingMessages = await reflectionHelpers.getSessionMessages(session.id);
 
       if (existingMessages.length > 0) {
-        // FIX 3: Deduplicate messages loaded from DB by content+role to handle
-        // any duplicate rows that got saved before the init guard was in place.
+        // Deduplicate messages loaded from DB by content+role
         const seen = new Set();
         const deduped = existingMessages.filter((m) => {
           const key = `${m.role}::${m.content}`;
@@ -360,8 +355,6 @@ export default function ReflectionV2() {
 
     const isInit = userText === '__INIT__';
 
-    // FIX 4: Always read from messagesRef.current — never from the stale
-    // messages closure. This is what was causing the AI reply to vanish.
     let currentMsgs = messagesRef.current;
 
     if (!isInit) {
@@ -473,12 +466,22 @@ export default function ReflectionV2() {
         isTyping: false,
       };
 
-      // FIX 5: Build the final list by taking messagesRef (which has the user
-      // bubble), stripping the typing indicator, and appending the AI reply.
-      // Never rely on React's prev in setMessages for this — it can be stale.
+      // Build final list — strip typing indicator, append AI reply
       const finalMsgs = [...messagesRef.current.filter((m) => !m.isTyping), aiMessage];
       messagesRef.current = finalMsgs;
       setMessages(finalMsgs);
+
+      // ── FIX: Save assistant message to DB so it persists on refresh ──
+      reflectionHelpers
+        .saveMessage(sid, user.id, {
+          role: 'assistant',
+          content: data.assistant_message || '',
+          stage: state.current_stage,
+          message_type: isSummaryCard ? 'summary_card' : data.message_type || 'question',
+          chips: data.chips || null,
+          extracted_data: isSummaryCard ? { card_data: newSummaryData } : null,
+        })
+        .catch(() => {});
 
       if (data.extracted_data || data.stage_advance || data.checklist_updates || data.consecutive_excuses !== undefined) {
         const newState = { ...state };
@@ -495,18 +498,15 @@ export default function ReflectionV2() {
           newState.self_hype_message = data.extracted_data.self_hype_message;
         if (data.stage_advance && data.new_stage)
           newState.current_stage = data.new_stage;
-        // Merge checklist updates
         if (data.checklist_updates) {
           newState.checklist = { ...(newState.checklist || { ...DEFAULT_CHECKLIST }) };
           Object.keys(data.checklist_updates).forEach((key) => {
             if (data.checklist_updates[key]) newState.checklist[key] = true;
           });
         }
-        // Track exercises run
         if (data.exercise_run && data.exercise_run !== 'none') {
           newState.exercises_run = [...new Set([...(newState.exercises_run || []), data.exercise_run])];
         }
-        // Track consecutive excuses
         if (data.consecutive_excuses !== undefined) {
           newState.consecutive_excuses = data.consecutive_excuses;
         }
@@ -555,7 +555,7 @@ export default function ReflectionV2() {
     }
   }
 
-  // ── Handle chip selection ─────────────────────────────────────────────────
+  // ── Handle chip selection ─────────────────────────────────────────────���───
 
   function handleChipSelect(chip, messageId) {
     if (isLoading || isComplete) return;
@@ -593,7 +593,7 @@ export default function ReflectionV2() {
     }
   }, [isInitializing]);
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  // ── Render ────────────────────────────��───────────────────────────────────
 
   return (
     <AppShellV2 title="Nightly Reflection">
