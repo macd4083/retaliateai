@@ -212,6 +212,11 @@ export default function ReflectionV2() {
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
 
+  // FIX: Guard ref to ensure initSession only ever runs ONCE per mount,
+  // even if user?.id changes multiple times due to Supabase auth events
+  // firing INITIAL_SESSION then SIGNED_IN back-to-back on load.
+  const initCalledRef = useRef(false);
+
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -249,6 +254,11 @@ export default function ReflectionV2() {
 
   useEffect(() => {
     if (!user?.id) return;
+    // FIX: Only run once. Supabase fires auth events multiple times on mount
+    // which caused initSession() → sendMessage('__INIT__') to run twice,
+    // producing two duplicate opening messages from the AI.
+    if (initCalledRef.current) return;
+    initCalledRef.current = true;
     initSession();
   }, [user?.id]);
 
@@ -403,8 +413,7 @@ export default function ReflectionV2() {
         } catch (_e) {}
       }
 
-      // FIX: Added AbortController with 25s timeout to prevent silent hangs
-      // when the Vercel function or OpenAI takes too long to respond.
+      // Added AbortController with 25s timeout to prevent silent hangs
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 25000);
 
@@ -471,10 +480,6 @@ export default function ReflectionV2() {
         return [...without, aiMessage];
       });
 
-      // FIX: Removed client-side assistant message save here.
-      // The API (api/reflection-chat.js step 8) already saves it server-side.
-      // Saving here too was creating duplicate rows in reflection_messages.
-
       if (data.extracted_data || data.stage_advance) {
         const newState = { ...state };
 
@@ -526,7 +531,6 @@ export default function ReflectionV2() {
       }
     } catch (error) {
       console.error('Failed to send message:', error);
-      // FIX: Distinguish between timeout/abort and other errors for better UX
       const isTimeout = error.name === 'AbortError';
       setMessages((prev) => {
         const without = prev.filter((m) => !m.isTyping);
@@ -557,7 +561,7 @@ export default function ReflectionV2() {
     sendMessage(chip.label);
   }
 
-  // ── Handle send ───────────────────────────────────────────────────────────
+  // ── Handle send ────────────────────────���──────────────────────────────────
 
   function handleSend() {
     const text = inputValue.trim();
