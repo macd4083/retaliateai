@@ -191,4 +191,184 @@ export const reflectionHelpers = {
     if (error) throw error;
     return data || [];
   },
+
+  // ── Intelligent coaching helpers ──────────────────────────────────────────
+
+  /**
+   * Get due follow-ups: items where check_back_after <= today OR
+   * trigger_condition matches any of the provided currentSignals.
+   * Only returns non-triggered items.
+   */
+  async getFollowUpQueue(userId, currentSignals = []) {
+    const today = new Date().toISOString().split('T')[0];
+    const { data, error } = await supabase
+      .from('follow_up_queue')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('triggered', false)
+      .is('resolved_at', null);
+
+    if (error) throw error;
+    if (!data) return [];
+
+    return data.filter((item) => {
+      if (item.check_back_after <= today) return true;
+      if (item.trigger_condition && currentSignals.includes(item.trigger_condition)) return true;
+      return false;
+    });
+  },
+
+  /** Mark a follow-up item as triggered (surfaced to the user). */
+  async markFollowUpTriggered(followUpId) {
+    const { data, error } = await supabase
+      .from('follow_up_queue')
+      .update({ triggered: true })
+      .eq('id', followUpId)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+
+  /** Insert a new follow-up into the queue. */
+  async queueFollowUp(userId, sessionId, { context, question, check_back_after, trigger_condition }) {
+    const fallbackDate = new Date();
+    fallbackDate.setDate(fallbackDate.getDate() + 3);
+
+    const { data, error } = await supabase
+      .from('follow_up_queue')
+      .insert({
+        user_id: userId,
+        session_id: sessionId || null,
+        context,
+        question,
+        check_back_after: check_back_after || fallbackDate.toISOString().split('T')[0],
+        trigger_condition: trigger_condition || null,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+
+  /**
+   * Get or upsert a growth marker for a theme.
+   * If the theme exists: increment occurrence_count and add the exercise.
+   * If occurrence_count >= 3 and check_in_after is null: schedule check-in 14 days out.
+   */
+  async upsertGrowthMarker(userId, theme, { exercise_run, check_in_message } = {}) {
+    const { data: existing, error: fetchError } = await supabase
+      .from('growth_markers')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('theme', theme)
+      .maybeSingle();
+
+    if (fetchError) throw fetchError;
+
+    if (existing) {
+      const exercises = Array.isArray(existing.exercises_run) ? existing.exercises_run : [];
+      if (exercise_run && !exercises.includes(exercise_run)) exercises.push(exercise_run);
+      const newCount = (existing.occurrence_count || 1) + 1;
+
+      const checkInDate = new Date();
+      checkInDate.setDate(checkInDate.getDate() + 14);
+      const shouldScheduleCheckIn = newCount >= 3 && !existing.check_in_after;
+
+      const { data, error } = await supabase
+        .from('growth_markers')
+        .update({
+          occurrence_count: newCount,
+          exercises_run: exercises,
+          check_in_after: shouldScheduleCheckIn ? checkInDate.toISOString().split('T')[0] : existing.check_in_after,
+          check_in_message: check_in_message || existing.check_in_message,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', existing.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data;
+    }
+
+    // New marker
+    const { data, error } = await supabase
+      .from('growth_markers')
+      .insert({
+        user_id: userId,
+        theme,
+        exercises_run: exercise_run ? [exercise_run] : [],
+        occurrence_count: 1,
+        check_in_message: check_in_message || null,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+
+  /** Get growth markers whose check-in is due (checked_in=false AND check_in_after <= today). */
+  async getDueGrowthMarkers(userId) {
+    const today = new Date().toISOString().split('T')[0];
+    const { data, error } = await supabase
+      .from('growth_markers')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('checked_in', false)
+      .lte('check_in_after', today)
+      .not('check_in_after', 'is', null);
+
+    if (error) throw error;
+    return data || [];
+  },
+
+  /**
+   * Merge checklistUpdates into the existing checklist JSONB on a session.
+   * Only sets keys to true — never downgrades a true to false.
+   */
+  async updateSessionChecklist(sessionId, checklistUpdates) {
+    const { data: current, error: fetchError } = await supabase
+      .from('reflection_sessions')
+      .select('checklist')
+      .eq('id', sessionId)
+      .maybeSingle();
+
+    if (fetchError) throw fetchError;
+
+    const base = current?.checklist || { wins: false, honest: false, plan: false, identity: false };
+    const merged = { ...base };
+    Object.keys(checklistUpdates).forEach((key) => {
+      if (checklistUpdates[key]) merged[key] = true;
+    });
+
+    const { data, error } = await supabase
+      .from('reflection_sessions')
+      .update({ checklist: merged, updated_at: new Date().toISOString() })
+      .eq('id', sessionId)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+
+  /**
+   * Get a lightweight summary of the last N sessions (no full messages).
+   * Returns: date, wins[], misses[], tomorrow_commitment, current_stage, checklist, mood_end_of_day
+   */
+  async getRecentSessionsSummary(userId, n = 7) {
+    const { data, error } = await supabase
+      .from('reflection_sessions')
+      .select('date, wins, misses, tomorrow_commitment, current_stage, checklist, mood_end_of_day')
+      .eq('user_id', userId)
+      .order('date', { ascending: false })
+      .limit(n);
+
+    if (error) throw error;
+    return data || [];
+  },
 };
