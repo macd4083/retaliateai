@@ -67,13 +67,14 @@ ON EXERCISES:
 - Briefly explain WHY before running an exercise (only if first time — check exercises_explained)
 - Keep explanation to 1 sentence. Then run it.
 - After exercise: connect result back to their identity, goals, or future self
+- NEVER repeat an exercise that already appears in exercises_run for this session
 
 ANTI-EXCUSE SYSTEM (activated when accountability_signal === "excuse"):
 Step 1 (consecutive_excuses === 1):
-  Acknowledge without validating: "Yeah, [X] is genuinely frustrating."
+  Acknowledge without validating: "Yeah, [use their specific frustration] is genuinely tough."
   Immediate pivot: "Here's what I keep coming back to though — what was the part that was yours to control?"
 Step 2 (consecutive_excuses >= 2):
-  "I'm not trying to dismiss [X]. But I notice we keep landing on what you couldn't do. What could you have done differently, even with [X] being true?"
+  "I'm not trying to dismiss [use their specific words]. But I notice we keep landing on what you couldn't do. What could you have done differently, even with that being true?"
 Step 3 (consecutive_excuses >= 3):
   Pull future_self from context.
   "I want to be straight with you — I'm hearing a lot of reasons why it didn't work. But the version of you that [future_self] doesn't live there. What would they say right now?"
@@ -88,8 +89,8 @@ gratitude_anchor:
   - Chips: ["Still has momentum 💪", "Small but real ✅", "Hard to find one 😔"]
 
 why_reconnect:
-  - Pull 3-layer why from context (why_layer_1 → why_layer_2 → why_layer_3).
-  - "You told me this matters because [why]. Does that still feel true?"
+  - Pull why from context.
+  - "You told me this matters because [use their actual why from context]. Does that still feel true?"
   - If yes: "So what's getting between you and that right now?"
   - If no: "What changed? What does it feel like it's about now?"
 
@@ -111,7 +112,7 @@ values_clarification:
 
 future_self_bridge:
   - Pull future_self from context.
-  - "You told me that in a year you want to be [future_self]. What would that version of you say about tonight?"
+  - "You told me that in a year you want to be [use their actual future_self from context]. What would that version of you say about tonight?"
   - Follow up: "What's one decision you can make right now that moves toward that?"
 
 ownership_reframe:
@@ -124,9 +125,10 @@ triage_one_thing:
   - After they identify it: "Good. Everything else is noise for tonight. What's one move on that one thing?"
 
 identity_reinforcement:
-  - "That's not luck or a one-off. That's a pattern emerging. What does doing [that] say about who you're becoming?"
+  - FILL IN their actual win/action, do NOT use a placeholder. Example: if they said "I worked on my app", say "That's not luck or a one-off. That's a pattern emerging. What does working on your app every day say about who you're becoming?"
   - Pull identity_statement from context.
-  - "You told me you're someone who [identity_statement]. Tonight proves it."
+  - "You told me you're someone who [use their actual identity_statement from context]. Tonight proves it."
+  - IMPORTANT: Only run this exercise ONCE per session. If it's already in exercises_run, do NOT run it again — instead give a natural follow-up or transition.
 
 RETURN JSON EXACTLY (no markdown, no extra keys):
 {
@@ -343,7 +345,6 @@ No markdown. No explanation.`;
 
 async function updateSessionChecklist(sessionId, checklistUpdates) {
   try {
-    // Fetch current checklist first, then merge
     const { data: current } = await supabase
       .from('reflection_sessions')
       .select('checklist')
@@ -499,7 +500,7 @@ export default async function handler(req, res) {
       history = [],
       user_message,
       context = {},
-      intent_data: clientIntentData = null, // client may pre-classify and pass it in
+      intent_data: clientIntentData = null,
     } = req.body;
 
     if (!user_id || !user_message) {
@@ -524,9 +525,9 @@ export default async function handler(req, res) {
       };
     }
 
+    // ── 2. Load context in parallel ───────────────────────────────────────
     const currentSignals = [intentData?.intent, intentData?.emotional_state, intentData?.accountability_signal].filter(Boolean);
 
-    // ── 2. Load context in parallel ───────────────────────────────────────
     const [
       followUpQueue,
       growthMarkers,
@@ -562,14 +563,21 @@ export default async function handler(req, res) {
     if (intentData?.accountability_signal === 'excuse') {
       consecutiveExcuses += 1;
     } else if (intentData?.accountability_signal === 'ownership') {
-      consecutiveExcuses = 0; // Reset on ownership
+      consecutiveExcuses = 0;
     }
 
     // ── 5. Check if a follow-up should surface first ──────────────────────
     const dueFollowUp = followUpQueue.length > 0 ? followUpQueue[0] : null;
     const dueGrowthMarker = growthMarkers.length > 0 ? growthMarkers[0] : null;
 
-    // ── 6. Build rich context for the prompt ─────────────────────────────
+    // ── 6. Exercise cooldown — never repeat an exercise already run this session ──
+    const sessionExercisesRun = Array.isArray(session_state.exercises_run) ? session_state.exercises_run : [];
+    let suggestedExercise = intentData?.suggested_exercise || 'none';
+    if (suggestedExercise !== 'none' && sessionExercisesRun.includes(suggestedExercise)) {
+      suggestedExercise = 'none'; // Block repeat
+    }
+
+    // ── 7. Build rich context for the prompt ─────────────────────────────
     const patternsText = reflectionPatterns.length > 0
       ? reflectionPatterns.map((p) => `"${p.label}" (${p.occurrence_count}x, type: ${p.pattern_type})`).join('; ')
       : 'No recurring patterns yet.';
@@ -587,10 +595,8 @@ export default async function handler(req, res) {
       : 'No active goals set yet.';
 
     const exercisesExplained = Array.isArray(profile.exercises_explained) ? profile.exercises_explained : [];
-    const suggestedExercise = intentData?.suggested_exercise || 'none';
     const isFirstTimeExercise = suggestedExercise !== 'none' && !exercisesExplained.includes(suggestedExercise);
 
-    // Build the rich context block injected as a user turn
     const contextBlock = {
       role: 'user',
       content: JSON.stringify({
@@ -610,6 +616,7 @@ export default async function handler(req, res) {
         session_state: {
           ...session_state,
           consecutive_excuses: consecutiveExcuses,
+          exercises_run: sessionExercisesRun,
         },
         intent_classification: intentData,
         follow_up_due: dueFollowUp
@@ -627,10 +634,13 @@ export default async function handler(req, res) {
           dueFollowUp ? 'PRIORITY: Surface the follow_up_due question BEFORE your main response.' : null,
           dueGrowthMarker ? 'Weave in the growth_marker_due check-in naturally.' : null,
           intentData?.accountability_signal === 'excuse'
-            ? `ANTI-EXCUSE: consecutive_excuses=${consecutiveExcuses}. Follow the anti-excuse protocol for this count.`
+            ? `ANTI-EXCUSE: consecutive_excuses=${consecutiveExcuses}. Follow the anti-excuse protocol for this count. Use their specific words, not placeholders.`
             : null,
           suggestedExercise !== 'none'
-            ? `RUN EXERCISE: ${suggestedExercise}. is_first_time=${isFirstTimeExercise} (explain in 1 sentence if first time). Set exercise_run="${suggestedExercise}" in response.`
+            ? `RUN EXERCISE: ${suggestedExercise}. is_first_time=${isFirstTimeExercise} (explain in 1 sentence if first time). IMPORTANT: Fill in ALL placeholders with the user's actual words from context and the conversation — never output literal bracket placeholders like [that] or [X]. Set exercise_run="${suggestedExercise}" in response.`
+            : null,
+          sessionExercisesRun.length > 0
+            ? `EXERCISES ALREADY RUN THIS SESSION: ${sessionExercisesRun.join(', ')}. Do NOT repeat any of these.`
             : null,
           'Use their actual words, goals, and why — never be generic.',
           'One question only. 2-3 sentences max.',
@@ -638,7 +648,7 @@ export default async function handler(req, res) {
       }),
     };
 
-    // ── 7. Build messages array ───────────────────────────────────────────
+    // ── 8. Build messages array ───────────────────────────────────────────
     const messages = [{ role: 'system', content: SYSTEM_PROMPT }, contextBlock, ...history.slice(-20)];
 
     if (!isInit) {
@@ -666,7 +676,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // ── 8. Call GPT-4o ────────────────────────────────────────────────────
+    // ── 9. Call GPT-4o ────────────────────────────────────────────────────
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o',
       messages,
@@ -697,6 +707,11 @@ export default async function handler(req, res) {
     result.checklist_updates = result.checklist_updates || { ...DEFAULT_CHECKLIST };
     result.follow_up_queued = result.follow_up_queued || false;
 
+    // Safety: if GPT somehow tries to re-run a blocked exercise, strip it
+    if (result.exercise_run !== 'none' && sessionExercisesRun.includes(result.exercise_run)) {
+      result.exercise_run = 'none';
+    }
+
     // Merge checklist_content from classifier into checklist_updates
     if (intentData?.checklist_content) {
       Object.keys(intentData.checklist_content).forEach((key) => {
@@ -704,30 +719,25 @@ export default async function handler(req, res) {
       });
     }
 
-    // ── 9. Post-response DB writes (all non-blocking, fail silently) ──────
+    // ── 10. Post-response DB writes (all non-blocking, fail silently) ──────
     const dbPromises = [];
 
-    // Update session checklist
     if (session_id && Object.values(result.checklist_updates).some(Boolean)) {
       dbPromises.push(updateSessionChecklist(session_id, result.checklist_updates));
     }
 
-    // Update session with exercise info and consecutive_excuses
     if (session_id) {
       dbPromises.push(updateSessionExercise(session_id, result.exercise_run, consecutiveExcuses));
     }
 
-    // Mark exercise as explained if this was its first run
     if (result.exercise_run && result.exercise_run !== 'none' && isFirstTimeExercise) {
       dbPromises.push(markExerciseExplained(user_id, result.exercise_run, exercisesExplained));
     }
 
-    // Mark follow-up as triggered
     if (dueFollowUp) {
       dbPromises.push(markFollowUpTriggered(dueFollowUp.id));
     }
 
-    // Queue a follow-up if an exercise was run
     const exerciseRan = result.exercise_run && result.exercise_run !== 'none';
     if (exerciseRan && session_id) {
       dbPromises.push(
@@ -738,7 +748,6 @@ export default async function handler(req, res) {
           trigger_condition: intentData?.emotional_state,
         })
       );
-      // Upsert growth marker
       dbPromises.push(
         upsertGrowthMarker(user_id, result.exercise_run, {
           exercise_run: result.exercise_run,
@@ -747,7 +756,6 @@ export default async function handler(req, res) {
       );
     }
 
-    // Update session DB if stage advanced or data extracted
     if (session_id && (result.stage_advance || result.extracted_data || result.is_session_complete)) {
       const updates = {};
       if (result.stage_advance && result.new_stage) updates.current_stage = result.new_stage;
@@ -772,15 +780,12 @@ export default async function handler(req, res) {
       }
     }
 
-    // Upsert blocker patterns
     if (result.extracted_data?.blocker_tags?.length) {
       dbPromises.push(upsertBlockerPatterns(user_id, result.extracted_data.blocker_tags));
     }
 
-    // Fire all DB writes in parallel — do not await (non-blocking)
     Promise.all(dbPromises).catch(() => {});
 
-    // Attach consecutive_excuses to response so client can track it in session_state
     result.consecutive_excuses = consecutiveExcuses;
 
     return res.status(200).json(result);
