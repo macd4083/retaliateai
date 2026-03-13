@@ -1,3 +1,16 @@
+/**
+ * api/reflection-chat.js
+ *
+ * LEGACY ENDPOINT — kept for backward compatibility.
+ * The primary endpoint is now api/reflection-coach.js which includes
+ * intent classification, the anti-excuse system, exercise routing,
+ * follow-up queue management, and growth markers.
+ *
+ * This file continues to work as before. If `intent_data` is provided
+ * in the request body it is passed through in the session context so
+ * downstream consumers can make use of it.
+ */
+
 import OpenAI from 'openai';
 import { createClient } from '@supabase/supabase-js';
 
@@ -131,6 +144,7 @@ export default async function handler(req, res) {
       history = [],
       user_message,
       context = {},
+      intent_data = null, // passed through if client provides pre-classified intent
     } = req.body;
 
     if (!user_id || !user_message) {
@@ -262,6 +276,7 @@ export default async function handler(req, res) {
           streak: context.reflection_streak || context.streak || 0,
         },
         session_state: session_state || {},
+        intent_data: intent_data || null, // forwarded for downstream consumers
         instruction:
           'Use the context and user_identity above deeply. Reference their actual goals, why, and identity. Notice their patterns. Ask one question at a time. Be personal, not generic.',
       }),

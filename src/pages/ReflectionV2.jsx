@@ -31,6 +31,8 @@ const STAGE_PLACEHOLDERS = {
   close: 'Write yourself a message...',
 };
 
+const DEFAULT_CHECKLIST = { wins: false, honest: false, plan: false, identity: false };
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function ProgressBar({ currentStage }) {
@@ -224,6 +226,10 @@ export default function ReflectionV2() {
     blocker_tags: [],
     tomorrow_commitment: null,
     self_hype_message: null,
+    // Intelligent coaching fields
+    consecutive_excuses: 0,
+    checklist: { ...DEFAULT_CHECKLIST },
+    exercises_run: [],
   });
   const [summaryCardData, setSummaryCardData] = useState({});
 
@@ -278,6 +284,10 @@ export default function ReflectionV2() {
         blocker_tags: session.blocker_tags || [],
         tomorrow_commitment: session.tomorrow_commitment || null,
         self_hype_message: session.self_hype_message || null,
+        // Intelligent coaching fields
+        consecutive_excuses: session.consecutive_excuses || 0,
+        checklist: session.checklist || { ...DEFAULT_CHECKLIST },
+        exercises_run: Array.isArray(session.exercises_run) ? session.exercises_run : [],
       };
       setSessionState(restoredState);
 
@@ -406,7 +416,7 @@ export default function ReflectionV2() {
 
       let response;
       try {
-        response = await fetch('/api/reflection-chat', {
+        response = await fetch('/api/reflection-coach', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           signal: controller.signal,
@@ -417,6 +427,8 @@ export default function ReflectionV2() {
               ...state,
               is_first_message: isInit,
               yesterday_commitment: yesterdayCommitment,
+              consecutive_excuses: state.consecutive_excuses || 0,
+              checklist: state.checklist || { ...DEFAULT_CHECKLIST },
             },
             history: isInit ? [] : buildHistory(currentMsgs),
             user_message: userText,
@@ -468,7 +480,7 @@ export default function ReflectionV2() {
       messagesRef.current = finalMsgs;
       setMessages(finalMsgs);
 
-      if (data.extracted_data || data.stage_advance) {
+      if (data.extracted_data || data.stage_advance || data.checklist_updates || data.consecutive_excuses !== undefined) {
         const newState = { ...state };
         if (data.extracted_data?.mood) newState.mood_end_of_day = data.extracted_data.mood;
         if (data.extracted_data?.win_text)
@@ -483,6 +495,21 @@ export default function ReflectionV2() {
           newState.self_hype_message = data.extracted_data.self_hype_message;
         if (data.stage_advance && data.new_stage)
           newState.current_stage = data.new_stage;
+        // Merge checklist updates
+        if (data.checklist_updates) {
+          newState.checklist = { ...(newState.checklist || { ...DEFAULT_CHECKLIST }) };
+          Object.keys(data.checklist_updates).forEach((key) => {
+            if (data.checklist_updates[key]) newState.checklist[key] = true;
+          });
+        }
+        // Track exercises run
+        if (data.exercise_run && data.exercise_run !== 'none') {
+          newState.exercises_run = [...new Set([...(newState.exercises_run || []), data.exercise_run])];
+        }
+        // Track consecutive excuses
+        if (data.consecutive_excuses !== undefined) {
+          newState.consecutive_excuses = data.consecutive_excuses;
+        }
         setSessionState(newState);
 
         const dbUpdates = {};
