@@ -25,6 +25,39 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+/**
+ * SUPABASE MIGRATION — run once in SQL editor before deploying:
+ *
+ * CREATE EXTENSION IF NOT EXISTS vector;
+ *
+ * ALTER TABLE reflection_sessions ADD COLUMN IF NOT EXISTS summary text;
+ * ALTER TABLE reflection_sessions ADD COLUMN IF NOT EXISTS embedding vector(1536);
+ *
+ * ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS values text[];
+ * ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS short_term_state text;
+ * ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS long_term_patterns text[];
+ * ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS growth_areas text[];
+ * ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS strengths text[];
+ * ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS profile_updated_at timestamptz;
+ *
+ * CREATE OR REPLACE FUNCTION match_reflection_sessions(
+ *   query_embedding vector(1536),
+ *   match_user_id uuid,
+ *   match_count int DEFAULT 3
+ * )
+ * RETURNS TABLE (id uuid, date date, summary text, similarity float)
+ * LANGUAGE sql STABLE AS $$
+ *   SELECT id, date, summary,
+ *     1 - (embedding <=> query_embedding) AS similarity
+ *   FROM reflection_sessions
+ *   WHERE user_id = match_user_id
+ *     AND embedding IS NOT NULL
+ *     AND summary IS NOT NULL
+ *   ORDER BY embedding <=> query_embedding
+ *   LIMIT match_count;
+ * $$;
+ */
+
 const DEFAULT_CHECKLIST = { wins: false, honest: false, plan: false, identity: false };
 
 // ── System prompt ─────────────────────────────────────────────────────────────
@@ -80,6 +113,8 @@ ON KNOWING WHEN TO CLOSE:
 - If they've stated a clear plan and responded positively, that thread is CLOSED
 - A good close is a warm send-off with a final identity statement, not an interrogation
 - Set is_session_complete: true when wins + plan are covered and conversation has natural resolution
+- If the user has clearly answered a question, even informally ("I'll just know", "I'm not worried about it", "I'll figure it out"), that topic is CLOSED. Do not follow up on it.
+- A closed topic means: move forward or wrap up. Never re-ask what was just answered.
 
 ON VENTING:
 - One message of full acknowledgment
@@ -239,7 +274,7 @@ async function loadRecentSessionsSummary(userId) {
   try {
     const { data } = await supabase
       .from('reflection_sessions')
-      .select('date, wins, misses, tomorrow_commitment, current_stage, checklist, mood_end_of_day')
+      .select('date, wins, misses, tomorrow_commitment, current_stage, checklist, mood_end_of_day, summary')
       .eq('user_id', userId)
       .order('date', { ascending: false })
       .limit(7);
@@ -265,7 +300,7 @@ async function loadUserProfile(userId) {
   try {
     const { data } = await supabase
       .from('user_profiles')
-      .select('full_name, display_name, bio, identity_statement, big_goal, why, future_self, life_areas, blockers, exercises_explained')
+      .select('full_name, display_name, bio, identity_statement, big_goal, why, future_self, life_areas, blockers, exercises_explained, values, short_term_state, long_term_patterns, growth_areas, strengths')
       .eq('id', userId)
       .maybeSingle();
     return data || null;
@@ -430,6 +465,140 @@ async function upsertBlockerPatterns(userId, blockerTags) {
   }
 }
 
+// ── Vector search + profile evolution helpers ─────────────────────────────────
+
+async function generateEmbedding(text) {
+  try {
+    const response = await openai.embeddings.create({
+      model: 'text-embedding-3-small',
+      input: text.slice(0, 8000),
+    });
+    return response.data[0].embedding;
+  } catch (_e) { return null; }
+}
+
+async function searchRelevantMemories(userId, queryText, matchCount = 3) {
+  try {
+    const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve([]), 1500));
+    const searchPromise = (async () => {
+      const embedding = await generateEmbedding(queryText);
+      if (!embedding) return [];
+      const { data } = await supabase.rpc('match_reflection_sessions', {
+        query_embedding: embedding,
+        match_user_id: userId,
+        match_count: matchCount,
+      });
+      return data || [];
+    })();
+    return await Promise.race([searchPromise, timeoutPromise]);
+  } catch (_e) { return []; }
+}
+
+function generateSessionSummary(sessionState, result, profile, dateStr) {
+  const name = profile.display_name || 'User';
+  const wins = Array.isArray(sessionState.wins)
+    ? sessionState.wins.map((w) => (typeof w === 'string' ? w : w.text)).filter(Boolean).join(', ')
+    : result.extracted_data?.win_text || 'not recorded';
+  const miss = result.extracted_data?.miss_text || sessionState.misses?.[0] || null;
+  const commitment = sessionState.tomorrow_commitment || result.extracted_data?.tomorrow_commitment || null;
+  const insight = result.extracted_data?.depth_insight || null;
+  const exercises = Array.isArray(sessionState.exercises_run) ? sessionState.exercises_run.join(', ') : 'none';
+  const mood = sessionState.mood_end_of_day || result.extracted_data?.mood || null;
+
+  let summary = `Session ${dateStr}: ${name} worked on ${wins}.`;
+  if (miss) summary += ` Honest moment: ${miss}.`;
+  if (commitment) summary += ` Tomorrow's plan: ${commitment}.`;
+  if (insight) summary += ` Depth insight: ${insight}.`;
+  if (exercises !== 'none') summary += ` Exercises: ${exercises}.`;
+  if (mood) summary += ` Mood: ${mood}.`;
+  return summary;
+}
+
+async function evolveUserProfile(userId, summaryText, currentProfile, recentSessions) {
+  try {
+    const EVOLVE_SYSTEM = `You are analyzing a completed reflection session to evolve the user's profile.
+
+Given the session summary and current user profile, extract:
+1. short_term_state: 1-2 sentences on how they're doing right now. Human language, not clinical. E.g. "He's been grinding on his app and working on his morning routine."
+2. long_term_patterns: recurring themes/behaviors emerging (max 5 strings)
+3. growth_areas: areas actively being worked on (max 4 strings)
+4. strengths: positive traits consistently shown (max 4 strings)
+5. values: core values surfaced in their language and choices (max 5 strings)
+6. identity_statement_update: ONLY if a stronger more specific identity statement clearly emerged — otherwise null
+7. big_goal_update: ONLY if their goal evolved or became clearer — otherwise null
+8. why_update: ONLY if their why deepened or clarified — otherwise null
+
+Rules:
+- Use their actual words, not clinical language
+- Only update identity_statement/big_goal/why if genuinely stronger version emerged
+- Merge with existing profile — evolve, don't erase
+- Keep arrays concise, quality over quantity
+
+Return valid JSON only:
+{
+  "short_term_state": "...",
+  "long_term_patterns": ["..."],
+  "growth_areas": ["..."],
+  "strengths": ["..."],
+  "values": ["..."],
+  "identity_statement_update": "..." | null,
+  "big_goal_update": "..." | null,
+  "why_update": "..." | null
+}`;
+
+    const recentSummaries = recentSessions
+      .filter((s) => s.summary)
+      .slice(0, 3)
+      .map((s) => `${s.date}: ${s.summary}`)
+      .join('\n');
+
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: EVOLVE_SYSTEM },
+        {
+          role: 'user',
+          content: JSON.stringify({
+            session_summary: summaryText,
+            current_profile: {
+              name: currentProfile?.display_name || currentProfile?.full_name,
+              identity_statement: currentProfile?.identity_statement,
+              big_goal: currentProfile?.big_goal,
+              why: currentProfile?.why,
+              future_self: currentProfile?.future_self,
+              short_term_state: currentProfile?.short_term_state,
+              long_term_patterns: currentProfile?.long_term_patterns,
+              growth_areas: currentProfile?.growth_areas,
+              strengths: currentProfile?.strengths,
+              values: currentProfile?.values,
+            },
+            recent_sessions: recentSummaries || 'none',
+          }),
+        },
+      ],
+      response_format: { type: 'json_object' },
+      temperature: 0.4,
+      max_tokens: 600,
+    });
+
+    const evolution = JSON.parse(completion.choices[0].message.content);
+
+    const profileUpdates = {
+      short_term_state: evolution.short_term_state,
+      long_term_patterns: evolution.long_term_patterns,
+      growth_areas: evolution.growth_areas,
+      strengths: evolution.strengths,
+      values: evolution.values,
+      profile_updated_at: new Date().toISOString(),
+    };
+    if (evolution.identity_statement_update) profileUpdates.identity_statement = evolution.identity_statement_update;
+    if (evolution.big_goal_update) profileUpdates.big_goal = evolution.big_goal_update;
+    if (evolution.why_update) profileUpdates.why = evolution.why_update;
+
+    await supabase.from('user_profiles').update(profileUpdates).eq('id', userId);
+  } catch (_e) {}
+}
+
 // ── Main handler ──────────────────────────────────────────────────────────────
 
 export default async function handler(req, res) {
@@ -489,6 +658,11 @@ export default async function handler(req, res) {
       life_areas: context.life_areas || userProfile?.life_areas || [],
       blockers: context.blockers || userProfile?.blockers || [],
       exercises_explained: userProfile?.exercises_explained || [],
+      values: userProfile?.values || [],
+      short_term_state: userProfile?.short_term_state || null,
+      long_term_patterns: userProfile?.long_term_patterns || [],
+      growth_areas: userProfile?.growth_areas || [],
+      strengths: userProfile?.strengths || [],
     };
 
     // ── 4. Consecutive excuses ────────────────────────────────────────────
@@ -522,9 +696,10 @@ export default async function handler(req, res) {
     // ── 7. Session state analysis for instructions ────────────────────────
     const mergedChecklist = { ...(session_state.checklist || {}), ...(intentData?.checklist_content || {}) };
     const tomorrowFilled = !!session_state.tomorrow_commitment;
-    const sessionReadyToClose = tomorrowFilled && mergedChecklist.wins;
-    const depthProbeNeeded = intentData?.depth_opportunity && !sessionExercisesRun.includes('depth_probe');
     const messageCount = history.length;
+    const sessionReadyToClose = tomorrowFilled && mergedChecklist.wins && (mergedChecklist.identity || messageCount >= 10);
+    const forceClose = messageCount >= 14 && tomorrowFilled && mergedChecklist.wins;
+    const depthProbeNeeded = intentData?.depth_opportunity && !sessionExercisesRun.includes('depth_probe');
     const honestMissing = !mergedChecklist.honest && messageCount >= 4;
     const identityMissing = !mergedChecklist.identity && messageCount >= 6;
 
@@ -537,9 +712,17 @@ export default async function handler(req, res) {
       : 'none';
 
     const recentSessionsText = recentSessions.slice(0, 3).map((s) => {
+      if (s.summary) return `${s.date}: ${s.summary}`;
       const wins = Array.isArray(s.wins) ? s.wins.map((w) => (typeof w === 'string' ? w : w.text)).filter(Boolean) : [];
       return `${s.date}: wins=[${wins.slice(0, 2).join(', ')}] commitment="${s.tomorrow_commitment || ''}"`;
     }).join(' | ') || 'none';
+
+    // ── 8b. Memory search for question/advice/memory_query intents ────────
+    const isMemoryMode = ['question', 'advice_request', 'memory_query'].includes(intentData?.intent);
+    let relevantMemories = [];
+    if (isMemoryMode && !isInit) {
+      relevantMemories = await searchRelevantMemories(user_id, user_message);
+    }
 
     const goalsText = activeGoals.length > 0
       ? activeGoals.map((g) => `"${g.title}"`).join('; ')
@@ -555,11 +738,19 @@ export default async function handler(req, res) {
           why: profile.why,
           future_self: profile.future_self,
           life_areas: Array.isArray(profile.life_areas) ? profile.life_areas.join(', ') : '',
+          values: Array.isArray(profile.values) && profile.values.length > 0 ? profile.values.join(', ') : undefined,
+          short_term_state: profile.short_term_state || undefined,
+          long_term_patterns: Array.isArray(profile.long_term_patterns) && profile.long_term_patterns.length > 0 ? profile.long_term_patterns : undefined,
+          growth_areas: Array.isArray(profile.growth_areas) && profile.growth_areas.length > 0 ? profile.growth_areas : undefined,
+          strengths: Array.isArray(profile.strengths) && profile.strengths.length > 0 ? profile.strengths : undefined,
         },
         goals: goalsText,
         yesterday_commitment: yesterdayCommitment || 'none',
         patterns: patternsText,
         recent_sessions: recentSessionsText,
+        relevant_memories: relevantMemories.length > 0
+          ? relevantMemories.map((m) => ({ date: m.date, summary: m.summary, similarity: m.similarity }))
+          : undefined,
         session: {
           stage: session_state.current_stage || 'wins',
           checklist: mergedChecklist,
@@ -582,6 +773,9 @@ export default async function handler(req, res) {
         ready_to_close: sessionReadyToClose,
         streak: context.reflection_streak || context.streak || 0,
         instructions: [
+          isMemoryMode
+            ? `MEMORY MODE: The user asked a question or wants advice. PAUSE the stage workflow — do NOT advance stage or update checklist. Answer their question directly using relevant_memories and their profile data. Use their actual past words and patterns. Be specific, not generic. End your response with ONE question that naturally brings them back to the ${session_state.current_stage || 'wins'} stage.`
+            : null,
           dueFollowUp ? 'PRIORITY: Surface follow_up_due question first.' : null,
           dueGrowthMarker ? 'Weave in growth_marker_due check-in naturally.' : null,
           intentData?.accountability_signal === 'excuse'
@@ -602,12 +796,14 @@ export default async function handler(req, res) {
           sessionExercisesRun.length > 0
             ? `ALREADY RUN: ${sessionExercisesRun.join(', ')}. Do NOT repeat.`
             : null,
-          suggestedNextStage
+          suggestedNextStage && !isMemoryMode
             ? `STAGE HINT: Ready to move to "${suggestedNextStage}". Transition naturally if conversation supports it. Set stage_advance:true, new_stage:"${suggestedNextStage}".`
             : null,
-          sessionReadyToClose
-            ? `READY TO CLOSE: wins + plan covered. If tone is resolved, wrap warmly. End with an identity statement. Set is_session_complete:true. Do NOT keep drilling.`
-            : null,
+          forceClose
+            ? 'FORCE CLOSE: Session has gone long. Wins + plan covered. Wrap up NOW with a warm identity statement. Set is_session_complete:true. No more questions.'
+            : sessionReadyToClose
+              ? `READY TO CLOSE: wins + plan covered. If tone is resolved, wrap warmly. End with an identity statement. Set is_session_complete:true. Do NOT keep drilling.`
+              : null,
           'Use their actual words — never be generic.',
           'One question only. 2-3 sentences max.',
           'NEVER drill a topic already answered.',
@@ -726,6 +922,21 @@ export default async function handler(req, res) {
     }
 
     Promise.all(dbPromises).catch(() => {});
+
+    // Post-session background work — fire and forget
+    if (result.is_session_complete && session_id) {
+      (async () => {
+        try {
+          const summaryText = generateSessionSummary(session_state, result, profile, today());
+          const embedding = await generateEmbedding(summaryText);
+          const sessionUpdates = { summary: summaryText };
+          if (embedding) sessionUpdates.embedding = embedding;
+          await supabase.from('reflection_sessions').update(sessionUpdates).eq('id', session_id);
+          await evolveUserProfile(user_id, summaryText, userProfile, recentSessions);
+        } catch (_e) {}
+      })();
+    }
+
     result.consecutive_excuses = consecutiveExcuses;
 
     return res.status(200).json(result);
