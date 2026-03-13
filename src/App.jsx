@@ -15,7 +15,7 @@ import TermsOfService from './pages/TermsOfService';
 import { useAuth } from './lib/AuthContext';
 import { supabase } from './lib/supabase/client';
 
-// ── Old imports (preserved, not deleted) ──────────────────────────────────
+// ── Old imports (preserved, not deleted) ───────────────���──────────────────
 // import Sidebar from './components/layout/Sidebar';
 // import JournalEditor from './components/journal/JournalEditor';
 // import EntryDetailModal from './components/journal/EntryDetailModal';
@@ -33,18 +33,39 @@ import { supabase } from './lib/supabase/client';
 //   useDeleteJournalEntry,
 // } from './hooks';
 
+// ── Full-screen loading screen ────────────────────────────────────────────
+// FIX: Proper branded loading screen shown while auth + onboarding status resolves.
+// Prevents any flash of onboarding or wrong content during initial load.
+function LoadingScreen() {
+  return (
+    <div className="flex flex-col items-center justify-center h-screen bg-zinc-950 gap-4">
+      <div className="w-10 h-10 border-2 border-zinc-700 border-t-red-500 rounded-full animate-spin" />
+      <p className="text-zinc-500 text-sm tracking-wide">Loading...</p>
+    </div>
+  );
+}
+
 // ── AuthGuardV2 ────────────────────────────────────────────────────────────
 // Checks auth + onboarding_completed. If not onboarded, shows OnboardingV2.
 function AuthGuardV2({ children }) {
   const { user, loading } = useAuth();
+
+  // FIX: Start as null (unknown), not false.
+  // null = "haven't checked yet" → show loading screen
+  // false = "checked, not completed" → show onboarding
+  // true = "checked, completed" → show app
   const [onboardingCompleted, setOnboardingCompleted] = React.useState(null);
   const [profileLoading, setProfileLoading] = React.useState(true);
 
   React.useEffect(() => {
+    // If auth is still resolving, don't do anything yet
+    if (loading) return;
+
     if (!user?.id) {
       setProfileLoading(false);
       return;
     }
+
     supabase
       .from('user_profiles')
       .select('onboarding_completed')
@@ -54,14 +75,12 @@ function AuthGuardV2({ children }) {
         setOnboardingCompleted(data?.onboarding_completed ?? false);
         setProfileLoading(false);
       });
-  }, [user?.id]);
+  }, [user?.id, loading]); // FIX: also depend on loading so we wait for auth to settle
 
-  if (loading || profileLoading) {
-    return (
-      <div className="flex items-center justify-center h-screen bg-zinc-950">
-        <div className="w-8 h-8 border-2 border-zinc-700 border-t-red-500 rounded-full animate-spin" />
-      </div>
-    );
+  // Show loading screen until BOTH auth AND profile check are done.
+  // onboardingCompleted === null means we haven't gotten the answer yet.
+  if (loading || profileLoading || onboardingCompleted === null) {
+    return <LoadingScreen />;
   }
 
   if (!user) return <Navigate to="/login" replace />;

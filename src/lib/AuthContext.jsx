@@ -16,17 +16,15 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Check active sessions
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      setLoading(false);
-    });
-
-    // Listen for auth changes
+    // FIX: Use onAuthStateChange as the single source of truth.
+    // It fires immediately with the current session on mount (INITIAL_SESSION event),
+    // so we can rely on it alone and avoid the race condition where getSession()
+    // and onAuthStateChange() both resolve and cause double renders/double initSession calls.
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
+      setLoading(false); // Only set loading false once — after the first auth event
     });
 
     return () => subscription.unsubscribe();
@@ -41,7 +39,6 @@ export function AuthProvider({ children }) {
     user,
     loading,
     signOut,
-    // Add aliases for compatibility
     isLoadingAuth: loading,
     isAuthenticated: !!user,
   };
