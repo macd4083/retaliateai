@@ -209,8 +209,8 @@ export default function TermsOfService() {
               </p>
               <div className="bg-slate-50 rounded-lg p-4 mt-4">
                 <p className="text-slate-700">
-                  <strong>Email:</strong> <a href="mailto:legal@retaliateai.com" className="text-blue-600 hover:text-blue-700">legal@retaliateai.com</a><br/>
-                  <strong>Website:</strong> <a href="https://retaliateai.com" className="text-blue-600 hover:text-blue-700">https://retaliateai.com</a>
+                  <strong>Email:</strong> <a href="mailto:legal@old.retaliateai.com" className="text-blue-600 hover:text-blue-700">legal@old.retaliateai.com</a><br/>
+                  <strong>Website:</strong> <a href="https://old.retaliateai.com" className="text-blue-600 hover:text-blue-700">https://old.retaliateai.com</a>
                 </p>
               </div>
             </section>

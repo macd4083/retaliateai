@@ -129,7 +129,7 @@ export default function PrivacyPolicy() {
                 <li><strong>Opt-out:</strong> Unsubscribe from marketing emails (if we add this feature)</li>
               </ul>
               <p className="text-slate-700 mt-4">
-                To exercise these rights, contact us at <a href="mailto:privacy@retaliateai.com" className="text-blue-600 hover: text-blue-700">privacy@retaliateai. com</a>
+                To exercise these rights, contact us at <a href="mailto:privacy@old.retaliateai.com" className="text-blue-600 hover: text-blue-700">privacy@old.retaliateai.com</a>
               </p>
             </section>
 
@@ -187,8 +187,8 @@ export default function PrivacyPolicy() {
               </p>
               <div className="bg-slate-50 rounded-lg p-4 mt-4">
                 <p className="text-slate-700">
-                  <strong>Email:</strong> <a href="mailto:privacy@retaliateai.com" className="text-blue-600 hover: text-blue-700">privacy@retaliateai.com</a><br/>
-                  <strong>Website: </strong> <a href="https://retaliateai.com" className="text-blue-600 hover:text-blue-700">https://retaliateai.com</a>
+                  <strong>Email:</strong> <a href="mailto:privacy@old.retaliateai.com" className="text-blue-600 hover: text-blue-700">privacy@old.retaliateai.com</a><br/>
+                  <strong>Website: </strong> <a href="https://old.retaliateai.com" className="text-blue-600 hover:text-blue-700">https://old.retaliateai.com</a>
                 </p>
               </div>
             </section>

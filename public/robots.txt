@@ -2,4 +2,4 @@ User-agent: *
 Allow: /
 Disallow: /api/
 
-Sitemap: https://retaliateai.com/sitemap.xml
+Sitemap: https://old.retaliateai.com/sitemap.xml
