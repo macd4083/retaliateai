@@ -1,9 +1,10 @@
 import { supabase } from './client';
+import { localDateStr } from '../dateUtils';
 
 export const reflectionHelpers = {
   // Get or create today's reflection session
   async getTodaySession(userId) {
-    const today = new Date().toISOString().split('T')[0];
+    const today = localDateStr();
 
     const { data: existing, error: fetchError } = await supabase
       .from('reflection_sessions')
@@ -28,9 +29,7 @@ export const reflectionHelpers = {
 
   // Get yesterday's tomorrow_commitment (the plan they made last night)
   async getYesterdayCommitment(userId) {
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayStr = yesterday.toISOString().split('T')[0];
+    const yesterdayStr = localDateStr(-1);
 
     const { data, error } = await supabase
       .from('reflection_sessions')
@@ -83,9 +82,7 @@ export const reflectionHelpers = {
 
   // Get recent patterns for a user
   async getRecentPatterns(userId, days = 14) {
-    const since = new Date();
-    since.setDate(since.getDate() - days);
-    const sinceStr = since.toISOString().split('T')[0];
+    const sinceStr = localDateStr(-days);
 
     const { data, error } = await supabase
       .from('reflection_patterns')
@@ -100,7 +97,7 @@ export const reflectionHelpers = {
 
   // Upsert a pattern (insert or increment occurrence_count)
   async upsertPattern(userId, patternData) {
-    const today = new Date().toISOString().split('T')[0];
+    const today = localDateStr();
 
     // Check if a pattern with same type+label already exists
     const { data: existing, error: fetchError } = await supabase
@@ -200,7 +197,7 @@ export const reflectionHelpers = {
    * Only returns non-triggered items.
    */
   async getFollowUpQueue(userId, currentSignals = []) {
-    const today = new Date().toISOString().split('T')[0];
+    const today = localDateStr();
     const { data, error } = await supabase
       .from('follow_up_queue')
       .select('*')
@@ -233,8 +230,7 @@ export const reflectionHelpers = {
 
   /** Insert a new follow-up into the queue. */
   async queueFollowUp(userId, sessionId, { context, question, check_back_after, trigger_condition }) {
-    const fallbackDate = new Date();
-    fallbackDate.setDate(fallbackDate.getDate() + 3);
+    const fallbackDate = localDateStr(3);
 
     const { data, error } = await supabase
       .from('follow_up_queue')
@@ -243,7 +239,7 @@ export const reflectionHelpers = {
         session_id: sessionId || null,
         context,
         question,
-        check_back_after: check_back_after || fallbackDate.toISOString().split('T')[0],
+        check_back_after: check_back_after || fallbackDate,
         trigger_condition: trigger_condition || null,
       })
       .select()
@@ -273,8 +269,6 @@ export const reflectionHelpers = {
       if (exercise_run && !exercises.includes(exercise_run)) exercises.push(exercise_run);
       const newCount = (existing.occurrence_count || 1) + 1;
 
-      const checkInDate = new Date();
-      checkInDate.setDate(checkInDate.getDate() + 14);
       const shouldScheduleCheckIn = newCount >= 3 && !existing.check_in_after;
 
       const { data, error } = await supabase
@@ -282,7 +276,7 @@ export const reflectionHelpers = {
         .update({
           occurrence_count: newCount,
           exercises_run: exercises,
-          check_in_after: shouldScheduleCheckIn ? checkInDate.toISOString().split('T')[0] : existing.check_in_after,
+          check_in_after: shouldScheduleCheckIn ? localDateStr(14) : existing.check_in_after,
           check_in_message: check_in_message || existing.check_in_message,
           updated_at: new Date().toISOString(),
         })
@@ -313,7 +307,7 @@ export const reflectionHelpers = {
 
   /** Get growth markers whose check-in is due (checked_in=false AND check_in_after <= today). */
   async getDueGrowthMarkers(userId) {
-    const today = new Date().toISOString().split('T')[0];
+    const today = localDateStr();
     const { data, error } = await supabase
       .from('growth_markers')
       .select('*')

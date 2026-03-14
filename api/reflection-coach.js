@@ -200,14 +200,19 @@ function getTimeGreeting() {
   return map[getTimeOfDay()];
 }
 
+// Returns YYYY-MM-DD in local time (NOT UTC) to avoid off-by-one day for non-UTC users
+function localDate(offsetDays = 0) {
+  const d = new Date();
+  if (offsetDays !== 0) d.setDate(d.getDate() + offsetDays);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function today() {
-  return new Date().toISOString().split('T')[0];
+  return localDate();
 }
 
 function daysFromNow(n) {
-  const d = new Date();
-  d.setDate(d.getDate() + n);
-  return d.toISOString().split('T')[0];
+  return localDate(n);
 }
 
 // ── Stage advancement heuristic ───────────────────────────────────────────────
@@ -258,13 +263,11 @@ async function loadGrowthMarkers(userId) {
 
 async function loadReflectionPatterns(userId) {
   try {
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     const { data } = await supabase
       .from('reflection_patterns')
       .select('label, occurrence_count, pattern_type')
       .eq('user_id', userId)
-      .gte('last_seen_date', thirtyDaysAgo.toISOString().split('T')[0])
+      .gte('last_seen_date', localDate(-30))
       .order('occurrence_count', { ascending: false })
       .limit(5);
     return data || [];
@@ -285,13 +288,11 @@ async function loadRecentSessionsSummary(userId) {
 
 async function loadYesterdayCommitment(userId) {
   try {
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
     const { data } = await supabase
       .from('reflection_sessions')
       .select('tomorrow_commitment')
       .eq('user_id', userId)
-      .eq('date', yesterday.toISOString().split('T')[0])
+      .eq('date', localDate(-1))
       .maybeSingle();
     return data?.tomorrow_commitment || null;
   } catch (_e) { return null; }
