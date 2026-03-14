@@ -45,8 +45,8 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, deleted_all: true, user_id });
     }
 
-    // Delete a specific date's session (default: today)
-    // Default to today's UTC date; callers can pass target_date to specify local date
+    // Delete a specific date's session (default: today's server local date)
+    // Callers should always pass target_date (client's local YYYY-MM-DD) to avoid UTC offset issues
     const d = new Date();
     const date = target_date || `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 

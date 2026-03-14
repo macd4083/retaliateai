@@ -97,6 +97,8 @@ Good depth questions (use naturally, not robotically):
   "What would have to be true about you for that to keep happening?"
 Balance: go deep once, then move. Don't psychoanalyze every message.
 
+DEPTH CONVERSATION: When the user is in a reflective back-and-forth ("what do you think" style exchange), allow the chain to continue naturally. Multiple consecutive "what do you think" exchanges are GOOD — do not prematurely pivot to action or next stage. Only close a depth thread when the user has reached an insight or naturally signals they want to move on. When the user answers a reflective/opinion question with their own reflection, the coach IS ALLOWED to follow up with another reflective question — do not count this as "drilling a topic".
+
 ON THE CHECKLIST (wins / honest / plan / identity):
 - These are background goals — track silently from conversation
 - wins: a real win or effort was mentioned
@@ -182,7 +184,17 @@ RETURN JSON EXACTLY (no markdown, no extra keys):
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function getTimeOfDay() {
+// tzOffset is the value from client's new Date().getTimezoneOffset() (minutes WEST of UTC, e.g. EST = 300)
+function getTimeOfDay(tzOffset) {
+  if (tzOffset != null) {
+    const utcHour = new Date().getUTCHours();
+    const localHour = ((utcHour * 60 - tzOffset) / 60 + 24) % 24;
+    if (localHour < 12) return 'morning';
+    if (localHour < 17) return 'afternoon';
+    if (localHour < 21) return 'evening';
+    return 'night';
+  }
+  // Fallback: use server local time (Vercel = UTC, but better than nothing)
   const hour = new Date().getHours();
   if (hour < 12) return 'morning';
   if (hour < 17) return 'afternoon';
@@ -190,29 +202,37 @@ function getTimeOfDay() {
   return 'night';
 }
 
-function getTimeGreeting() {
+function getTimeGreeting(tzOffset) {
   const map = {
-    morning: "Good morning — let's reflect on yesterday.",
+    morning: "Good morning — let's start with where you're at.",
     afternoon: 'Hey, taking a moment this afternoon to reflect.',
     evening: "Good evening — let's talk about today.",
     night: "Hey, it's getting late. Let's do a quick reflection before you sleep.",
   };
-  return map[getTimeOfDay()];
+  return map[getTimeOfDay(tzOffset)];
 }
 
-// Returns YYYY-MM-DD in local time (NOT UTC) to avoid off-by-one day for non-UTC users
-function localDate(offsetDays = 0) {
-  const d = new Date();
+// Returns YYYY-MM-DD based on the client-supplied date string (preferred) or server local time.
+// clientDate: YYYY-MM-DD string sent from the browser (the user's actual local date)
+// offsetDays: e.g. -1 for yesterday relative to clientDate
+function localDate(offsetDays = 0, clientDate) {
+  let d;
+  if (clientDate) {
+    const [y, m, day] = clientDate.split('-').map(Number);
+    d = new Date(y, m - 1, day);
+  } else {
+    d = new Date();
+  }
   if (offsetDays !== 0) d.setDate(d.getDate() + offsetDays);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function today() {
-  return localDate();
+function today(clientDate) {
+  return localDate(0, clientDate);
 }
 
-function daysFromNow(n) {
-  return localDate(n);
+function daysFromNow(n, clientDate) {
+  return localDate(n, clientDate);
 }
 
 // ── Stage advancement heuristic ───────────────────────────────────────────────
@@ -230,7 +250,7 @@ function deriveStageHint(sessionState, classifierChecklist) {
 
 // ── Parallel context loaders (all fail silently) ──────────────────────────────
 
-async function loadFollowUpQueue(userId, currentSignals = []) {
+async function loadFollowUpQueue(userId, currentSignals = [], clientDate) {
   try {
     const { data } = await supabase
       .from('follow_up_queue')
@@ -239,7 +259,7 @@ async function loadFollowUpQueue(userId, currentSignals = []) {
       .eq('triggered', false)
       .is('resolved_at', null);
     if (!data || data.length === 0) return [];
-    const todayStr = today();
+    const todayStr = today(clientDate);
     return data.filter((item) => {
       if (item.check_back_after <= todayStr) return true;
       if (item.trigger_condition && currentSignals.includes(item.trigger_condition)) return true;
@@ -248,26 +268,26 @@ async function loadFollowUpQueue(userId, currentSignals = []) {
   } catch (_e) { return []; }
 }
 
-async function loadGrowthMarkers(userId) {
+async function loadGrowthMarkers(userId, clientDate) {
   try {
     const { data } = await supabase
       .from('growth_markers')
       .select('id, theme, check_in_message, check_in_after')
       .eq('user_id', userId)
       .eq('checked_in', false)
-      .lte('check_in_after', today())
+      .lte('check_in_after', today(clientDate))
       .not('check_in_after', 'is', null);
     return data || [];
   } catch (_e) { return []; }
 }
 
-async function loadReflectionPatterns(userId) {
+async function loadReflectionPatterns(userId, clientDate) {
   try {
     const { data } = await supabase
       .from('reflection_patterns')
       .select('label, occurrence_count, pattern_type')
       .eq('user_id', userId)
-      .gte('last_seen_date', localDate(-30))
+      .gte('last_seen_date', localDate(-30, clientDate))
       .order('occurrence_count', { ascending: false })
       .limit(5);
     return data || [];
@@ -286,13 +306,13 @@ async function loadRecentSessionsSummary(userId) {
   } catch (_e) { return []; }
 }
 
-async function loadYesterdayCommitment(userId) {
+async function loadYesterdayCommitment(userId, clientToday) {
   try {
     const { data } = await supabase
       .from('reflection_sessions')
       .select('tomorrow_commitment')
       .eq('user_id', userId)
-      .eq('date', localDate(-1))
+      .eq('date', localDate(-1, clientToday))
       .maybeSingle();
     return data?.tomorrow_commitment || null;
   } catch (_e) { return null; }
@@ -420,7 +440,7 @@ async function markFollowUpTriggered(followUpId) {
   } catch (_e) {}
 }
 
-async function upsertGrowthMarker(userId, theme, { exercise_run, check_in_message }) {
+async function upsertGrowthMarker(userId, theme, { exercise_run, check_in_message }, clientDate) {
   try {
     const { data: existing } = await supabase
       .from('growth_markers').select('id, occurrence_count, exercises_run, check_in_after')
@@ -431,7 +451,7 @@ async function upsertGrowthMarker(userId, theme, { exercise_run, check_in_messag
       const newCount = (existing.occurrence_count || 1) + 1;
       await supabase.from('growth_markers').update({
         occurrence_count: newCount, exercises_run: exercises,
-        check_in_after: newCount >= 3 && !existing.check_in_after ? daysFromNow(14) : existing.check_in_after,
+        check_in_after: newCount >= 3 && !existing.check_in_after ? daysFromNow(14, clientDate) : existing.check_in_after,
         check_in_message: check_in_message || null,
         updated_at: new Date().toISOString(),
       }).eq('id', existing.id);
@@ -679,6 +699,12 @@ export default async function handler(req, res) {
       intent_data: clientIntentData = null,
     } = req.body;
 
+    // Extract client-supplied local date and timezone offset (sent by the browser)
+    // client_local_date: YYYY-MM-DD string in the user's local time
+    // client_tz_offset: minutes WEST of UTC (from new Date().getTimezoneOffset(), e.g. EST = 300)
+    const client_local_date = context.client_local_date || null;
+    const client_tz_offset = context.client_tz_offset != null ? context.client_tz_offset : null;
+
     if (!user_id || !user_message) {
       return res.status(400).json({ error: 'user_id and user_message are required' });
     }
@@ -704,11 +730,11 @@ export default async function handler(req, res) {
 
     const [followUpQueue, growthMarkers, reflectionPatterns, recentSessions, yesterdayCommitment, userProfile, activeGoals] =
       await Promise.all([
-        loadFollowUpQueue(user_id, currentSignals),
-        loadGrowthMarkers(user_id),
-        loadReflectionPatterns(user_id),
+        loadFollowUpQueue(user_id, currentSignals, client_local_date),
+        loadGrowthMarkers(user_id, client_local_date),
+        loadReflectionPatterns(user_id, client_local_date),
         loadRecentSessionsSummary(user_id),
-        loadYesterdayCommitment(user_id),
+        loadYesterdayCommitment(user_id, client_local_date),
         loadUserProfile(user_id),
         loadActiveGoals(user_id),
       ]);
@@ -886,7 +912,7 @@ export default async function handler(req, res) {
       const stage = session_state?.current_stage || 'wins';
       messages.push({
         role: 'user',
-        content: `Open the ${stage} stage of tonight's reflection. Greeting: "${getTimeGreeting()}". ${
+        content: `Open the ${stage} stage of tonight's reflection. Greeting: "${getTimeGreeting(client_tz_offset)}". ${
           yesterdayCommitment ? `Yesterday's commitment: "${yesterdayCommitment}". Reference it if wins stage.` : 'No yesterday commitment.'
         } ${(context.reflection_streak || context.streak || 0) > 1 ? `${context.reflection_streak || context.streak}-night streak — acknowledge briefly.` : ''} Start with mood chips: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful 🙏","value":"grateful"},{"label":"Motivated 💪","value":"motivated"},{"label":"Okay 😐","value":"okay"},{"label":"Tired 😴","value":"tired"},{"label":"Stressed 😤","value":"stressed"}]`,
       });
@@ -952,7 +978,7 @@ export default async function handler(req, res) {
         queueFollowUp(user_id, session_id, {
           context: `${result.exercise_run} exercise run during reflection`,
           question: `Last time we worked on ${result.exercise_run.replace(/_/g, ' ')} — how has that been showing up?`,
-          check_back_after: daysFromNow(3),
+          check_back_after: daysFromNow(3, client_local_date),
           trigger_condition: intentData?.emotional_state,
         })
       );
@@ -960,7 +986,7 @@ export default async function handler(req, res) {
         upsertGrowthMarker(user_id, result.exercise_run, {
           exercise_run: result.exercise_run,
           check_in_message: `How has your work on ${result.exercise_run.replace(/_/g, ' ')} been going?`,
-        })
+        }, client_local_date)
       );
     }
 
@@ -1037,7 +1063,7 @@ Return ONLY valid JSON: { "question": "...", "context": "brief context on why th
                 await queueFollowUp(user_id, session_id, {
                   context: followUpData.context || 'Auto-queued from shallow session detector',
                   question: followUpData.question,
-                  check_back_after: daysFromNow(1),
+                  check_back_after: daysFromNow(1, client_local_date),
                   trigger_condition: null,
                 });
               }
