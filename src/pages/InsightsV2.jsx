@@ -17,8 +17,8 @@ const LIFE_AREA_EMOJI = {
 };
 
 function formatDate(dateStr) {
-  const d = new Date(dateStr);
-  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 }
 
 export default function InsightsV2() {

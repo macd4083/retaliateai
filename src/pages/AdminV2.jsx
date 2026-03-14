@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Database, Trash2, ChevronDown, ChevronRight, RefreshCw } from 'lucide-react';
 import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase/client';
+import { localDateStr } from '../lib/dateUtils';
 import AppShellV2 from '../components/v2/AppShellV2';
 
 const ADMIN_SECRET = import.meta.env.VITE_ADMIN_SECRET;
@@ -310,10 +311,8 @@ export default function AdminV2() {
   const [loading, setLoading] = useState(false);
   const [resultMsg, setResultMsg] = useState('');
 
-  const todayStr = (() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  })();
+  // todayStr uses local time getters (not UTC) so the date matches the user's timezone.
+  const todayStr = localDateStr();
 
   // ── Admin check ───────────────────────────────────────────────────────────
 
@@ -431,7 +430,7 @@ export default function AdminV2() {
       const res = await fetch('/api/admin-reset', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user.id, admin_secret: ADMIN_SECRET }),
+        body: JSON.stringify({ user_id: user.id, admin_secret: ADMIN_SECRET, target_date: localDateStr() }),
       });
       const json = await res.json();
       if (json.ok) {

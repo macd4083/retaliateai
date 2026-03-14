@@ -3,6 +3,7 @@ import { Send, Moon, CheckCircle, Circle, RefreshCw } from 'lucide-react';
 import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase/client';
 import { reflectionHelpers } from '../lib/supabase/reflection';
+import { localDateStr } from '../lib/dateUtils';
 import AppShellV2 from '../components/v2/AppShellV2';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -452,6 +453,8 @@ export default function ReflectionV2() {
               life_areas: profile?.life_areas || [],
               blockers: profile?.blockers || [],
               display_name: profile?.display_name || profile?.full_name || null,
+              client_local_date: localDateStr(),
+              client_tz_offset: new Date().getTimezoneOffset(),
             },
           }),
         });

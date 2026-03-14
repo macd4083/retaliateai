@@ -163,7 +163,9 @@ export const reflectionHelpers = {
     const oneDayMs = 24 * 60 * 60 * 1000;
 
     for (let i = 0; i < data.length; i++) {
-      const sessionDate = new Date(data[i].date);
+      // Parse as local midnight to avoid UTC offset shifting the date by one day
+      const [y, m, d] = data[i].date.split('-').map(Number);
+      const sessionDate = new Date(y, m - 1, d);
       sessionDate.setHours(0, 0, 0, 0);
       const expectedTime = todayTime.getTime() - i * oneDayMs;
 
