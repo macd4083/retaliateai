@@ -48,7 +48,7 @@ export default async function handler(req, res) {
     // Delete a specific date's session (default: today)
     // Default to today's UTC date; callers can pass target_date to specify local date
     const d = new Date();
-    const date = target_date || `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+    const date = target_date || `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
     const { data: session } = await supabase
       .from('reflection_sessions')

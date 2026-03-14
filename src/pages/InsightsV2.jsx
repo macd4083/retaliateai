@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase/client';
 import { reflectionHelpers } from '../lib/supabase/reflection';
+import { localDateStr } from '../lib/dateUtils';
 import AppShellV2 from '../components/v2/AppShellV2';
 
 const LIFE_AREA_EMOJI = {
@@ -63,14 +64,12 @@ export default function InsightsV2() {
 
   async function loadSessions() {
     // Completed sessions in last 30 days
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     const { data: completed } = await supabase
       .from('reflection_sessions')
       .select('id')
       .eq('user_id', user.id)
       .eq('is_complete', true)
-      .gte('date', thirtyDaysAgo.toISOString().split('T')[0]);
+      .gte('date', localDateStr(-30));
     setCompletedCount(completed?.length || 0);
 
     // Recent commitments
