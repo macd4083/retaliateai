@@ -24,6 +24,7 @@ export default function InsightsV2() {
   const { user } = useAuth();
 
   const [lifeAreas, setLifeAreas] = useState(null);
+  const [livingProfile, setLivingProfile] = useState(null);
   const [completedCount, setCompletedCount] = useState(0);
   const [commitments, setCommitments] = useState([]);
   const [wins, setWins] = useState([]);
@@ -53,10 +54,11 @@ export default function InsightsV2() {
   async function loadProfile() {
     const { data } = await supabase
       .from('user_profiles')
-      .select('life_areas')
+      .select('life_areas, short_term_state, strengths, values, identity_statement, growth_areas, long_term_patterns, profile_updated_at')
       .eq('id', user.id)
       .maybeSingle();
     setLifeAreas(data?.life_areas || []);
+    setLivingProfile(data);
   }
 
   async function loadSessions() {
@@ -141,6 +143,72 @@ export default function InsightsV2() {
               <p className="text-zinc-500 text-sm">Keep showing up.</p>
             </div>
           </div>
+
+          {/* ── Who You're Becoming ─────────────────────────────────────────── */}
+          {livingProfile?.identity_statement && (
+            <div className="bg-gradient-to-br from-red-950/40 to-zinc-900 border border-red-900/50 rounded-2xl p-5">
+              <p className="text-zinc-500 text-xs uppercase tracking-widest mb-2">Who You're Becoming</p>
+              <p className="text-white text-base font-medium leading-relaxed">"{livingProfile.identity_statement}"</p>
+              {livingProfile.profile_updated_at && (
+                <p className="text-zinc-600 text-xs mt-3">
+                  Last updated {new Date(livingProfile.profile_updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* ── Right Now ───────────────────────────────────────────────── */}
+          {livingProfile?.short_term_state && (
+            <section>
+              <h2 className="text-white font-semibold text-base mb-3">Right Now</h2>
+              <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
+                <p className="text-zinc-300 text-sm leading-relaxed">{livingProfile.short_term_state}</p>
+              </div>
+            </section>
+          )}
+
+          {/* ── Your Strengths ──────────────────────────────────────────── */}
+          {livingProfile?.strengths && livingProfile.strengths.length > 0 && (
+            <section>
+              <h2 className="text-white font-semibold text-base mb-3">Your Strengths 💪</h2>
+              <div className="flex flex-wrap gap-2">
+                {livingProfile.strengths.map((s, i) => (
+                  <div key={i} className="px-3 py-1.5 bg-green-950/60 border border-green-800/50 rounded-full text-green-300 text-xs">
+                    {s}
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* ── Your Values ─────────────────────────────────────────────── */}
+          {livingProfile?.values && livingProfile.values.length > 0 && (
+            <section>
+              <h2 className="text-white font-semibold text-base mb-3">Your Values</h2>
+              <div className="flex flex-wrap gap-2">
+                {livingProfile.values.map((v, i) => (
+                  <div key={i} className="px-3 py-1.5 bg-zinc-800 border border-zinc-700 rounded-full text-zinc-300 text-xs">
+                    {v}
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* ── Growth Areas ────────────────────────────────────────────── */}
+          {livingProfile?.growth_areas && livingProfile.growth_areas.length > 0 && (
+            <section>
+              <h2 className="text-white font-semibold text-base mb-3">Growing In</h2>
+              <div className="space-y-2">
+                {livingProfile.growth_areas.map((area, i) => (
+                  <div key={i} className="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 flex items-center gap-3">
+                    <span className="text-red-500 text-sm">↑</span>
+                    <p className="text-zinc-200 text-sm">{area}</p>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
 
           {/* ── Life Areas ──────────────────────────────────────────── */}
           <section>

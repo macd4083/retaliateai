@@ -59,6 +59,7 @@ const supabase = createClient(
  */
 
 const DEFAULT_CHECKLIST = { wins: false, honest: false, plan: false, identity: false };
+const MIN_DEEP_SESSION_MESSAGE_COUNT = 6;
 
 // ── System prompt ─────────────────────────────────────────────────────────────
 
@@ -516,6 +517,63 @@ function generateSessionSummary(sessionState, result, profile, dateStr) {
 
 async function evolveUserProfile(userId, summaryText, currentProfile, recentSessions) {
   try {
+    // Check if a monthly deep pattern pass is due
+    const lastUpdated = currentProfile?.profile_updated_at ? new Date(currentProfile.profile_updated_at) : null;
+    const daysSinceUpdate = lastUpdated ? Math.floor((Date.now() - lastUpdated.getTime()) / (1000 * 60 * 60 * 24)) : 999;
+    const isMonthlyPassDue = daysSinceUpdate >= 30;
+
+    let deepPatternContext = '';
+    if (isMonthlyPassDue) {
+      try {
+        const { data: thirtyDaySessions } = await supabase
+          .from('reflection_sessions')
+          .select('date, summary, mood_end_of_day, tomorrow_commitment')
+          .eq('user_id', userId)
+          .not('summary', 'is', null)
+          .order('date', { ascending: false })
+          .limit(30);
+
+        if (thirtyDaySessions && thirtyDaySessions.length >= 5) {
+          const patternCompletion = await openai.chat.completions.create({
+            model: 'gpt-4o-mini',
+            messages: [
+              {
+                role: 'system',
+                content: `Analyze these 30 days of reflection session summaries and identify:
+1. top_3_recurring_themes: themes mentioned 3+ times (max 3 strings)
+2. mood_trend: "improving" | "stable" | "declining" based on mood data
+3. commitment_followthrough_rate: rough % based on wins following commitments (0-100)
+4. emerging_strengths: new strengths becoming consistent (max 3 strings)
+5. persistent_blockers: blockers that keep showing up (max 3 strings)
+
+Return ONLY valid JSON matching exactly:
+{
+  "top_3_recurring_themes": [],
+  "mood_trend": "stable",
+  "commitment_followthrough_rate": 0,
+  "emerging_strengths": [],
+  "persistent_blockers": []
+}`,
+              },
+              {
+                role: 'user',
+                content: JSON.stringify(thirtyDaySessions.map((s) => ({
+                  date: s.date,
+                  summary: s.summary?.slice(0, 200),
+                  mood: s.mood_end_of_day,
+                  committed: !!s.tomorrow_commitment,
+                }))),
+              },
+            ],
+            response_format: { type: 'json_object' },
+            max_tokens: 300,
+            temperature: 0.5,
+          });
+          deepPatternContext = patternCompletion.choices[0].message.content;
+        }
+      } catch (_e) { /* fail silently */ }
+    }
+
     const EVOLVE_SYSTEM = `You are analyzing a completed reflection session to evolve the user's profile.
 
 Given the session summary and current user profile, extract:
@@ -527,10 +585,12 @@ Given the session summary and current user profile, extract:
 6. identity_statement_update: ONLY if a stronger more specific identity statement clearly emerged — otherwise null
 7. big_goal_update: ONLY if their goal evolved or became clearer — otherwise null
 8. why_update: ONLY if their why deepened or clarified — otherwise null
+9. blockers_update: ONLY if new blockers clearly emerged or existing ones evolved — otherwise null. Array of strings max 5.
+10. future_self_update: ONLY if the user expressed a clearer, stronger, or evolved version of their 1-year vision — otherwise null.
 
 Rules:
 - Use their actual words, not clinical language
-- Only update identity_statement/big_goal/why if genuinely stronger version emerged
+- Only update identity_statement/big_goal/why/blockers/future_self if genuinely stronger version emerged
 - Merge with existing profile — evolve, don't erase
 - Keep arrays concise, quality over quantity
 
@@ -543,7 +603,9 @@ Return valid JSON only:
   "values": ["..."],
   "identity_statement_update": "..." | null,
   "big_goal_update": "..." | null,
-  "why_update": "..." | null
+  "why_update": "..." | null,
+  "blockers_update": ["..."] | null,
+  "future_self_update": "..." | null
 }`;
 
     const recentSummaries = recentSessions
@@ -573,7 +635,7 @@ Return valid JSON only:
               values: currentProfile?.values,
             },
             recent_sessions: recentSummaries || 'none',
-          }),
+          }) + (deepPatternContext ? `\n\n## MONTHLY DEEP PATTERN ANALYSIS (use to enrich long_term_patterns and strengths):\n${deepPatternContext}` : ''),
         },
       ],
       response_format: { type: 'json_object' },
@@ -594,6 +656,8 @@ Return valid JSON only:
     if (evolution.identity_statement_update) profileUpdates.identity_statement = evolution.identity_statement_update;
     if (evolution.big_goal_update) profileUpdates.big_goal = evolution.big_goal_update;
     if (evolution.why_update) profileUpdates.why = evolution.why_update;
+    if (evolution.blockers_update) profileUpdates.blockers = evolution.blockers_update;
+    if (evolution.future_self_update) profileUpdates.future_self = evolution.future_self_update;
 
     await supabase.from('user_profiles').update(profileUpdates).eq('id', userId);
   } catch (_e) {}
@@ -717,11 +781,12 @@ export default async function handler(req, res) {
       return `${s.date}: wins=[${wins.slice(0, 2).join(', ')}] commitment="${s.tomorrow_commitment || ''}"`;
     }).join(' | ') || 'none';
 
-    // ── 8b. Memory search for question/advice/memory_query intents ────────
+    // ── 8b. Memory search for question/advice/memory_query/reflective intents ────────
     const isMemoryMode = ['question', 'advice_request', 'memory_query'].includes(intentData?.intent);
+    const shouldSearchMemories = isMemoryMode || intentData?.emotional_state === 'reflective';
     let relevantMemories = [];
-    if (isMemoryMode && !isInit) {
-      relevantMemories = await searchRelevantMemories(user_id, user_message);
+    if (!isInit && shouldSearchMemories) {
+      relevantMemories = await searchRelevantMemories(user_id, user_message, 3);
     }
 
     const goalsText = activeGoals.length > 0
@@ -933,6 +998,50 @@ export default async function handler(req, res) {
           if (embedding) sessionUpdates.embedding = embedding;
           await supabase.from('reflection_sessions').update(sessionUpdates).eq('id', session_id);
           await evolveUserProfile(user_id, summaryText, userProfile, recentSessions);
+
+          // Shallow session detector — if wins or honest checklist items are missing,
+          // queue a strategic follow-up for the next night
+          const checklist = session_state?.checklist || {};
+          const messageCount = Array.isArray(history) ? history.length : 0;
+          const isShallow = messageCount < MIN_DEEP_SESSION_MESSAGE_COUNT || (!checklist.honest) || (!checklist.wins);
+
+          if (isShallow) {
+            try {
+              const followUpCompletion = await openai.chat.completions.create({
+                model: 'gpt-4o-mini',
+                messages: [
+                  {
+                    role: 'system',
+                    content: `You are generating ONE strategic follow-up question for the next reflection session, based on a session summary that felt surface-level.
+
+The question should:
+- Dig into something that was mentioned but not fully explored
+- Connect to their identity, why, or future self
+- Feel natural, not clinical
+- Be 1 sentence only
+
+Return ONLY valid JSON: { "question": "...", "context": "brief context on why this was queued" }`,
+                  },
+                  {
+                    role: 'user',
+                    content: `Session summary: ${summaryText}\n\nUser profile: identity="${userProfile?.identity_statement || 'not set'}", why="${userProfile?.why || 'not set'}", future_self="${userProfile?.future_self || 'not set'}"`,
+                  },
+                ],
+                response_format: { type: 'json_object' },
+                max_tokens: 150,
+                temperature: 0.7,
+              });
+              const followUpData = JSON.parse(followUpCompletion.choices[0].message.content);
+              if (followUpData.question) {
+                await queueFollowUp(user_id, session_id, {
+                  context: followUpData.context || 'Auto-queued from shallow session detector',
+                  question: followUpData.question,
+                  check_back_after: daysFromNow(1),
+                  trigger_condition: null,
+                });
+              }
+            } catch (_e) { /* fail silently */ }
+          }
         } catch (_e) {}
       })();
     }
