@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Send, Moon, CheckCircle, Circle, RefreshCw } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase/client';
 import { reflectionHelpers } from '../lib/supabase/reflection';
@@ -85,6 +86,7 @@ function TypingIndicator() {
 }
 
 function SummaryCard({ data, streak }) {
+  const navigate = useNavigate();
   return (
     <div className="bg-zinc-800 border border-zinc-600 rounded-2xl p-5 my-2 shadow-lg">
       <div className="flex items-center gap-2 mb-4">
@@ -136,6 +138,14 @@ function SummaryCard({ data, streak }) {
       <p className="text-zinc-500 text-xs mt-4 text-center italic">
         You're building the identity of someone who shows up.
       </p>
+      <div className="flex sm:justify-end justify-center mt-3">
+        <button
+          onClick={() => navigate('/insights')}
+          className="text-sm text-zinc-400 hover:text-white border border-zinc-700 hover:border-zinc-500 rounded-lg px-3 py-1.5 transition-colors"
+        >
+          → View Insights
+        </button>
+      </div>
     </div>
   );
 }
@@ -552,6 +562,21 @@ export default function ReflectionV2() {
           completed_at: new Date().toISOString(),
           reflection_streak: finalStreak,
         }).catch(() => {});
+
+        const alreadyHasPrompt = messagesRef.current.some((m) => m.id === 'post-session-prompt');
+        if (!alreadyHasPrompt) {
+          const postSessionMsg = {
+            id: 'post-session-prompt',
+            role: 'assistant',
+            content: "That's a wrap on tonight. 🌙 Anything else on your mind before you close out?",
+            chips: null,
+            isPostSession: true,
+            isTyping: false,
+          };
+          const withPrompt = [...messagesRef.current, postSessionMsg];
+          messagesRef.current = withPrompt;
+          setMessages(withPrompt);
+        }
       }
     } catch (error) {
       console.error('Failed to send message:', error);
@@ -619,7 +644,7 @@ export default function ReflectionV2() {
   // ── Handle chip selection ─────────────────────────────────────────────���───
 
   function handleChipSelect(chip, messageId) {
-    if (isLoading || isComplete) return;
+    if (isLoading) return;
     setUsedChipMessageIds((prev) => new Set([...prev, messageId]));
     sendMessage(chip.label);
   }
@@ -628,7 +653,7 @@ export default function ReflectionV2() {
 
   function handleSend() {
     const text = inputValue.trim();
-    if (!text || isLoading || isComplete) return;
+    if (!text || isLoading) return;
     setInputValue('');
     sendMessage(text);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
@@ -688,45 +713,39 @@ export default function ReflectionV2() {
         </div>
 
         <div className="flex-shrink-0 border-t border-zinc-800 bg-zinc-950 px-4 py-3">
-          {isComplete ? (
-            <div className="text-center py-2">
-              <p className="text-zinc-500 text-sm">Tonight's reflection is complete. ✨</p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {isAdmin && (
-                <div className="flex justify-end">
-                  <button
-                    onClick={handleAdminReset}
-                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 border border-zinc-800 transition-colors"
-                  >
-                    <RefreshCw className="w-3 h-3" />
-                    Reset Session
-                  </button>
-                </div>
-              )}
-              <div className="flex items-end gap-3">
-              <textarea
-                ref={textareaRef}
-                value={inputValue}
-                onChange={handleTextareaChange}
-                onKeyDown={handleKeyDown}
-                disabled={isLoading || isInitializing}
-                placeholder={STAGE_PLACEHOLDERS[sessionState.current_stage] || 'Tell me more...'}
-                rows={1}
-                className="flex-1 bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-500 resize-none focus:outline-none focus:border-zinc-500 transition-colors disabled:opacity-50"
-                style={{ minHeight: '44px', maxHeight: '120px' }}
-              />
-              <button
-                onClick={handleSend}
-                disabled={!inputValue.trim() || isLoading || isInitializing}
-                className="w-10 h-10 rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center flex-shrink-0"
-              >
-                <Send className="w-4 h-4 text-white" />
-              </button>
+          <div className="space-y-2">
+            {isAdmin && (
+              <div className="flex justify-end">
+                <button
+                  onClick={handleAdminReset}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 border border-zinc-800 transition-colors"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  Reset Session
+                </button>
               </div>
+            )}
+            <div className="flex items-end gap-3">
+            <textarea
+              ref={textareaRef}
+              value={inputValue}
+              onChange={handleTextareaChange}
+              onKeyDown={handleKeyDown}
+              disabled={isLoading || isInitializing}
+              placeholder={isComplete ? 'Anything else on your mind...' : (STAGE_PLACEHOLDERS[sessionState.current_stage] || 'Tell me more...')}
+              rows={1}
+              className="flex-1 bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-500 resize-none focus:outline-none focus:border-zinc-500 transition-colors disabled:opacity-50"
+              style={{ minHeight: '44px', maxHeight: '120px' }}
+            />
+            <button
+              onClick={handleSend}
+              disabled={!inputValue.trim() || isLoading || isInitializing}
+              className="w-10 h-10 rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center flex-shrink-0"
+            >
+              <Send className="w-4 h-4 text-white" />
+            </button>
             </div>
-          )}
+          </div>
         </div>
       </div>
     </AppShellV2>
