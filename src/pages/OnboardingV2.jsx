@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ArrowRight, ArrowLeft, Check } from 'lucide-react';
 import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase/client';
+import { localDateStr } from '../lib/dateUtils';
 
 const LIFE_AREA_OPTIONS = [
   { emoji: '💼', label: 'Career & Business' },
@@ -177,7 +178,7 @@ export default function OnboardingV2({ onOnboardingComplete } = {}) {
       await saveProfile({ blockers: allBlockers, onboarding_step: 5 });
 
       // Upsert each blocker into reflection_patterns
-      const today = new Date().toISOString().split('T')[0];
+      const today = localDateStr();
       for (const blocker of allBlockers) {
         try {
           const { data: existing } = await supabase
