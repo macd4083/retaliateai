@@ -910,11 +910,14 @@ export default async function handler(req, res) {
       messages.push({ role: 'user', content: user_message });
     } else {
       const stage = session_state?.current_stage || 'wins';
+      const streak = context.reflection_streak || context.streak || 0;
       messages.push({
         role: 'user',
         content: `Open the ${stage} stage of tonight's reflection. Greeting: "${getTimeGreeting(client_tz_offset)}". ${
-          yesterdayCommitment ? `Yesterday's commitment: "${yesterdayCommitment}". Reference it if wins stage.` : 'No yesterday commitment.'
-        } ${(context.reflection_streak || context.streak || 0) > 1 ? `${context.reflection_streak || context.streak}-night streak — acknowledge briefly.` : ''} Start with mood chips: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful 🙏","value":"grateful"},{"label":"Motivated 💪","value":"motivated"},{"label":"Okay 😐","value":"okay"},{"label":"Tired 😴","value":"tired"},{"label":"Stressed 😤","value":"stressed"}]`,
+          yesterdayCommitment
+            ? `Yesterday's commitment was: "${yesterdayCommitment}". Open by asking specifically how THAT went — use their exact words from the commitment. Make it personal. Then offer mood chips.`
+            : 'No yesterday commitment. Open with a warm greeting and mood chips.'
+        } ${streak > 1 ? `${streak}-night streak — acknowledge briefly.` : ''} Start with mood chips: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful 🙏","value":"grateful"},{"label":"Motivated 💪","value":"motivated"},{"label":"Okay 😐","value":"okay"},{"label":"Tired 😴","value":"tired"},{"label":"Stressed 😤","value":"stressed"}]`,
       });
     }
 
@@ -938,6 +941,21 @@ export default async function handler(req, res) {
         checklist_updates: { ...DEFAULT_CHECKLIST },
         follow_up_queued: false, is_session_complete: false,
       };
+    }
+
+    // Safety sanitizer: if assistant_message is itself a JSON object string, unwrap it and merge fields
+    if (typeof result.assistant_message === 'string' && result.assistant_message.trimStart().startsWith('{')) {
+      try {
+        const inner = JSON.parse(result.assistant_message);
+        if (inner && typeof inner.assistant_message === 'string') {
+          // Merge all fields from the inner object so is_session_complete etc. are preserved
+          Object.assign(result, inner);
+        }
+      } catch (_e) { /* not valid JSON — leave as-is */ }
+    }
+    // Final fallback: ensure assistant_message is never null/undefined/empty
+    if (!result.assistant_message) {
+      result.assistant_message = "I'm here — what's on your mind?";
     }
 
     result.exercise_run = result.exercise_run || 'none';
@@ -1019,7 +1037,7 @@ export default async function handler(req, res) {
     if (result.is_session_complete && session_id) {
       (async () => {
         try {
-          const summaryText = generateSessionSummary(session_state, result, profile, today());
+          const summaryText = generateSessionSummary(session_state, result, profile, today(client_local_date));
           const embedding = await generateEmbedding(summaryText);
           const sessionUpdates = { summary: summaryText };
           if (embedding) sessionUpdates.embedding = embedding;
