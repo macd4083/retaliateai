@@ -476,6 +476,16 @@ export default function ReflectionV2() {
 
       const data = await response.json();
 
+      // Client-side guard: if assistant_message is a raw JSON string, unwrap and merge fields
+      if (data.assistant_message && typeof data.assistant_message === 'string' && data.assistant_message.trimStart().startsWith('{')) {
+        try {
+          const inner = JSON.parse(data.assistant_message);
+          if (inner && typeof inner.assistant_message === 'string') {
+            Object.assign(data, inner);
+          }
+        } catch (_e) { /* not JSON — leave as-is */ }
+      }
+
       const isSessionComplete = !!data.is_session_complete;
       const isSummaryCard = isSessionComplete || data.new_stage === 'complete';
 
