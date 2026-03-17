@@ -101,13 +101,13 @@ DEPTH CONVERSATION: When the user is in a reflective back-and-forth ("what do yo
 
 ON THE CHECKLIST (wins / honest / plan / identity):
 - These are background goals — track silently from conversation
-- wins: a real win or effort was mentioned
+- wins: a real win or effort was mentioned. After the FIRST win is mentioned, always follow up with an open invitation to share more: e.g. "What else went well today?" or "What's another one?" — do NOT advance to the honest stage after just one win exchange. Let the user share as many wins as they want before moving on.
 - honest: they acknowledged something they're struggling with or could improve
 - plan: a concrete tomorrow commitment was stated
 - identity: they made a statement about who they are or are becoming
 - After ~8 messages, if items are still empty, weave them in naturally
 - Never say "you haven't completed X" — natural human transitions only
-- If honest is missing after wins are covered, gently probe: "What's one thing from today you'd do differently?"
+- If honest is missing after wins are covered, gently probe with self-awareness questions like: "Where did you feel like you weren't fully showing up today?" or "Is there a moment from today that's still sitting with you?" or "What part of today are you least proud of — not what you'd fix, just what happened?" The goal of the honest stage is self-awareness and honest naming of who they were TODAY — NOT planning or action. Do NOT ask "what would you do differently" or any future-action questions during the honest stage — those belong in the tomorrow stage.
 - If identity is missing near the end, ask: "What does [their actions/plan] say about who you're becoming?"
 
 ON KNOWING WHEN TO CLOSE:
@@ -237,11 +237,11 @@ function daysFromNow(n, clientDate) {
 
 // ── Stage advancement heuristic ───────────────────────────────────────────────
 
-function deriveStageHint(sessionState, classifierChecklist) {
+function deriveStageHint(sessionState, classifierChecklist, messageCount) {
   const stage = sessionState.current_stage || 'wins';
   const cl = { ...(sessionState.checklist || {}), ...(classifierChecklist || {}) };
   const hasPlan = !!sessionState.tomorrow_commitment;
-  if (stage === 'wins' && cl.wins) return 'honest';
+  if (stage === 'wins' && cl.wins && messageCount >= 4) return 'honest';
   if (stage === 'honest' && cl.honest) return 'tomorrow';
   if (stage === 'tomorrow' && hasPlan) return 'close';
   if (stage === 'close' && cl.identity && hasPlan) return 'complete';
@@ -781,13 +781,13 @@ export default async function handler(req, res) {
       suggestedExercise = 'none';
     }
 
-    // ── 6b. Stage hint ─────��──────────────────────────────────────────────
-    const suggestedNextStage = deriveStageHint(session_state, intentData?.checklist_content);
+    // ── 6b. Stage hint ─────────────────────────────────────────────────
+    const messageCount = history.length;
+    const suggestedNextStage = deriveStageHint(session_state, intentData?.checklist_content, messageCount);
 
     // ── 7. Session state analysis for instructions ────────────────────────
     const mergedChecklist = { ...(session_state.checklist || {}), ...(intentData?.checklist_content || {}) };
     const tomorrowFilled = !!session_state.tomorrow_commitment;
-    const messageCount = history.length;
     const sessionReadyToClose = tomorrowFilled && mergedChecklist.wins && (mergedChecklist.identity || messageCount >= 10);
     const forceClose = messageCount >= 14 && tomorrowFilled && mergedChecklist.wins;
     const depthProbeNeeded = intentData?.depth_opportunity && !sessionExercisesRun.includes('depth_probe');
@@ -880,7 +880,7 @@ export default async function handler(req, res) {
             ? `DEPTH OPPORTUNITY: Go deeper here. Ask WHY or surface the belief underneath. Use a depth_probe question naturally. Set exercise_run="depth_probe". Store any insight in extracted_data.depth_insight.`
             : null,
           honestMissing
-            ? `HONEST MISSING: Gently probe for a miss or honest moment. E.g. "What's one thing from today you'd do differently?" Weave it naturally.`
+            ? `HONEST MISSING: Gently probe for a miss or honest moment with self-awareness questions. E.g. "Where did you feel like you weren't fully showing up today?" or "Is there a moment from today that's still sitting with you?" or "What part of today are you least proud of — not what you'd fix, just what happened?" Goal is self-awareness about TODAY, not action planning. Do NOT ask "what would you do differently" — that belongs in tomorrow. Weave it naturally.`
             : null,
           identityMissing && !sessionReadyToClose
             ? `IDENTITY MISSING: Find a natural moment to ask what their actions say about who they're becoming. E.g. "What does [their action] say about who you're becoming?"`
