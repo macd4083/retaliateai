@@ -85,8 +85,23 @@ function TypingIndicator() {
   );
 }
 
-function SummaryCard({ data, streak }) {
+function SummaryCard({ data, streak, followThroughStats }) {
   const navigate = useNavigate();
+
+  // Derive follow-through summary line (only shown if total >= 3)
+  let followThroughLine = null;
+  if (followThroughStats && followThroughStats.total >= 3) {
+    const { kept, total } = followThroughStats;
+    const rate = kept / total;
+    if (rate >= 0.7) {
+      followThroughLine = "That's real consistency.";
+    } else if (rate >= 0.5) {
+      followThroughLine = `You're in a building phase. ${total - kept} commitment${total - kept !== 1 ? 's' : ''} slipped — that's the work.`;
+    } else {
+      followThroughLine = "Consistency is the goal right now, not intensity. Small commitments that stick beat big ones that don't.";
+    }
+  }
+
   return (
     <div className="bg-zinc-800 border border-zinc-600 rounded-2xl p-5 my-2 shadow-lg">
       <div className="flex items-center gap-2 mb-4">
@@ -129,6 +144,20 @@ function SummaryCard({ data, streak }) {
             </p>
           </div>
         )}
+        {followThroughStats && followThroughStats.total >= 3 && (
+          <div className="flex items-start gap-2">
+            <span className="text-blue-300 mt-0.5">📊</span>
+            <div>
+              <span className="text-zinc-400 text-xs">This week</span>
+              <p className="text-white text-sm">
+                {followThroughStats.kept} of {followThroughStats.total} commitments kept
+              </p>
+              {followThroughLine && (
+                <p className="text-zinc-400 text-xs mt-0.5">{followThroughLine}</p>
+              )}
+            </div>
+          </div>
+        )}
         {data.self_hype_message && (
           <div className="mt-4 p-3 bg-zinc-900 rounded-xl border border-zinc-700">
             <p className="text-zinc-300 text-sm italic">"{data.self_hype_message}"</p>
@@ -150,7 +179,7 @@ function SummaryCard({ data, streak }) {
   );
 }
 
-function ChatMessage({ message, onChipSelect, chipsDisabled, streak }) {
+function ChatMessage({ message, onChipSelect, chipsDisabled, streak, followThroughStats }) {
   const isUser = message.role === 'user';
   if (message.isTyping) return <TypingIndicator />;
   if (message.message_type === 'summary_card' && message.card_data) {
@@ -160,7 +189,7 @@ function ChatMessage({ message, onChipSelect, chipsDisabled, streak }) {
           <Moon className="w-4 h-4 text-red-400" />
         </div>
         <div className="max-w-[80%]">
-          <SummaryCard data={message.card_data} streak={streak} />
+          <SummaryCard data={message.card_data} streak={streak} followThroughStats={followThroughStats} />
         </div>
       </div>
     );
@@ -240,6 +269,7 @@ export default function ReflectionV2() {
     exercises_run: [],
   });
   const [summaryCardData, setSummaryCardData] = useState({});
+  const [followThroughStats, setFollowThroughStats] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
 
   const timeContext = getTimeContext();
@@ -573,6 +603,23 @@ export default function ReflectionV2() {
           reflection_streak: finalStreak,
         }).catch(() => {});
 
+        // Fetch follow-through stats to show in the summary card
+        try {
+          const statsRes = await fetch('/api/commitment-stats', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: user.id }),
+          });
+          if (statsRes.ok) {
+            const statsData = await statsRes.json();
+            setFollowThroughStats({
+              kept: statsData.followThrough7?.kept ?? 0,
+              total: statsData.followThrough7?.total ?? 0,
+              trajectory: statsData.trajectory,
+            });
+          }
+        } catch (_e) {}
+
         const alreadyHasPrompt = messagesRef.current.some((m) => m.id === 'post-session-prompt');
         if (!alreadyHasPrompt) {
           const postSessionMsg = {
@@ -715,6 +762,7 @@ export default function ReflectionV2() {
                   onChipSelect={(chip) => handleChipSelect(chip, message.id)}
                   chipsDisabled={usedChipMessageIds.has(message.id) || isLoading}
                   streak={streak}
+                  followThroughStats={followThroughStats}
                 />
               ))}
               <div ref={messagesEndRef} />

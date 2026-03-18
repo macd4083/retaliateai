@@ -268,6 +268,69 @@ async function loadFollowUpQueue(userId, currentSignals = [], clientDate) {
   } catch (_e) { return []; }
 }
 
+async function loadCommitmentStats(userId, clientDate) {
+  try {
+    const todayStr = today(clientDate);
+
+    // Fetch last 14 days of sessions for follow-through computation
+    const { data: sessions14 } = await supabase
+      .from('reflection_sessions')
+      .select('date, tomorrow_commitment, is_complete')
+      .eq('user_id', userId)
+      .gte('date', localDate(-14, clientDate))
+      .lte('date', todayStr)
+      .order('date', { ascending: true });
+
+    const allSessions = sessions14 || [];
+    const sessionsByDate = {};
+    for (const s of allSessions) {
+      sessionsByDate[s.date] = s;
+    }
+
+    const day7ago = localDate(-7, clientDate);
+    const last7 = allSessions.filter((s) => s.date >= day7ago);
+
+    // Compute follow-through for last 7 days
+    const withCommitment = last7.filter((s) => !!s.tomorrow_commitment);
+    if (withCommitment.length === 0) return null;
+
+    const evaluable = withCommitment.slice(0, -1);
+    if (evaluable.length === 0) return null;
+
+    let kept = 0;
+    for (const s of evaluable) {
+      const nextDay = localDate(1, s.date);
+      if (sessionsByDate[nextDay]?.is_complete) kept++;
+    }
+
+    const total = evaluable.length;
+    if (total < 3) return null;
+
+    const rate7 = kept / total;
+
+    // Also compute prior 7 for trajectory
+    const day14ago = localDate(-14, clientDate);
+    const prior7 = allSessions.filter((s) => s.date >= day14ago && s.date < day7ago);
+    const priorWithCommitment = prior7.filter((s) => !!s.tomorrow_commitment);
+    const priorEvaluable = priorWithCommitment.slice(0, -1);
+    let priorKept = 0;
+    for (const s of priorEvaluable) {
+      const nextDay = localDate(1, s.date);
+      if (sessionsByDate[nextDay]?.is_complete) priorKept++;
+    }
+    const priorTotal = priorEvaluable.length;
+    const ratePrior = priorTotal > 0 ? priorKept / priorTotal : null;
+
+    let trajectory = 'stable';
+    if (ratePrior !== null) {
+      if (rate7 - ratePrior > 0.1) trajectory = 'improving';
+      else if (ratePrior - rate7 > 0.1) trajectory = 'declining';
+    }
+
+    return { rate7, trajectory, kept7: kept, total7: total };
+  } catch (_e) { return null; }
+}
+
 async function loadGrowthMarkers(userId, clientDate) {
   try {
     const { data } = await supabase
@@ -728,7 +791,7 @@ export default async function handler(req, res) {
     // ── 2. Load context in parallel ───────────────────────────────────────
     const currentSignals = [intentData?.intent, intentData?.emotional_state, intentData?.accountability_signal].filter(Boolean);
 
-    const [followUpQueue, growthMarkers, reflectionPatterns, recentSessions, yesterdayCommitment, userProfile, activeGoals] =
+    const [followUpQueue, growthMarkers, reflectionPatterns, recentSessions, yesterdayCommitment, userProfile, activeGoals, commitmentStats] =
       await Promise.all([
         loadFollowUpQueue(user_id, currentSignals, client_local_date),
         loadGrowthMarkers(user_id, client_local_date),
@@ -737,6 +800,7 @@ export default async function handler(req, res) {
         loadYesterdayCommitment(user_id, client_local_date),
         loadUserProfile(user_id),
         loadActiveGoals(user_id),
+        loadCommitmentStats(user_id, client_local_date),
       ]);
 
     // ── 3. Merge profile ──────────────────────────────────────────────────
@@ -843,6 +907,14 @@ export default async function handler(req, res) {
         relevant_memories: relevantMemories.length > 0
           ? relevantMemories.map((m) => ({ date: m.date, summary: m.summary, similarity: m.similarity }))
           : undefined,
+        commitment_stats: commitmentStats
+          ? {
+              rate_last_7: Math.round(commitmentStats.rate7 * 100) / 100,
+              trajectory: commitmentStats.trajectory,
+              kept: commitmentStats.kept7,
+              total: commitmentStats.total7,
+            }
+          : undefined,
         session: {
           stage: session_state.current_stage || 'wins',
           checklist: mergedChecklist,
@@ -885,6 +957,22 @@ export default async function handler(req, res) {
           identityMissing && !sessionReadyToClose
             ? `IDENTITY MISSING: Find a natural moment to ask what their actions say about who they're becoming. E.g. "What does [their action] say about who you're becoming?"`
             : null,
+          (() => {
+            // Instruction 1 — commitment quality nudge when making the commitment (tomorrow stage)
+            if (!commitmentStats) return null;
+            const { rate7, trajectory: traj, total7 } = commitmentStats;
+            const commitmentStatsForInstruction = traj === 'declining' || (rate7 < 0.5 && total7 >= 5);
+            if (!commitmentStatsForInstruction) return null;
+            const ratePercent = Math.round(rate7 * 100);
+            return `COMMITMENT QUALITY: Follow-through rate is ${ratePercent}% (${commitmentStats.kept7}/${total7} last 7 days), trajectory is ${traj}. When the user is forming their commitment, gently suggest they scale it back to something they can absolutely guarantee. Say something like: "Given where you're at, let's make this something you can 100% do — we can push the intensity later. What's one small thing you'll actually show up for?" Do NOT lecture. Say it once, warmly, then let them commit to what they want.`;
+          })(),
+          (() => {
+            // Instruction 2 — progress framing during wins (only if enough recent session history)
+            if (recentSessions.length < 3) return null;
+            const hasWins = recentSessions.some((s) => Array.isArray(s.wins) ? s.wins.length > 0 : !!s.summary);
+            if (!hasWins) return null;
+            return `PROGRESS AWARENESS: You have ${recentSessions.length} recent sessions of data. If it's natural in the wins conversation, ask ONE question that helps the user notice their own growth — using only what's real in their history. E.g. if they mention finishing something, ask "Is that something you would have followed through on a month ago?" or "How does that compare to where you were when you started?" Do NOT state their progress for them. Ask the question that makes THEM see it. Only do this once per session, and only if it genuinely fits the conversation. Never fabricate history.`;
+          })(),
           sessionExercisesRun.length > 0
             ? `ALREADY RUN: ${sessionExercisesRun.join(', ')}. Do NOT repeat.`
             : null,
