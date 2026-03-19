@@ -90,15 +90,22 @@ function SummaryCard({ data, streak, followThroughStats }) {
 
   // Derive follow-through summary line (only shown if total >= 3)
   let followThroughLine = null;
+  let followThroughEmoji = null;
   if (followThroughStats && followThroughStats.total >= 3) {
-    const { kept, total } = followThroughStats;
+    const { kept, total, trajectory } = followThroughStats;
     const rate = kept / total;
     if (rate >= 0.7) {
-      followThroughLine = "That's real consistency.";
-    } else if (rate >= 0.5) {
-      followThroughLine = `You're in a building phase. ${total - kept} commitment${total - kept !== 1 ? 's' : ''} slipped — that's the work.`;
+      followThroughLine = `You've kept ${kept} of your last ${total} commitments. That's your highest stretch yet.`;
+      followThroughEmoji = '✅';
+    } else if (trajectory === 'improving') {
+      followThroughLine = `${kept} of ${total} this week. You're trending up — keep it going.`;
+      followThroughEmoji = '📈';
+    } else if (rate >= 0.4) {
+      followThroughLine = `${kept} of ${total} this week. You're in a building phase — that's real.`;
+      followThroughEmoji = '📈';
     } else {
-      followThroughLine = "Consistency is the goal right now, not intensity. Small commitments that stick beat big ones that don't.";
+      followThroughLine = `${kept} of ${total} this week. Let's make the next one smaller and easier to nail.`;
+      followThroughEmoji = '🎯';
     }
   }
 
@@ -144,18 +151,10 @@ function SummaryCard({ data, streak, followThroughStats }) {
             </p>
           </div>
         )}
-        {followThroughStats && followThroughStats.total >= 3 && (
-          <div className="flex items-start gap-2">
-            <span className="text-blue-300 mt-0.5">📊</span>
-            <div>
-              <span className="text-zinc-400 text-xs">This week</span>
-              <p className="text-white text-sm">
-                {followThroughStats.kept} of {followThroughStats.total} commitments kept
-              </p>
-              {followThroughLine && (
-                <p className="text-zinc-400 text-xs mt-0.5">{followThroughLine}</p>
-              )}
-            </div>
+        {followThroughStats && followThroughStats.total >= 3 && followThroughLine && (
+          <div className="flex items-center gap-2">
+            <span>{followThroughEmoji}</span>
+            <p className="text-white text-sm">{followThroughLine}</p>
           </div>
         )}
         {data.self_hype_message && (
