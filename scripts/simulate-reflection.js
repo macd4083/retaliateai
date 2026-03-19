@@ -336,6 +336,8 @@ async function main() {
 
       history.push({ role: 'assistant', content: coachMsg });
 
+      printCoach(coachMsg);
+
       // Score the coach message
       const quality = await scoreCoachMessage({
         persona,
@@ -346,7 +348,6 @@ async function main() {
         coachMessage: coachMsg,
       });
 
-      printCoach(coachMsg);
       printQuality(quality);
 
       sessionQualityScores.push(quality.score);

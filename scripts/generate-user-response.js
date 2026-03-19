@@ -130,7 +130,7 @@ Score meanings:
 Flags (pick all that apply):
 - GENERIC: doesn't use user's actual words, goals, or context
 - TOO_LONG: more than 3 sentences
-- TWO_QUESTIONS: asked more than one question
+- SCATTERED_QUESTIONS: Asked two or more questions pulling the user in different directions, diluting focus. Do NOT flag when questions stack on the same topic to push deeper; only flag when they are genuinely unrelated or let the user dodge one by answering the other.
 - THERAPIST_LANGUAGE: "how does that make you feel", overly clinical
 - VALIDATED_EXCUSE: let the user off the hook instead of pivoting
 - REPEATED_TOPIC: re-asked something already answered
