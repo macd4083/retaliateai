@@ -79,6 +79,22 @@ node --env-file=.env.simulation.local scripts/simulate-reflection.js \
 | `--days` | `30` | Number of days to simulate |
 | `--start-date` | 30 days ago | Start date (YYYY-MM-DD) |
 | `--persona` | `ambitious_but_inconsistent` | Which persona to use |
+| `--clean` | `false` | **Recommended.** Wipes all previous sim data for `SIM_USER_ID` and resets the user profile to the persona definition before running. Without this, leftover patterns and profile data from prior runs will contaminate the coach's context. |
+
+## Why `--clean` matters
+
+The reflection coach reads 7 Supabase tables before every response — including accumulated patterns, an AI-evolved user profile, and queued follow-up questions. If `SIM_USER_ID` has leftover data from a previous run, the coach starts Day 1 already "knowing" the user, which defeats the purpose of the simulation.
+
+Always use `--clean` when running a fresh test. A snapshot of your pre-run profile is saved to `report.meta.pre_run_profile_snapshot` so you can restore it if needed.
+
+**Example:**
+```bash
+node --env-file=.env.simulation.local scripts/simulate-reflection.js \
+  --days 7 \
+  --start-date 2026-03-14 \
+  --persona ambitious_but_inconsistent \
+  --clean
+```
 
 ### Available personas
 
