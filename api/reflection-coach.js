@@ -235,6 +235,16 @@ function daysFromNow(n, clientDate) {
   return localDate(n, clientDate);
 }
 
+// Return the Monday of the ISO week containing dateStr (Mon = week start)
+function getMondayOf(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  const day = date.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+  const offset = day === 0 ? 6 : day - 1;
+  const monday = new Date(y, m - 1, d - offset);
+  return `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')}`;
+}
+
 // ── Stage advancement heuristic ───────────────────────────────────────────────
 
 function deriveStageHint(sessionState, classifierChecklist, messageCount) {
@@ -271,6 +281,7 @@ async function loadFollowUpQueue(userId, currentSignals = [], clientDate) {
 async function loadCommitmentStats(userId, clientDate) {
   try {
     const todayStr = today(clientDate);
+    const thisMonday = getMondayOf(todayStr);
 
     // Fetch last 14 days of sessions for follow-through computation
     const { data: sessions14 } = await supabase
@@ -287,8 +298,9 @@ async function loadCommitmentStats(userId, clientDate) {
       sessionsByDate[s.date] = s;
     }
 
+    // FIX: Use strictly greater-than (>) to match commitment-stats.js exactly
     const day7ago = localDate(-7, clientDate);
-    const last7 = allSessions.filter((s) => s.date >= day7ago);
+    const last7 = allSessions.filter((s) => s.date > day7ago);
 
     // Compute follow-through for last 7 days
     const withCommitment = last7.filter((s) => !!s.tomorrow_commitment);
@@ -310,7 +322,7 @@ async function loadCommitmentStats(userId, clientDate) {
 
     // Also compute prior 7 for trajectory
     const day14ago = localDate(-14, clientDate);
-    const prior7 = allSessions.filter((s) => s.date >= day14ago && s.date < day7ago);
+    const prior7 = allSessions.filter((s) => s.date > day14ago && s.date <= day7ago);
     const priorWithCommitment = prior7.filter((s) => !!s.tomorrow_commitment);
     const priorEvaluable = priorWithCommitment.slice(0, -1);
     let priorKept = 0;
@@ -327,7 +339,26 @@ async function loadCommitmentStats(userId, clientDate) {
       else if (ratePrior - rate7 > 0.1) trajectory = 'declining';
     }
 
-    return { rate7, trajectory, kept7: kept, total7: total };
+    // Compute this-week kept/total for the half-circle gauge context
+    const thisWeekSessions = allSessions.filter((s) => s.date >= thisMonday && s.date <= todayStr);
+    const thisWeekWithCommitment = thisWeekSessions.filter((s) => !!s.tomorrow_commitment);
+    const thisWeekEvaluable = thisWeekWithCommitment.slice(0, -1);
+    let thisWeekKept = 0;
+    for (const s of thisWeekEvaluable) {
+      const nextDay = localDate(1, s.date);
+      if (sessionsByDate[nextDay]?.is_complete) thisWeekKept++;
+    }
+    const thisWeekTotal = thisWeekEvaluable.length;
+
+    return {
+      rate7,
+      trajectory,
+      kept7: kept,
+      total7: total,
+      priorKept7: priorKept,
+      thisWeekKept,
+      thisWeekTotal,
+    };
   } catch (_e) { return null; }
 }
 
@@ -911,8 +942,11 @@ export default async function handler(req, res) {
           ? {
               rate_last_7: Math.round(commitmentStats.rate7 * 100) / 100,
               trajectory: commitmentStats.trajectory,
-              kept: commitmentStats.kept7,
-              total: commitmentStats.total7,
+              kept_last_7: commitmentStats.kept7,
+              total_last_7: commitmentStats.total7,
+              prior_kept_7: commitmentStats.priorKept7,
+              this_week_kept: commitmentStats.thisWeekKept,
+              this_week_total: commitmentStats.thisWeekTotal,
             }
           : undefined,
         session: {
@@ -961,10 +995,11 @@ export default async function handler(req, res) {
             // Instruction 1 — commitment quality nudge when making the commitment (tomorrow stage)
             if (!commitmentStats) return null;
             const { rate7, trajectory: traj, total7 } = commitmentStats;
-            const commitmentStatsForInstruction = traj === 'declining' || (rate7 < 0.5 && total7 >= 5);
+            // Lowered threshold from >= 5 to >= 3 — matches our "meaningful data" standard everywhere
+            const commitmentStatsForInstruction = traj === 'declining' || (rate7 < 0.5 && total7 >= 3);
             if (!commitmentStatsForInstruction) return null;
             const ratePercent = Math.round(rate7 * 100);
-            return `COMMITMENT QUALITY: Follow-through rate is ${ratePercent}% (${commitmentStats.kept7}/${total7} last 7 days), trajectory is ${traj}. When the user is forming their commitment, gently suggest they scale it back to something they can absolutely guarantee. Say something like: "Given where you're at, let's make this something you can 100% do — we can push the intensity later. What's one small thing you'll actually show up for?" Do NOT lecture. Say it once, warmly, then let them commit to what they want.`;
+            return `COMMITMENT QUALITY: Follow-through rate is ${ratePercent}% (${commitmentStats.kept7}/${total7} last 7 days), trajectory is ${traj}. When the user is forming their tomorrow commitment, gently suggest they scale it back to something they can guarantee. Say something like: "Let's make this something you can 100% do — we can worry about intensity later. Right now the goal is showing up consistently. What's one thing you'll actually do?" Do NOT lecture. Say it once, warmly, then accept whatever they commit to.`;
           })(),
           (() => {
             // Instruction 2 — progress framing during wins (only if enough recent session history)
@@ -1180,6 +1215,18 @@ Return ONLY valid JSON: { "question": "...", "context": "brief context on why th
     }
 
     result.consecutive_excuses = consecutiveExcuses;
+
+    // Attach follow-through data so the client can render the summary card
+    // ("You've kept X of your last 7 commitments") without a second round-trip.
+    if (commitmentStats) {
+      result.commitment_summary = {
+        kept7: commitmentStats.kept7,
+        total7: commitmentStats.total7,
+        trajectory: commitmentStats.trajectory,
+        thisWeekKept: commitmentStats.thisWeekKept,
+        thisWeekTotal: commitmentStats.thisWeekTotal,
+      };
+    }
 
     return res.status(200).json(result);
 
