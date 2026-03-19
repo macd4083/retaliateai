@@ -170,7 +170,7 @@ export default function InsightsV2() {
     );
   }
 
-  // ── Derived values ──────────────────────────────────────────────────────────
+  // ── Derived values ────────────────────────────────────────────────────────
 
   const ft = commitmentStats?.followThrough7;
   const ftPrior = commitmentStats?.followThroughPrior7;
@@ -206,16 +206,14 @@ export default function InsightsV2() {
       <div className="h-full overflow-y-auto">
         <div className="max-w-md mx-auto px-4 py-6 space-y-8">
 
-          {/* ── Section 1: Consistency Tracker ──────────────────────── */}
+          {/* ── Section 1: Consistency Tracker ────────────────���─────── */}
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
             <p className="text-white font-semibold text-lg mb-4">Consistency Tracker</p>
 
             {/* Stats */}
             <div className="space-y-4">
-              {/* Follow-Through Rate */}
+              {/* Follow-Through Rate — no label or subtitle, just the number */}
               <div>
-                <p className="text-zinc-500 text-xs uppercase tracking-widest mb-0.5">Follow-Through</p>
-                <p className="text-zinc-400 text-xs mb-2">Did you do what you said you'd do?</p>
                 {ft && ft.total > 0 ? (
                   <>
                     <p className="text-white text-3xl font-bold mb-2">
@@ -275,7 +273,7 @@ export default function InsightsV2() {
                 <p className="text-zinc-500 text-sm">No commitments yet. Start a reflection tonight.</p>
               )}
 
-              {/* Show more */}
+              {/* Show more — only appears when there are more than visibleCount commitments */}
               {allCommitments.length > visibleCount && (
                 <button
                   onClick={() => setVisibleCount((c) => c + 7)}
@@ -310,7 +308,7 @@ export default function InsightsV2() {
             </div>
           )}
 
-          {/* ── Section 4: Recovery Speed (only if recoveriesCount > 0) ─ */}
+          {/* ── Section 4: Bounce Back (only if recoveriesCount > 0) ──── */}
           {recoveriesCount > 0 && (
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
               <p className="text-white font-semibold text-base mb-1">Bounce Back</p>
@@ -411,7 +409,7 @@ export default function InsightsV2() {
             </section>
           )}
 
-          {/* ── Section 8: Your Strengths (small cards) ──────────────── */}
+          {/* ── Section 8: Your Strengths ─────────────────────────────── */}
           {livingProfile?.strengths && livingProfile.strengths.length > 0 && (
             <section>
               <h2 className="text-white font-semibold text-base mb-3">Your Strengths 💪</h2>
@@ -427,7 +425,7 @@ export default function InsightsV2() {
             </section>
           )}
 
-          {/* ── Section 9: Your Values (chips — identity anchors) ─────── */}
+          {/* ── Section 9: Your Values ────────────────────────────────── */}
           {livingProfile?.values && livingProfile.values.length > 0 && (
             <section>
               <h2 className="text-white font-semibold text-base mb-3">Your Values</h2>
