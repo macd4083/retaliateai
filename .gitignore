@@ -29,3 +29,7 @@ dist-ssr
 
 .env
 .vercel
+
+# Simulation
+!scripts/.env.simulation
+scripts/simulation-report.json

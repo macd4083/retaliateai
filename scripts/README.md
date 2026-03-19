@@ -1,0 +1,198 @@
+# Reflection Simulator
+
+Simulates months of nightly reflection sessions end-to-end to test coaching quality, data tracking, and insight generation.
+
+## How It Works
+
+The simulator calls `api/reflection-coach.js` directly as a function (no running server needed). The entire real pipeline fires: GPT-4o coaching, intent classification, DB writes, profile evolution, embeddings, follow-up queuing, and growth markers.
+
+For each simulated day it:
+1. Creates a `reflection_sessions` row in Supabase for that date
+2. Sends `__INIT__` to get the coach's opening message
+3. Uses GPT-4o-mini to generate realistic persona-appropriate responses
+4. Loops through ~8–12 turns until `is_session_complete: true` or a max turn limit
+5. Scores each coach message for quality (1–5) using GPT-4o-mini
+6. Writes `simulation-report.json` with full session data and flagged messages
+
+---
+
+## Setup
+
+### 1. Create a dedicated test user in Supabase
+
+- Go to **Supabase Dashboard → Authentication → Users**
+- Click **Add user → Create new user**
+- Email: `test-sim@retaliateai.dev`, any password
+- Copy the UUID that appears — you'll need it for step 2
+
+### 2. Set up your environment file
+
+```bash
+cp scripts/.env.simulation .env.simulation.local
+# Fill in SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, OPENAI_API_KEY, SIM_USER_ID
+```
+
+### 3. Set up the test user's profile
+
+Run this SQL in the **Supabase SQL editor**, replacing the UUID with your test user's UUID:
+
+```sql
+INSERT INTO user_profiles (id, display_name, full_name, big_goal, why, future_self, identity_statement, life_areas, blockers)
+VALUES (
+  'your-uuid-here',
+  'Alex',
+  'Alex (Sim)',
+  'Launch my SaaS to $5k MRR by end of year',
+  'I want to prove I can build something real and stop talking about it',
+  'In a year I''m running a profitable product and don''t need a job',
+  'I''m someone who builds things that matter',
+  ARRAY['work', 'fitness', 'relationships'],
+  ARRAY['perfectionism', 'distraction', 'fear of shipping']
+) ON CONFLICT (id) DO NOTHING;
+```
+
+For the `consistent_grinder` or `creative_with_perfectionism` personas, adjust the values to match the persona defined in `scripts/personas.js`.
+
+---
+
+## Running the Simulator
+
+### Basic run (30 days, default persona)
+
+```bash
+node --env-file=.env.simulation.local scripts/simulate-reflection.js
+```
+
+### With options
+
+```bash
+node --env-file=.env.simulation.local scripts/simulate-reflection.js \
+  --days 90 \
+  --start-date 2025-12-01 \
+  --persona consistent_grinder
+```
+
+### Available options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--days` | `30` | Number of days to simulate |
+| `--start-date` | 30 days ago | Start date (YYYY-MM-DD) |
+| `--persona` | `ambitious_but_inconsistent` | Which persona to use |
+
+### Available personas
+
+| Key | Name | Description |
+|-----|------|-------------|
+| `ambitious_but_inconsistent` | Alex | Building SaaS, ~60% follow-through |
+| `consistent_grinder` | Jordan | Consistent but surface-level, ~85% follow-through |
+| `creative_with_perfectionism` | Sam | Deep reflector but struggles to commit, ~50% follow-through |
+
+---
+
+## Terminal Output
+
+```
+━━━ DAY 1 — 2025-12-01 ━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🤖  Hey, it's getting late — how are you feeling tonight?
+👤  Proud 🔥
+🤖  Love that — what happened today that's got you feeling proud?
+👤  I finally shipped the landing page I've been putting off for two weeks
+    ↳ Quality: 5/5
+🤖  Two weeks of putting it off and you shipped it — that's the win right there. What made today different?
+...
+✅  Complete | Stage: close | Exercises: depth_probe | Turns: 9
+```
+
+---
+
+## Reviewing Results
+
+After the run completes, open `scripts/simulation-report.json`.
+
+### What to look at in the app
+
+Log in as your test user and check:
+- **Insights page** — are patterns being detected correctly?
+- **Profile** — is `short_term_state` evolving realistically?
+- **Reflection history** — do sessions feel coherent?
+
+### Sharing flagged issues with Copilot
+
+1. Open `simulation-report.json`
+2. Find the `flagged_for_review` array at the bottom
+3. Copy the flagged entries you want to fix
+4. Paste them in a Copilot chat and say:
+   > "Here are flagged coach messages from the simulator — can you fix the system prompt?"
+
+Copilot will look at the flag reasons, cross-reference with `api/reflection-coach.js` SYSTEM_PROMPT, and write the fix.
+
+---
+
+## Flag Types
+
+| Flag | Meaning | Where to fix |
+|------|---------|-------------|
+| `GENERIC` | Didn't use user's actual words/context | SYSTEM_PROMPT core rules |
+| `THERAPIST_LANGUAGE` | "How does that make you feel" etc. | SYSTEM_PROMPT personality |
+| `TWO_QUESTIONS` | Asked more than one question | SYSTEM_PROMPT core rules |
+| `VALIDATED_EXCUSE` | Let user off the hook | ANTI-EXCUSE SYSTEM section |
+| `REPEATED_TOPIC` | Re-asked something already answered | ON KNOWING WHEN TO CLOSE section |
+| `WEAK_DEPTH` | Missed a depth opportunity | SELF-REFLECTION PRIORITY section |
+| `OFF_STAGE` | Wrong stage for context | Stage advancement logic |
+| `TOO_LONG` | More than 3 sentences | SYSTEM_PROMPT personality |
+
+---
+
+## Report Structure
+
+`simulation-report.json` contains:
+
+```json
+{
+  "meta": { "persona": "...", "start_date": "...", "days_simulated": 30, "user_id": "...", "run_at": "..." },
+  "summary": {
+    "total_turns": 247,
+    "avg_quality_score": 3.8,
+    "sessions_completed": 28,
+    "sessions_incomplete": 2,
+    "flags_by_type": { "GENERIC": 12, "THERAPIST_LANGUAGE": 3 }
+  },
+  "sessions": [
+    {
+      "date": "2025-12-01",
+      "session_id": "...",
+      "completed": true,
+      "turns": 9,
+      "avg_quality": 4.1,
+      "exercises_run": ["depth_probe"],
+      "checklist": { "wins": true, "honest": true, "plan": true, "identity": true },
+      "conversation": [...]
+    }
+  ],
+  "flagged_for_review": [
+    {
+      "date": "2025-12-05",
+      "turn": 6,
+      "coach_message": "How does that make you feel?",
+      "user_message_before": "I keep avoiding the hard stuff",
+      "session_stage": "honest",
+      "quality_score": 1,
+      "flags": ["THERAPIST_LANGUAGE"],
+      "reason": "Classic therapist question — violates SYSTEM_PROMPT core rules",
+      "session_id": "..."
+    }
+  ]
+}
+```
+
+---
+
+## Cost Estimate
+
+| Run | GPT-4o turns (coach) | GPT-4o-mini turns | Est. cost |
+|-----|---------------------|-------------------|-----------|
+| 30 days | ~270 | ~540 | ~$2–4 |
+| 90 days | ~810 | ~1,620 | ~$6–12 |
+
+> **Tip:** Use `--days 3` for a quick smoke test before a full run.
