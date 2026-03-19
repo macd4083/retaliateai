@@ -40,6 +40,7 @@ export default function InsightsV2() {
   const [streak, setStreak] = useState(0);
   const [commitmentStats, setCommitmentStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [expandedCommitments, setExpandedCommitments] = useState(new Set());
 
   useEffect(() => {
     if (!user?.id) return;
@@ -220,6 +221,15 @@ export default function InsightsV2() {
   })();
   const showLoadMore = isCurrentWeekSelected && allCommitments.length > visibleCount;
 
+  function toggleCommitmentExpanded(key) {
+    setExpandedCommitments((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
   // Reflection patterns for narrative cards
   const patternCards = patterns.filter((p) => p.occurrence_count >= 2);
   const longTermPatterns = Array.isArray(livingProfile?.long_term_patterns) ? livingProfile.long_term_patterns : [];
@@ -366,25 +376,54 @@ export default function InsightsV2() {
             <div className="border-t border-zinc-800 mt-4 pt-4">
               {displayedCommitments.length > 0 ? (
                 <div className="space-y-2">
-                  {displayedCommitments.map((c, i) => (
-                    <div key={i} className="bg-zinc-800 rounded-xl px-4 py-3 border border-zinc-700 flex items-center gap-3">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-zinc-500 text-xs mb-1">{formatDate(c.date)}</p>
-                        <p className="text-zinc-200 text-sm leading-relaxed">{c.commitment}</p>
+                  {displayedCommitments.map((c, i) => {
+                    const key = c.date || `idx-${i}`;
+                    const isExpanded = expandedCommitments.has(key);
+                    return (
+                      <div key={key} className="bg-zinc-800 rounded-xl border border-zinc-700 overflow-hidden">
+                        <button
+                          onClick={() => toggleCommitmentExpanded(key)}
+                          className="w-full px-4 py-3 flex items-center gap-3 text-left"
+                        >
+                          <div className="flex-1 min-w-0">
+                            <p className="text-zinc-500 text-xs mb-0.5">{formatDate(c.date)}</p>
+                            <p className="text-zinc-200 text-sm leading-relaxed line-clamp-1">{c.commitment}</p>
+                          </div>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            {c.status === 'kept' && (
+                              <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center">
+                                <Check size={12} className="text-white" />
+                              </div>
+                            )}
+                            {c.status === 'pending' && (
+                              <div className="w-6 h-6 rounded-full border-2 border-zinc-600" />
+                            )}
+                            {c.status === 'missed' && (
+                              <div className="w-6 h-6 rounded-full border-2 border-red-900" />
+                            )}
+                            <ChevronDown
+                              size={14}
+                              className={`text-zinc-500 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}
+                            />
+                          </div>
+                        </button>
+                        {isExpanded && (
+                          <div className="px-4 pb-4 border-t border-zinc-700">
+                            <p className="text-zinc-300 text-sm leading-relaxed mt-3">{c.commitment}</p>
+                            <p className={`text-xs mt-2 font-medium ${
+                              c.status === 'kept' ? 'text-green-400' :
+                              c.status === 'missed' ? 'text-red-400' :
+                              'text-zinc-500'
+                            }`}>
+                              {c.status === 'kept' ? '✅ Followed through' :
+                               c.status === 'missed' ? '❌ Missed' :
+                               '⏳ Pending — check back tomorrow'}
+                            </p>
+                          </div>
+                        )}
                       </div>
-                      {c.status === 'kept' && (
-                        <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center flex-shrink-0">
-                          <Check size={12} className="text-white" />
-                        </div>
-                      )}
-                      {c.status === 'pending' && (
-                        <div className="w-6 h-6 rounded-full border-2 border-zinc-600 flex-shrink-0" />
-                      )}
-                      {c.status === 'missed' && (
-                        <div className="w-6 h-6 rounded-full border-2 border-red-900 flex-shrink-0" />
-                      )}
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 <p className="text-zinc-500 text-sm">
