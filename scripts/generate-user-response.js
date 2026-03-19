@@ -32,38 +32,70 @@ function pickResponseMode(weights) {
 }
 
 /**
- * Build the mode-specific instruction block for the system prompt.
+ * Generate a contextually-specific behavioral framing instruction for the persona's response.
+ * Replaces the static modeInstruction() template strings.
+ *
+ * Returns a short paragraph (2-5 sentences) that tells the main generation call exactly
+ * *how* to respond in this specific moment — referencing the actual coach message,
+ * the daily event, the persona's mood, and any active hidden traits.
  */
-function modeInstruction(mode, dailyEvent) {
-  switch (mode) {
-    case 'A':
-      return `RESPONSE MODE: "I have an answer" — Concrete, specific.
-You have a clear answer for this. Reference the actual thing that happened today: "${dailyEvent}"
-Name specific people, products, or situations from that event. Be direct but casual.
-1-3 sentences. Sound like you're texting, not writing an essay.`;
+async function generateBehavioralFraming({
+  mode,
+  persona,
+  coachMessage,
+  currentStage,
+  mood,
+  dailyEvent,
+  yesterdayCommitment,
+  followedThrough,
+  sessionContext,
+  assignedTraits,
+}) {
+  const modeLabel = mode === 'A'
+    ? 'concrete and specific (Mode A: I have an answer)'
+    : mode === 'B'
+    ? 'exploratory and uncertain (Mode B: thinking live)'
+    : 'pushback or confusion (Mode C: this doesn\'t apply)';
 
-    case 'B':
-      return `RESPONSE MODE: "I'm figuring it out right now" — Thinking live.
-The coach asked something genuinely hard — about identity, fear, patterns, or why you do something.
-You don't have a pre-packaged answer. Think through it in real time in the message:
-- Start uncertain: "huh, I haven't thought about it that way..." or "that's a hard one..."
-- Then try to work it out: "I guess... maybe it's because..." or "it might be that I..."
-- Land somewhere partially insightful OR still uncertain — both are fine
-- 2-4 sentences. Messy and exploratory, NOT polished. Sound stuck but genuinely trying.
-Do NOT give a tidy answer. This is self-reflection developing in real time.`;
+  const traitSummary = assignedTraits && assignedTraits.length > 0
+    ? assignedTraits.map(t => `- ${t.label}: ${t.archetype}`).join('\n')
+    : 'none';
 
-    case 'C':
-      return `RESPONSE MODE: "I don't understand / this doesn't apply" — Pushback or confusion.
-The coach's question feels vague, off-topic, or doesn't fit your current state.
-Pick one of these reactions:
-- Mild confusion: "wait, what do you mean exactly?" or "I'm not sure I follow"
-- Redirect: "I don't think that's really the issue for me right now"
-- Deflection: give a brief surface answer and pivot to something else on your mind
-- 1-2 sentences. Brief. This signals to the system that the coach asked a bad or unclear question.`;
+  const prompt = `You are a simulation director designing a single user response for a fake persona in a coaching chat test.
 
-    default:
-      return '';
-  }
+PERSONA: ${persona.name}
+Mood right now: ${mood}
+What happened today: ${dailyEvent ?? 'nothing unusual'}
+Session stage: ${currentStage}
+Yesterday's commitment: ${yesterdayCommitment ?? 'none'}
+Followed through: ${yesterdayCommitment ? (followedThrough ? 'yes, mostly' : 'no, fell short') : 'n/a'}
+
+Already shared this session:
+${sessionContext.sharedWins ? `- Wins: ${sessionContext.sharedWins}` : ''}
+${sessionContext.sharedMisses ? `- Struggles: ${sessionContext.sharedMisses}` : ''}
+${sessionContext.sharedTomorrow ? `- Tomorrow plan: ${sessionContext.sharedTomorrow}` : ''}
+
+Hidden traits active (persona expresses these through behavior only — never states them):
+${traitSummary}
+
+Coach just said: "${coachMessage}"
+
+Response mode to use: ${modeLabel}
+
+Write a 2-5 sentence behavioral direction for how ${persona.name} should respond RIGHT NOW to this specific coach message.
+Be specific — reference the actual event, the mood, and how any active traits color the response.
+This is an instruction to the actor, not the response itself.
+Do NOT write the response. Write the framing that tells the actor how to play this beat.
+Keep it under 120 words.`;
+
+  const result = await openai.chat.completions.create({
+    model: 'gpt-4o-mini',
+    messages: [{ role: 'user', content: prompt }],
+    max_tokens: 180,
+    temperature: 0.9,
+  });
+
+  return result.choices[0].message.content.trim();
 }
 
 /**
@@ -101,6 +133,20 @@ export async function generateUserResponse({
   // Pick response mode based on persona's weighted probabilities
   const weights = persona.tendencies.responseModeWeights ?? [0.55, 0.30, 0.15];
   const responseMode = pickResponseMode(weights);
+
+  // Generate contextually-specific behavioral framing for this exact moment
+  const behavioralFraming = await generateBehavioralFraming({
+    mode: responseMode,
+    persona,
+    coachMessage,
+    currentStage,
+    mood,
+    dailyEvent,
+    yesterdayCommitment,
+    followedThrough,
+    sessionContext,
+    assignedTraits,
+  });
 
   const hiddenTraitBlock =
     assignedTraits && assignedTraits.length > 0
@@ -159,7 +205,8 @@ ${sessionContext.sharedTomorrow ? `- Already shared tomorrow plan: ${sessionCont
 
 CURRENT STAGE: ${currentStage || 'unknown'}
 
-${modeInstruction(responseMode, dailyEvent)}
+BEHAVIORAL DIRECTION FOR THIS BEAT:
+${behavioralFraming}
 
 GENERAL RULES:
 - Sound like a real person TEXTING, not writing formally

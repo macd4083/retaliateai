@@ -183,7 +183,7 @@ async function fetchProfileSnapshot(supabase, userId) {
     const { data } = await supabase
       .from('user_profiles')
       .select('identity_statement, big_goal, why, short_term_state, strengths, growth_areas')
-      .eq('user_id', userId)
+      .eq('id', userId)
       .single();
     profile = data ?? null;
   } catch (err) {
