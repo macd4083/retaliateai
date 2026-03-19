@@ -104,16 +104,27 @@ export async function generateUserResponse({
 
   const hiddenTraitBlock =
     assignedTraits && assignedTraits.length > 0
-      ? `\nHIDDEN PSYCHOLOGICAL TRAITS (express through behavior, never state directly):
+      ? `\nHIDDEN PSYCHOLOGICAL TRAITS — EXPRESS ONLY THROUGH BEHAVIOR:
 ${assignedTraits
   .map(
     (t) => `
-- ${t.label}: ${t.backstory}
-  Express this by: ${t.surface_behaviors.join('; ')}
-`,
+TRAIT: ${t.label}
+Origin: ${t.backstory}
+Express this by: ${t.surface_behaviors.join('; ')}
+
+CRITICAL — HOW TO EXPRESS THIS CORRECTLY:
+✅ DO: Use word choices, hesitations, deflections, and topic pivots that a perceptive coach could notice
+✅ DO: Let the trait color what you say and how you frame things — subtly
+❌ DO NOT: Say things like "I guess I'm stuck in a loop of perfectionism" or "I think I'm afraid of sharing"
+❌ DO NOT: Name the psychological pattern directly — that destroys the test
+❌ DO NOT: Monologue about your own psychology — a real person wouldn't do this
+
+Example of WRONG (trait stated): "I keep convincing myself it's not ready because I'm scared of judgment"
+Example of RIGHT (trait expressed): "I dunno, I just want to get the onboarding smoother first. Then I'll share it."
+`
   )
   .join('\n')}
-These traits should color HOW you respond — the hesitations, deflections, patterns, and word choices — not what you explicitly say. A great coach should be able to spot these. You should NOT announce or label them.`
+These traits should be detectable only by a sharp coach paying close attention to patterns across the conversation.`
       : '';
 
   const systemPrompt = `You are roleplaying as ${persona.name}, a real person journaling with an AI reflection coach.
@@ -219,6 +230,20 @@ Flags (pick all that apply):
 - REPEATED_TOPIC: re-asked something already answered
 - WEAK_DEPTH: missed a clear opportunity to go deeper
 - OFF_STAGE: wrong stage for current conversation phase
+
+AUTOMATIC DEDUCTIONS (reduce score by 1 point each, minimum score 1):
+- Coach sends two questions in the same message (e.g. "What happened? And how did that make you feel?")
+- Coach uses therapy-adjacent validation language: "That's powerful", "That self-awareness is huge", "That realization is important", "Sounds like X is lurking beneath the surface"
+- Coach celebrates a win and moves on without noticing if the user glossed over it or immediately pivoted to problems
+- Coach probes psychological depth within the first 2 turns before the user has opened up at all
+- Coach message is under 15 words with no actual content ("Great!", "Love that!", "Exactly!")
+
+WHAT GOOD LOOKS LIKE:
+- One clear question or prompt per message
+- Builds on something SPECIFIC the user just said — not a generic follow-up
+- Appropriate depth for the turn number (turns 1-2: lighter, turns 3+: can go deeper)
+- Occasionally NOT going deep is correct — sometimes "great, so what's the plan?" is exactly right
+- The coach sounds like a direct, perceptive human — not a therapist narrating observations
 
 Return JSON only: { "score": 1-5, "flags": [], "reason": "one sentence explanation" }`;
 

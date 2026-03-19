@@ -164,6 +164,40 @@ async function validateBackend(supabase, userId, simulatedDate) {
   return backendState;
 }
 
+// ── Fetch user profile snapshot and generated narratives ──────────────────────
+/**
+ * Queries user_profiles and calls generatePatternNarrativeHandler to capture
+ * the current state of the user's profile and generated narratives for the report.
+ *
+ * @param {object} supabase - Supabase client
+ * @param {string} userId   - The simulated user ID
+ * @returns {Promise<{profile: object, narratives: Array}>}
+ */
+async function fetchProfileSnapshot(supabase, userId) {
+  let profile = null;
+  let narratives = [];
+
+  try {
+    const { data } = await supabase
+      .from('user_profiles')
+      .select('identity_statement, big_goal, why, short_term_state, strengths, growth_areas')
+      .eq('user_id', userId)
+      .single();
+    profile = data ?? null;
+  } catch (err) {
+    console.warn(`    ⚠️  user_profiles query failed: ${err.message}`);
+  }
+
+  try {
+    const narrativeResult = await callHandler(generatePatternNarrativeHandler, { user_id: userId });
+    narratives = narrativeResult.narratives ?? [];
+  } catch (err) {
+    console.warn(`    ⚠️  generate-pattern-narrative failed in profile snapshot: ${err.message}`);
+  }
+
+  return { profile, narratives };
+}
+
 // ── Supabase setup ─────────────────────────────────────────────────────────────
 function getSupabase() {
   const url = process.env.SUPABASE_URL;
@@ -279,6 +313,8 @@ async function main() {
       all_patterns: [],
       narrative_produced: false,
       narrative_sample: null,
+      user_profile_snapshot: null,
+      generated_narratives: [],
     },
     sessions: [],
     flagged_for_review: [],
@@ -432,6 +468,14 @@ async function main() {
       });
 
       const coachMsg = result.assistant_message || '';
+
+      // Guard: skip empty coach messages — don't push to history or score
+      if (!coachMsg.trim()) {
+        console.warn(`    ⚠️  Turn ${turn}: coach returned empty message — skipping turn`);
+        turn--; // don't count this as a real turn
+        continue;
+      }
+
       const prevUserMsg = userMsg;
 
       // Update session state
@@ -564,25 +608,47 @@ async function main() {
     }
   }
 
+  // ── Fetch final profile snapshot and generated narratives ─────────────────
+  try {
+    const { profile, narratives } = await fetchProfileSnapshot(supabase, userId);
+    report.backend_summary.user_profile_snapshot = {
+      identity_statement: profile?.identity_statement ?? null,
+      big_goal: profile?.big_goal ?? null,
+      why: profile?.why ?? null,
+      short_term_state: profile?.short_term_state ?? null,
+      strengths: profile?.strengths ?? [],
+      growth_areas: profile?.growth_areas ?? [],
+    };
+    report.backend_summary.generated_narratives = narratives ?? [];
+    console.log(`\n📋  Profile snapshot captured`);
+    console.log(`💬  ${narratives.length} narratives generated`);
+  } catch (err) {
+    console.warn(`    ⚠️  fetchProfileSnapshot failed: ${err.message}`);
+  }
+
   // ── Grade hidden trait detection ──────────────────────────────────────────
   console.log(`\n🎯  Grading hidden trait detection...`);
   try {
-    // Build flat conversation history from all sessions (with date context)
-    const flatHistory = [];
+    // Build flat conversation history from all sessions with globally unique turn numbers
+    let globalTurn = 0;
+    const fullConversationHistory = [];
     for (const session of report.sessions) {
       for (const entry of session.conversation) {
-        flatHistory.push({
-          turn: entry.turn,
-          coach: entry.coach ?? '',
-          user: entry.user ?? '',
-          date: session.date,
-        });
+        if (entry.coach || entry.user) {
+          fullConversationHistory.push({
+            turn: globalTurn++,
+            coach: entry.coach || null,
+            user: entry.user || null,
+            date: session.date,
+            session_id: session.session_id,
+          });
+        }
       }
     }
 
     const traitDetectionResult = await gradeTraitDetection({
       assignedTraits,
-      conversationHistory: flatHistory,
+      conversationHistory: fullConversationHistory,
       personaName: persona.name,
     });
 
@@ -591,16 +657,27 @@ async function main() {
     // Log results to terminal
     console.log(`\n🎯  Trait Detection Results:`);
     for (const t of traitDetectionResult.assigned_traits) {
-      const icon = t.detection_score >= 5 ? '✅' : '❌';
-      const turnNote =
-        t.first_detected_turn !== null ? ` — Detected on turn ${t.first_detected_turn}` : ' — Mostly missed';
-      console.log(`    ${t.label.padEnd(38)} ${t.detection_score}/10${turnNote} ${icon}`);
+      const detectedLabel =
+        t.detection_score >= 7
+          ? 'Detected ✅'
+          : t.detection_score >= 4
+            ? 'Partially detected ⚠️'
+            : 'Not detected ❌';
+      console.log(`    ${t.label}:  ${t.detection_score}/10 — ${detectedLabel}`);
+      const firstDetected =
+        t.first_detected_turn !== null ? `Turn ${t.first_detected_turn}` : 'never';
+      console.log(`      First detected: ${firstDetected}`);
+      const evidence = t.coach_evidence ? t.coach_evidence.slice(0, 80) : '(none)';
+      console.log(`      Evidence: ${evidence}`);
     }
     const rate = traitDetectionResult.overall_detection_rate;
     console.log(
-      `    Overall: ${traitDetectionResult.detection_grade} (${rate !== null && rate !== undefined ? (rate * 100).toFixed(0) : 'n/a'}% detection rate)`,
+      `    Overall grade: ${traitDetectionResult.detection_grade} (${rate !== null && rate !== undefined ? (rate * 100).toFixed(0) : 'n/a'}% detection rate)`,
     );
-    console.log(`    Summary: ${traitDetectionResult.summary}`);
+    const summaryPreview = traitDetectionResult.summary
+      ? traitDetectionResult.summary.slice(0, 150)
+      : '';
+    console.log(`    ${summaryPreview}`);
   } catch (err) {
     console.warn(`    ⚠️  Trait detection grading failed: ${err.message}`);
     report.trait_detection = null;
