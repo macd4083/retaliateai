@@ -18,12 +18,23 @@ function formatDate(dateStr) {
   return new Date(y, m - 1, d).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 }
 
+// Return the Monday of the ISO week containing dateStr (Mon = week start)
+function getMondayOf(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  const day = date.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+  const offset = day === 0 ? 6 : day - 1;
+  const monday = new Date(y, m - 1, d - offset);
+  return `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')}`;
+}
+
 export default function InsightsV2() {
   const { user } = useAuth();
 
   const [livingProfile, setLivingProfile] = useState(null);
   const [allCommitments, setAllCommitments] = useState([]);
   const [visibleCount, setVisibleCount] = useState(7);
+  const [selectedWeekIndex, setSelectedWeekIndex] = useState(null);
   const [wins, setWins] = useState([]);
   const [patterns, setPatterns] = useState([]);
   const [streak, setStreak] = useState(0);
@@ -137,7 +148,8 @@ export default function InsightsV2() {
       .select('label, occurrence_count, pattern_type')
       .eq('user_id', user.id)
       .gte('occurrence_count', 2)
-      .order('occurrence_count', { ascending: false });
+      .order('occurrence_count', { ascending: false })
+      .limit(4);
     setPatterns(data || []);
   }
 
@@ -176,6 +188,12 @@ export default function InsightsV2() {
   const ftPrior = commitmentStats?.followThroughPrior7;
   const trajectory = commitmentStats?.trajectory;
   const { recoveryDays = 0, recoveriesCount = 0 } = commitmentStats || {};
+  const weeklyData = commitmentStats?.weeklyData || [];
+
+  // Selected week: defaults to the most recent week (last index)
+  const activeWeekIndex = selectedWeekIndex !== null ? selectedWeekIndex : Math.max(0, weeklyData.length - 1);
+  const selectedWeek = weeklyData[activeWeekIndex] ?? null;
+  const isCurrentWeekSelected = weeklyData.length === 0 || activeWeekIndex === weeklyData.length - 1;
 
   const priorRate = ftPrior?.total > 0 ? Math.round((ftPrior.kept / ftPrior.total) * 100) : null;
 
@@ -188,14 +206,19 @@ export default function InsightsV2() {
     return 'Consistent with last week.';
   }
 
-  function trajectoryText() {
-    if (!ft || ft.total < 3) return 'Not enough data yet';
-    if (trajectory === 'improving') return 'Getting better';
-    if (trajectory === 'declining') return 'Slipping';
-    return 'Holding steady';
-  }
-
-  const visibleCommitments = allCommitments.slice(0, visibleCount);
+  // Commitment list: filter to selected week for non-current weeks
+  const displayedCommitments = (() => {
+    if (isCurrentWeekSelected) {
+      return allCommitments.slice(0, visibleCount);
+    }
+    const weeksBack = weeklyData.length - 1 - activeWeekIndex;
+    const todayStr = localDateStr(0);
+    const todayMonday = getMondayOf(todayStr);
+    const wStart = addDays(todayMonday, -weeksBack * 7);
+    const wEnd = addDays(wStart, 6);
+    return allCommitments.filter((c) => c.date >= wStart && c.date <= wEnd);
+  })();
+  const showLoadMore = isCurrentWeekSelected && allCommitments.length > visibleCount;
 
   // Reflection patterns for narrative cards
   const patternCards = patterns.filter((p) => p.occurrence_count >= 2);
@@ -206,17 +229,129 @@ export default function InsightsV2() {
       <div className="h-full overflow-y-auto">
         <div className="max-w-md mx-auto px-4 py-6 space-y-8">
 
-          {/* ── Section 1: Consistency Tracker ────────────────���─────── */}
+          {/* ── Section 1: Consistency Tracker ────────────────────────── */}
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
             <p className="text-white font-semibold text-lg mb-4">Consistency Tracker</p>
 
-            {/* Stats */}
-            <div className="space-y-4">
-              {/* Follow-Through Rate — no label or subtitle, just the number */}
-              <div>
+            {weeklyData.length > 0 ? (() => {
+              // ── Sparkline ──────────────────────────────────────────────
+              const padX = 20;
+              const baseline = 70;
+              const chartTop = 25;
+              const chartH = baseline - chartTop;
+              const totalW = 320;
+              const n = weeklyData.length;
+              const xStep = n > 1 ? (totalW - 2 * padX) / (n - 1) : 0;
+
+              function getX(i) { return padX + i * xStep; }
+              function getY(rate) { return rate === null ? baseline : baseline - rate * chartH; }
+
+              const lineParts = weeklyData.map((w, i) => {
+                const x = getX(i).toFixed(1);
+                const y = getY(w.rate).toFixed(1);
+                return i === 0 ? `M ${x} ${y}` : `L ${x} ${y}`;
+              });
+
+              // ── Gauge ──────────────────────────────────────────────────
+              const cx = 100, cy = 108, r = 78;
+              const halfCirc = Math.PI * r;
+              const fullCirc = 2 * Math.PI * r;
+              const gRate = selectedWeek?.rate ?? null;
+              const gKept = selectedWeek?.kept ?? 0;
+              const gTotal = selectedWeek?.total ?? 0;
+              const fillLen = gRate !== null ? Math.min(gRate * halfCirc, halfCirc) : 0;
+              const fillColor = gRate === null ? '#52525b' : gRate >= 0.6 ? '#dc2626' : '#71717a';
+
+              const weekDescText = gRate === null
+                ? 'No commitments tracked this week.'
+                : gRate >= 0.8
+                  ? `Strong week — ${gKept} of ${gTotal} commitments followed through.`
+                  : gRate >= 0.6
+                    ? `Solid week — ${gKept} of ${gTotal} commitments followed through.`
+                    : gRate >= 0.3
+                      ? `${gKept} of ${gTotal} commitments followed through this week.`
+                      : `Tough week — ${gKept} of ${gTotal} commitments this week.`;
+
+              return (
+                <>
+                  {/* Sparkline SVG */}
+                  <svg viewBox="0 0 320 100" className="w-full mb-1">
+                    {/* Dashed baseline */}
+                    <line x1={padX} y1={baseline} x2={totalW - padX} y2={baseline}
+                      stroke="#52525b" strokeWidth={1} strokeDasharray="3 3" />
+                    {/* Connecting line */}
+                    <path d={lineParts.join(' ')} fill="none" stroke="#52525b" strokeWidth={1.5} />
+                    {/* Dots, tooltips, week labels */}
+                    {weeklyData.map((w, i) => {
+                      const x = getX(i);
+                      const y = getY(w.rate);
+                      const isSelected = i === activeWeekIndex;
+                      const hasData = w.total > 0;
+                      return (
+                        <g key={i} onClick={() => setSelectedWeekIndex(i)} style={{ cursor: 'pointer' }}>
+                          {isSelected && hasData && (
+                            <>
+                              <rect x={x - 16} y={y - 23} width={32} height={17} rx={8}
+                                fill="#27272a" stroke="#3f3f46" strokeWidth={1} />
+                              <text x={x} y={y - 10} textAnchor="middle"
+                                fill="white" fontSize={9} fontWeight="bold" fontFamily="sans-serif">
+                                {w.kept}/{w.total}
+                              </text>
+                            </>
+                          )}
+                          <circle cx={x} cy={y} r={isSelected ? 5.5 : 4}
+                            fill={isSelected ? '#ef4444' : hasData ? '#71717a' : '#27272a'} />
+                          <text x={x} y={95} textAnchor="middle"
+                            fill={isSelected ? '#a1a1aa' : '#52525b'} fontSize={8} fontFamily="sans-serif">
+                            {w.weekLabel}
+                          </text>
+                        </g>
+                      );
+                    })}
+                  </svg>
+
+                  {/* Half-donut gauge */}
+                  <div className="mt-1">
+                    <svg viewBox="0 0 200 115" className="w-full max-w-[220px] mx-auto block">
+                      {/* Background arc */}
+                      <circle cx={cx} cy={cy} r={r} fill="none" stroke="#3f3f46"
+                        strokeWidth={13}
+                        strokeDasharray={`${halfCirc.toFixed(1)} ${fullCirc.toFixed(1)}`}
+                        strokeLinecap="round"
+                        transform={`rotate(-180, ${cx}, ${cy})`} />
+                      {/* Fill arc */}
+                      {fillLen > 0 && (
+                        <circle cx={cx} cy={cy} r={r} fill="none" stroke={fillColor}
+                          strokeWidth={13}
+                          strokeDasharray={`${fillLen.toFixed(1)} ${fullCirc.toFixed(1)}`}
+                          strokeLinecap="round"
+                          transform={`rotate(-180, ${cx}, ${cy})`} />
+                      )}
+                      {/* Center fraction */}
+                      <text x={cx} y={cy - 8} textAnchor="middle"
+                        fill="white" fontSize={30} fontWeight="bold" fontFamily="sans-serif">
+                        {gRate !== null ? `${gKept}/${gTotal}` : '—'}
+                      </text>
+                    </svg>
+                    {/* Trajectory indicator — only for the current week */}
+                    {isCurrentWeekSelected && ft && ft.total >= 3 && (
+                      <p className="text-center text-zinc-400 text-xs mt-1">
+                        {trajectory === 'improving' ? '▲ Getting better'
+                          : trajectory === 'declining' ? '▼ Slipping'
+                          : '→ Holding steady'}
+                      </p>
+                    )}
+                    {/* Plain-language week description */}
+                    <p className="text-center text-zinc-500 text-sm mt-2">{weekDescText}</p>
+                  </div>
+                </>
+              );
+            })() : (
+              /* Fallback: no weekly data yet */
+              <div className="space-y-4 mb-4">
                 {ft && ft.total > 0 ? (
                   <>
-                    <p className="text-white text-3xl font-bold mb-2">
+                    <p className="text-white text-3xl font-bold">
                       {ft.kept} <span className="text-zinc-500 text-xl font-normal">of {ft.total}</span>
                     </p>
                     <p className="text-zinc-400 text-sm">{trajectoryLine()}</p>
@@ -225,31 +360,13 @@ export default function InsightsV2() {
                   <p className="text-zinc-500 text-sm">Keep showing up — more data coming.</p>
                 )}
               </div>
-
-              {/* Trajectory */}
-              <div>
-                <p className="text-zinc-500 text-xs uppercase tracking-widest mb-1">Trajectory</p>
-                <p className="text-zinc-200 text-sm">{trajectoryText()}</p>
-              </div>
-
-              {/* Recovery Speed — only rendered if recoveriesCount > 0 */}
-              {recoveriesCount > 0 && (
-                <div>
-                  <p className="text-zinc-500 text-xs uppercase tracking-widest mb-1">Recovery</p>
-                  <p className="text-zinc-200 text-sm">
-                    {recoveryDays <= 1
-                      ? "You've never missed more than a day before coming back."
-                      : `Missed and came back ${recoveriesCount} time${recoveriesCount !== 1 ? 's' : ''}. Fastest return: ${recoveryDays} day${recoveryDays !== 1 ? 's' : ''}.`}
-                  </p>
-                </div>
-              )}
-            </div>
+            )}
 
             {/* Commitment list */}
             <div className="border-t border-zinc-800 mt-4 pt-4">
-              {visibleCommitments.length > 0 ? (
+              {displayedCommitments.length > 0 ? (
                 <div className="space-y-2">
-                  {visibleCommitments.map((c, i) => (
+                  {displayedCommitments.map((c, i) => (
                     <div key={i} className="bg-zinc-800 rounded-xl px-4 py-3 border border-zinc-700 flex items-center gap-3">
                       <div className="flex-1 min-w-0">
                         <p className="text-zinc-500 text-xs mb-1">{formatDate(c.date)}</p>
@@ -270,11 +387,13 @@ export default function InsightsV2() {
                   ))}
                 </div>
               ) : (
-                <p className="text-zinc-500 text-sm">No commitments yet. Start a reflection tonight.</p>
+                <p className="text-zinc-500 text-sm">
+                  {isCurrentWeekSelected ? 'No commitments yet. Start a reflection tonight.' : 'No commitments this week.'}
+                </p>
               )}
 
-              {/* Show more — only appears when there are more than visibleCount commitments */}
-              {allCommitments.length > visibleCount && (
+              {/* Show more — only for current week when there's more data */}
+              {showLoadMore && (
                 <button
                   onClick={() => setVisibleCount((c) => c + 7)}
                   className="mt-3 text-zinc-400 text-sm flex items-center gap-1 hover:text-white transition-colors"
@@ -342,54 +461,51 @@ export default function InsightsV2() {
                 {patternCards.map((p, i) => {
                   if (p.pattern_type === 'blocker') {
                     return (
-                      <div key={i} className="bg-zinc-900 border border-red-900/50 rounded-2xl p-4">
-                        <p className="text-zinc-500 text-xs mb-2">Something we've noticed</p>
-                        <p className="text-zinc-200 text-sm leading-relaxed">
-                          You've brought up <strong className="text-white">{p.label}</strong> {p.occurrence_count} time{p.occurrence_count !== 1 ? 's' : ''}.
-                          That's not a character flaw — it's a pattern worth understanding. What's underneath it?
+                      <div key={i} className="bg-zinc-900 border border-zinc-800 border-l-4 border-l-red-600 rounded-2xl p-4">
+                        <p className="text-zinc-500 text-xs uppercase tracking-widest mb-2">Something we keep seeing</p>
+                        <p className="text-zinc-300 text-sm leading-relaxed">
+                          <strong className="text-white font-semibold">{p.label}</strong>{' '}
+                          has come up {p.occurrence_count} time{p.occurrence_count !== 1 ? 's' : ''} in your reflections. That's not random — it's a signal. Worth sitting with.
+                          {p.occurrence_count >= 8 && " At this point, it's not a one-off. It's a recurring chapter in your story."}
+                          {p.occurrence_count >= 5 && p.occurrence_count < 8 && ' The fact that you keep naming it means part of you already knows it matters.'}
                         </p>
                       </div>
                     );
                   }
                   if (p.pattern_type === 'strength') {
                     return (
-                      <div key={i} className="bg-zinc-900 border border-green-900/50 rounded-2xl p-4">
-                        <p className="text-zinc-500 text-xs mb-2">A strength emerging</p>
-                        <p className="text-zinc-200 text-sm leading-relaxed">
-                          <strong className="text-white">{p.label}</strong> has shown up {p.occurrence_count} time{p.occurrence_count !== 1 ? 's' : ''} in your
-                          reflections. That's not a coincidence.
+                      <div key={i} className="bg-zinc-900 border border-zinc-800 border-l-4 border-l-green-600 rounded-2xl p-4">
+                        <p className="text-zinc-500 text-xs uppercase tracking-widest mb-2">A strength we've noticed</p>
+                        <p className="text-zinc-300 text-sm leading-relaxed">
+                          <strong className="text-white font-semibold">{p.label}</strong>{' '}
+                          has shown up {p.occurrence_count} time{p.occurrence_count !== 1 ? 's' : ''}. That's not luck — that's a pattern you've built.
+                          {p.occurrence_count >= 5 && ' A month ago, this might not have even been on your radar.'}
                         </p>
                       </div>
                     );
                   }
                   return (
-                    <div key={i} className="bg-zinc-900 border border-zinc-700 rounded-2xl p-4">
-                      <p className="text-zinc-500 text-xs mb-2">A thread we keep seeing</p>
-                      <p className="text-zinc-200 text-sm leading-relaxed">
-                        <strong className="text-white">{p.label}</strong> keeps coming up — {p.occurrence_count} time{p.occurrence_count !== 1 ? 's' : ''} now.
-                        Worth sitting with.
+                    <div key={i} className="bg-zinc-900 border border-zinc-800 border-l-4 border-l-zinc-500 rounded-2xl p-4">
+                      <p className="text-zinc-500 text-xs uppercase tracking-widest mb-2">A recurring thread</p>
+                      <p className="text-zinc-300 text-sm leading-relaxed">
+                        <strong className="text-white font-semibold">{p.label}</strong>{' '}
+                        keeps coming back — {p.occurrence_count} time{p.occurrence_count !== 1 ? 's' : ''} now. Patterns like this are worth paying attention to.
                       </p>
                     </div>
                   );
                 })}
               </div>
             ) : longTermPatterns.length > 0 ? (
-              <div className="bg-zinc-900 border border-zinc-700 rounded-2xl p-4">
-                <p className="text-zinc-500 text-xs mb-2">Recurring themes</p>
-                <p className="text-zinc-200 text-sm leading-relaxed">
-                  We've noticed{' '}
-                  {longTermPatterns.slice(0, 2).map((p, i, arr) => (
-                    <React.Fragment key={i}>
-                      <strong className="text-white">{p}</strong>
-                      {i < arr.length - 1 ? ' and ' : ''}
-                    </React.Fragment>
-                  ))}{' '}
-                  as recurring themes in your reflections.
+              <div className="bg-zinc-900 border border-zinc-800 border-l-4 border-l-zinc-500 rounded-2xl p-4">
+                <p className="text-zinc-500 text-xs uppercase tracking-widest mb-2">A recurring thread</p>
+                <p className="text-zinc-300 text-sm leading-relaxed">
+                  <strong className="text-white font-semibold">{longTermPatterns[0]}</strong>{' '}
+                  keeps coming back. Patterns like this are worth paying attention to.
                 </p>
               </div>
             ) : (
               <p className="text-zinc-500 text-sm bg-zinc-900 border border-zinc-800 rounded-xl p-4">
-                Patterns emerge after a few reflections. Keep showing up.
+                Patterns emerge from repetition. Keep showing up and we'll start seeing yours.
               </p>
             )}
           </section>

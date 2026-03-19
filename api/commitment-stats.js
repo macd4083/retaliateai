@@ -40,6 +40,22 @@ function diffDays(a, b) {
   return Math.round(Math.abs(db - da) / 86400000);
 }
 
+// Return the Monday of the ISO week containing dateStr (Mon = week start)
+function getMondayOf(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  const day = date.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+  const offset = day === 0 ? 6 : day - 1;
+  const monday = new Date(y, m - 1, d - offset);
+  return `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')}`;
+}
+
+// Format a YYYY-MM-DD date as "Mon D" (e.g. "Mar 10")
+function formatWeekLabel(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
 /**
  * Compute follow-through for a window of sessions.
  *
@@ -83,6 +99,8 @@ export default async function handler(req, res) {
     const day7ago = addDays(today, -7);
     const day14ago = addDays(today, -14);
     const day30ago = addDays(today, -30);
+    const thisMonday = getMondayOf(today);
+    const weekStart8ago = addDays(thisMonday, -7 * 7); // Monday 7 weeks before current week
 
     // Fetch last 14 days of sessions for follow-through computation
     const { data: sessions14 } = await supabase
@@ -144,12 +162,42 @@ export default async function handler(req, res) {
       }
     }
 
+    // Weekly sparkline data: 8 calendar weeks (Mon–Sun), oldest→newest
+    const { data: sessions8w } = await supabase
+      .from('reflection_sessions')
+      .select('date, tomorrow_commitment, is_complete')
+      .eq('user_id', user_id)
+      .gte('date', weekStart8ago)
+      .lte('date', today)
+      .order('date', { ascending: true });
+
+    const all8wSessions = sessions8w || [];
+    const all8wByDate = {};
+    for (const s of all8wSessions) {
+      all8wByDate[s.date] = s;
+    }
+
+    const weeklyData = [];
+    for (let i = 7; i >= 0; i--) {
+      const wStart = addDays(thisMonday, -i * 7);
+      const wEnd = addDays(wStart, 6);
+      const wSessions = all8wSessions.filter((s) => s.date >= wStart && s.date <= wEnd);
+      const { kept, total } = computeFollowThrough(wSessions, all8wByDate);
+      weeklyData.push({
+        weekLabel: formatWeekLabel(wStart),
+        kept,
+        total,
+        rate: total > 0 ? Math.round((kept / total) * 1000) / 1000 : null,
+      });
+    }
+
     return res.status(200).json({
       followThrough7,
       followThroughPrior7,
       trajectory,
       recoveryDays,
       recoveriesCount,
+      weeklyData,
     });
   } catch (err) {
     console.error('commitment-stats error:', err);
