@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Check, ChevronDown } from 'lucide-react';
 import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase/client';
 import { reflectionHelpers } from '../lib/supabase/reflection';
@@ -21,8 +22,8 @@ export default function InsightsV2() {
   const { user } = useAuth();
 
   const [livingProfile, setLivingProfile] = useState(null);
-  const [commitmentSessions, setCommitmentSessions] = useState([]); // sessions with follow-through status
-  const [recentCommitments, setRecentCommitments] = useState([]);   // last 10 for the list
+  const [allCommitments, setAllCommitments] = useState([]);
+  const [visibleCount, setVisibleCount] = useState(7);
   const [wins, setWins] = useState([]);
   const [patterns, setPatterns] = useState([]);
   const [streak, setStreak] = useState(0);
@@ -59,77 +60,54 @@ export default function InsightsV2() {
   }
 
   async function loadSessions() {
-    // Fetch last 14 days of sessions (with commitment and completion info) for circle visualization
-    const { data: sessions14 } = await supabase
-      .from('reflection_sessions')
-      .select('date, tomorrow_commitment, is_complete')
-      .eq('user_id', user.id)
-      .gte('date', localDateStr(-14))
-      .lte('date', localDateStr(0))
-      .order('date', { ascending: true });
+    const today = localDateStr(0);
 
-    const allSessions = sessions14 || [];
-    const sessionsByDate = {};
-    for (const s of allSessions) {
-      sessionsByDate[s.date] = s;
-    }
-
-    // Compute follow-through status for each session with a commitment
-    const withCommitment = allSessions.filter((s) => !!s.tomorrow_commitment);
-    const mostRecentDate = withCommitment.length > 0 ? withCommitment[withCommitment.length - 1].date : null;
-
-    // Take last 7 sessions with commitments for the circle display
-    const circles = withCommitment.slice(-7).map((s) => {
-      const nextDay = addDays(s.date, 1);
-      const isPending = s.date === mostRecentDate;
-      return {
-        date: s.date,
-        commitment: s.tomorrow_commitment,
-        status: isPending ? 'pending' : (sessionsByDate[nextDay]?.is_complete ? 'kept' : 'missed'),
-      };
-    });
-    setCommitmentSessions(circles);
-
-    // Recent 10 commitments for the list section
-    const { data: recentC } = await supabase
+    // Fetch all sessions with a commitment (desc order, up to 100)
+    const { data: allWithCommitment } = await supabase
       .from('reflection_sessions')
       .select('date, tomorrow_commitment, is_complete')
       .eq('user_id', user.id)
       .not('tomorrow_commitment', 'is', null)
       .order('date', { ascending: false })
-      .limit(10);
+      .limit(100);
 
-    // For each recent commitment, check next-day completion client-side
-    // We need session data for the day after each commitment
-    if (recentC && recentC.length > 0) {
-      const oldestDate = recentC[recentC.length - 1].date;
-      const newestNextDay = addDays(recentC[0].date, 1);
+    // Day-behind rule: include a session as a commitment row only if
+    // is_complete === true OR the date is before today (already passed).
+    const eligibleCommitments = (allWithCommitment || []).filter(
+      (s) => s.is_complete || s.date < today
+    );
 
-      const { data: checkSessions } = await supabase
+    if (eligibleCommitments.length > 0) {
+      const newestDate = eligibleCommitments[0].date;
+      const oldestDate = eligibleCommitments[eligibleCommitments.length - 1].date;
+
+      // Fetch sessions in the date range for next-day lookups
+      const { data: lookupSessions } = await supabase
         .from('reflection_sessions')
         .select('date, is_complete')
         .eq('user_id', user.id)
         .gte('date', oldestDate)
-        .lte('date', newestNextDay)
+        .lte('date', addDays(newestDate, 1))
         .order('date', { ascending: true });
 
-      const checkMap = {};
-      for (const s of checkSessions || []) {
-        checkMap[s.date] = s;
+      const sessionsByDate = {};
+      for (const s of lookupSessions || []) {
+        sessionsByDate[s.date] = s;
       }
 
-      const mostRecentCommitmentDate = recentC[0].date;
-      const enriched = recentC.map((c) => {
-        const nextDay = addDays(c.date, 1);
-        const isPending = c.date === mostRecentCommitmentDate;
-        return {
-          ...c,
-          status: isPending ? 'pending' : (checkMap[nextDay]?.is_complete ? 'kept' : 'missed'),
-        };
+      const computed = eligibleCommitments.map((s, idx) => {
+        const nextDay = addDays(s.date, 1);
+        const isNewest = idx === 0;
+        // Most recent: pending unless next day already has a completed session
+        const status = isNewest
+          ? (sessionsByDate[nextDay]?.is_complete ? 'kept' : 'pending')
+          : (sessionsByDate[nextDay]?.is_complete ? 'kept' : 'missed');
+        return { date: s.date, commitment: s.tomorrow_commitment, status };
       });
-      setRecentCommitments(enriched);
+
+      setAllCommitments(computed);
     } else {
-      setRecentCommitments([]);
+      setAllCommitments([]);
     }
 
     // Wins from last 7 sessions
@@ -204,11 +182,20 @@ export default function InsightsV2() {
   function trajectoryLine() {
     if (!ft || ft.total < 3) return 'Keep showing up — more data coming.';
     if (trajectory === 'improving' && priorRate !== null)
-      return `Up from ${priorRate}% last week. You're building real consistency.`;
+      return `Up from ${priorRate}% last week — you're building momentum.`;
     if (trajectory === 'declining' && priorRate !== null)
-      return `Down from ${priorRate}% last week. That's worth paying attention to.`;
+      return `Down from ${priorRate}% last week. Worth paying attention to.`;
     return 'Consistent with last week.';
   }
+
+  function trajectoryText() {
+    if (!ft || ft.total < 3) return 'Not enough data yet';
+    if (trajectory === 'improving') return 'Getting better';
+    if (trajectory === 'declining') return 'Slipping';
+    return 'Holding steady';
+  }
+
+  const visibleCommitments = allCommitments.slice(0, visibleCount);
 
   // Reflection patterns for narrative cards
   const patternCards = patterns.filter((p) => p.occurrence_count >= 2);
@@ -219,36 +206,86 @@ export default function InsightsV2() {
       <div className="h-full overflow-y-auto">
         <div className="max-w-md mx-auto px-4 py-6 space-y-8">
 
-          {/* ── Section 1: Follow-Through Card ────────────────────────── */}
+          {/* ── Section 1: Consistency Tracker ──────────────────────── */}
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
-            <p className="text-zinc-500 text-xs uppercase tracking-widest mb-0.5">Follow-Through</p>
-            <p className="text-zinc-600 text-xs mb-3">Did you do what you said you'd do?</p>
-            {ft && ft.total > 0 ? (
-              <>
-                <p className="text-white text-3xl font-bold mb-4">
-                  {ft.kept} <span className="text-zinc-500 text-xl font-normal">of {ft.total}</span>
-                </p>
-                {/* Circle visual */}
-                <div className="flex gap-2 mb-3">
-                  {commitmentSessions.map((s, i) => (
-                    <div
-                      key={i}
-                      title={`${formatDate(s.date)}: ${s.status}`}
-                      className={`w-6 h-6 rounded-full border-2 flex-shrink-0 ${
-                        s.status === 'kept'
-                          ? 'bg-green-500 border-green-500'
-                          : s.status === 'pending'
-                          ? 'bg-zinc-700 border-zinc-500'
-                          : 'bg-zinc-800 border-zinc-700'
-                      }`}
-                    />
+            <p className="text-white font-semibold text-lg mb-4">Consistency Tracker</p>
+
+            {/* Stats */}
+            <div className="space-y-4">
+              {/* Follow-Through Rate */}
+              <div>
+                <p className="text-zinc-500 text-xs uppercase tracking-widest mb-0.5">Follow-Through</p>
+                <p className="text-zinc-400 text-xs mb-2">Did you do what you said you'd do?</p>
+                {ft && ft.total > 0 ? (
+                  <>
+                    <p className="text-white text-3xl font-bold mb-2">
+                      {ft.kept} <span className="text-zinc-500 text-xl font-normal">of {ft.total}</span>
+                    </p>
+                    <p className="text-zinc-400 text-sm">{trajectoryLine()}</p>
+                  </>
+                ) : (
+                  <p className="text-zinc-500 text-sm">Keep showing up — more data coming.</p>
+                )}
+              </div>
+
+              {/* Trajectory */}
+              <div>
+                <p className="text-zinc-500 text-xs uppercase tracking-widest mb-1">Trajectory</p>
+                <p className="text-zinc-200 text-sm">{trajectoryText()}</p>
+              </div>
+
+              {/* Recovery Speed — only rendered if recoveriesCount > 0 */}
+              {recoveriesCount > 0 && (
+                <div>
+                  <p className="text-zinc-500 text-xs uppercase tracking-widest mb-1">Recovery</p>
+                  <p className="text-zinc-200 text-sm">
+                    {recoveryDays <= 1
+                      ? "You've never missed more than a day before coming back."
+                      : `Missed and came back ${recoveriesCount} time${recoveriesCount !== 1 ? 's' : ''}. Fastest return: ${recoveryDays} day${recoveryDays !== 1 ? 's' : ''}.`}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Commitment list */}
+            <div className="border-t border-zinc-800 mt-4 pt-4">
+              {visibleCommitments.length > 0 ? (
+                <div className="space-y-2">
+                  {visibleCommitments.map((c, i) => (
+                    <div key={i} className="bg-zinc-800 rounded-xl px-4 py-3 border border-zinc-700 flex items-center gap-3">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-zinc-500 text-xs mb-1">{formatDate(c.date)}</p>
+                        <p className="text-zinc-200 text-sm leading-relaxed">{c.commitment}</p>
+                      </div>
+                      {c.status === 'kept' && (
+                        <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center flex-shrink-0">
+                          <Check size={12} className="text-white" />
+                        </div>
+                      )}
+                      {c.status === 'pending' && (
+                        <div className="w-6 h-6 rounded-full border-2 border-zinc-600 flex-shrink-0" />
+                      )}
+                      {c.status === 'missed' && (
+                        <div className="w-6 h-6 rounded-full border-2 border-red-900 flex-shrink-0" />
+                      )}
+                    </div>
                   ))}
                 </div>
-                <p className="text-zinc-400 text-sm">{trajectoryLine()}</p>
-              </>
-            ) : (
-              <p className="text-zinc-500 text-sm">Keep showing up — more data coming.</p>
-            )}
+              ) : (
+                <p className="text-zinc-500 text-sm">No commitments yet. Start a reflection tonight.</p>
+              )}
+
+              {/* Show more */}
+              {allCommitments.length > visibleCount && (
+                <button
+                  onClick={() => setVisibleCount((c) => c + 7)}
+                  className="mt-3 text-zinc-400 text-sm flex items-center gap-1 hover:text-white transition-colors"
+                >
+                  Show more commitments
+                  <ChevronDown size={14} />
+                </button>
+              )}
+            </div>
           </div>
 
           {/* ── Section 2: Streak ─────────────────────────────────────── */}
@@ -404,33 +441,7 @@ export default function InsightsV2() {
             </section>
           )}
 
-          {/* ── Section 10: Recent Commitments (fixed follow-through) ─── */}
-          <section>
-            <h2 className="text-white font-semibold text-base mb-3">Recent Commitments</h2>
-            {recentCommitments.length === 0 ? (
-              <p className="text-zinc-500 text-sm bg-zinc-900 border border-zinc-800 rounded-xl p-4">
-                No commitments yet. Start a reflection tonight.
-              </p>
-            ) : (
-              <div className="space-y-2">
-                {recentCommitments.map((c, i) => {
-                  const icon = c.status === 'kept' ? '✅' : c.status === 'pending' ? '⏳' : '⬜';
-                  const iconColor = c.status === 'kept' ? 'text-green-400' : c.status === 'pending' ? 'text-yellow-500' : 'text-zinc-600';
-                  return (
-                    <div key={i} className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 flex items-start gap-3">
-                      <span className={`text-lg flex-shrink-0 mt-0.5 ${iconColor}`}>{icon}</span>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-zinc-500 text-xs mb-1">{formatDate(c.date)}</p>
-                        <p className="text-zinc-200 text-sm leading-relaxed">{c.tomorrow_commitment}</p>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </section>
-
-          {/* ── Section 11: Recent Wins ───────────────────────────────── */}
+          {/* ── Section 10: Recent Wins ───────────────────────────────── */}
           <section>
             <h2 className="text-white font-semibold text-base mb-3">Recent Wins 🔥</h2>
             {wins.length === 0 ? (
