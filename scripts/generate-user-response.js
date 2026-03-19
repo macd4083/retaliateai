@@ -3,6 +3,11 @@
  *
  * Calls GPT-4o-mini to generate a realistic user response given the persona,
  * coach message, session stage, and conversation history so far.
+ *
+ * Three response modes:
+ *   Mode A — "I have an answer": used for concrete questions; references the specific daily event.
+ *   Mode B — "I'm figuring it out right now": used for deep/identity questions; thinking develops live.
+ *   Mode C — "I don't understand / pushback": used for vague or off-topic coach messages.
  */
 
 import OpenAI from 'openai';
@@ -10,16 +15,70 @@ import OpenAI from 'openai';
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 /**
+ * Pick a response mode based on weighted probabilities.
+ * weights = [pA, pB, pC] where pA+pB+pC should equal 1.0
+ * Returns 'A', 'B', or 'C'.
+ */
+function pickResponseMode(weights) {
+  if (!Array.isArray(weights) || weights.length < 3) {
+    // fallback: balanced distribution
+    weights = [0.55, 0.30, 0.15];
+  }
+  const [pA, pB] = weights;
+  const roll = Math.random();
+  if (roll < pA) return 'A';
+  if (roll < pA + pB) return 'B';
+  return 'C';
+}
+
+/**
+ * Build the mode-specific instruction block for the system prompt.
+ */
+function modeInstruction(mode, dailyEvent) {
+  switch (mode) {
+    case 'A':
+      return `RESPONSE MODE: "I have an answer" — Concrete, specific.
+You have a clear answer for this. Reference the actual thing that happened today: "${dailyEvent}"
+Name specific people, products, or situations from that event. Be direct but casual.
+1-3 sentences. Sound like you're texting, not writing an essay.`;
+
+    case 'B':
+      return `RESPONSE MODE: "I'm figuring it out right now" — Thinking live.
+The coach asked something genuinely hard — about identity, fear, patterns, or why you do something.
+You don't have a pre-packaged answer. Think through it in real time in the message:
+- Start uncertain: "huh, I haven't thought about it that way..." or "that's a hard one..."
+- Then try to work it out: "I guess... maybe it's because..." or "it might be that I..."
+- Land somewhere partially insightful OR still uncertain — both are fine
+- 2-4 sentences. Messy and exploratory, NOT polished. Sound stuck but genuinely trying.
+Do NOT give a tidy answer. This is self-reflection developing in real time.`;
+
+    case 'C':
+      return `RESPONSE MODE: "I don't understand / this doesn't apply" — Pushback or confusion.
+The coach's question feels vague, off-topic, or doesn't fit your current state.
+Pick one of these reactions:
+- Mild confusion: "wait, what do you mean exactly?" or "I'm not sure I follow"
+- Redirect: "I don't think that's really the issue for me right now"
+- Deflection: give a brief surface answer and pivot to something else on your mind
+- 1-2 sentences. Brief. This signals to the system that the coach asked a bad or unclear question.`;
+
+    default:
+      return '';
+  }
+}
+
+/**
  * Generate a realistic user response for the simulation.
  *
  * @param {object} params
- * @param {object} params.persona       - Full persona definition from personas.js
- * @param {string} params.coachMessage  - The coach's latest message
- * @param {string} params.currentStage  - Current session stage (wins/honest/tomorrow/close/complete)
- * @param {Array}  params.history       - Conversation history so far [{role, content}]
- * @param {string} params.simulatedDate - The simulated date (YYYY-MM-DD)
- * @param {string} params.mood          - Today's mood (randomly selected for the day)
- * @param {object} params.sessionContext - What the persona has already shared this session
+ * @param {object} params.persona              - Full persona definition from personas.js
+ * @param {string} params.coachMessage         - The coach's latest message
+ * @param {string} params.currentStage         - Current session stage (wins/honest/tomorrow/close/complete)
+ * @param {Array}  params.history              - Conversation history so far [{role, content}]
+ * @param {string} params.simulatedDate        - The simulated date (YYYY-MM-DD)
+ * @param {string} params.mood                 - Today's mood (randomly selected for the day)
+ * @param {object} params.sessionContext       - What the persona has already shared this session
+ * @param {string} params.dailyEvent           - The specific event drawn for today (from dailyEventBank)
+ * @param {string|null} params.yesterdayCommitment - What the persona committed to yesterday (or null)
  * @returns {Promise<string>} - The generated user message
  */
 export async function generateUserResponse({
@@ -30,9 +89,16 @@ export async function generateUserResponse({
   simulatedDate,
   mood,
   sessionContext = {},
+  dailyEvent = null,
+  yesterdayCommitment = null,
 }) {
+  // Determine follow-through on yesterday's commitment
   const followThroughRoll = Math.random();
   const followedThrough = followThroughRoll < persona.tendencies.follow_through_rate;
+
+  // Pick response mode based on persona's weighted probabilities
+  const weights = persona.tendencies.responseModeWeights ?? [0.55, 0.30, 0.15];
+  const responseMode = pickResponseMode(weights);
 
   const systemPrompt = `You are roleplaying as ${persona.name}, a real person journaling with an AI reflection coach.
 
@@ -55,7 +121,9 @@ TENDENCIES:
 TODAY'S CONTEXT:
 - Date: ${simulatedDate}
 - Mood today: ${mood}
-- Did they follow through on yesterday's commitment: ${followedThrough ? 'yes, mostly' : 'no, they fell short'}
+- What actually happened today: ${dailyEvent ?? 'nothing out of the ordinary'}
+- Yesterday's commitment: ${yesterdayCommitment ? `"${yesterdayCommitment}"` : 'no specific commitment made'}
+- Did they follow through on yesterday's commitment: ${yesterdayCommitment ? (followedThrough ? 'yes, mostly' : 'no, they fell short') : 'n/a'}
 
 SESSION SO FAR:
 ${sessionContext.sharedWins ? `- Already shared wins: ${sessionContext.sharedWins}` : ''}
@@ -64,26 +132,25 @@ ${sessionContext.sharedTomorrow ? `- Already shared tomorrow plan: ${sessionCont
 
 CURRENT STAGE: ${currentStage || 'unknown'}
 
-RULES FOR YOUR RESPONSE:
+${modeInstruction(responseMode, dailyEvent)}
+
+GENERAL RULES:
 - Sound like a real person TEXTING, not writing formally
-- Keep it SHORT: 1-4 sentences typically. Never write paragraphs
 - Stay true to the persona's tendencies for this stage
-- If mood is tired/stressed, be shorter and less enthusiastic
+- If mood is tired/stressed/flat, be shorter and less enthusiastic
 - If mood is proud/motivated, be more energetic
-- Occasionally be vague or surface-level (this tests whether the coach pushes deeper)
 - If the coach offers mood chips/options, pick one naturally
-- If asked a direct question, answer it (but maybe not fully if persona tendency is to deflect)
 - Use casual language: contractions, short sentences, real talk
 - NEVER sound like an AI or a journaling app user — sound like a real person`;
 
   const historyFormatted = history
-    .slice(-6) // last 6 turns for context
+    .slice(-8) // last 8 turns for richer context
     .map((m) => `${m.role === 'assistant' ? 'Coach' : persona.name}: ${m.content}`)
     .join('\n');
 
   const userPrompt = `${historyFormatted ? `Recent conversation:\n${historyFormatted}\n\n` : ''}Coach just said: "${coachMessage}"
 
-Respond as ${persona.name} would. Keep it short and real.`;
+Respond as ${persona.name} would. Keep it real.`;
 
   const response = await openai.chat.completions.create({
     model: 'gpt-4o-mini',
@@ -91,7 +158,7 @@ Respond as ${persona.name} would. Keep it short and real.`;
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
     ],
-    max_tokens: 150,
+    max_tokens: 200,
     temperature: 0.85,
   });
 

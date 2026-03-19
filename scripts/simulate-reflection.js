@@ -21,6 +21,8 @@ import { dirname, join } from 'path';
 import { randomUUID } from 'crypto';
 
 import handler from '../api/reflection-coach.js';
+import commitmentStatsHandler from '../api/commitment-stats.js';
+import generatePatternNarrativeHandler from '../api/generate-pattern-narrative.js';
 import { PERSONAS, DEFAULT_PERSONA } from './personas.js';
 import { generateUserResponse, scoreCoachMessage } from './generate-user-response.js';
 
@@ -67,16 +69,97 @@ function addDays(dateStr, n) {
   return d.toISOString().slice(0, 10);
 }
 
-// ── Call the coach handler directly ───────────────────────────────────────────
-async function callCoach(body) {
+// ── Call any handler directly (generic helper) ────────────────────────────────
+function callHandler(handlerFn, body) {
   return new Promise((resolve) => {
     const req = { method: 'POST', body };
     const res = {
       status: (code) => ({ json: (data) => resolve({ code, ...data }) }),
       json: (data) => resolve({ code: 200, ...data }),
     };
-    handler(req, res);
+    handlerFn(req, res);
   });
+}
+
+// ── Call the coach handler directly ───────────────────────────────────────────
+async function callCoach(body) {
+  return callHandler(handler, body);
+}
+
+// ── Validate backend state after a session completes ─────────────────────────
+/**
+ * Calls commitment-stats, queries reflection_patterns, and optionally calls
+ * generate-pattern-narrative to verify real data landed correctly.
+ *
+ * @param {object} supabase   - Supabase client
+ * @param {string} userId     - The simulated user ID
+ * @param {string} simulatedDate - The date of the completed session (YYYY-MM-DD)
+ * @returns {Promise<object>} - backend_state object for the session record
+ */
+async function validateBackend(supabase, userId, simulatedDate) {
+  const backendState = {
+    follow_through_7day: null,
+    trajectory: null,
+    patterns_accumulated: [],
+    narrative_sample: null,
+  };
+
+  // 1. Commitment stats
+  try {
+    const stats = await callHandler(commitmentStatsHandler, { user_id: userId });
+    if (stats.followThrough7) {
+      backendState.follow_through_7day = stats.followThrough7;
+      backendState.trajectory = stats.trajectory ?? null;
+      console.log(`    📊  Follow-through (7d): ${stats.followThrough7.kept}/${stats.followThrough7.total} kept | Trajectory: ${stats.trajectory ?? 'n/a'}`);
+    }
+  } catch (err) {
+    console.warn(`    ⚠️  commitment-stats failed: ${err.message}`);
+  }
+
+  // 2. Accumulated reflection patterns
+  try {
+    const { data: patterns } = await supabase
+      .from('reflection_patterns')
+      .select('label, occurrence_count, pattern_type')
+      .eq('user_id', userId)
+      .order('occurrence_count', { ascending: false })
+      .limit(10);
+
+    if (patterns && patterns.length > 0) {
+      backendState.patterns_accumulated = patterns.map((p) => ({
+        label: p.label,
+        occurrences: p.occurrence_count,
+        type: p.pattern_type,
+      }));
+      const patternStr = patterns
+        .map((p) => `${p.label}(${p.occurrence_count})`)
+        .join(', ');
+      console.log(`    🔁  Patterns: ${patternStr}`);
+
+      // 3. Generate narrative if enough signal exists
+      const qualifyingPatterns = patterns.filter((p) => p.occurrence_count >= 2);
+      if (qualifyingPatterns.length >= 2) {
+        try {
+          const narrativeResult = await callHandler(generatePatternNarrativeHandler, { user_id: userId });
+          if (narrativeResult.narratives && narrativeResult.narratives.length > 0) {
+            const first = narrativeResult.narratives[0];
+            const preview = first.narrative ?? '';
+            backendState.narrative_sample = preview || null;
+            const display = preview.length > 120 ? `${preview.slice(0, 120)}...` : preview;
+            console.log(`    💬  Narrative (${first.label}): "${display}"`);
+          }
+        } catch (err) {
+          console.warn(`    ⚠️  generate-pattern-narrative failed: ${err.message}`);
+        }
+      }
+    } else {
+      console.log(`    🔁  Patterns: none accumulated yet`);
+    }
+  } catch (err) {
+    console.warn(`    ⚠️  reflection_patterns query failed: ${err.message}`);
+  }
+
+  return backendState;
 }
 
 // ── Supabase setup ─────────────────────────────────────────────────────────────
@@ -177,11 +260,23 @@ async function main() {
       sessions_incomplete: 0,
       flags_by_type: {},
     },
+    backend_summary: {
+      final_follow_through_7day: null,
+      final_trajectory: null,
+      all_patterns: [],
+      narrative_produced: false,
+      narrative_sample: null,
+    },
     sessions: [],
     flagged_for_review: [],
   };
 
   let totalQualityScores = [];
+
+  // ── Cross-session state — carries forward across days ─────────────────────
+  const crossSessionState = {
+    yesterdayCommitment: null,
+  };
 
   // ── Graceful interrupt handler — write partial report ──
   let interrupted = false;
@@ -202,7 +297,16 @@ async function main() {
     const moods = persona.tendencies.mood_distribution;
     const mood = moods[(day - 1) % moods.length];
 
+    // Draw today's daily event randomly from the persona's event bank
+    const eventBank = persona.dailyEventBank ?? [];
+    const dailyEvent = eventBank.length > 0
+      ? eventBank[Math.floor(Math.random() * eventBank.length)]
+      : null;
+
     separator(day, simulatedDate);
+    if (dailyEvent) {
+      console.log(`📅  Today's event: ${dailyEvent}`);
+    }
 
     // Create session row
     const sessionId = await createSessionRow(supabase, userId, simulatedDate);
@@ -224,12 +328,14 @@ async function main() {
     const sessionRecord = {
       date: simulatedDate,
       session_id: sessionId,
+      daily_event: dailyEvent,
       completed: false,
       turns: 0,
       avg_quality: null,
       exercises_run: [],
       checklist: { wins: false, honest: false, plan: false, identity: false },
       conversation: [],
+      backend_state: null,
     };
 
     const sessionQualityScores = [];
@@ -288,6 +394,8 @@ async function main() {
         simulatedDate,
         mood,
         sessionContext,
+        dailyEvent,
+        yesterdayCommitment: crossSessionState.yesterdayCommitment,
       });
 
       printUser(userMsg);
@@ -395,6 +503,14 @@ async function main() {
         ? Math.round((sessionQualityScores.reduce((a, b) => a + b, 0) / sessionQualityScores.length) * 100) / 100
         : null;
 
+    // Update cross-session state for the next day
+    crossSessionState.yesterdayCommitment = sessionState.tomorrow_commitment ?? null;
+
+    // Run backend validation and store result
+    console.log(`\n🔍  Backend validation:`);
+    const backendState = await validateBackend(supabase, userId, simulatedDate);
+    sessionRecord.backend_state = backendState;
+
     report.sessions.push(sessionRecord);
 
     if (sessionState.is_complete) {
@@ -413,6 +529,24 @@ async function main() {
     // Small delay between days to avoid rate limiting
     if (day < days) {
       await new Promise((r) => setTimeout(r, 500));
+    }
+  }
+
+  // ── Populate final backend_summary from last known state ──────────────────
+  const lastSession = report.sessions[report.sessions.length - 1];
+  if (lastSession?.backend_state) {
+    const bs = lastSession.backend_state;
+    report.backend_summary.final_follow_through_7day = bs.follow_through_7day;
+    report.backend_summary.final_trajectory = bs.trajectory;
+    report.backend_summary.narrative_produced = !!bs.narrative_sample;
+    report.backend_summary.narrative_sample = bs.narrative_sample;
+  }
+  // Collect all patterns sorted by occurrence count (from last session with patterns)
+  for (let i = report.sessions.length - 1; i >= 0; i--) {
+    const patterns = report.sessions[i]?.backend_state?.patterns_accumulated;
+    if (patterns && patterns.length > 0) {
+      report.backend_summary.all_patterns = [...patterns].sort((a, b) => b.occurrences - a.occurrences);
+      break;
     }
   }
 
