@@ -110,9 +110,9 @@ export default async function handler(req, res) {
       allSessionsByDate[s.date] = s;
     }
 
-    // Split into two windows
-    const last7 = allSessions.filter((s) => s.date >= day7ago);
-    const prior7 = allSessions.filter((s) => s.date >= day14ago && s.date < day7ago);
+    // Split into two windows (strictly greater-than so each window is exactly 7 days)
+    const last7 = allSessions.filter((s) => s.date > day7ago);
+    const prior7 = allSessions.filter((s) => s.date > day14ago && s.date <= day7ago);
 
     const followThrough7 = computeFollowThrough(last7, allSessionsByDate);
     const followThroughPrior7 = computeFollowThrough(prior7, allSessionsByDate);
