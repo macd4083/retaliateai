@@ -528,9 +528,9 @@ async function upsertGrowthMarker(userId, theme, { exercise_run, check_in_messag
   } catch (_e) {}
 }
 
-async function upsertBlockerPatterns(userId, blockerTags) {
+async function upsertBlockerPatterns(userId, blockerTags, clientDate) {
   if (!blockerTags || blockerTags.length === 0) return;
-  const todayStr = today();
+  const todayStr = today(clientDate);
   for (const tag of blockerTags) {
     try {
       const { data: existing } = await supabase
@@ -1031,19 +1031,27 @@ export default async function handler(req, res) {
       };
     }
 
-    // Safety sanitizer: if assistant_message is itself a JSON object string, unwrap it and merge fields
-    if (typeof result.assistant_message === 'string' && result.assistant_message.trimStart().startsWith('{')) {
-      try {
-        const inner = JSON.parse(result.assistant_message);
-        if (inner && typeof inner.assistant_message === 'string') {
-          // Merge all fields from the inner object so is_session_complete etc. are preserved
-          Object.assign(result, inner);
-        }
-      } catch (_e) { /* not valid JSON — leave as-is */ }
+    // Safety sanitizer: if assistant_message is itself a JSON object string, unwrap it and merge fields.
+    // Find the first '{' in case there is non-JSON preamble text before it.
+    if (typeof result.assistant_message === 'string') {
+      const firstBrace = result.assistant_message.indexOf('{');
+      if (firstBrace !== -1) {
+        try {
+          const inner = JSON.parse(result.assistant_message.slice(firstBrace));
+          if (inner && typeof inner.assistant_message === 'string') {
+            // Merge all fields from the inner object so is_session_complete etc. are preserved
+            Object.assign(result, inner);
+          }
+        } catch (_e) { /* not valid JSON — leave as-is */ }
+      }
     }
     // Final fallback: ensure assistant_message is never null/undefined/empty
     if (!result.assistant_message) {
       result.assistant_message = "I'm here — what's on your mind?";
+    }
+    // Strip leading/trailing whitespace and blank lines from the final message
+    if (typeof result.assistant_message === 'string') {
+      result.assistant_message = result.assistant_message.trim();
     }
 
     result.exercise_run = result.exercise_run || 'none';
@@ -1116,7 +1124,7 @@ export default async function handler(req, res) {
     }
 
     if (result.extracted_data?.blocker_tags?.length) {
-      dbPromises.push(upsertBlockerPatterns(user_id, result.extracted_data.blocker_tags));
+      dbPromises.push(upsertBlockerPatterns(user_id, result.extracted_data.blocker_tags, client_local_date));
     }
 
     Promise.all(dbPromises).catch(() => {});
