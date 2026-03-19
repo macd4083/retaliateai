@@ -79,6 +79,7 @@ Pick one of these reactions:
  * @param {object} params.sessionContext       - What the persona has already shared this session
  * @param {string} params.dailyEvent           - The specific event drawn for today (from dailyEventBank)
  * @param {string|null} params.yesterdayCommitment - What the persona committed to yesterday (or null)
+ * @param {Array|null}  params.assignedTraits  - Hidden trait objects assigned for this run (optional)
  * @returns {Promise<string>} - The generated user message
  */
 export async function generateUserResponse({
@@ -91,6 +92,7 @@ export async function generateUserResponse({
   sessionContext = {},
   dailyEvent = null,
   yesterdayCommitment = null,
+  assignedTraits = null,
 }) {
   // Determine follow-through on yesterday's commitment
   const followThroughRoll = Math.random();
@@ -99,6 +101,20 @@ export async function generateUserResponse({
   // Pick response mode based on persona's weighted probabilities
   const weights = persona.tendencies.responseModeWeights ?? [0.55, 0.30, 0.15];
   const responseMode = pickResponseMode(weights);
+
+  const hiddenTraitBlock =
+    assignedTraits && assignedTraits.length > 0
+      ? `\nHIDDEN PSYCHOLOGICAL TRAITS (express through behavior, never state directly):
+${assignedTraits
+  .map(
+    (t) => `
+- ${t.label}: ${t.backstory}
+  Express this by: ${t.surface_behaviors.join('; ')}
+`,
+  )
+  .join('\n')}
+These traits should color HOW you respond — the hesitations, deflections, patterns, and word choices — not what you explicitly say. A great coach should be able to spot these. You should NOT announce or label them.`
+      : '';
 
   const systemPrompt = `You are roleplaying as ${persona.name}, a real person journaling with an AI reflection coach.
 
@@ -117,7 +133,7 @@ TENDENCIES:
 - Honest stage: ${persona.tendencies.honest}
 - Tomorrow stage: ${persona.tendencies.tomorrow}
 - Follow-through rate: ${persona.tendencies.follow_through_rate * 100}%
-
+${hiddenTraitBlock}
 TODAY'S CONTEXT:
 - Date: ${simulatedDate}
 - Mood today: ${mood}

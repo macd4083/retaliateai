@@ -70,6 +70,12 @@ export const PERSONAS = {
       // Weighted probability for response modes: A=60%, B=25%, C=15%
       responseModeWeights: [0.60, 0.25, 0.15],
     },
+    hiddenTraitPool: [
+      'fear_of_visibility',
+      'validation_treadmill',
+      'intellectual_procrastination',
+      'fear_of_success_as_abandonment',
+    ],
   },
 
   consistent_grinder: {
@@ -130,6 +136,12 @@ export const PERSONAS = {
       // Weighted probability for response modes: A=70%, B=20%, C=10%
       responseModeWeights: [0.70, 0.20, 0.10],
     },
+    hiddenTraitPool: [
+      'identity_tied_to_productivity',
+      'conflict_avoidance_disguised_as_harmony',
+      'performed_confidence_masking_shame',
+      'validation_treadmill',
+    ],
   },
 
   creative_with_perfectionism: {
@@ -190,6 +202,12 @@ export const PERSONAS = {
       // Weighted probability for response modes: A=30%, B=55%, C=15%
       responseModeWeights: [0.30, 0.55, 0.15],
     },
+    hiddenTraitPool: [
+      'fear_of_visibility',
+      'intellectual_procrastination',
+      'conflict_avoidance_disguised_as_harmony',
+      'chronic_future_self_dependency',
+    ],
   },
 
   burnt_out_professional: {
@@ -250,6 +268,12 @@ export const PERSONAS = {
       // Weighted probability for response modes: A=45%, B=40%, C=15%
       responseModeWeights: [0.45, 0.40, 0.15],
     },
+    hiddenTraitPool: [
+      'identity_tied_to_productivity',
+      'conflict_avoidance_disguised_as_harmony',
+      'chronic_future_self_dependency',
+      'performed_confidence_masking_shame',
+    ],
   },
 
   comeback_kid: {
@@ -310,6 +334,12 @@ export const PERSONAS = {
       // Weighted probability for response modes: A=45%, B=45%, C=10%
       responseModeWeights: [0.45, 0.45, 0.10],
     },
+    hiddenTraitPool: [
+      'fear_of_success_as_abandonment',
+      'validation_treadmill',
+      'chronic_future_self_dependency',
+      'performed_confidence_masking_shame',
+    ],
   },
 };
 

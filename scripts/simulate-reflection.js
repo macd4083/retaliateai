@@ -25,6 +25,8 @@ import commitmentStatsHandler from '../api/commitment-stats.js';
 import generatePatternNarrativeHandler from '../api/generate-pattern-narrative.js';
 import { PERSONAS, DEFAULT_PERSONA } from './personas.js';
 import { generateUserResponse, scoreCoachMessage } from './generate-user-response.js';
+import { drawTraits } from './hidden-traits.js';
+import { gradeTraitDetection } from './grade-trait-detection.js';
 
 // ── Resolve paths ──────────────────────────────────────────────────────────────
 const __filename = fileURLToPath(import.meta.url);
@@ -244,6 +246,16 @@ async function main() {
   console.log(`    Start date: ${startDate}`);
   console.log(`    User ID:    ${userId}\n`);
 
+  // ── Draw hidden traits from the persona's pool ────────────────────────────
+  const traitPool = persona.hiddenTraitPool ?? [];
+  const assignedTraits = drawTraits(traitPool, 2);
+
+  console.log(`🧠  Hidden traits assigned:`);
+  assignedTraits.forEach((t, i) => {
+    console.log(`    ${i + 1}. ${t.label} — ${t.archetype}`);
+  });
+  console.log('');
+
   // ── Report state ──
   const report = {
     meta: {
@@ -252,6 +264,7 @@ async function main() {
       days_simulated: days,
       user_id: userId,
       run_at: new Date().toISOString(),
+      assigned_traits: assignedTraits.map((t) => ({ id: t.id, label: t.label })),
     },
     summary: {
       total_turns: 0,
@@ -396,6 +409,7 @@ async function main() {
         sessionContext,
         dailyEvent,
         yesterdayCommitment: crossSessionState.yesterdayCommitment,
+        assignedTraits,
       });
 
       printUser(userMsg);
@@ -548,6 +562,48 @@ async function main() {
       report.backend_summary.all_patterns = [...patterns].sort((a, b) => b.occurrences - a.occurrences);
       break;
     }
+  }
+
+  // ── Grade hidden trait detection ──────────────────────────────────────────
+  console.log(`\n🎯  Grading hidden trait detection...`);
+  try {
+    // Build flat conversation history from all sessions (with date context)
+    const flatHistory = [];
+    for (const session of report.sessions) {
+      for (const entry of session.conversation) {
+        flatHistory.push({
+          turn: entry.turn,
+          coach: entry.coach ?? '',
+          user: entry.user ?? '',
+          date: session.date,
+        });
+      }
+    }
+
+    const traitDetectionResult = await gradeTraitDetection({
+      assignedTraits,
+      conversationHistory: flatHistory,
+      personaName: persona.name,
+    });
+
+    report.trait_detection = traitDetectionResult;
+
+    // Log results to terminal
+    console.log(`\n🎯  Trait Detection Results:`);
+    for (const t of traitDetectionResult.assigned_traits) {
+      const icon = t.detection_score >= 5 ? '✅' : '❌';
+      const turnNote =
+        t.first_detected_turn !== null ? ` — Detected on turn ${t.first_detected_turn}` : ' — Mostly missed';
+      console.log(`    ${t.label.padEnd(38)} ${t.detection_score}/10${turnNote} ${icon}`);
+    }
+    const rate = traitDetectionResult.overall_detection_rate;
+    console.log(
+      `    Overall: ${traitDetectionResult.detection_grade} (${rate !== null && rate !== undefined ? (rate * 100).toFixed(0) : 'n/a'}% detection rate)`,
+    );
+    console.log(`    Summary: ${traitDetectionResult.summary}`);
+  } catch (err) {
+    console.warn(`    ⚠️  Trait detection grading failed: ${err.message}`);
+    report.trait_detection = null;
   }
 
   finalizeReport(report, totalQualityScores);
