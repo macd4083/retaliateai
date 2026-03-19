@@ -40,12 +40,14 @@ function parseArgs() {
     days: 30,
     startDate: null,
     persona: DEFAULT_PERSONA,
+    clean: false,
   };
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--days' && args[i + 1]) result.days = parseInt(args[++i], 10);
     else if (args[i] === '--start-date' && args[i + 1]) result.startDate = args[++i];
     else if (args[i] === '--persona' && args[i + 1]) result.persona = args[++i];
+    else if (args[i] === '--clean') result.clean = true;
   }
 
   // Default start date: 30 days ago
@@ -256,9 +258,131 @@ function printSummary({ completed, stage, exercises, turns }) {
   console.log(`${icon}  ${completed ? 'Complete' : 'Incomplete'} | Stage: ${stage} | Exercises: ${exStr} | Turns: ${turns}`);
 }
 
+// ── Clean user data — wipe all sim user rows before a fresh run ───────────────
+async function cleanUserData(supabase, userId) {
+  const tablesCleared = [];
+  let rowsDeleted = 0;
+
+  // Get all session IDs for this user first
+  const { data: sessions } = await supabase
+    .from('reflection_sessions')
+    .select('id')
+    .eq('user_id', userId);
+
+  const sessionIds = (sessions ?? []).map((s) => s.id);
+
+  // Delete reflection_messages joined through sessions
+  if (sessionIds.length > 0) {
+    const { data: deletedMsgs, error: msgErr } = await supabase
+      .from('reflection_messages')
+      .delete()
+      .in('session_id', sessionIds)
+      .select('id');
+    if (!msgErr) {
+      const count = (deletedMsgs ?? []).length;
+      rowsDeleted += count;
+      tablesCleared.push({ table: 'reflection_messages', rows: count });
+      console.log(`    🗑️  Cleared reflection_messages (${count} rows)`);
+    }
+  } else {
+    tablesCleared.push({ table: 'reflection_messages', rows: 0 });
+    console.log(`    🗑️  Cleared reflection_messages (0 rows)`);
+  }
+
+  // Delete reflection_sessions
+  {
+    const { data: deletedSessions, error: sessErr } = await supabase
+      .from('reflection_sessions')
+      .delete()
+      .eq('user_id', userId)
+      .select('id');
+    if (!sessErr) {
+      const count = (deletedSessions ?? []).length;
+      rowsDeleted += count;
+      tablesCleared.push({ table: 'reflection_sessions', rows: count });
+      console.log(`    🗑️  Cleared reflection_sessions (${count} rows)`);
+    }
+  }
+
+  // Delete reflection_patterns
+  {
+    const { data: deletedPatterns, error: patErr } = await supabase
+      .from('reflection_patterns')
+      .delete()
+      .eq('user_id', userId)
+      .select('id');
+    if (!patErr) {
+      const count = (deletedPatterns ?? []).length;
+      rowsDeleted += count;
+      tablesCleared.push({ table: 'reflection_patterns', rows: count });
+      console.log(`    🗑️  Cleared reflection_patterns (${count} rows)`);
+    }
+  }
+
+  // Delete follow_up_queue
+  {
+    const { data: deletedQueue, error: queueErr } = await supabase
+      .from('follow_up_queue')
+      .delete()
+      .eq('user_id', userId)
+      .select('id');
+    if (!queueErr) {
+      const count = (deletedQueue ?? []).length;
+      rowsDeleted += count;
+      tablesCleared.push({ table: 'follow_up_queue', rows: count });
+      console.log(`    🗑️  Cleared follow_up_queue (${count} rows)`);
+    }
+  }
+
+  // Delete growth_markers
+  {
+    const { data: deletedMarkers, error: markerErr } = await supabase
+      .from('growth_markers')
+      .delete()
+      .eq('user_id', userId)
+      .select('id');
+    if (!markerErr) {
+      const count = (deletedMarkers ?? []).length;
+      rowsDeleted += count;
+      tablesCleared.push({ table: 'growth_markers', rows: count });
+      console.log(`    🗑️  Cleared growth_markers (${count} rows)`);
+    }
+  }
+
+  return { tablesCleared, rowsDeleted };
+}
+
+// ── Seed user profile — reset to persona definition for a clean baseline ──────
+async function seedUserProfile(supabase, userId, persona) {
+  const { error } = await supabase.from('user_profiles').upsert(
+    {
+      id: userId,
+      display_name: persona.profile.display_name,
+      big_goal: persona.profile.big_goal,
+      why: persona.profile.why,
+      future_self: persona.profile.future_self,
+      identity_statement: persona.profile.identity_statement,
+      life_areas: persona.profile.life_areas,
+      blockers: persona.profile.blockers,
+      short_term_state: null,
+      long_term_patterns: [],
+      strengths: [],
+      growth_areas: [],
+      profile_updated_at: null,
+    },
+    { onConflict: 'id' }
+  );
+
+  if (error) {
+    console.warn(`  ⚠️  Could not seed user profile: ${error.message}`);
+  } else {
+    console.log(`    🌱  Profile seeded for persona: ${persona.name}`);
+  }
+}
+
 // ── Main simulation ────────────────────────────────────────────────────────────
 async function main() {
-  const { days, startDate, persona: personaKey } = parseArgs();
+  const { days, startDate, persona: personaKey, clean } = parseArgs();
 
   const persona = PERSONAS[personaKey];
   if (!persona) {
@@ -299,6 +423,9 @@ async function main() {
       user_id: userId,
       run_at: new Date().toISOString(),
       assigned_traits: assignedTraits.map((t) => ({ id: t.id, label: t.label })),
+      clean: clean,
+      pre_run_profile_snapshot: null,
+      clean_result: null,
     },
     summary: {
       total_turns: 0,
@@ -335,6 +462,28 @@ async function main() {
     finalizeReport(report, totalQualityScores);
     process.exit(0);
   });
+
+  // ── --clean: snapshot, wipe, and seed before the day loop ─────────────────
+  if (clean) {
+    console.log('\n🧹  --clean flag set. Wiping previous sim data...');
+
+    // 1. Snapshot existing profile
+    const { data: existingProfile } = await supabase
+      .from('user_profiles')
+      .select('*')
+      .eq('id', userId)
+      .maybeSingle();
+    report.meta.pre_run_profile_snapshot = existingProfile ?? null;
+
+    // 2. Wipe data
+    const cleanResult = await cleanUserData(supabase, userId);
+    report.meta.clean_result = cleanResult;
+
+    // 3. Seed profile
+    await seedUserProfile(supabase, userId, persona);
+
+    console.log('✅  Clean complete. Starting fresh simulation.\n');
+  }
 
   // ── Day loop ──────────────────────────────────────────────────────────────
   for (let day = 1; day <= days; day++) {
@@ -685,6 +834,9 @@ async function main() {
 
   finalizeReport(report, totalQualityScores);
   console.log(`\n✅  Simulation complete. Report saved to:\n    ${REPORT_PATH}\n`);
+  if (clean) {
+    console.log(`✅  Clean run complete. Pre-run snapshot saved to report.meta.pre_run_profile_snapshot\n`);
+  }
 }
 
 // ── Finalize and write report ──────────────────────────────────────────────────
