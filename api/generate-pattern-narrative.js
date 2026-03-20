@@ -55,6 +55,20 @@ export default async function handler(req, res) {
       .order('date', { ascending: false })
       .limit(30);
 
+    // ── 2b. Load depth insights from reflection_messages (last 30 days) ──
+    const { data: depthInsights } = await supabase
+      .from('reflection_messages')
+      .select('extracted_data, created_at')
+      .eq('user_id', user_id)
+      .not('extracted_data', 'is', null)
+      .gte('created_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
+      .order('created_at', { ascending: false })
+      .limit(20);
+
+    const depthInsightTexts = (depthInsights || [])
+      .map(m => m.extracted_data?.depth_insight)
+      .filter(Boolean);
+
     // ── 3. Load user profile for context ─────────────────────────────────
     const { data: profile } = await supabase
       .from('user_profiles')
@@ -72,10 +86,10 @@ export default async function handler(req, res) {
       .map((s) => {
         const wins = Array.isArray(s.wins)
           ? s.wins.map((w) => (typeof w === 'string' ? w : w?.text)).filter(Boolean).join('; ')
-          : '';
+          : (typeof s.wins === 'string' ? s.wins : '');
         const misses = Array.isArray(s.misses)
           ? s.misses.map((m) => (typeof m === 'string' ? m : m?.text)).filter(Boolean).join('; ')
-          : '';
+          : (typeof s.misses === 'string' ? s.misses : '');
         const blockers = Array.isArray(s.blocker_tags) ? s.blocker_tags.join(', ') : '';
         let line = `[${s.date}]`;
         if (s.summary) line += ` ${s.summary}`;
@@ -112,6 +126,7 @@ You will receive:
 - Their patterns (blockers and strengths with occurrence counts and dates)
 - Their actual session history (summaries, wins, struggles, commitments, and any depth insights captured)
 - Their profile (identity, goal, why)
+- \`depth_insights\` — these are the actual realizations users had during reflection sessions (e.g. "I avoid shipping because I'm afraid of being judged as average"). Use these as primary evidence when they exist. They are more direct than behavioral observations.
 
 For each pattern, generate ONE insight paragraph. This is NOT a recap of what happened. It is an honest, specific analysis of what the pattern is, what function it's likely serving, and what the user can watch for in themselves going forward.
 
@@ -152,6 +167,7 @@ Return ONLY valid JSON:
             patterns: patternList,
             session_history: sessionContext,
             profile: profileContext || 'No profile data yet.',
+            depth_insights: depthInsightTexts.length > 0 ? depthInsightTexts : undefined,
           }),
         },
       ],

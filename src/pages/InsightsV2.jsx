@@ -557,7 +557,7 @@ export default function InsightsV2() {
               </div>
             ) : (
               <p className="text-zinc-500 text-sm bg-zinc-900 border border-zinc-800 rounded-xl p-4">
-                Patterns show up after a few sessions. Keep going.
+                Patterns emerge after 3–5 reflections. The more specific you are in your sessions, the faster we can surface what's really going on.
               </p>
             )}
           </section>

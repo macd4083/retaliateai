@@ -564,6 +564,8 @@ export default function ReflectionV2() {
           newState.tomorrow_commitment = data.extracted_data.tomorrow_commitment;
         if (data.extracted_data?.self_hype_message)
           newState.self_hype_message = data.extracted_data.self_hype_message;
+        if (data.extracted_data?.depth_insight)
+          newState.depth_insight = data.extracted_data.depth_insight;
         if (data.stage_advance && data.new_stage)
           newState.current_stage = data.new_stage;
         if (data.checklist_updates) {
