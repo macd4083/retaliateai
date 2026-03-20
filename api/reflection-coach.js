@@ -294,16 +294,24 @@ async function loadCommitmentStats(userId, clientDate) {
     const withCommitment = last7.filter((s) => !!s.tomorrow_commitment);
     if (withCommitment.length === 0) return null;
 
-    const evaluable = withCommitment.slice(0, -1);
-    if (evaluable.length === 0) return null;
-
     let kept = 0;
-    for (const s of evaluable) {
+    let total = 0;
+
+    for (let idx = 0; idx < withCommitment.length; idx++) {
+      const s = withCommitment[idx];
       const nextDay = localDate(1, s.date);
-      if (sessionsByDate[nextDay]?.is_complete) kept++;
+      const nextSession = sessionsByDate[nextDay];
+      const isLastInWindow = idx === withCommitment.length - 1;
+
+      if (isLastInWindow && !nextSession?.is_complete) {
+        // Most recent commitment — next day not yet complete, skip (pending)
+        continue;
+      }
+
+      total++;
+      if (nextSession?.is_complete) kept++;
     }
 
-    const total = evaluable.length;
     if (total < 3) return null;
 
     const rate7 = kept / total;
@@ -312,13 +320,22 @@ async function loadCommitmentStats(userId, clientDate) {
     const day14ago = localDate(-14, clientDate);
     const prior7 = allSessions.filter((s) => s.date >= day14ago && s.date < day7ago);
     const priorWithCommitment = prior7.filter((s) => !!s.tomorrow_commitment);
-    const priorEvaluable = priorWithCommitment.slice(0, -1);
     let priorKept = 0;
-    for (const s of priorEvaluable) {
+    let priorTotal = 0;
+
+    for (let idx = 0; idx < priorWithCommitment.length; idx++) {
+      const s = priorWithCommitment[idx];
       const nextDay = localDate(1, s.date);
-      if (sessionsByDate[nextDay]?.is_complete) priorKept++;
+      const nextSession = sessionsByDate[nextDay];
+      const isLastInWindow = idx === priorWithCommitment.length - 1;
+
+      if (isLastInWindow && !nextSession?.is_complete) {
+        continue;
+      }
+
+      priorTotal++;
+      if (nextSession?.is_complete) priorKept++;
     }
-    const priorTotal = priorEvaluable.length;
     const ratePrior = priorTotal > 0 ? priorKept / priorTotal : null;
 
     let trajectory = 'stable';
@@ -487,11 +504,11 @@ async function markExerciseExplained(userId, exerciseName, currentExplained = []
   } catch (_e) {}
 }
 
-async function queueFollowUp(userId, sessionId, { context, question, check_back_after, trigger_condition }) {
+async function queueFollowUp(userId, sessionId, { context, question, check_back_after, trigger_condition }, clientDate) {
   try {
     await supabase.from('follow_up_queue').insert({
       user_id: userId, session_id: sessionId, context, question,
-      check_back_after: check_back_after || daysFromNow(3),
+      check_back_after: check_back_after || daysFromNow(3, clientDate),
       trigger_condition: trigger_condition || null,
     });
   } catch (_e) {}
@@ -580,7 +597,7 @@ async function searchRelevantMemories(userId, queryText, matchCount = 3) {
 }
 
 function generateSessionSummary(sessionState, result, profile, dateStr) {
-  const name = profile.display_name || 'User';
+  const name = profile.display_name || profile.full_name || 'them';
   const wins = Array.isArray(sessionState.wins)
     ? sessionState.wins.map((w) => (typeof w === 'string' ? w : w.text)).filter(Boolean).join(', ')
     : result.extracted_data?.win_text || 'not recorded';
@@ -1094,7 +1111,7 @@ export default async function handler(req, res) {
           question: `Last time we worked on ${result.exercise_run.replace(/_/g, ' ')} — how has that been showing up?`,
           check_back_after: daysFromNow(3, client_local_date),
           trigger_condition: intentData?.emotional_state,
-        })
+        }, client_local_date)
       );
       dbPromises.push(
         upsertGrowthMarker(user_id, result.exercise_run, {
@@ -1179,7 +1196,7 @@ Return ONLY valid JSON: { "question": "...", "context": "brief context on why th
                   question: followUpData.question,
                   check_back_after: daysFromNow(1, client_local_date),
                   trigger_condition: null,
-                });
+                }, client_local_date);
               }
             } catch (_e) { /* fail silently */ }
           }
