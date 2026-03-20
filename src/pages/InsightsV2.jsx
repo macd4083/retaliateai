@@ -552,6 +552,11 @@ export default function InsightsV2() {
                     <p className="text-zinc-300 text-sm leading-relaxed">
                       <strong className="text-white">{p.label}</strong> — {p.occurrence_count} time{p.occurrence_count !== 1 ? 's' : ''} in your reflections.
                     </p>
+                    <p className="text-zinc-400 text-sm mt-1">
+                      {p.pattern_type === 'blocker'
+                        ? `This has shown up ${p.occurrence_count} times in your reflections. Keep reflecting to get a full breakdown.`
+                        : `You've shown this ${p.occurrence_count} times. Keep going to unlock a full narrative.`}
+                    </p>
                   </div>
                 ))}
               </div>

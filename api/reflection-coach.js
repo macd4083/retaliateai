@@ -387,7 +387,7 @@ async function loadRecentSessionsSummary(userId) {
   try {
     const { data } = await supabase
       .from('reflection_sessions')
-      .select('date, wins, misses, tomorrow_commitment, current_stage, checklist, mood_end_of_day, summary')
+      .select('date, wins, misses, tomorrow_commitment, current_stage, checklist, mood_end_of_day, summary, blocker_tags')
       .eq('user_id', userId)
       .eq('is_complete', true)
       .order('date', { ascending: false })
@@ -619,9 +619,11 @@ function generateSessionSummary(sessionState, result, profile, dateStr) {
   const insight = result.extracted_data?.depth_insight || sessionState.depth_insight || null;
   const exercises = Array.isArray(sessionState.exercises_run) ? sessionState.exercises_run.join(', ') : 'none';
   const mood = sessionState.mood_end_of_day || result.extracted_data?.mood || null;
+  const blockers = Array.isArray(sessionState.blocker_tags) ? sessionState.blocker_tags.join(', ') : null;
 
   let summary = `Session ${dateStr}: ${name} worked on ${wins}.`;
   if (miss) summary += ` Honest moment: ${miss}.`;
+  if (blockers) summary += ` Blockers: ${blockers}.`;
   if (commitment) summary += ` Tomorrow's plan: ${commitment}.`;
   if (insight) summary += ` Depth insight: ${insight}.`;
   if (exercises !== 'none') summary += ` Exercises: ${exercises}.`;
@@ -885,7 +887,8 @@ export default async function handler(req, res) {
     const sessionReadyToClose = tomorrowFilled && mergedChecklist.wins && (mergedChecklist.identity || messageCount >= 10);
     const forceClose = messageCount >= 14 && tomorrowFilled && mergedChecklist.wins;
     const depthProbeNeeded = intentData?.depth_opportunity && !sessionExercisesRun.includes('depth_probe');
-    const honestMissing = !mergedChecklist.honest && messageCount >= 4;
+    const hasMissInSession = Array.isArray(session_state.misses) && session_state.misses.length > 0;
+    const honestMissing = !mergedChecklist.honest && !hasMissInSession && messageCount >= 4;
     const identityMissing = !mergedChecklist.identity && messageCount >= 6;
 
     // ── 8. Build compact context block ───────────────────────────────────
@@ -897,9 +900,16 @@ export default async function handler(req, res) {
       : 'none';
 
     const recentSessionsText = recentSessions.slice(0, 3).map((s) => {
-      if (s.summary) return `${s.date}: ${s.summary}`;
+      const blockers = Array.isArray(s.blocker_tags) ? s.blocker_tags.join(', ') : '';
+      if (s.summary) {
+        let line = `${s.date}: ${s.summary}`;
+        if (blockers) line += ` blockers=[${blockers}]`;
+        return line;
+      }
       const wins = Array.isArray(s.wins) ? s.wins.map((w) => (typeof w === 'string' ? w : w.text)).filter(Boolean) : [];
-      return `${s.date}: wins=[${wins.slice(0, 2).join(', ')}] commitment="${s.tomorrow_commitment || ''}"`;
+      let line = `${s.date}: wins=[${wins.slice(0, 2).join(', ')}] commitment="${s.tomorrow_commitment || ''}"`;
+      if (blockers) line += ` blockers=[${blockers}]`;
+      return line;
     }).join(' | ') || 'none';
 
     // ── 8b. Memory search for question/advice/memory_query/reflective intents ────────
@@ -995,6 +1005,17 @@ export default async function handler(req, res) {
           session_state.depth_insight && !sessionReadyToClose
             ? `DEPTH CALLBACK: Earlier the user surfaced this insight: "${session_state.depth_insight}". If a natural moment arises (especially in 'close' stage), reflect it back to them once — e.g. "You said earlier [insight]. What does that mean for how you show up tomorrow?" Do this once only, warmly.`
             : null,
+          (() => {
+            const capturedWins = Array.isArray(session_state.wins)
+              ? session_state.wins.map(w => typeof w === 'string' ? w : w?.text).filter(Boolean)
+              : [];
+            const capturedMisses = Array.isArray(session_state.misses)
+              ? session_state.misses.map(m => typeof m === 'string' ? m : m?.text).filter(Boolean)
+              : [];
+            const capturedBlockers = Array.isArray(session_state.blocker_tags) ? session_state.blocker_tags : [];
+            if (capturedWins.length === 0 && capturedMisses.length === 0 && capturedBlockers.length === 0) return null;
+            return `REFERENCE WHAT THEY SAID: The user has already shared: wins=[${capturedWins.join(', ')}], misses=[${capturedMisses.join(', ')}], blockers=[${capturedBlockers.join(', ')}]. Your next question MUST reference at least one of these specifically. Never ask a generic question when you have their real words.`;
+          })(),
           honestMissing
             ? `HONEST MISSING: Gently probe for a miss or honest moment with self-awareness questions. ${
                 reflectionPatterns.length > 0
@@ -1025,7 +1046,7 @@ export default async function handler(req, res) {
             // Instruction 3 — pattern-aware metacognitive questioning
             if (reflectionPatterns.length === 0 || messageCount < 2) return null;
             const topPattern = reflectionPatterns[0];
-            if (topPattern.occurrence_count < 3) return null;
+            if (topPattern.occurrence_count < 2) return null;
             return `PATTERN AWARENESS: The user's most recurring pattern is "${topPattern.label}" (${topPattern.occurrence_count}x). If they say or do something that looks like this pattern — even obliquely — ask a question that helps them SEE it, not name it for them. Never say "I notice you keep doing X" or "this sounds like your ${topPattern.label} pattern". Instead, ask something like: "What's making it hard to just ship it as-is?" or "You said you'd do this yesterday — what happened between then and now?" The goal is to surface the pattern through their own answer, not your observation. Use naturally. Once per session max. Do NOT interrupt a good moment to force it in.`;
           })(),
           sessionExercisesRun.length > 0
