@@ -519,6 +519,11 @@ export default function InsightsV2() {
                     >
                       <p className="text-zinc-500 text-xs uppercase tracking-widest mb-2">{label}</p>
                       <p className="text-zinc-300 text-sm leading-relaxed">{n.narrative}</p>
+                      {n.watch_for && (
+                        <p className="text-zinc-500 text-xs mt-3 italic border-t border-zinc-800 pt-3">
+                          Watch for: {n.watch_for}
+                        </p>
+                      )}
                       {n.occurrences && (
                         <p className="text-zinc-600 text-xs mt-2">
                           {n.occurrences} time{n.occurrences !== 1 ? 's' : ''} in your reflections

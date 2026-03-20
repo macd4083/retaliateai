@@ -106,23 +106,28 @@ export default async function handler(req, res) {
     }));
 
     // ── 5. Call GPT to generate real narratives ───────────────────────────
-    const SYSTEM = `You are analyzing a person's real reflection session data to generate honest, specific insights.
+    const SYSTEM = `You are analyzing a person's real reflection session data to generate genuine psychological insights — not summaries, not affirmations, not generic coaching language.
 
 You will receive:
-- Their patterns (blockers and strengths they've shown up with)
-- Their actual session history (summaries, wins, struggles, commitments)
+- Their patterns (blockers and strengths with occurrence counts and dates)
+- Their actual session history (summaries, wins, struggles, commitments, and any depth insights captured)
 - Their profile (identity, goal, why)
 
-Generate ONE narrative paragraph per pattern. Requirements:
-- Reference SPECIFIC things from their actual session data — actual wins they mentioned, actual struggles, actual dates, actual commitments
-- Sound like a thoughtful human coach who has been paying close attention, not a template
-- NEVER use generic phrases like "it's a signal", "worth sitting with", "it's not random", "that's not luck"
-- DO NOT use the same sentence structure for each card
-- Blockers: be honest about what you see — name the pattern plainly, reference when it showed up, note if they pushed through it anyway
-- Strengths: be specific about what they actually did, show trajectory if you can see one (e.g. "a month ago... now...")
-- Keep each narrative to 2-4 sentences max
+For each pattern, generate ONE insight paragraph. This is NOT a recap of what happened. It is an honest, specific analysis of what the pattern is, what function it's likely serving, and what the user can watch for in themselves going forward.
+
+Requirements:
+- Name the underlying mechanism, not just the behavior. "Perfectionism" is a label — what IS it actually doing? (e.g. "keeping work private until it's guaranteed to be received well, which means it never ships")
+- Use SPECIFIC evidence from their session data — actual dates, actual quotes, actual commitments they made or broke
+- Explain what the pattern might be protecting them from or helping them avoid — be honest, not clinical
+- Give the user one specific thing to NOTICE about themselves going forward — not "try X", but "watch for the moment when Y" — this is metacognitive awareness, not advice
+- Do NOT use phrases like: "it's worth sitting with", "it's a signal", "that's not luck", "it's not random", "this shows growth", "you're making progress"
+- Do NOT moralize or give unsolicited advice on what to change
 - Write in second person ("you", "your")
-- Use their actual words from their session data when possible
+- 4-6 sentences per pattern. Be substantive. Don't pad.
+- Use their actual words from session data when possible
+- Blockers: be unflinching but not harsh — name what you see plainly, show where it appeared, describe what it costs them, and what to watch for
+- Strengths: show trajectory — "a month ago... now..." — be specific about what they actually did, not generic praise
+- If there is genuinely not enough data to say anything specific about a pattern, omit it rather than being generic
 
 Return ONLY valid JSON:
 {
@@ -131,12 +136,11 @@ Return ONLY valid JSON:
       "label": "<pattern label>",
       "type": "<blocker|strength|theme>",
       "occurrences": <number>,
-      "narrative": "<your 2-4 sentence narrative>"
+      "narrative": "<your 4-6 sentence insight>",
+      "watch_for": "<one specific thing to notice — 1 sentence>"
     }
   ]
-}
-
-If there is genuinely not enough data to say anything specific about a pattern, omit it from the array rather than being generic.`;
+}`;
 
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o',
@@ -153,7 +157,7 @@ If there is genuinely not enough data to say anything specific about a pattern, 
       ],
       response_format: { type: 'json_object' },
       temperature: 0.6,
-      max_tokens: 1200,
+      max_tokens: 2000,
     });
 
     const result = JSON.parse(completion.choices[0].message.content);
