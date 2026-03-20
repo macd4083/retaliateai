@@ -97,6 +97,15 @@ Good depth questions (use naturally, not robotically):
   "What would have to be true about you for that to keep happening?"
 Balance: go deep once, then move. Don't psychoanalyze every message.
 
+METACOGNITIVE QUESTIONING PRINCIPLES:
+- The most valuable question you can ask is one that makes the user realize something about themselves that they hadn't consciously noticed yet
+- Ask questions that surface contradictions: "You said you want X, but you also said Y happened. What's going on there?"
+- Ask questions about the gap between intention and action: "What was different about today vs. the days it did work?"
+- Ask questions that name the pattern without naming it: "Is this the first time that's happened, or does this show up in other places too?"
+- Ask questions about the decision moment: "At what point in the day did you decide not to do it?" — the answer usually reveals the real blocker
+- When someone achieves something: "What made today different?" — not "great job!" — help them understand the mechanism so they can replicate it
+- One question. Always one. Never a list. Never two questions in the same message.
+
 DEPTH CONVERSATION: When the user is in a reflective back-and-forth ("what do you think" style exchange), allow the chain to continue naturally. Multiple consecutive "what do you think" exchanges are GOOD — do not prematurely pivot to action or next stage. Only close a depth thread when the user has reached an insight or naturally signals they want to move on. When the user answers a reflective/opinion question with their own reflection, the coach IS ALLOWED to follow up with another reflective question — do not count this as "drilling a topic".
 
 ON THE CHECKLIST (wins / honest / plan / identity):
@@ -380,6 +389,7 @@ async function loadRecentSessionsSummary(userId) {
       .from('reflection_sessions')
       .select('date, wins, misses, tomorrow_commitment, current_stage, checklist, mood_end_of_day, summary')
       .eq('user_id', userId)
+      .eq('is_complete', true)
       .order('date', { ascending: false })
       .limit(7);
     return data || [];
@@ -599,11 +609,14 @@ async function searchRelevantMemories(userId, queryText, matchCount = 3) {
 function generateSessionSummary(sessionState, result, profile, dateStr) {
   const name = profile.display_name || profile.full_name || 'them';
   const wins = Array.isArray(sessionState.wins)
-    ? sessionState.wins.map((w) => (typeof w === 'string' ? w : w.text)).filter(Boolean).join(', ')
-    : result.extracted_data?.win_text || 'not recorded';
-  const miss = result.extracted_data?.miss_text || sessionState.misses?.[0] || null;
+    ? sessionState.wins.map((w) => (typeof w === 'string' ? w : w?.text)).filter(Boolean).join(', ')
+    : (typeof sessionState.wins === 'string' ? sessionState.wins : result.extracted_data?.win_text || 'not recorded');
+  const firstMiss = Array.isArray(sessionState.misses) && sessionState.misses.length > 0
+    ? (typeof sessionState.misses[0] === 'string' ? sessionState.misses[0] : sessionState.misses[0]?.text)
+    : (typeof sessionState.misses === 'string' ? sessionState.misses : null);
+  const miss = result.extracted_data?.miss_text || firstMiss || null;
   const commitment = sessionState.tomorrow_commitment || result.extracted_data?.tomorrow_commitment || null;
-  const insight = result.extracted_data?.depth_insight || null;
+  const insight = result.extracted_data?.depth_insight || sessionState.depth_insight || null;
   const exercises = Array.isArray(sessionState.exercises_run) ? sessionState.exercises_run.join(', ') : 'none';
   const mood = sessionState.mood_end_of_day || result.extracted_data?.mood || null;
 
@@ -939,6 +952,14 @@ export default async function handler(req, res) {
           exercises_run: sessionExercisesRun,
           consecutive_excuses: consecutiveExcuses,
           message_count: messageCount,
+          session_wins_captured: Array.isArray(session_state.wins)
+            ? session_state.wins.map(w => typeof w === 'string' ? w : w?.text).filter(Boolean)
+            : [],
+          session_misses_captured: Array.isArray(session_state.misses)
+            ? session_state.misses.map(m => typeof m === 'string' ? m : m?.text).filter(Boolean)
+            : [],
+          session_blockers_captured: session_state.blocker_tags || [],
+          depth_insight_captured: session_state.depth_insight || null,
         },
         intent: {
           type: intentData.intent,
@@ -967,6 +988,12 @@ export default async function handler(req, res) {
             : null,
           depthProbeNeeded
             ? `DEPTH OPPORTUNITY: Go deeper here. Ask WHY or surface the belief underneath. Use a depth_probe question naturally. Set exercise_run="depth_probe". Store any insight in extracted_data.depth_insight.`
+            : null,
+          session_state.wins?.length > 0 && Array.isArray(session_state.wins) && session_state.current_stage !== 'wins'
+            ? `CALLBACK: The user mentioned these wins earlier: ${session_state.wins.map(w => typeof w === 'string' ? w : w?.text).filter(Boolean).join(', ')}. If relevant, reference these by name when asking about follow-through or identity. Never re-ask what you already know.`
+            : null,
+          session_state.depth_insight && !sessionReadyToClose
+            ? `DEPTH CALLBACK: Earlier the user surfaced this insight: "${session_state.depth_insight}". If a natural moment arises (especially in 'close' stage), reflect it back to them once — e.g. "You said earlier [insight]. What does that mean for how you show up tomorrow?" Do this once only, warmly.`
             : null,
           honestMissing
             ? `HONEST MISSING: Gently probe for a miss or honest moment with self-awareness questions. ${
@@ -1153,6 +1180,54 @@ export default async function handler(req, res) {
 
     if (result.extracted_data?.blocker_tags?.length) {
       dbPromises.push(upsertBlockerPatterns(user_id, result.extracted_data.blocker_tags, client_local_date));
+    }
+
+    // Write wins to session row immediately when extracted (so data survives session interruption)
+    if (session_id && result.extracted_data?.win_text) {
+      dbPromises.push(
+        (async () => {
+          try {
+            const { data: current } = await supabase
+              .from('reflection_sessions')
+              .select('wins')
+              .eq('id', session_id)
+              .maybeSingle();
+            const existingWins = Array.isArray(current?.wins) ? current.wins : [];
+            const newWin = { text: result.extracted_data.win_text };
+            const alreadyThere = existingWins.some(w => (typeof w === 'string' ? w : w?.text) === result.extracted_data.win_text);
+            if (!alreadyThere) {
+              await supabase
+                .from('reflection_sessions')
+                .update({ wins: [...existingWins, newWin], updated_at: new Date().toISOString() })
+                .eq('id', session_id);
+            }
+          } catch (e) { console.error('Failed to persist win to session:', e); }
+        })()
+      );
+    }
+
+    // Write misses to session row immediately when extracted (so data survives session interruption)
+    if (session_id && result.extracted_data?.miss_text) {
+      dbPromises.push(
+        (async () => {
+          try {
+            const { data: current } = await supabase
+              .from('reflection_sessions')
+              .select('misses')
+              .eq('id', session_id)
+              .maybeSingle();
+            const existingMisses = Array.isArray(current?.misses) ? current.misses : [];
+            const newMiss = { text: result.extracted_data.miss_text };
+            const alreadyThere = existingMisses.some(m => (typeof m === 'string' ? m : m?.text) === result.extracted_data.miss_text);
+            if (!alreadyThere) {
+              await supabase
+                .from('reflection_sessions')
+                .update({ misses: [...existingMisses, newMiss], updated_at: new Date().toISOString() })
+                .eq('id', session_id);
+            }
+          } catch (e) { console.error('Failed to persist miss to session:', e); }
+        })()
+      );
     }
 
     Promise.all(dbPromises).catch(() => {});

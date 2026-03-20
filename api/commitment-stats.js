@@ -212,6 +212,7 @@ export default async function handler(req, res) {
     }
 
     const weeklyData = [];
+    // Loop: i=7 (oldest, 7 weeks ago) down to i=0 (current week) = 8 weeks total
     for (let i = 7; i >= 0; i--) {
       const wStart = addDays(thisMonday, -i * 7);
       const wEnd = addDays(wStart, 6);
