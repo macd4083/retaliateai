@@ -3,7 +3,7 @@
  *
  * Computes follow-through rate, trajectory, and recovery stats for a user.
  *
- * POST { user_id }
+ * POST { user_id, client_local_date? }
  *
  * Returns:
  *   followThrough7:      { kept, total } — commitments kept in the last 7 calendar days
@@ -119,13 +119,13 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { user_id } = req.body || {};
+  const { user_id, client_local_date } = req.body || {};
   if (!user_id) {
     return res.status(400).json({ error: 'user_id is required' });
   }
 
   try {
-    const today = todayStr();
+    const today = client_local_date || todayStr();
     const day14ago = addDays(today, -14);
     const day30ago = addDays(today, -30);
     const thisMonday = getMondayOf(today);
