@@ -349,6 +349,21 @@ async function cleanUserData(supabase, userId) {
     }
   }
 
+  // Delete goals
+  {
+    const { data: deletedGoals, error: goalsErr } = await supabase
+      .from('goals')
+      .delete()
+      .eq('user_id', userId)
+      .select('id');
+    if (!goalsErr) {
+      const count = (deletedGoals ?? []).length;
+      rowsDeleted += count;
+      tablesCleared.push({ table: 'goals', rows: count });
+      console.log(`    🗑️  Cleared goals (${count} rows)`);
+    }
+  }
+
   return { tablesCleared, rowsDeleted };
 }
 
@@ -368,6 +383,8 @@ async function seedUserProfile(supabase, userId, persona) {
       long_term_patterns: [],
       strengths: [],
       growth_areas: [],
+      exercises_explained: [],
+      values: [],
       profile_updated_at: null,
     },
     { onConflict: 'id' }
