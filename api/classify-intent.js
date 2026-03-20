@@ -45,9 +45,17 @@ Classify the user message and return ONLY valid JSON matching this exact shape:
 }
 
 ACCOUNTABILITY SIGNAL RULES:
-- excuse: blaming external factors, "I can't because X", deflecting responsibility, passive voice about own failures
-- ownership: "I did/didn't do X", taking personal responsibility, "I chose", "that was on me"
-- neutral: factual statement, question, no clear responsibility signal
+- excuse: The user actively deflects personal responsibility — e.g. "I couldn't because X happened", passive voice about their own failures where they had agency, or framing external events as the reason they didn't act when they clearly had a choice.
+  DO NOT mark as excuse: simply mentioning that something hard happened today, naming a real external obstacle while still owning the miss ("work blew up and I dropped the ball"), or factual context-setting without blame language.
+- ownership: "I did/didn't do X", taking personal responsibility, "I chose", "that was on me", "I let it slip"
+- neutral: factual statement, question, context without clear responsibility signal, or ambiguous phrasing where the blame direction is unclear
+
+KEY DISTINCTION — context vs. deflection:
+  "my laptop broke so I couldn't work" → excuse (had alternatives, chose not to act)
+  "got pulled into a 3-hour client emergency, still didn't finish the email" → neutral/ownership (real constraint named, no blame deflection)
+  "I just didn't do it" → ownership
+  "it was a crazy day" with no attempt to own anything → excuse
+  When in doubt, lean toward neutral — only mark excuse when deflection is explicit and unambiguous.
 
 EXERCISE ROUTING (pick the BEST match; default to "none"):
 - excuse signal detected                         → ownership_reframe
@@ -96,37 +104,17 @@ export default async function handler(req, res) {
           content: `${contextHint}\n\nUser message: "${user_message}"`,
         },
       ],
+      max_tokens: 200,
+      temperature: 0.1,
       response_format: { type: 'json_object' },
-      temperature: 0.3,
-      max_tokens: 150,
     });
 
-    let classification;
-    try {
-      classification = JSON.parse(completion.choices[0].message.content);
-    } catch (_parseErr) {
-      // Fallback safe defaults if parsing fails
-      classification = {
-        intent: 'checkin',
-        energy_level: 'medium',
-        accountability_signal: 'neutral',
-        emotional_state: 'flat',
-        checklist_content: { wins: false, honest: false, plan: false, identity: false },
-        suggested_exercise: 'none',
-      };
-    }
+    const raw = completion.choices[0].message.content;
+    const parsed = JSON.parse(raw);
 
-    return res.status(200).json(classification);
-  } catch (error) {
-    console.error('Error in classify-intent:', error);
-    // Return safe defaults — never block the chat
-    return res.status(200).json({
-      intent: 'checkin',
-      energy_level: 'medium',
-      accountability_signal: 'neutral',
-      emotional_state: 'flat',
-      checklist_content: { wins: false, honest: false, plan: false, identity: false },
-      suggested_exercise: 'none',
-    });
+    return res.status(200).json(parsed);
+  } catch (err) {
+    console.error('classify-intent error:', err);
+    return res.status(500).json({ error: 'Classification failed' });
   }
 }
