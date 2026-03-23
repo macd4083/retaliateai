@@ -83,6 +83,69 @@ export default function Landing() {
             </p>
           </div>
 
+          {/* Product / Service Description */}
+          <div className="pb-32">
+            <div className="max-w-5xl mx-auto">
+              <div className="text-center mb-12">
+                <span className="px-4 py-1.5 bg-red-950/50 text-red-500 border border-red-900 rounded-full text-xs font-bold uppercase tracking-widest">
+                  What We Do
+                </span>
+                <h2 className="text-4xl md:text-5xl font-bold text-white mt-6 mb-4 uppercase tracking-tight">
+                  The Only Journal That Fights Back
+                </h2>
+                <p className="text-xl text-gray-400 max-w-3xl mx-auto leading-relaxed">
+                  Retaliate AI is an AI-powered journaling platform that turns your daily reflections into a personalized roadmap for growth—delivered entirely in your browser, no downloads required.
+                </p>
+              </div>
+
+              <div className="grid md:grid-cols-2 gap-8">
+                {/* What We Sell */}
+                <div className="bg-gradient-to-b from-red-950/30 to-transparent border border-red-900/40 rounded-xl p-8">
+                  <div className="w-12 h-12 bg-red-900/50 rounded-lg flex items-center justify-center mb-5">
+                    <Zap className="w-6 h-6 text-red-500" />
+                  </div>
+                  <h3 className="text-xl font-bold text-white mb-3 uppercase tracking-wide">What It Is</h3>
+                  <p className="text-gray-400 leading-relaxed">
+                    A web-based AI journaling app with structured practices—free-form journaling, Clarity deep-dives, and Gratitude sessions. Your entries are analyzed by AI in real time to surface patterns, track goals, and deliver actionable next steps—all without any manual tagging or setup.
+                  </p>
+                </div>
+
+                {/* Who It's For */}
+                <div className="bg-gradient-to-b from-red-950/30 to-transparent border border-red-900/40 rounded-xl p-8">
+                  <div className="w-12 h-12 bg-red-900/50 rounded-lg flex items-center justify-center mb-5">
+                    <Users className="w-6 h-6 text-red-500" />
+                  </div>
+                  <h3 className="text-xl font-bold text-white mb-3 uppercase tracking-wide">Who It's For</h3>
+                  <p className="text-gray-400 leading-relaxed">
+                    Built for driven individuals—entrepreneurs, athletes, creators, and anyone serious about self-improvement—who are tired of vague advice and want clear, data-backed insight into their own habits, goals, and blind spots.
+                  </p>
+                </div>
+
+                {/* What You Get */}
+                <div className="bg-gradient-to-b from-red-950/30 to-transparent border border-red-900/40 rounded-xl p-8">
+                  <div className="w-12 h-12 bg-red-900/50 rounded-lg flex items-center justify-center mb-5">
+                    <TrendingUp className="w-6 h-6 text-red-500" />
+                  </div>
+                  <h3 className="text-xl font-bold text-white mb-3 uppercase tracking-wide">What You Get</h3>
+                  <p className="text-gray-400 leading-relaxed">
+                    After each session you receive AI-generated insights, emotion and pattern analysis, automatic goal tracking, and probing follow-up questions that push you past surface-level thinking—so you leave every entry with clarity and a concrete next action.
+                  </p>
+                </div>
+
+                {/* Current Status */}
+                <div className="bg-gradient-to-b from-red-950/30 to-transparent border border-red-900/40 rounded-xl p-8">
+                  <div className="w-12 h-12 bg-red-900/50 rounded-lg flex items-center justify-center mb-5">
+                    <Award className="w-6 h-6 text-red-500" />
+                  </div>
+                  <h3 className="text-xl font-bold text-white mb-3 uppercase tracking-wide">Current Status</h3>
+                  <p className="text-gray-400 leading-relaxed">
+                    Retaliate AI is live and actively used—with 500+ members, 10,000+ AI insights generated, and a 95% satisfaction rate. The core platform is fully operational and free to start, with premium features in active development based on user feedback.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* Social Proof Stats */}
           <div className="pb-20">
             <div className="bg-gradient-to-b from-red-950/20 to-transparent border border-red-900/30 rounded-xl p-12 backdrop-blur-sm">
