@@ -64,6 +64,7 @@ function AuthGuardV2({ children }) {
 
     if (!user?.id) {
       setProfileLoading(false);
+      setOnboardingCompleted(false);
       return;
     }
 
