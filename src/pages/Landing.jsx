@@ -10,7 +10,7 @@ export default function Landing() {
   // If user is already logged in, redirect to app
   React.useEffect(() => {
     if (user) {
-      navigate('/Journal');
+      navigate('/reflection');
     }
   }, [user, navigate]);
 

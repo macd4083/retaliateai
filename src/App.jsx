@@ -12,6 +12,7 @@ import ResetPassword from './pages/ResetPassword';
 import EmailConfirmed from './pages/EmailConfirmed';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import TermsOfService from './pages/TermsOfService';
+import Landing from './pages/Landing';
 
 import { useAuth } from './lib/AuthContext';
 import { supabase } from './lib/supabase/client';
@@ -108,16 +109,9 @@ export default function App() {
       <Route path="/auth/callback" element={<EmailConfirmed />} />
       <Route path="/privacy" element={<PrivacyPolicy />} />
       <Route path="/terms" element={<TermsOfService />} />
+      <Route path="/" element={<Landing />} />
 
       {/* V2 protected routes */}
-      <Route
-        path="/"
-        element={
-          <AuthGuardV2>
-            <Navigate to="/reflection" replace />
-          </AuthGuardV2>
-        }
-      />
       <Route
         path="/reflection"
         element={
