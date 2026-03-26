@@ -266,6 +266,8 @@ export default function ReflectionV2() {
     consecutive_excuses: 0,
     checklist: { ...DEFAULT_CHECKLIST },
     exercises_run: [],
+    wins_asked_for_more: false,
+    honest_depth: false,
   });
   const [summaryCardData, setSummaryCardData] = useState({});
   const [followThroughStats, setFollowThroughStats] = useState(null);
@@ -340,6 +342,8 @@ export default function ReflectionV2() {
         consecutive_excuses: session.consecutive_excuses || 0,
         checklist: session.checklist || { ...DEFAULT_CHECKLIST },
         exercises_run: Array.isArray(session.exercises_run) ? session.exercises_run : [],
+        wins_asked_for_more: false,
+        honest_depth: false,
       };
       setSessionState(restoredState);
 
@@ -551,7 +555,7 @@ export default function ReflectionV2() {
         })
         .catch(() => {});
 
-      if (data.extracted_data || data.stage_advance || data.checklist_updates || data.consecutive_excuses !== undefined) {
+      if (data.extracted_data || data.stage_advance || data.checklist_updates || data.consecutive_excuses !== undefined || data.wins_asked_for_more || data.honest_depth) {
         const newState = { ...state };
         if (data.extracted_data?.mood) newState.mood_end_of_day = data.extracted_data.mood;
         if (data.extracted_data?.win_text)
@@ -580,12 +584,19 @@ export default function ReflectionV2() {
         if (data.consecutive_excuses !== undefined) {
           newState.consecutive_excuses = data.consecutive_excuses;
         }
+        if (data.wins_asked_for_more === true) newState.wins_asked_for_more = true;
+        if (data.honest_depth === true) newState.honest_depth = true;
         setSessionState(newState);
 
         const dbUpdates = {};
         if (data.extracted_data?.mood) dbUpdates.mood_end_of_day = data.extracted_data.mood;
-        if (data.extracted_data?.tomorrow_commitment)
+        if (data.extracted_data?.tomorrow_commitment) {
           dbUpdates.tomorrow_commitment = data.extracted_data.tomorrow_commitment;
+          // Set commitment_made_at when saving for the first time
+          if (!state.tomorrow_commitment) {
+            dbUpdates.commitment_made_at = new Date().toISOString();
+          }
+        }
         if (data.extracted_data?.self_hype_message)
           dbUpdates.self_hype_message = data.extracted_data.self_hype_message;
         if (data.stage_advance && data.new_stage) dbUpdates.current_stage = data.new_stage;
@@ -690,6 +701,8 @@ export default function ReflectionV2() {
           consecutive_excuses: 0,
           checklist: { ...DEFAULT_CHECKLIST },
           exercises_run: [],
+          wins_asked_for_more: false,
+          honest_depth: false,
         });
         initCalledRef.current = false;
         setIsInitializing(true);

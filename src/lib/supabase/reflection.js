@@ -8,7 +8,7 @@ export const reflectionHelpers = {
 
     const { data: existing, error: fetchError } = await supabase
       .from('reflection_sessions')
-      .select('*')
+      .select('*, commitment_made_at')
       .eq('user_id', userId)
       .eq('date', today)
       .maybeSingle();
