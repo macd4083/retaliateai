@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Check } from 'lucide-react';
 import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase/client';
 import AppShellV2 from '../components/v2/AppShellV2';
@@ -17,12 +18,27 @@ const LIFE_AREA_EMOJI = {
   'Career & Business': '💼',
   'Health & Fitness': '🏋️',
   'Relationships': '❤️',
-  'Personal Growth': '🧠',
+  'Mental Health': '🧠',
+  'Personal Growth': '🌱',
   'Money & Finance': '💰',
+  'Education': '🎓',
+  'Gaming': '🎮',
   'Creativity': '🎨',
   'Spirituality': '🙏',
-  'Education': '🎓',
 };
+
+const DEFAULT_LIFE_AREA_OPTIONS = [
+  { emoji: '💼', label: 'Career & Business' },
+  { emoji: '🏋️', label: 'Health & Fitness' },
+  { emoji: '❤️', label: 'Relationships' },
+  { emoji: '🧠', label: 'Mental Health' },
+  { emoji: '🌱', label: 'Personal Growth' },
+  { emoji: '💰', label: 'Money & Finance' },
+  { emoji: '🎓', label: 'Education' },
+  { emoji: '🎮', label: 'Gaming' },
+  { emoji: '🎨', label: 'Creativity' },
+  { emoji: '🙏', label: 'Spirituality' },
+];
 
 export default function SettingsV2() {
   const { user, signOut } = useAuth();
@@ -43,6 +59,10 @@ export default function SettingsV2() {
   const [editingIdentity, setEditingIdentity] = useState(null);
   const [identityEditValue, setIdentityEditValue] = useState('');
   const [identitySaving, setIdentitySaving] = useState(false);
+
+  const [editingLifeAreas, setEditingLifeAreas] = useState(false);
+  const [lifeAreaDraft, setLifeAreaDraft] = useState([]);
+  const [lifeAreaSaving, setLifeAreaSaving] = useState(false);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -108,6 +128,25 @@ export default function SettingsV2() {
       setEditingIdentity(null);
     } finally {
       setIdentitySaving(false);
+    }
+  };
+
+  const handleSaveLifeAreas = async () => {
+    if (lifeAreaDraft.length < 3 || lifeAreaDraft.length > 5) return;
+    setLifeAreaSaving(true);
+    try {
+      const { error } = await supabase
+        .from('user_profiles')
+        .update({ life_areas: lifeAreaDraft })
+        .eq('id', user.id);
+      if (error) throw error;
+      setProfile((p) => ({ ...p, life_areas: lifeAreaDraft }));
+      setEditingLifeAreas(false);
+    } catch (err) {
+      console.error('Failed to save life areas:', err);
+      alert('Failed to save. Please try again.');
+    } finally {
+      setLifeAreaSaving(false);
     }
   };
 
@@ -411,15 +450,70 @@ export default function SettingsV2() {
               <h2 className="text-white font-semibold text-sm uppercase tracking-wider">
                 Focus Areas
               </h2>
-              <button
-                onClick={() => alert('Coming soon')}
-                className="text-zinc-500 hover:text-white text-xs transition-colors"
-              >
-                Update
-              </button>
+              {!editingLifeAreas && (
+                <button
+                  onClick={() => {
+                    setLifeAreaDraft(profile?.life_areas || []);
+                    setEditingLifeAreas(true);
+                  }}
+                  className="text-zinc-500 hover:text-white text-xs transition-colors"
+                >
+                  Update
+                </button>
+              )}
             </div>
 
-            {profile?.life_areas && profile.life_areas.length > 0 ? (
+            {editingLifeAreas ? (
+              <div>
+                <p className="text-zinc-400 text-xs mb-3">Pick 3–5 areas.</p>
+                <div className="flex flex-wrap gap-2 mb-4">
+                  {DEFAULT_LIFE_AREA_OPTIONS.map(({ emoji, label }) => {
+                    const selected = lifeAreaDraft.includes(label);
+                    const atMax = !selected && lifeAreaDraft.length >= 5;
+                    return (
+                      <button
+                        key={label}
+                        onClick={() => {
+                          if (selected) {
+                            setLifeAreaDraft((prev) => prev.filter((x) => x !== label));
+                          } else if (!atMax) {
+                            setLifeAreaDraft((prev) => [...prev, label]);
+                          }
+                        }}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+                          selected
+                            ? 'bg-red-900 border-red-600 text-white'
+                            : atMax
+                            ? 'bg-zinc-800 border-zinc-700 text-zinc-600 cursor-not-allowed'
+                            : 'bg-zinc-800 border-zinc-700 text-zinc-300 hover:border-zinc-500'
+                        }`}
+                      >
+                        {selected && <Check className="w-3 h-3" />}
+                        {emoji} {label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleSaveLifeAreas}
+                    disabled={lifeAreaDraft.length < 3 || lifeAreaDraft.length > 5 || lifeAreaSaving}
+                    className="flex-1 py-2 rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-semibold transition-colors"
+                  >
+                    {lifeAreaSaving ? 'Saving…' : 'Save'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setLifeAreaDraft(profile?.life_areas || []);
+                      setEditingLifeAreas(false);
+                    }}
+                    className="flex-1 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-semibold transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : profile?.life_areas && profile.life_areas.length > 0 ? (
               <div className="flex flex-wrap gap-2">
                 {profile.life_areas.map((area) => (
                   <span
