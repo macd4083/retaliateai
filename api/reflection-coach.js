@@ -110,8 +110,8 @@ DEPTH CONVERSATION: When the user is in a reflective back-and-forth ("what do yo
 
 ON THE CHECKLIST (wins / honest / plan / identity):
 - These are background goals — track silently from conversation
-- wins: a real win or effort was mentioned. After the FIRST win is mentioned, always follow up with an open invitation to share more: e.g. "What else went well today?" or "What's another one?" — do NOT advance to the honest stage after just one win exchange. Let the user share as many wins as they want before moving on.
-- honest: they acknowledged something they're struggling with or could improve
+- wins: a real win or effort was mentioned. After the FIRST win is mentioned, always follow up with an open invitation to share more: e.g. "What else went well today?" or "What's another one?" — do NOT advance to the honest stage after just one win exchange. Let the user share as many wins as they want before moving on. Set wins_asked_for_more: true in the response only after you have asked this "what else?" question at least once. If the user responds with a list of wins (e.g. "sleep, app work, boxing"), you MAY ask about multiple items from that list in the same response — this is the ONE exception to the one-question rule. Only transition to honest after the user clearly signals they are done sharing wins.
+- honest: they acknowledged something they're struggling with or could improve. When the honest moment is first detected, do NOT immediately close the honest stage or mark honest_depth: true. Ask ONE open-ended follow-up question that invites the user to say more — e.g. "What do you think was really behind that?" or "When in the day did you notice it happening?" Only after the user has responded to that follow-up should you set honest_depth: true in the response.
 - plan: a concrete tomorrow commitment was stated
 - identity: they made a statement about who they are or are becoming
 - After ~8 messages, if items are still empty, weave them in naturally
@@ -187,6 +187,8 @@ RETURN JSON EXACTLY (no markdown, no extra keys):
   },
   "exercise_run": "none|gratitude_anchor|why_reconnect|evidence_audit|implementation_intention|values_clarification|future_self_bridge|ownership_reframe|triage_one_thing|identity_reinforcement|depth_probe",
   "checklist_updates": {"wins": false, "honest": false, "plan": false, "identity": false},
+  "wins_asked_for_more": false,
+  "honest_depth": false,
   "follow_up_queued": false,
   "is_session_complete": false
 }`;
@@ -250,8 +252,8 @@ function deriveStageHint(sessionState, classifierChecklist, messageCount) {
   const stage = sessionState.current_stage || 'wins';
   const cl = { ...(sessionState.checklist || {}), ...(classifierChecklist || {}) };
   const hasPlan = !!sessionState.tomorrow_commitment;
-  if (stage === 'wins' && cl.wins && messageCount >= 4) return 'honest';
-  if (stage === 'honest' && cl.honest) return 'tomorrow';
+  if (stage === 'wins' && cl.wins && messageCount >= 4 && sessionState.wins_asked_for_more === true) return 'honest';
+  if (stage === 'honest' && cl.honest && sessionState.honest_depth === true) return 'tomorrow';
   if (stage === 'tomorrow' && hasPlan) return 'close';
   if (stage === 'close' && cl.identity && hasPlan) return 'complete';
   return null;
@@ -405,6 +407,19 @@ async function loadYesterdayCommitment(userId, clientToday) {
       .eq('date', localDate(-1, clientToday))
       .maybeSingle();
     return data?.tomorrow_commitment || null;
+  } catch (_e) { return null; }
+}
+
+async function loadTodayEarlyCommitment(userId, clientToday) {
+  try {
+    const { data } = await supabase
+      .from('reflection_sessions')
+      .select('tomorrow_commitment, commitment_made_at')
+      .eq('user_id', userId)
+      .eq('date', today(clientToday))
+      .maybeSingle();
+    if (!data?.tomorrow_commitment || !data?.commitment_made_at) return null;
+    return { commitment: data.tomorrow_commitment, made_at: data.commitment_made_at };
   } catch (_e) { return null; }
 }
 
@@ -823,7 +838,7 @@ export default async function handler(req, res) {
     // ── 2. Load context in parallel ───────────────────────────────────────
     const currentSignals = [intentData?.intent, intentData?.emotional_state, intentData?.accountability_signal].filter(Boolean);
 
-    const [followUpQueue, growthMarkers, reflectionPatterns, recentSessions, yesterdayCommitment, userProfile, activeGoals, commitmentStats] =
+    const [followUpQueue, growthMarkers, reflectionPatterns, recentSessions, yesterdayCommitment, userProfile, activeGoals, commitmentStats, todayEarlyCommitment] =
       await Promise.all([
         loadFollowUpQueue(user_id, currentSignals, client_local_date),
         loadGrowthMarkers(user_id, client_local_date),
@@ -833,6 +848,7 @@ export default async function handler(req, res) {
         loadUserProfile(user_id),
         loadActiveGoals(user_id),
         loadCommitmentStats(user_id, client_local_date),
+        loadTodayEarlyCommitment(user_id, client_local_date),
       ]);
 
     // ── 3. Merge profile ──────────────────────────────────────────────────
@@ -856,6 +872,17 @@ export default async function handler(req, res) {
     let consecutiveExcuses = session_state.consecutive_excuses || 0;
     if (intentData?.accountability_signal === 'excuse') consecutiveExcuses += 1;
     else if (intentData?.accountability_signal === 'ownership') consecutiveExcuses = 0;
+
+    // ── 4b. Same-day early commitment (Issue 4) ───────────────────────────
+    // Only surface if commitment_made_at is >30 minutes before now (not the current session)
+    let sameDayCommitment = null;
+    if (todayEarlyCommitment?.commitment && todayEarlyCommitment?.made_at) {
+      const madeAtMs = new Date(todayEarlyCommitment.made_at).getTime();
+      const thirtyMinutesMs = 30 * 60 * 1000;
+      if (Date.now() - madeAtMs > thirtyMinutesMs) {
+        sameDayCommitment = todayEarlyCommitment;
+      }
+    }
 
     // ── 5. Follow-ups & growth markers ───────────────────────────────────
     const dueFollowUp = followUpQueue.length > 0 ? followUpQueue[0] : null;
@@ -942,6 +969,7 @@ export default async function handler(req, res) {
         },
         goals: goalsText,
         yesterday_commitment: yesterdayCommitment || 'none',
+        same_day_commitment: sameDayCommitment ? { commitment: sameDayCommitment.commitment, made_at: sameDayCommitment.made_at } : undefined,
         patterns: patternsText,
         recent_sessions: recentSessionsText,
         relevant_memories: relevantMemories.length > 0
@@ -962,6 +990,8 @@ export default async function handler(req, res) {
           exercises_run: sessionExercisesRun,
           consecutive_excuses: consecutiveExcuses,
           message_count: messageCount,
+          wins_asked_for_more: session_state.wins_asked_for_more === true,
+          honest_depth: session_state.honest_depth === true,
           session_wins_captured: Array.isArray(session_state.wins)
             ? session_state.wins.map(w => typeof w === 'string' ? w : w?.text).filter(Boolean)
             : [],
@@ -1080,7 +1110,9 @@ export default async function handler(req, res) {
         content: `Open the ${stage} stage of tonight's reflection. Greeting: "${getTimeGreeting(client_tz_offset)}". ${
           yesterdayCommitment
             ? `Yesterday's commitment was: "${yesterdayCommitment}". Open by asking specifically how THAT went — use their exact words from the commitment. Make it personal. Then offer mood chips.`
-            : 'No yesterday commitment. Open with a warm greeting and mood chips.'
+            : sameDayCommitment
+              ? `This morning they committed to: "${sameDayCommitment.commitment}". Open by checking in on how that went today before starting the reflection. Then offer mood chips.`
+              : 'No commitment on record. Open with a warm greeting and mood chips.'
         } ${streak > 1 ? `${streak}-night streak — acknowledge briefly.` : ''} Start with mood chips: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful 🙏","value":"grateful"},{"label":"Motivated 💪","value":"motivated"},{"label":"Okay 😐","value":"okay"},{"label":"Tired 😴","value":"tired"},{"label":"Stressed 😤","value":"stressed"}]`,
       });
     }
@@ -1133,6 +1165,8 @@ export default async function handler(req, res) {
     result.exercise_run = result.exercise_run || 'none';
     result.checklist_updates = result.checklist_updates || { ...DEFAULT_CHECKLIST };
     result.follow_up_queued = result.follow_up_queued || false;
+    result.wins_asked_for_more = result.wins_asked_for_more === true;
+    result.honest_depth = result.honest_depth === true;
 
     // Safety strip — never re-run a blocked exercise
     if (result.exercise_run !== 'none' && sessionExercisesRun.includes(result.exercise_run)) {
@@ -1165,12 +1199,53 @@ export default async function handler(req, res) {
     const exerciseRan = result.exercise_run && result.exercise_run !== 'none';
     if (exerciseRan && session_id) {
       dbPromises.push(
-        queueFollowUp(user_id, session_id, {
-          context: `${result.exercise_run} exercise run during reflection`,
-          question: `Last time we worked on ${result.exercise_run.replace(/_/g, ' ')} — how has that been showing up?`,
-          check_back_after: daysFromNow(3, client_local_date),
-          trigger_condition: intentData?.emotional_state,
-        }, client_local_date)
+        (async () => {
+          const exerciseName = result.exercise_run.replace(/_/g, ' ');
+          let followUpQuestion;
+          try {
+            const depthInsight = result.extracted_data?.depth_insight || null;
+            const followUpCompletion = await openai.chat.completions.create({
+              model: 'gpt-4o-mini',
+              messages: [
+                {
+                  role: 'system',
+                  content: `You are generating ONE follow-up question for a future reflection session, based on an exercise that was just completed.
+
+The question should:
+- Reference what the user actually worked on or the insight they reached during the exercise
+- Be a single specific sentence that feels like a natural continuation
+- NOT use bracket placeholders like [topic] or [their words]
+- Sound like a coach checking in, not a form question
+
+Return ONLY valid JSON: { "question": "..." }`,
+                },
+                {
+                  role: 'user',
+                  content: `Exercise run: ${exerciseName}\n${depthInsight ? `Depth insight from session: "${depthInsight}"\n` : ''}User profile: identity="${profile.identity_statement || 'not set'}", why="${profile.why || 'not set'}"`,
+                },
+              ],
+              response_format: { type: 'json_object' },
+              max_tokens: 100,
+              temperature: 0.7,
+            });
+            const choice = followUpCompletion.choices?.[0];
+            if (choice?.message?.content) {
+              const followUpData = JSON.parse(choice.message.content);
+              followUpQuestion = followUpData.question || null;
+            }
+          } catch (_e) { /* fail silently */ }
+
+          if (!followUpQuestion) {
+            followUpQuestion = `How has the work you did on ${exerciseName} been showing up since our last session?`;
+          }
+
+          await queueFollowUp(user_id, session_id, {
+            context: `${result.exercise_run} exercise run during reflection`,
+            question: followUpQuestion,
+            check_back_after: daysFromNow(3, client_local_date),
+            trigger_condition: intentData?.emotional_state,
+          }, client_local_date);
+        })()
       );
       dbPromises.push(
         upsertGrowthMarker(user_id, result.exercise_run, {
@@ -1184,7 +1259,13 @@ export default async function handler(req, res) {
       const updates = {};
       if (result.stage_advance && result.new_stage) updates.current_stage = result.new_stage;
       if (result.extracted_data?.mood) updates.mood_end_of_day = result.extracted_data.mood;
-      if (result.extracted_data?.tomorrow_commitment) updates.tomorrow_commitment = result.extracted_data.tomorrow_commitment;
+      if (result.extracted_data?.tomorrow_commitment) {
+        updates.tomorrow_commitment = result.extracted_data.tomorrow_commitment;
+        // Only set commitment_made_at when first setting the commitment
+        if (!session_state.tomorrow_commitment) {
+          updates.commitment_made_at = new Date().toISOString();
+        }
+      }
       if (result.extracted_data?.self_hype_message) updates.self_hype_message = result.extracted_data.self_hype_message;
       if (result.is_session_complete) {
         updates.is_complete = true;
