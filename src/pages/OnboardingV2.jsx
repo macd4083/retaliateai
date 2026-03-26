@@ -5,7 +5,7 @@ import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase/client';
 import { localDateStr } from '../lib/dateUtils';
 
-const LIFE_AREA_OPTIONS = [
+const DEFAULT_LIFE_AREA_OPTIONS = [
   { emoji: '💼', label: 'Career & Business' },
   { emoji: '🏋️', label: 'Health & Fitness' },
   { emoji: '❤️', label: 'Relationships' },
@@ -14,7 +14,41 @@ const LIFE_AREA_OPTIONS = [
   { emoji: '🎨', label: 'Creativity' },
   { emoji: '🙏', label: 'Spirituality' },
   { emoji: '🎓', label: 'Education' },
+  { emoji: '🏠', label: 'Family' },
+  { emoji: '🌍', label: 'Travel' },
+  { emoji: '🎮', label: 'Hobbies' },
+  { emoji: '🧘', label: 'Mental Health' },
+  { emoji: '🍕', label: 'Food & Cooking' },
+  { emoji: '📚', label: 'Learning' },
+  { emoji: '🎵', label: 'Music' },
+  { emoji: '⚽', label: 'Sports' },
+  { emoji: '🏡', label: 'Home & Environment' },
+  { emoji: '🤝', label: 'Community' },
 ];
+
+const GOAL_PLACEHOLDERS = {
+  'Career & Business': 'Build and launch my SaaS app',
+  'Health & Fitness': 'Run a 5K and exercise 4x a week',
+  'Relationships': 'Deepen my closest friendships',
+  'Personal Growth': 'Build a consistent morning routine',
+  'Money & Finance': 'Save 3 months of living expenses',
+  'Creativity': 'Complete my first creative project',
+  'Spirituality': 'Build a daily mindfulness practice',
+  'Education': 'Complete an online course in my field',
+  'Family': 'Spend quality time with family every week',
+  'Travel': 'Take one meaningful trip this year',
+  'Hobbies': 'Dedicate weekly time to a hobby I love',
+  'Mental Health': 'Build consistent self-care habits',
+  'Food & Cooking': 'Cook at home 4 nights a week',
+  'Learning': 'Read 12 books this year',
+  'Music': 'Learn to play a song I love',
+  'Sports': 'Join a local sports team or league',
+  'Home & Environment': 'Create a space I love coming home to',
+  'Community': 'Give back to my local community regularly',
+};
+
+const MIN_LIFE_AREAS = 3;
+const MAX_LIFE_AREAS = 6;
 
 const BLOCKER_OPTIONS = [
   'Procrastination',
@@ -82,8 +116,19 @@ export default function OnboardingV2({ onOnboardingComplete } = {}) {
   const [selectedBlockers, setSelectedBlockers] = useState([]);
   const [customBlocker, setCustomBlocker] = useState('');
 
-  // Step 5
+  // Step 5 — area selection
+  const [lifeAreaOptions, setLifeAreaOptions] = useState(DEFAULT_LIFE_AREA_OPTIONS);
   const [selectedLifeAreas, setSelectedLifeAreas] = useState([]);
+  const [customAreas, setCustomAreas] = useState([]);
+  const [customAreaInput, setCustomAreaInput] = useState('');
+  const [showCustomInput, setShowCustomInput] = useState(false);
+
+  // Step 5b — per-area goal capture
+  const [lifeAreaPhase, setLifeAreaPhase] = useState('select'); // 'select' | 'goals'
+  const [areaGoalIndex, setAreaGoalIndex] = useState(0);
+  const [areaGoals, setAreaGoals] = useState({});
+  const [currentGoalTitle, setCurrentGoalTitle] = useState('');
+  const [currentGoalWhy, setCurrentGoalWhy] = useState('');
 
   // Step 6
   const [reflectionTime, setReflectionTime] = useState('21:00');
@@ -215,38 +260,89 @@ export default function OnboardingV2({ onOnboardingComplete } = {}) {
     }
   };
 
+  const handleAddCustomArea = () => {
+    const trimmed = customAreaInput.trim();
+    if (!trimmed || customAreas.length >= 2) return;
+    const newOption = { emoji: '✨', label: trimmed };
+    setLifeAreaOptions((prev) => [...prev, newOption]);
+    setCustomAreas((prev) => [...prev, trimmed]);
+    setSelectedLifeAreas((prev) =>
+      prev.length < MAX_LIFE_AREAS ? [...prev, trimmed] : prev
+    );
+    setCustomAreaInput('');
+    setShowCustomInput(false);
+  };
+
   const handleStep5 = async () => {
-    if (selectedLifeAreas.length === 0) return;
+    if (selectedLifeAreas.length < MIN_LIFE_AREAS) return;
     setSaving(true);
     try {
       await saveProfile({ life_areas: selectedLifeAreas, onboarding_step: 6 });
+      setAreaGoalIndex(0);
+      setCurrentGoalTitle('');
+      setCurrentGoalWhy('');
+      setAreaGoals({});
+      setLifeAreaPhase('goals');
+    } catch (_e) {
+      alert('Failed to save life areas. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
 
-      // Read current why for goal creation
-      const { data: profile } = await supabase
-        .from('user_profiles')
-        .select('why')
-        .eq('id', user.id)
-        .maybeSingle();
-      const why = profile?.why || '';
-
-      // Create one goal per selected area
-      for (const area of selectedLifeAreas) {
+  const handleAreaGoalsComplete = async (goals) => {
+    setSaving(true);
+    try {
+      for (const [area, goal] of Object.entries(goals)) {
         try {
           await supabase.from('goals').insert({
             user_id: user.id,
-            title: `${area} — from onboarding`,
+            title: goal.title,
+            why_it_matters: goal.why || null,
             category: area,
             status: 'active',
-            why_it_matters: why,
           });
-        } catch (_e) {}
+        } catch (err) {
+          console.error('Failed to insert goal for area:', area, err);
+        }
       }
-
+      setLifeAreaPhase('select');
       setStep(6);
     } catch (_e) {
-      alert('Failed to save. Please try again.');
+      alert('Failed to save goals. Please try again.');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleAreaGoalNext = () => {
+    const currentArea = selectedLifeAreas[areaGoalIndex];
+    const updatedGoals = { ...areaGoals };
+    if (currentGoalTitle.trim()) {
+      updatedGoals[currentArea] = {
+        title: currentGoalTitle.trim(),
+        why: currentGoalWhy.trim(),
+      };
+      setAreaGoals(updatedGoals);
+    }
+    const isLast = areaGoalIndex === selectedLifeAreas.length - 1;
+    if (isLast) {
+      handleAreaGoalsComplete(updatedGoals);
+    } else {
+      setAreaGoalIndex((i) => i + 1);
+      setCurrentGoalTitle('');
+      setCurrentGoalWhy('');
+    }
+  };
+
+  const handleAreaGoalSkip = () => {
+    const isLast = areaGoalIndex === selectedLifeAreas.length - 1;
+    if (isLast) {
+      handleAreaGoalsComplete(areaGoals);
+    } else {
+      setAreaGoalIndex((i) => i + 1);
+      setCurrentGoalTitle('');
+      setCurrentGoalWhy('');
     }
   };
 
@@ -283,6 +379,18 @@ export default function OnboardingV2({ onOnboardingComplete } = {}) {
   const goBack = () => {
     if (step === 3 && whySubStep > 1) {
       setWhySubStep((s) => s - 1);
+      return;
+    }
+    if (step === 5 && lifeAreaPhase === 'goals') {
+      if (areaGoalIndex > 0) {
+        const prevIndex = areaGoalIndex - 1;
+        const prevArea = selectedLifeAreas[prevIndex];
+        setAreaGoalIndex(prevIndex);
+        setCurrentGoalTitle(areaGoals[prevArea]?.title || '');
+        setCurrentGoalWhy(areaGoals[prevArea]?.why || '');
+      } else {
+        setLifeAreaPhase('select');
+      }
       return;
     }
     if (step > 1) setStep((s) => s - 1);
@@ -497,45 +605,180 @@ export default function OnboardingV2({ onOnboardingComplete } = {}) {
           </div>
         )}
 
-        {/* ── Step 5 ── Life Areas ── */}
-        {step === 5 && (
+        {/* ── Step 5 ── Life Area Selection ── */}
+        {step === 5 && lifeAreaPhase === 'select' && (
           <div className="flex flex-col flex-1">
             <h2 className="text-2xl font-bold text-white mb-2">
               Which areas of life matter most to you right now?
             </h2>
-            <p className="text-zinc-400 text-sm mb-6">Select all that apply.</p>
-            <div className="grid grid-cols-2 gap-3 mb-auto">
-              {LIFE_AREA_OPTIONS.map(({ emoji, label }) => {
+            <div className="flex items-center justify-between mb-6">
+              <p className="text-zinc-400 text-sm">Pick {MIN_LIFE_AREAS}–{MAX_LIFE_AREAS} areas.</p>
+              <span
+                className={`text-sm font-medium tabular-nums ${
+                  selectedLifeAreas.length >= MIN_LIFE_AREAS ? 'text-red-400' : 'text-zinc-500'
+                }`}
+              >
+                {selectedLifeAreas.length}/{MAX_LIFE_AREAS}
+              </span>
+            </div>
+
+            <div className="flex flex-wrap gap-2 mb-4">
+              {lifeAreaOptions.map(({ emoji, label }) => {
                 const selected = selectedLifeAreas.includes(label);
+                const atMax = !selected && selectedLifeAreas.length >= MAX_LIFE_AREAS;
                 return (
                   <button
                     key={label}
                     onClick={() => {
-                      setSelectedLifeAreas((prev) =>
-                        selected ? prev.filter((x) => x !== label) : [...prev, label]
-                      );
+                      if (selected) {
+                        setSelectedLifeAreas((prev) => prev.filter((x) => x !== label));
+                      } else if (!atMax) {
+                        setSelectedLifeAreas((prev) => [...prev, label]);
+                      }
                     }}
-                    className={`flex flex-col items-center gap-2 p-4 rounded-2xl border transition-colors ${
+                    className={`px-4 py-2 rounded-full text-sm font-medium border transition-all ${
                       selected
-                        ? 'bg-red-900/40 border-red-600 text-white'
-                        : 'bg-zinc-900 border-zinc-700 text-zinc-300 hover:border-zinc-500'
+                        ? 'bg-red-900 border-red-600 text-white'
+                        : atMax
+                        ? 'bg-zinc-800 border-zinc-700 text-zinc-600 cursor-not-allowed'
+                        : 'bg-zinc-800 border-zinc-700 text-zinc-300 hover:border-zinc-500'
                     }`}
                   >
-                    <span className="text-2xl">{emoji}</span>
-                    <span className="text-xs text-center leading-tight">{label}</span>
+                    {emoji} {label}
                   </button>
                 );
               })}
+
+              {customAreas.length < 2 && !showCustomInput && (
+                <button
+                  onClick={() => setShowCustomInput(true)}
+                  className="px-4 py-2 rounded-full text-sm font-medium border border-dashed border-zinc-600 text-zinc-400 hover:border-red-600 hover:text-red-400 transition-all bg-zinc-900"
+                >
+                  + Add your own
+                </button>
+              )}
             </div>
+
+            {showCustomInput && (
+              <div className="flex gap-2 mb-4">
+                <input
+                  type="text"
+                  value={customAreaInput}
+                  onChange={(e) => setCustomAreaInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleAddCustomArea();
+                    if (e.key === 'Escape') {
+                      setShowCustomInput(false);
+                      setCustomAreaInput('');
+                    }
+                  }}
+                  placeholder="e.g. Meditation, Side Projects..."
+                  autoFocus
+                  className="flex-1 bg-zinc-900 border border-zinc-600 rounded-xl px-4 py-2.5 text-white placeholder-zinc-500 text-sm focus:outline-none focus:border-red-600 transition-colors"
+                />
+                <button
+                  onClick={handleAddCustomArea}
+                  disabled={!customAreaInput.trim()}
+                  className="px-3 py-2 bg-red-600 hover:bg-red-500 disabled:opacity-40 rounded-xl text-white transition-colors"
+                >
+                  <Check className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+
+            <div className="mb-auto" />
+
             <button
               onClick={handleStep5}
-              disabled={selectedLifeAreas.length === 0 || saving}
+              disabled={selectedLifeAreas.length < MIN_LIFE_AREAS || saving}
               className="w-full flex items-center justify-center gap-2 bg-red-600 hover:bg-red-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold py-3.5 rounded-xl transition-colors mt-8"
             >
               {saving ? 'Saving...' : 'Continue'} <ArrowRight className="w-4 h-4" />
             </button>
           </div>
         )}
+
+        {/* ── Step 5b ── Per-Area Goal Capture ── */}
+        {step === 5 && lifeAreaPhase === 'goals' && (() => {
+          const currentAreaLabel = selectedLifeAreas[areaGoalIndex];
+          const currentAreaOption =
+            lifeAreaOptions.find((a) => a.label === currentAreaLabel) || {
+              emoji: '✨',
+              label: currentAreaLabel,
+            };
+          return (
+            <div className="flex flex-col flex-1">
+              {/* Progress bar */}
+              <div className="flex items-center gap-1.5 mb-6">
+                {selectedLifeAreas.map((_, i) => (
+                  <div
+                    key={i}
+                    className={`h-1 flex-1 rounded-full transition-all ${
+                      i < areaGoalIndex
+                        ? 'bg-red-600'
+                        : i === areaGoalIndex
+                        ? 'bg-red-400'
+                        : 'bg-zinc-700'
+                    }`}
+                  />
+                ))}
+              </div>
+
+              <p className="text-zinc-500 text-xs uppercase tracking-wider mb-1">
+                Area {areaGoalIndex + 1} of {selectedLifeAreas.length}
+              </p>
+              <h2 className="text-2xl font-bold text-white mb-6">
+                {currentAreaOption.emoji} {currentAreaLabel}
+              </h2>
+
+              <label className="block text-zinc-400 text-xs uppercase tracking-wider mb-2">
+                What's your #1 goal in this area?
+              </label>
+              <input
+                type="text"
+                value={currentGoalTitle}
+                onChange={(e) => setCurrentGoalTitle(e.target.value)}
+                placeholder={GOAL_PLACEHOLDERS[currentAreaLabel] || 'Set a meaningful goal'}
+                autoFocus
+                className="bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-white placeholder-zinc-500 text-sm focus:outline-none focus:border-red-600 transition-colors mb-4"
+              />
+
+              <label className="block text-zinc-400 text-xs uppercase tracking-wider mb-2">
+                Why does this matter to you?{' '}
+                <span className="text-zinc-600 normal-case">(optional)</span>
+              </label>
+              <input
+                type="text"
+                value={currentGoalWhy}
+                onChange={(e) => setCurrentGoalWhy(e.target.value)}
+                placeholder="Because..."
+                className="bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-white placeholder-zinc-500 text-sm focus:outline-none focus:border-red-600 transition-colors mb-auto"
+              />
+
+              <div className="flex gap-3 mt-8">
+                <button
+                  onClick={handleAreaGoalSkip}
+                  disabled={saving}
+                  className="flex-1 py-3.5 rounded-xl border border-zinc-700 text-zinc-400 hover:text-white hover:border-zinc-500 disabled:opacity-40 transition-colors text-sm font-medium"
+                >
+                  Skip this area
+                </button>
+                <button
+                  onClick={handleAreaGoalNext}
+                  disabled={saving}
+                  className="flex-1 flex items-center justify-center gap-2 bg-red-600 hover:bg-red-500 disabled:opacity-40 text-white font-semibold py-3.5 rounded-xl transition-colors text-sm"
+                >
+                  {saving
+                    ? 'Saving...'
+                    : areaGoalIndex === selectedLifeAreas.length - 1
+                    ? 'Finish'
+                    : 'Next'}{' '}
+                  {!saving && <ArrowRight className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* ── Step 6 ── Notification Time ── */}
         {step === 6 && (
@@ -592,6 +835,7 @@ export default function OnboardingV2({ onOnboardingComplete } = {}) {
             bigGoal={bigGoal}
             why={[why1, why2, why3].filter(Boolean).join(' → ')}
             selectedLifeAreas={selectedLifeAreas}
+            lifeAreaMap={Object.fromEntries(lifeAreaOptions.map(({ emoji, label }) => [label, emoji]))}
             onComplete={handleComplete}
             saving={saving}
           />
@@ -601,20 +845,7 @@ export default function OnboardingV2({ onOnboardingComplete } = {}) {
   );
 }
 
-function Step7Summary({ fullName, futureSelf, bigGoal, why, selectedLifeAreas, onComplete, saving }) {
-  const areaEmoji = Object.fromEntries(
-    [
-      ['Career & Business', '💼'],
-      ['Health & Fitness', '🏋️'],
-      ['Relationships', '❤️'],
-      ['Personal Growth', '🧠'],
-      ['Money & Finance', '💰'],
-      ['Creativity', '🎨'],
-      ['Spirituality', '🙏'],
-      ['Education', '🎓'],
-    ]
-  );
-
+function Step7Summary({ fullName, futureSelf, bigGoal, why, selectedLifeAreas, lifeAreaMap = {}, onComplete, saving }) {
   const truncate = (text, len = 120) =>
     text && text.length > len ? text.slice(0, len) + '...' : text;
 
@@ -662,7 +893,7 @@ function Step7Summary({ fullName, futureSelf, bigGoal, why, selectedLifeAreas, o
                   key={area}
                   className="px-2.5 py-1 rounded-full bg-red-900/40 border border-red-800 text-red-300 text-xs"
                 >
-                  {areaEmoji[area] || ''} {area}
+                  {lifeAreaMap[area] || '✨'} {area}
                 </span>
               ))}
             </div>
