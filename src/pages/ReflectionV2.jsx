@@ -249,6 +249,7 @@ export default function ReflectionV2() {
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
+  const [initError, setInitError] = useState(false);
   const [sessionId, setSessionId] = useState(null);
   const [isComplete, setIsComplete] = useState(false);
   const [usedChipMessageIds, setUsedChipMessageIds] = useState(new Set());
@@ -316,7 +317,9 @@ export default function ReflectionV2() {
 
   async function initSession() {
     setIsInitializing(true);
+    setInitError(false);
     try {
+      // Profile load — non-critical, fail silently
       try {
         const { data: profile } = await supabase
           .from('user_profiles')
@@ -324,9 +327,18 @@ export default function ReflectionV2() {
           .eq('id', user.id)
           .maybeSingle();
         setUserProfile(profile);
-      } catch (_e) {}
+      } catch (profileErr) {
+        console.error('[initSession] profile load failed:', profileErr);
+      }
 
-      const session = await reflectionHelpers.getTodaySession(user.id);
+      // Session creation — critical
+      let session;
+      try {
+        session = await reflectionHelpers.getTodaySession(user.id);
+      } catch (sessionErr) {
+        console.error('[initSession] getTodaySession failed:', sessionErr);
+        throw sessionErr;
+      }
       setSessionId(session.id);
       setIsComplete(session.is_complete);
 
@@ -347,10 +359,22 @@ export default function ReflectionV2() {
       };
       setSessionState(restoredState);
 
-      const currentStreak = await reflectionHelpers.getReflectionStreak(user.id);
-      setStreak(currentStreak);
+      // Streak — non-critical, fail silently
+      try {
+        const currentStreak = await reflectionHelpers.getReflectionStreak(user.id);
+        setStreak(currentStreak);
+      } catch (streakErr) {
+        console.error('[initSession] getReflectionStreak failed:', streakErr);
+      }
 
-      const existingMessages = await reflectionHelpers.getSessionMessages(session.id);
+      // Message load — critical
+      let existingMessages;
+      try {
+        existingMessages = await reflectionHelpers.getSessionMessages(session.id);
+      } catch (msgErr) {
+        console.error('[initSession] getSessionMessages failed:', msgErr);
+        throw msgErr;
+      }
 
       if (existingMessages.length > 0) {
         // Deduplicate messages loaded from DB by content+role
@@ -379,10 +403,15 @@ export default function ReflectionV2() {
         );
         setUsedChipMessageIds(usedIds);
       } else {
-        await sendMessage('__INIT__', session.id, restoredState);
+        try {
+          await sendMessage('__INIT__', session.id, restoredState);
+        } catch (initMsgErr) {
+          console.error('[initSession] sendMessage __INIT__ failed:', initMsgErr);
+          throw initMsgErr;
+        }
       }
     } catch (error) {
-      console.error('Failed to init reflection session:', error);
+      console.error('[initSession] Fatal error loading session:', error);
       const errMsg = [{
         id: Date.now(),
         role: 'assistant',
@@ -393,6 +422,7 @@ export default function ReflectionV2() {
       }];
       messagesRef.current = errMsg;
       setMessages(errMsg);
+      setInitError(true);
     } finally {
       setIsInitializing(false);
     }
@@ -779,6 +809,20 @@ export default function ReflectionV2() {
                   followThroughStats={followThroughStats}
                 />
               ))}
+              {initError && (
+                <div className="flex justify-center mt-3">
+                  <button
+                    onClick={() => {
+                      initCalledRef.current = false;
+                      setInitError(false);
+                      initSession();
+                    }}
+                    className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition-colors"
+                  >
+                    Try Again
+                  </button>
+                </div>
+              )}
               <div ref={messagesEndRef} />
             </>
           )}

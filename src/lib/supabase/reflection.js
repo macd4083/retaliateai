@@ -6,25 +6,18 @@ export const reflectionHelpers = {
   async getTodaySession(userId) {
     const today = localDateStr();
 
-    const { data: existing, error: fetchError } = await supabase
+    // Upsert: insert if not exists, return existing if already there
+    const { data, error } = await supabase
       .from('reflection_sessions')
-      .select('*, commitment_made_at')
-      .eq('user_id', userId)
-      .eq('date', today)
-      .maybeSingle();
-
-    if (fetchError) throw fetchError;
-    if (existing) return existing;
-
-    // Create a new session for today
-    const { data: created, error: createError } = await supabase
-      .from('reflection_sessions')
-      .insert({ user_id: userId, date: today })
+      .upsert(
+        { user_id: userId, date: today },
+        { onConflict: 'user_id,date', ignoreDuplicates: false }
+      )
       .select()
       .single();
 
-    if (createError) throw createError;
-    return created;
+    if (error) throw error;
+    return data;
   },
 
   // Get yesterday's tomorrow_commitment (the plan they made last night)
