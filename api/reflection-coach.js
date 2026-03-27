@@ -60,6 +60,7 @@ const supabase = createClient(
 
 const DEFAULT_CHECKLIST = { wins: false, honest: false, plan: false, identity: false };
 const MIN_DEEP_SESSION_MESSAGE_COUNT = 6;
+const MAX_DEPTH_INSIGHTS_RETAINED = 4;
 
 // ── System prompt ─────────────────────────────────────────────────────────────
 
@@ -170,6 +171,64 @@ depth_probe (use naturally mid-conversation, not as a named exercise):
   Examples: "Why do you think you keep coming back to that?" / "What's the story you're telling yourself about [X]?" / "What would have to be true about you for that to keep happening?"
   After a depth answer: sit with it. Reflect back what you heard. Then one forward question.
 
+GOAL CONNECTION — WHEN AND HOW TO BUILD MEANING
+
+You have a goals array. Each goal may have: id, area, title, original_why, enriched_why, vision_snapshot, depth_insights (array of {date, insight}), days_since_mentioned, suggested_next_action.
+
+You also may have quiet_goals — goals that haven't come up in 14+ days. These are a soft permission: if a natural opening exists, one gentle check-in is fine. If there's no opening, skip entirely.
+
+CORE RULE: You are NOT managing the user through a goals framework. Goals are background knowledge. Use them when the moment is right — not because they're there.
+
+HARD LIMITS:
+- Max one goal-deepening moment per session
+- Goals come up during honest or close stage only — never during wins stage (wins is their time to celebrate, not be redirected)
+- Never surface a goal that naturally came up in wins already — you've got it, let it breathe
+- If you've already run a goal-related moment this session (exercise_run includes goal_*), don't do another
+
+WHEN TO MAKE THE CONNECTION:
+
+1. User mentions something that connects to a goal and reports it like a fact
+   → They're reporting, not realizing the significance
+   → Don't just celebrate — help them feel what it means
+   → Use the richest context available: if enriched_why exists use it. If vision_snapshot exists use it.
+   → "That's not just [what they did]. You've been working toward [goal title]. What was that like?"
+   → Set extracted_data.goal_id_referenced to the goal's id
+
+2. User is stuck on something that connects to a goal
+   → One question that goes under the surface behavior
+   → Priority order of what to reference:
+     a. If depth_insights exist for this goal: "You realized once [most recent insight]. How does that connect to what's making it hard now?"
+     b. If enriched_why exists: "You said this is really about [enriched_why]. What happens to that when you avoid it?"
+     c. If only original_why: "You set this goal because [original_why]. Is that still true — or has something shifted?"
+     d. If nothing: "What's the real thing that makes this hard to show up for?"
+   → Set extracted_data.goal_id_referenced to the goal's id
+
+3. User questions a goal's relevance
+   → "I'm not sure I want this anymore" / "Maybe I was being unrealistic"
+   → Do NOT push them back toward the goal. Do NOT reassure them it's worth it.
+   → ONE question only: "What changed?"
+   → Sit with their answer. Follow their lead.
+   → If they reconnect: then bridge to vision
+   → If they release: acknowledge and ask "What matters more to you right now?"
+   → If releasing: set extracted_data.goal_suggestion: { "action": "pause", "goal_id": "...", "reason": "their exact words" }
+
+4. User says something vivid about what their life looks like when a goal is done
+   → Capture it: set extracted_data.goal_vision_fragment with their exact words
+   → Set extracted_data.goal_id_referenced to the matching goal
+   → Then the identity close: "That's who you're becoming. And tonight you [specific thing they did]. That's the person who gets there."
+
+5. User has a realization about a goal
+   → Set extracted_data.goal_depth_insight with the realization in their words
+   → Set extracted_data.goal_id_referenced
+
+WHAT NOT TO DO:
+- Never announce you're doing a "goal check-in"
+- Never ask about multiple goals in the same session
+- Never redirect a conversation that's already going somewhere real just to fit in a goal
+- Never ask the generic "why does that goal matter to you?" — you have context, use it
+- Never manufacture a moment that isn't there
+- Never surface a goal during wins stage
+
 RETURN JSON EXACTLY (no markdown, no extra keys):
 {
   "assistant_message": "your message (2-3 sentences, one question)",
@@ -183,7 +242,12 @@ RETURN JSON EXACTLY (no markdown, no extra keys):
     "blocker_tags": [],
     "tomorrow_commitment": null,
     "self_hype_message": null,
-    "depth_insight": null
+    "depth_insight": null,
+    "goal_id_referenced": null,
+    "goal_why_insight": null,
+    "goal_vision_fragment": null,
+    "goal_depth_insight": null,
+    "goal_suggestion": null
   },
   "exercise_run": "none|gratitude_anchor|why_reconnect|evidence_audit|implementation_intention|values_clarification|future_self_bridge|ownership_reframe|triage_one_thing|identity_reinforcement|depth_probe",
   "checklist_updates": {"wins": false, "honest": false, "plan": false, "identity": false},
@@ -438,11 +502,21 @@ async function loadActiveGoals(userId) {
   try {
     const { data } = await supabase
       .from('goals')
-      .select('title, why_it_matters, category')
+      .select('id, title, why_it_matters, category, enriched_why, vision_snapshot, depth_insights, last_mentioned_at, suggested_next_action')
       .eq('user_id', userId)
       .eq('status', 'active')
-      .limit(5);
-    return data || [];
+      .limit(6);
+
+    if (!data) return [];
+
+    const today = new Date();
+    return data.map((g) => ({
+      ...g,
+      days_since_mentioned: g.last_mentioned_at
+        ? Math.floor((today - new Date(g.last_mentioned_at)) / 86400000)
+        : null,
+      depth_insights: Array.isArray(g.depth_insights) ? g.depth_insights : [],
+    }));
   } catch (_e) { return []; }
 }
 
@@ -718,6 +792,7 @@ Given the session summary and current user profile, extract:
 8. why_update: ONLY if their why deepened or clarified — otherwise null
 9. blockers_update: ONLY if new blockers clearly emerged or existing ones evolved — otherwise null. Array of strings max 5.
 10. future_self_update: ONLY if the user expressed a clearer, stronger, or evolved version of their 1-year vision — otherwise null.
+11. goal_updates: array of { goal_id, enriched_why, vision_fragment, depth_insight, last_mentioned_date } for any goals that were meaningfully discussed. Only include fields that have new content — null otherwise. Empty array if no goals were discussed.
 
 Rules:
 - Use their actual words, not clinical language
@@ -736,7 +811,8 @@ Return valid JSON only:
   "big_goal_update": "..." | null,
   "why_update": "..." | null,
   "blockers_update": ["..."] | null,
-  "future_self_update": "..." | null
+  "future_self_update": "..." | null,
+  "goal_updates": []
 }`;
 
     const recentSummaries = recentSessions
@@ -746,7 +822,7 @@ Return valid JSON only:
       .join('\n');
 
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: 'gpt-4o',
       messages: [
         { role: 'system', content: EVOLVE_SYSTEM },
         {
@@ -771,7 +847,7 @@ Return valid JSON only:
       ],
       response_format: { type: 'json_object' },
       temperature: 0.4,
-      max_tokens: 600,
+      max_tokens: 700,
     });
 
     const evolution = JSON.parse(completion.choices[0].message.content);
@@ -791,6 +867,36 @@ Return valid JSON only:
     if (evolution.future_self_update) profileUpdates.future_self = evolution.future_self_update;
 
     await supabase.from('user_profiles').update(profileUpdates).eq('id', userId);
+
+    // Write back goal updates from EVOLVE pass
+    if (Array.isArray(evolution.goal_updates)) {
+      for (const gu of evolution.goal_updates) {
+        if (!gu.goal_id) continue;
+        const goalUpdates = {};
+        if (gu.enriched_why) goalUpdates.enriched_why = gu.enriched_why;
+        if (gu.vision_fragment) goalUpdates.vision_snapshot = gu.vision_fragment;
+        if (gu.last_mentioned_date) goalUpdates.last_mentioned_at = gu.last_mentioned_date;
+        if (gu.depth_insight) {
+          // Append depth insight — fetch first, then update
+          supabase
+            .from('goals')
+            .select('depth_insights')
+            .eq('id', gu.goal_id)
+            .eq('user_id', userId)
+            .maybeSingle()
+            .then(({ data }) => {
+              const current = Array.isArray(data?.depth_insights) ? data.depth_insights : [];
+              const updated = [...current.slice(-MAX_DEPTH_INSIGHTS_RETAINED), { date: gu.last_mentioned_date || new Date().toISOString().split('T')[0], insight: gu.depth_insight }];
+              return supabase.from('goals').update({ ...goalUpdates, depth_insights: updated }).eq('id', gu.goal_id).eq('user_id', userId);
+            })
+            .then(() => {}).catch(() => {});
+          continue; // Skip simple update below since async above handles it
+        }
+        if (Object.keys(goalUpdates).length > 0) {
+          supabase.from('goals').update(goalUpdates).eq('id', gu.goal_id).eq('user_id', userId).then(() => {}).catch(() => {});
+        }
+      }
+    }
   } catch (_e) {}
 }
 
@@ -947,9 +1053,37 @@ export default async function handler(req, res) {
       relevantMemories = await searchRelevantMemories(user_id, user_message, 3);
     }
 
-    const goalsText = activeGoals.length > 0
-      ? activeGoals.map((g) => `"${g.title}"`).join('; ')
-      : 'none';
+    const goalsContext = activeGoals.length > 0
+      ? activeGoals.map((g) => {
+          const obj = {
+            id: g.id,
+            area: g.category,
+            title: g.title,
+            original_why: g.why_it_matters || null,
+            enriched_why: g.enriched_why || null,
+            vision_snapshot: g.vision_snapshot || null,
+            depth_insights: g.depth_insights?.length > 0 ? g.depth_insights : null,
+            suggested_next_action: g.suggested_next_action || null,
+          };
+          // Only include days_since_mentioned if it's meaningful (goal was tracked before)
+          if (g.days_since_mentioned !== null && g.days_since_mentioned > 7) {
+            obj.days_since_mentioned = g.days_since_mentioned;
+          }
+          return obj;
+        })
+      : [];
+
+    // Quiet goals: goals that have been tracked but haven't come up recently
+    // This is a soft permission to the coach — not an instruction to surface them
+    const quietGoals = activeGoals
+      .filter((g) => g.last_mentioned_at && g.days_since_mentioned > 14)
+      .map((g) => ({
+        goal_id: g.id,
+        area: g.category,
+        title: g.title,
+        days_since_mentioned: g.days_since_mentioned,
+        note: "hasn't come up recently — if a natural opening exists, one soft check-in is fine. If no opening, skip it.",
+      }));
 
     const contextBlock = {
       role: 'user',
@@ -967,7 +1101,8 @@ export default async function handler(req, res) {
           growth_areas: Array.isArray(profile.growth_areas) && profile.growth_areas.length > 0 ? profile.growth_areas : undefined,
           strengths: Array.isArray(profile.strengths) && profile.strengths.length > 0 ? profile.strengths : undefined,
         },
-        goals: goalsText,
+        goals: goalsContext.length > 0 ? goalsContext : 'none',
+        quiet_goals: quietGoals.length > 0 ? quietGoals : undefined,
         yesterday_commitment: yesterdayCommitment || 'none',
         same_day_commitment: sameDayCommitment ? { commitment: sameDayCommitment.commitment, made_at: sameDayCommitment.made_at } : undefined,
         patterns: patternsText,
@@ -1333,6 +1468,77 @@ Return ONLY valid JSON: { "question": "..." }`,
     }
 
     Promise.all(dbPromises).catch(() => {});
+
+    // ── Goal write-backs (fire-and-forget, all fail silently) ─────────────
+    const clientToday = today(client_local_date);
+
+    // Goal why insight — write to goals.enriched_why and update last_mentioned_at
+    if (result.extracted_data?.goal_why_insight && result.extracted_data?.goal_id_referenced) {
+      const goalId = result.extracted_data.goal_id_referenced;
+      supabase
+        .from('goals')
+        .update({
+          enriched_why: result.extracted_data.goal_why_insight,
+          last_mentioned_at: clientToday,
+        })
+        .eq('id', goalId)
+        .eq('user_id', user_id)
+        .then(() => {}).catch(() => {});
+    }
+
+    // Goal vision fragment — write to goals.vision_snapshot and update last_mentioned_at
+    if (result.extracted_data?.goal_vision_fragment && result.extracted_data?.goal_id_referenced) {
+      const goalId = result.extracted_data.goal_id_referenced;
+      supabase
+        .from('goals')
+        .update({
+          vision_snapshot: result.extracted_data.goal_vision_fragment,
+          last_mentioned_at: clientToday,
+        })
+        .eq('id', goalId)
+        .eq('user_id', user_id)
+        .then(() => {}).catch(() => {});
+    }
+
+    // Goal depth insight — append to goals.depth_insights array
+    if (result.extracted_data?.goal_depth_insight && result.extracted_data?.goal_id_referenced) {
+      const goalId = result.extracted_data.goal_id_referenced;
+      supabase
+        .from('goals')
+        .select('depth_insights')
+        .eq('id', goalId)
+        .eq('user_id', user_id)
+        .maybeSingle()
+        .then(({ data }) => {
+          const current = Array.isArray(data?.depth_insights) ? data.depth_insights : [];
+          const updated = [
+            ...current.slice(-MAX_DEPTH_INSIGHTS_RETAINED), // keep last 4 max
+            { date: clientToday, insight: result.extracted_data.goal_depth_insight },
+          ];
+          return supabase
+            .from('goals')
+            .update({ depth_insights: updated, last_mentioned_at: clientToday })
+            .eq('id', goalId)
+            .eq('user_id', user_id);
+        })
+        .then(() => {}).catch(() => {});
+    }
+
+    // Goal suggestion — queue as a follow-up for next session
+    if (result.extracted_data?.goal_suggestion) {
+      const suggestion = result.extracted_data.goal_suggestion;
+      if (suggestion.action && suggestion.goal_id) {
+        const goalTitle = activeGoals.find(g => g.id === suggestion.goal_id)?.title || 'that goal';
+        queueFollowUp(user_id, session_id, {
+          context: `goal_suggestion: action=${suggestion.action}, goal_id=${suggestion.goal_id}, reason="${suggestion.reason}"`,
+          question: suggestion.action === 'pause'
+            ? `Last time you mentioned you might want to pause your goal around "${goalTitle}". Is that still where you're at?`
+            : `You mentioned something shifting around one of your goals. What's your thinking now?`,
+          check_back_after: 1,
+          trigger_condition: 'always',
+        }, client_local_date).catch(() => {});
+      }
+    }
 
     // Post-session background work — fire and forget
     if (result.is_session_complete && session_id) {
