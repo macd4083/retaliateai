@@ -45,6 +45,7 @@ export default function InsightsV2() {
   const [streak, setStreak]                       = useState(0);
   const [commitmentStats, setCommitmentStats]     = useState(null);
   const [loading, setLoading]                     = useState(true);
+  const [activeGoals, setActiveGoals]             = useState([]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -61,10 +62,22 @@ export default function InsightsV2() {
         loadStreak(),
         loadCommitmentStats(),
         loadNarratives(),
+        loadActiveGoals(),
       ]);
     } finally {
       setLoading(false);
     }
+  }
+
+  async function loadActiveGoals() {
+    const { data } = await supabase
+      .from('goals')
+      .select('id, title, why_it_matters, category, status, created_at')
+      .eq('user_id', user.id)
+      .eq('status', 'active')
+      .order('created_at', { ascending: true })
+      .limit(5);
+    setActiveGoals(data || []);
   }
 
   async function loadProfile() {
@@ -484,6 +497,38 @@ export default function InsightsV2() {
                   : `Your longest gap was ${recoveryDays} day${recoveryDays !== 1 ? 's' : ''} — and you came back.`}
               </p>
             </div>
+          )}
+
+          {/* ── Section 4.5: Your Goals ───────────────────────────────── */}
+          {activeGoals.length > 0 && (
+            <section>
+              <h2 className="text-white font-semibold text-base mb-3">Your Goals</h2>
+              <div className="space-y-3">
+                {activeGoals.map((goal, i) => (
+                  <div
+                    key={goal.id || i}
+                    className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4"
+                  >
+                    <div className="flex items-start gap-3">
+                      <span className="text-lg mt-0.5">🎯</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-white font-medium text-sm leading-snug">{goal.title}</p>
+                        {goal.why_it_matters && (
+                          <p className="text-zinc-500 text-xs mt-1.5 leading-relaxed italic">
+                            &ldquo;{goal.why_it_matters}&rdquo;
+                          </p>
+                        )}
+                        {goal.category && (
+                          <span className="inline-block mt-2 px-2 py-0.5 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-400 text-xs">
+                            {goal.category.replace('_', ' ')}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
           )}
 
           {/* ── Section 5: Right Now ──────────────────────────────────── */}

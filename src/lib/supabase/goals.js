@@ -87,4 +87,33 @@ export const goalsHelpers = {
     
     if (error) throw error;
   },
+
+  // Mark goal as needing a motivation check-in
+  async scheduleGoalCheckin(goalId, checkinAfterDate) {
+    const { data, error } = await supabase
+      .from('goals')
+      .update({
+        next_checkin_at: checkinAfterDate,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', goalId)
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  },
+
+  // Get goals that are due for a check-in (next_checkin_at <= today and still active)
+  async getGoalsDueForCheckin(userId) {
+    const today = new Date().toISOString().slice(0, 10);
+    const { data, error } = await supabase
+      .from('goals')
+      .select('id, title, why_it_matters, category, next_checkin_at, created_at')
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .lte('next_checkin_at', today)
+      .not('next_checkin_at', 'is', null);
+    if (error) throw error;
+    return data || [];
+  },
 };
