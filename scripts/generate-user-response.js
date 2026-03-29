@@ -112,6 +112,8 @@ Keep it under 120 words.`;
  * @param {string} params.dailyEvent           - The specific event drawn for today (from dailyEventBank)
  * @param {string|null} params.yesterdayCommitment - What the persona committed to yesterday (or null)
  * @param {Array|null}  params.assignedTraits  - Hidden trait objects assigned for this run (optional)
+ * @param {number|null} params.dayNumber       - Day number in the simulation (1-based), used for tiered why responses
+ * @param {object|null} params.whyPool         - Persona's tiered why pool {shallow, deeper, additive} (optional)
  * @returns {Promise<string>} - The generated user message
  */
 export async function generateUserResponse({
@@ -125,10 +127,48 @@ export async function generateUserResponse({
   dailyEvent = null,
   yesterdayCommitment = null,
   assignedTraits = null,
+  dayNumber = null,
+  whyPool = null,
 }) {
   // Determine follow-through on yesterday's commitment
   const followThroughRoll = Math.random();
   const followedThrough = followThroughRoll < persona.tendencies.follow_through_rate;
+
+  // Detect whether the coach is asking about motivation/why
+  const whyKeywords = [
+    'why does this matter', "what's driving you", 'what drives you',
+    'why it matters', 'is that still motivating', 'still motivating you',
+    'what makes this real', 'what makes it real', 'why_reconnect',
+    'what\'s the real reason', 'what\'s underneath', 'what\'s actually underneath',
+    'why do you keep coming back', 'why are you doing this', 'what\'s pulling you',
+    'motivation check', 'is this still', 'still the thing that makes',
+    'what\'s the thing that makes', 'why this goal', 'why that goal',
+    'what made you set this', 'still what drives',
+  ];
+  const coachMsgLower = coachMessage.toLowerCase();
+  const isWhyQuestion = whyKeywords.some((kw) => coachMsgLower.includes(kw.toLowerCase()));
+
+  // Build tiered why injection if coach is asking a why question and a whyPool is available
+  let whyInjectionBlock = '';
+  if (isWhyQuestion && whyPool) {
+    const day = typeof dayNumber === 'number' ? dayNumber : 1;
+    let tier;
+    if (day <= 7) {
+      tier = 'shallow';
+    } else if (day <= 20) {
+      tier = 'deeper';
+    } else {
+      // Day 21+: sometimes additive, sometimes still deeper
+      tier = Math.random() < 0.6 ? 'additive' : 'deeper';
+    }
+    const pool = whyPool[tier] ?? whyPool.shallow ?? [];
+    if (pool.length > 0) {
+      const chosenWhy = pool[Math.floor(Math.random() * pool.length)];
+      whyInjectionBlock = `\nWHY-RESPONSE DIRECTION (the coach asked about motivation — use this as the core of your answer):
+"${chosenWhy}"
+Incorporate this naturally into your response. Don't just recite it verbatim — adapt it to sound like you're realizing or saying it in the moment. Keep it conversational and real.`;
+    }
+  }
 
   // Pick response mode based on persona's weighted probabilities
   const weights = persona.tendencies.responseModeWeights ?? [0.55, 0.30, 0.15];
@@ -207,7 +247,7 @@ CURRENT STAGE: ${currentStage || 'unknown'}
 
 BEHAVIORAL DIRECTION FOR THIS BEAT:
 ${behavioralFraming}
-
+${whyInjectionBlock}
 GENERAL RULES:
 - Sound like a real person TEXTING, not writing formally
 - Stay true to the persona's tendencies for this stage
@@ -249,7 +289,8 @@ Respond as ${persona.name} would. Keep it real.`;
  * @param {number} params.turnNumber     - Turn number in session
  * @param {string} params.previousUserMessage - What the user said before
  * @param {string} params.coachMessage   - The coach message to evaluate
- * @returns {Promise<{score: number, flags: string[], reason: string}>}
+ * @param {Array|null}  params.goalWhys  - Current whys array for the most recently active goal (optional)
+ * @returns {Promise<{score: number, flags: string[], reason: string, why_deepening_quality: number|null}>}
  */
 export async function scoreCoachMessage({
   persona,
@@ -258,7 +299,12 @@ export async function scoreCoachMessage({
   turnNumber,
   previousUserMessage,
   coachMessage,
+  goalWhys = null,
 }) {
+  const whyContext = goalWhys && goalWhys.length > 0
+    ? `\nKnown whys for this user's active goal: ${goalWhys.map((w, i) => `[${i}] "${w.text ?? w}"`).join('; ')}`
+    : '\nNo prior whys recorded for active goals yet.';
+
   const systemPrompt = `You are evaluating the quality of a reflection coach message. Score it 1-5 and flag issues.
 
 Score meanings:
@@ -292,7 +338,17 @@ WHAT GOOD LOOKS LIKE:
 - Occasionally NOT going deep is correct — sometimes "great, so what's the plan?" is exactly right
 - The coach sounds like a direct, perceptive human — not a therapist narrating observations
 
-Return JSON only: { "score": 1-5, "flags": [], "reason": "one sentence explanation" }`;
+WHY-DEEPENING QUALITY — score separately (1-5 or null):
+- Only score this if the coach message touches on goal motivation, why it matters, or what drives the user.
+- If the coach message has nothing to do with motivation/why, return null.
+- The known whys list for this user's goal is provided at the end of the user prompt (under "Known whys").
+- 5: Coach referenced specific text from the known whys list provided in context and asked a nuanced, personal follow-up (e.g. "You said this was about proving something to yourself — is that still the thing that makes it real?")
+- 4: Coach asked a specific, targeted motivation question that felt personal to this user's goals/context
+- 3: Coach asked a generic "why does this matter" question without referencing any prior why from the list
+- 2: Coach mentioned goals/motivation in a surface way without really deepening anything
+- 1: Coach missed an obvious opportunity to explore motivation when the user clearly brought it up
+
+Return JSON only: { "score": 1-5, "flags": [], "reason": "one sentence explanation", "why_deepening_quality": null | 1-5 }`;
 
   const userPrompt = `Context:
 - Persona: ${persona.name} — ${persona.description}
@@ -300,7 +356,7 @@ Return JSON only: { "score": 1-5, "flags": [], "reason": "one sentence explanati
 - Session stage: ${currentStage || 'unknown'}
 - Turn number: ${turnNumber}
 - Previous user message: "${previousUserMessage}"
-- Coach message being evaluated: "${coachMessage}"`;
+- Coach message being evaluated: "${coachMessage}"${whyContext}`;
 
   try {
     const response = await openai.chat.completions.create({
@@ -309,7 +365,7 @@ Return JSON only: { "score": 1-5, "flags": [], "reason": "one sentence explanati
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
       ],
-      max_tokens: 200,
+      max_tokens: 250,
       temperature: 0.3,
       response_format: { type: 'json_object' },
     });
@@ -319,8 +375,9 @@ Return JSON only: { "score": 1-5, "flags": [], "reason": "one sentence explanati
       score: parsed.score ?? 3,
       flags: parsed.flags ?? [],
       reason: parsed.reason ?? '',
+      why_deepening_quality: parsed.why_deepening_quality ?? null,
     };
   } catch {
-    return { score: 3, flags: [], reason: 'Could not parse quality score' };
+    return { score: 3, flags: [], reason: 'Could not parse quality score', why_deepening_quality: null };
   }
 }

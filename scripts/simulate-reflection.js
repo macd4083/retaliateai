@@ -23,6 +23,7 @@ import { randomUUID } from 'crypto';
 import handler from '../api/reflection-coach.js';
 import commitmentStatsHandler from '../api/commitment-stats.js';
 import generatePatternNarrativeHandler from '../api/generate-pattern-narrative.js';
+import createGoalHandler from '../api/create-goal.js';
 import { PERSONAS, DEFAULT_PERSONA } from './personas.js';
 import { generateUserResponse, scoreCoachMessage } from './generate-user-response.js';
 import { drawTraits } from './hidden-traits.js';
@@ -32,6 +33,7 @@ import { gradeTraitDetection } from './grade-trait-detection.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const REPORT_PATH = join(__dirname, 'simulation-report.json');
+const WHY_BUILDING_REPORT_PATH = join(__dirname, 'why-building-report.json');
 
 // ── Parse CLI args ─────────────────────────────────────────────────────────────
 function parseArgs() {
@@ -41,6 +43,8 @@ function parseArgs() {
     startDate: null,
     persona: DEFAULT_PERSONA,
     clean: false,
+    testWhyBuilding: false,
+    testGoalSuggestion: false,
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -48,6 +52,8 @@ function parseArgs() {
     else if (args[i] === '--start-date' && args[i + 1]) result.startDate = args[++i];
     else if (args[i] === '--persona' && args[i + 1]) result.persona = args[++i];
     else if (args[i] === '--clean') result.clean = true;
+    else if (args[i] === '--test-why-building') result.testWhyBuilding = true;
+    else if (args[i] === '--test-goal-suggestion') result.testGoalSuggestion = true;
   }
 
   // Default start date: 30 days ago
@@ -90,6 +96,70 @@ async function callCoach(body) {
   return callHandler(handler, body);
 }
 
+// ── Minimum keyword length for specific-why reference detection ───────────────
+const MIN_KEYWORD_LENGTH = 5;
+
+/**
+ * Given a list of active goal rows (with `id` and `whys` fields),
+ * returns the whys array of the most relevant goal for coach scoring context.
+ * Prefers a goal that already has whys; falls back to the first goal.
+ *
+ * @param {Array} goals - Active goal rows from Supabase
+ * @returns {Array} - The whys array to pass to scoreCoachMessage
+ */
+function selectGoalWhysForScoring(goals) {
+  if (!goals || goals.length === 0) return [];
+  const goalWithWhys = goals.find((g) => Array.isArray(g.whys) && g.whys.length > 0);
+  const selected = goalWithWhys ?? goals[0];
+  return Array.isArray(selected?.whys) ? selected.whys : [];
+}
+
+// ── Assert that whys are present in the coach context ─────────────────────────
+/**
+ * Queries active goals and checks that any goals with whys[] populated would
+ * have their whys sent to the coach (since reflection-coach.js selects whys
+ * from the goals table and includes them in the AI context block).
+ *
+ * Logs ✅ if whys are present and should be in context,
+ * or a note if no whys exist yet.
+ *
+ * @param {object} supabase - Supabase client
+ * @param {string} userId   - The simulated user ID
+ * @returns {Promise<{goalsWithWhys: number, totalWhys: number}>}
+ */
+async function assertWhysContext(supabase, userId) {
+  try {
+    const { data: goals } = await supabase
+      .from('goals')
+      .select('id, title, whys')
+      .eq('user_id', userId)
+      .eq('status', 'active');
+
+    if (!goals || goals.length === 0) return { goalsWithWhys: 0, totalWhys: 0 };
+
+    let goalsWithWhys = 0;
+    let totalWhys = 0;
+    for (const g of goals) {
+      const whysArr = Array.isArray(g.whys) ? g.whys : [];
+      if (whysArr.length > 0) {
+        goalsWithWhys++;
+        totalWhys += whysArr.length;
+      }
+    }
+
+    if (goalsWithWhys > 0) {
+      console.log(`    ✅  Whys context: ${goalsWithWhys} goal(s) with ${totalWhys} total why(s) — included in coach context`);
+    } else {
+      console.log(`    ℹ️   Whys context: no whys recorded yet — coach will ask exploratory motivation questions`);
+    }
+
+    return { goalsWithWhys, totalWhys };
+  } catch (err) {
+    console.warn(`    ⚠️  assertWhysContext failed: ${err.message}`);
+    return { goalsWithWhys: 0, totalWhys: 0 };
+  }
+}
+
 // ── Validate backend state after a session completes ─────────────────────────
 /**
  * Calls commitment-stats, queries reflection_patterns, and optionally calls
@@ -100,13 +170,14 @@ async function callCoach(body) {
  * @param {string} simulatedDate - The date of the completed session (YYYY-MM-DD)
  * @returns {Promise<object>} - backend_state object for the session record
  */
-async function validateBackend(supabase, userId, simulatedDate) {
+async function validateBackend(supabase, userId, simulatedDate, prevGoalWhysCounts = {}) {
   const backendState = {
     follow_through_7day: null,
     trajectory: null,
     patterns_accumulated: [],
     narrative_sample: null,
     goals_snapshot: [],
+    why_evolution_events: [],
   };
 
   // 1. Commitment stats
@@ -164,22 +235,31 @@ async function validateBackend(supabase, userId, simulatedDate) {
     console.warn(`    ⚠️  reflection_patterns query failed: ${err.message}`);
   }
 
-  // 3. Goals snapshot
+  // 3. Goals snapshot — read whys[], detect evolution vs previous session
   try {
     const { data: goals } = await supabase
       .from('goals')
-      .select('title, category, why_it_matters, whys, last_mentioned_at')
+      .select('id, title, category, why_it_matters, whys, last_mentioned_at')
       .eq('user_id', userId)
       .eq('status', 'active');
 
     if (goals && goals.length > 0) {
-      backendState.goals_snapshot = goals.map((g) => ({
-        title: g.title,
-        category: g.category,
-        why_it_matters: g.why_it_matters,
-        whys: Array.isArray(g.whys) ? g.whys : [],
-        last_mentioned_at: g.last_mentioned_at,
-      }));
+      backendState.goals_snapshot = goals.map((g) => {
+        const whysArr = Array.isArray(g.whys) ? g.whys : [];
+        const latestWhy = whysArr.length > 0 ? whysArr[whysArr.length - 1] : null;
+        return {
+          goal_id: g.id,
+          title: g.title,
+          category: g.category,
+          why_it_matters: g.why_it_matters,
+          whys: whysArr,
+          whys_count: whysArr.length,
+          latest_why: latestWhy?.text ?? null,
+          latest_why_added_at: latestWhy?.added_at ?? null,
+          last_mentioned_at: g.last_mentioned_at,
+        };
+      });
+
       console.log(`    🎯  Goals (${goals.length} active):`);
       for (const g of goals) {
         const whysArr = Array.isArray(g.whys) ? g.whys : [];
@@ -191,13 +271,44 @@ async function validateBackend(supabase, userId, simulatedDate) {
           : 'not set';
         const whyCount = whysArr.length > 0 ? ` (${whysArr.length} why${whysArr.length !== 1 ? 's' : ''})` : '';
         const lastMentioned = g.last_mentioned_at ? ` | last mentioned: ${g.last_mentioned_at}` : '';
-        console.log(`        "${g.title}" [${g.category ?? 'uncategorized'}] — latest why: ${whyDisplay}${whyCount}${lastMentioned}`);
+
+        // Detect why evolution vs previous session
+        const prevCount = prevGoalWhysCounts[g.id] ?? null;
+        let evolutionNote = '';
+        if (prevCount !== null && whysArr.length !== prevCount) {
+          if (whysArr.length > prevCount) {
+            evolutionNote = ` 🆕 why added (${prevCount} → ${whysArr.length})`;
+            backendState.why_evolution_events.push({
+              goal_id: g.id,
+              goal_title: g.title,
+              event: 'added',
+              prev_count: prevCount,
+              new_count: whysArr.length,
+              date: simulatedDate,
+            });
+          } else {
+            evolutionNote = ` 🔄 why replaced (${prevCount} → ${whysArr.length})`;
+            backendState.why_evolution_events.push({
+              goal_id: g.id,
+              goal_title: g.title,
+              event: 'replaced',
+              prev_count: prevCount,
+              new_count: whysArr.length,
+              date: simulatedDate,
+            });
+          }
+        }
+        console.log(`        "${g.title}" [${g.category ?? 'uncategorized'}] — latest why: ${whyDisplay}${whyCount}${lastMentioned}${evolutionNote}`);
       }
     } else {
       console.log(`    🎯  Goals: none active`);
     }
   } catch (err) {
-    console.warn(`    ⚠️  goals query failed: ${err.message}`);
+    if (err.message && err.message.includes('column') && err.message.includes('whys')) {
+      console.warn(`    ⚠️  goals.whys column not found — migration pending. Run scripts/migrate-whys.sql in Supabase.`);
+    } else {
+      console.warn(`    ⚠️  goals query failed: ${err.message}`);
+    }
   }
 
   return backendState;
@@ -304,7 +415,10 @@ function printUser(msg) {
 function printQuality(quality) {
   if (!quality) return;
   const flagStr = quality.flags.length ? ` | ${quality.flags.join(', ')}` : '';
-  console.log(`    ↳ Quality: ${quality.score}/5${flagStr}`);
+  const whyStr = quality.why_deepening_quality != null
+    ? ` | why-depth: ${quality.why_deepening_quality}/5`
+    : '';
+  console.log(`    ↳ Quality: ${quality.score}/5${flagStr}${whyStr}`);
 }
 
 function printSummary({ completed, stage, exercises, turns }) {
@@ -470,9 +584,527 @@ async function seedUserProfile(supabase, userId, persona) {
   }
 }
 
+// ── Why-Building Test — focused 7-day simulation on why evolution ─────────────
+/**
+ * Runs a focused 7-day simulation specifically testing how whys evolve.
+ *
+ * Day 1: User has a goal with a shallow why
+ * Day 3: Coach runs why_reconnect, user gives a deeper answer → why should be updated
+ * Day 5: User mentions a new reason → AI should detect it's distinct and add a second why
+ * Day 7: Coach runs motivation check-in, should reference specific whys from the list
+ *
+ * Outputs: why-building-report.json
+ */
+async function runWhyBuildingTest({ personaKey, startDate, clean }) {
+  const persona = PERSONAS[personaKey];
+  if (!persona) {
+    console.error(`❌  Unknown persona "${personaKey}". Available: ${Object.keys(PERSONAS).join(', ')}`);
+    process.exit(1);
+  }
+
+  const userId = process.env.SIM_USER_ID;
+  if (!userId) {
+    console.error('❌  SIM_USER_ID not set in environment');
+    process.exit(1);
+  }
+
+  const supabase = getSupabase();
+
+  console.log(`\n🔬  Starting --test-why-building (7-day focused run)`);
+  console.log(`    Persona:    ${personaKey} (${persona.name})`);
+  console.log(`    Start date: ${startDate}`);
+  console.log(`    User ID:    ${userId}\n`);
+
+  if (clean) {
+    console.log('🧹  Cleaning previous sim data...');
+    await cleanUserData(supabase, userId);
+    await seedUserProfile(supabase, userId, persona);
+    console.log('✅  Clean complete.\n');
+  }
+
+  const whyBuildingReport = {
+    meta: {
+      persona: personaKey,
+      start_date: startDate,
+      run_at: new Date().toISOString(),
+      user_id: userId,
+    },
+    days: [],
+    why_evolution_history: [],
+    assertions: {
+      day1_shallow_why_present: false,
+      day3_why_reconnect_fired: false,
+      day3_why_evolved: false,
+      day5_additive_why_detected: false,
+      day7_specific_why_referenced: false,
+    },
+    summary: {
+      total_why_evolution_events: 0,
+      final_whys_per_goal: [],
+    },
+  };
+
+  const traitPool = persona.hiddenTraitPool ?? [];
+  const assignedTraits = drawTraits(traitPool, 2);
+  const crossSessionState = {
+    yesterdayCommitment: null,
+    prevGoalWhysCounts: {},
+  };
+
+  for (let day = 1; day <= 7; day++) {
+    const simulatedDate = addDays(startDate, day - 1);
+    const moods = persona.tendencies.mood_distribution;
+    const mood = moods[(day - 1) % moods.length];
+    const eventBank = persona.dailyEventBank ?? [];
+    const dailyEvent = eventBank.length > 0
+      ? eventBank[Math.floor(Math.random() * eventBank.length)]
+      : null;
+
+    separator(day, simulatedDate);
+    if (dailyEvent) console.log(`📅  Today's event: ${dailyEvent}`);
+
+    const sessionId = await createSessionRow(supabase, userId, simulatedDate);
+
+    let history = [];
+    let sessionState = {
+      current_stage: 'wins',
+      checklist: { wins: false, honest: false, plan: false, identity: false },
+      tomorrow_commitment: null,
+      exercises_run: [],
+      consecutive_excuses: 0,
+      is_complete: false,
+    };
+    const sessionContext = { sharedWins: null, sharedMisses: null, sharedTomorrow: null };
+
+    const dayRecord = {
+      day,
+      date: simulatedDate,
+      exercises_run: [],
+      why_reconnect_fired: false,
+      coach_referenced_specific_why: false,
+      why_evolution_events: [],
+      conversation: [],
+    };
+
+    // INIT
+    const initResult = await callCoach({
+      user_id: userId,
+      session_id: sessionId,
+      session_state: sessionState,
+      history: [],
+      user_message: '__INIT__',
+      context: { client_local_date: simulatedDate },
+    });
+
+    const initCoachMsg = initResult.assistant_message || '';
+    printCoach(initCoachMsg);
+
+    if (initResult.stage_advance && initResult.new_stage) {
+      sessionState.current_stage = initResult.new_stage;
+    }
+    if (initResult.checklist_updates) {
+      sessionState.checklist = { ...sessionState.checklist, ...initResult.checklist_updates };
+    }
+    if (initResult.exercise_run && initResult.exercise_run !== 'none') {
+      sessionState.exercises_run = [...sessionState.exercises_run, initResult.exercise_run];
+    }
+    if (initResult.is_session_complete) sessionState.is_complete = true;
+    history.push({ role: 'assistant', content: initCoachMsg });
+
+    await assertWhysContext(supabase, userId);
+
+    // Fetch goal whys for context
+    let sessionGoalWhys = [];
+    try {
+      const { data: goalsForWhys } = await supabase
+        .from('goals').select('id, whys').eq('user_id', userId).eq('status', 'active');
+      sessionGoalWhys = selectGoalWhysForScoring(goalsForWhys ?? []);
+    } catch { /* non-fatal */ }
+
+    const MAX_TURNS = 14;
+    let turn = 0;
+
+    while (!sessionState.is_complete && turn < MAX_TURNS) {
+      turn++;
+
+      const userMsg = await generateUserResponse({
+        persona,
+        coachMessage: history[history.length - 1]?.content ?? '',
+        currentStage: sessionState.current_stage,
+        history,
+        simulatedDate,
+        mood,
+        sessionContext,
+        dailyEvent,
+        yesterdayCommitment: crossSessionState.yesterdayCommitment,
+        assignedTraits,
+        dayNumber: day,
+        whyPool: persona.whyPool ?? null,
+      });
+
+      printUser(userMsg);
+
+      if (sessionState.current_stage === 'wins') sessionContext.sharedWins = userMsg;
+      if (sessionState.current_stage === 'honest') sessionContext.sharedMisses = userMsg;
+      if (sessionState.current_stage === 'tomorrow') sessionContext.sharedTomorrow = userMsg;
+
+      history.push({ role: 'user', content: userMsg });
+
+      const result = await callCoach({
+        user_id: userId,
+        session_id: sessionId,
+        session_state: sessionState,
+        history,
+        user_message: userMsg,
+        context: { client_local_date: simulatedDate },
+      });
+
+      const coachMsg = result.assistant_message || '';
+      if (!coachMsg.trim()) { turn--; continue; }
+
+      if (result.stage_advance && result.new_stage) sessionState.current_stage = result.new_stage;
+      if (result.checklist_updates) sessionState.checklist = { ...sessionState.checklist, ...result.checklist_updates };
+      if (result.extracted_data?.tomorrow_commitment) sessionState.tomorrow_commitment = result.extracted_data.tomorrow_commitment;
+      if (result.exercise_run && result.exercise_run !== 'none') {
+        if (!sessionState.exercises_run.includes(result.exercise_run)) {
+          sessionState.exercises_run = [...sessionState.exercises_run, result.exercise_run];
+        }
+        // Track why_reconnect firing
+        if (result.exercise_run === 'why_reconnect') {
+          dayRecord.why_reconnect_fired = true;
+          if (day === 3) whyBuildingReport.assertions.day3_why_reconnect_fired = true;
+        }
+      }
+      if (typeof result.consecutive_excuses === 'number') sessionState.consecutive_excuses = result.consecutive_excuses;
+      if (result.is_session_complete) sessionState.is_complete = true;
+
+      history.push({ role: 'assistant', content: coachMsg });
+      printCoach(coachMsg);
+
+      // Check if coach referenced a specific why from the list
+      const coachMsgLower = coachMsg.toLowerCase();
+      const referencedSpecificWhy = sessionGoalWhys.some((w) => {
+        const whyText = (w.text ?? '').toLowerCase();
+        const keyWords = whyText.split(' ').filter((w) => w.length > MIN_KEYWORD_LENGTH);
+        return keyWords.some((kw) => coachMsgLower.includes(kw));
+      });
+      if (referencedSpecificWhy) {
+        dayRecord.coach_referenced_specific_why = true;
+        if (day === 7) whyBuildingReport.assertions.day7_specific_why_referenced = true;
+      }
+
+      dayRecord.conversation.push({ turn, coach: coachMsg, user: userMsg });
+      if (sessionState.is_complete) break;
+    }
+
+    dayRecord.exercises_run = sessionState.exercises_run;
+    crossSessionState.yesterdayCommitment = sessionState.tomorrow_commitment ?? null;
+
+    // Backend validation + why evolution detection
+    const backendState = await validateBackend(supabase, userId, simulatedDate, crossSessionState.prevGoalWhysCounts);
+
+    if (backendState.goals_snapshot && backendState.goals_snapshot.length > 0) {
+      for (const g of backendState.goals_snapshot) {
+        const prevCount = crossSessionState.prevGoalWhysCounts[g.goal_id] ?? 0;
+        crossSessionState.prevGoalWhysCounts[g.goal_id] = g.whys_count;
+
+        if (day === 1 && g.whys_count > 0) {
+          whyBuildingReport.assertions.day1_shallow_why_present = true;
+        }
+        if (day === 3 && g.whys_count !== prevCount) {
+          whyBuildingReport.assertions.day3_why_evolved = true;
+        }
+        if (day === 5 && g.whys_count > 1) {
+          whyBuildingReport.assertions.day5_additive_why_detected = true;
+        }
+      }
+
+      dayRecord.why_evolution_events = backendState.why_evolution_events ?? [];
+      if (backendState.why_evolution_events?.length > 0) {
+        whyBuildingReport.why_evolution_history.push(...backendState.why_evolution_events);
+        whyBuildingReport.summary.total_why_evolution_events += backendState.why_evolution_events.length;
+      }
+    }
+
+    printSummary({
+      completed: sessionState.is_complete,
+      stage: sessionState.current_stage,
+      exercises: sessionState.exercises_run,
+      turns: turn,
+    });
+
+    whyBuildingReport.days.push(dayRecord);
+
+    if (day < 7) await new Promise((r) => setTimeout(r, 500));
+  }
+
+  // Final goals state
+  try {
+    const { data: finalGoals } = await supabase
+      .from('goals').select('id, title, whys').eq('user_id', userId).eq('status', 'active');
+    if (finalGoals) {
+      whyBuildingReport.summary.final_whys_per_goal = finalGoals.map((g) => ({
+        goal_id: g.id,
+        title: g.title,
+        whys_count: Array.isArray(g.whys) ? g.whys.length : 0,
+        whys: Array.isArray(g.whys) ? g.whys : [],
+      }));
+    }
+  } catch (err) {
+    console.warn(`    ⚠️  Final goals query failed: ${err.message}`);
+  }
+
+  // Print assertion results
+  console.log('\n🔬  Why-Building Test Assertions:');
+  const assertions = whyBuildingReport.assertions;
+  console.log(`    Day 1 — shallow why present:        ${assertions.day1_shallow_why_present ? '✅ PASS' : '⚠️  not yet (whys may not exist in DB yet)'}`);
+  console.log(`    Day 3 — why_reconnect exercise fired: ${assertions.day3_why_reconnect_fired ? '✅ PASS' : '❌ FAIL'}`);
+  console.log(`    Day 3 — why evolved (count changed): ${assertions.day3_why_evolved ? '✅ PASS' : '❌ FAIL'}`);
+  console.log(`    Day 5 — additive why detected:      ${assertions.day5_additive_why_detected ? '✅ PASS' : '❌ FAIL'}`);
+  console.log(`    Day 7 — coach used specific why:    ${assertions.day7_specific_why_referenced ? '✅ PASS' : '❌ FAIL'}`);
+  console.log(`    Total why evolution events:         ${whyBuildingReport.summary.total_why_evolution_events}`);
+
+  try {
+    writeFileSync(WHY_BUILDING_REPORT_PATH, JSON.stringify(whyBuildingReport, null, 2), 'utf8');
+    console.log(`\n✅  Why-building report saved to:\n    ${WHY_BUILDING_REPORT_PATH}\n`);
+  } catch (err) {
+    console.error('❌  Could not write why-building report:', err.message);
+  }
+}
+
+// ── Goal Suggestion Test — tests coach goal suggestion + why journaling ────────
+/**
+ * Runs a focused single-session test for goal suggestion:
+ * 1. Simulates a session where the coach surfaces a suggested goal
+ * 2. The user accepts
+ * 3. A why for the new goal is recorded
+ * 4. The new goal appears in the DB with at least one why entry
+ *
+ * Logs pass/fail assertions to console.
+ */
+async function runGoalSuggestionTest({ personaKey, startDate, clean }) {
+  const persona = PERSONAS[personaKey];
+  if (!persona) {
+    console.error(`❌  Unknown persona "${personaKey}". Available: ${Object.keys(PERSONAS).join(', ')}`);
+    process.exit(1);
+  }
+
+  const userId = process.env.SIM_USER_ID;
+  if (!userId) {
+    console.error('❌  SIM_USER_ID not set in environment');
+    process.exit(1);
+  }
+
+  const supabase = getSupabase();
+
+  console.log(`\n🎯  Starting --test-goal-suggestion`);
+  console.log(`    Persona:    ${personaKey} (${persona.name})`);
+  console.log(`    Start date: ${startDate}`);
+  console.log(`    User ID:    ${userId}\n`);
+
+  if (clean) {
+    console.log('🧹  Cleaning previous sim data...');
+    await cleanUserData(supabase, userId);
+    await seedUserProfile(supabase, userId, persona);
+    console.log('✅  Clean complete.\n');
+  }
+
+  const assertions = {
+    session_completed: false,
+    goal_suggestion_fired: false,
+    goal_created_in_db: false,
+    goal_has_why: false,
+  };
+
+  const simulatedDate = startDate;
+  const sessionId = await createSessionRow(supabase, userId, simulatedDate);
+
+  const moods = persona.tendencies.mood_distribution;
+  const mood = moods[0];
+  const eventBank = persona.dailyEventBank ?? [];
+  const dailyEvent = eventBank.length > 0 ? eventBank[0] : null;
+  const traitPool = persona.hiddenTraitPool ?? [];
+  const assignedTraits = drawTraits(traitPool, 2);
+
+  separator(1, simulatedDate);
+  if (dailyEvent) console.log(`📅  Today's event: ${dailyEvent}`);
+
+  let history = [];
+  let sessionState = {
+    current_stage: 'wins',
+    checklist: { wins: false, honest: false, plan: false, identity: false },
+    tomorrow_commitment: null,
+    exercises_run: [],
+    consecutive_excuses: 0,
+    is_complete: false,
+  };
+  const sessionContext = { sharedWins: null, sharedMisses: null, sharedTomorrow: null };
+
+  let suggestedGoal = null;
+
+  const initResult = await callCoach({
+    user_id: userId,
+    session_id: sessionId,
+    session_state: sessionState,
+    history: [],
+    user_message: '__INIT__',
+    context: { client_local_date: simulatedDate },
+  });
+
+  const initCoachMsg = initResult.assistant_message || '';
+  printCoach(initCoachMsg);
+
+  if (initResult.stage_advance && initResult.new_stage) sessionState.current_stage = initResult.new_stage;
+  if (initResult.checklist_updates) sessionState.checklist = { ...sessionState.checklist, ...initResult.checklist_updates };
+  if (initResult.exercise_run && initResult.exercise_run !== 'none') sessionState.exercises_run = [...sessionState.exercises_run, initResult.exercise_run];
+  if (initResult.is_session_complete) sessionState.is_complete = true;
+  history.push({ role: 'assistant', content: initCoachMsg });
+
+  const MAX_TURNS = 16;
+  let turn = 0;
+
+  while (!sessionState.is_complete && turn < MAX_TURNS) {
+    turn++;
+
+    const userMsg = await generateUserResponse({
+      persona,
+      coachMessage: history[history.length - 1]?.content ?? '',
+      currentStage: sessionState.current_stage,
+      history,
+      simulatedDate,
+      mood,
+      sessionContext,
+      dailyEvent,
+      yesterdayCommitment: null,
+      assignedTraits,
+      dayNumber: 1,
+      whyPool: persona.whyPool ?? null,
+    });
+
+    printUser(userMsg);
+
+    if (sessionState.current_stage === 'wins') sessionContext.sharedWins = userMsg;
+    if (sessionState.current_stage === 'honest') sessionContext.sharedMisses = userMsg;
+    if (sessionState.current_stage === 'tomorrow') sessionContext.sharedTomorrow = userMsg;
+
+    history.push({ role: 'user', content: userMsg });
+
+    const result = await callCoach({
+      user_id: userId,
+      session_id: sessionId,
+      session_state: sessionState,
+      history,
+      user_message: userMsg,
+      context: { client_local_date: simulatedDate },
+    });
+
+    const coachMsg = result.assistant_message || '';
+    if (!coachMsg.trim()) { turn--; continue; }
+
+    // Check if coach surfaced a goal suggestion
+    if (result.extracted_data?.goal_suggestion && !suggestedGoal) {
+      suggestedGoal = result.extracted_data.goal_suggestion;
+      assertions.goal_suggestion_fired = true;
+      console.log(`\n💡  Goal suggestion detected: "${suggestedGoal.title ?? JSON.stringify(suggestedGoal)}"`);
+    }
+
+    if (result.stage_advance && result.new_stage) sessionState.current_stage = result.new_stage;
+    if (result.checklist_updates) sessionState.checklist = { ...sessionState.checklist, ...result.checklist_updates };
+    if (result.extracted_data?.tomorrow_commitment) sessionState.tomorrow_commitment = result.extracted_data.tomorrow_commitment;
+    if (result.exercise_run && result.exercise_run !== 'none') {
+      if (!sessionState.exercises_run.includes(result.exercise_run)) {
+        sessionState.exercises_run = [...sessionState.exercises_run, result.exercise_run];
+      }
+    }
+    if (typeof result.consecutive_excuses === 'number') sessionState.consecutive_excuses = result.consecutive_excuses;
+    if (result.is_session_complete) sessionState.is_complete = true;
+
+    history.push({ role: 'assistant', content: coachMsg });
+    printCoach(coachMsg);
+
+    if (sessionState.is_complete) break;
+  }
+
+  if (sessionState.is_complete) assertions.session_completed = true;
+
+  // If a goal was suggested, simulate accepting it and journaling why
+  if (suggestedGoal) {
+    const goalTitle = suggestedGoal.title ?? suggestedGoal;
+    const goalCategory = suggestedGoal.category ?? null;
+    // Generate a why for the new goal (use shallow tier since it's new)
+    const whyPool = persona.whyPool?.shallow ?? [];
+    const whyText = whyPool.length > 0
+      ? whyPool[Math.floor(Math.random() * whyPool.length)]
+      : 'I want to work on this because it matters to me';
+
+    console.log(`\n📝  Simulating user accepting goal: "${goalTitle}"`);
+    console.log(`    Why they journal: "${whyText}"`);
+
+    try {
+      const createResult = await callHandler(createGoalHandler, {
+        user_id: userId,
+        title: goalTitle,
+        category: goalCategory,
+        why_it_matters: whyText,
+      });
+
+      if (createResult.goal && createResult.goal.id) {
+        assertions.goal_created_in_db = true;
+        console.log(`    ✅  Goal created in DB: ${createResult.goal.id}`);
+
+        // Seed a why entry for this new goal
+        try {
+          const { error: whyErr } = await supabase
+            .from('goals')
+            .update({
+              whys: [{ text: whyText, added_at: new Date().toISOString(), source: 'user_journal' }],
+            })
+            .eq('id', createResult.goal.id)
+            .eq('user_id', userId);
+
+          if (!whyErr) {
+            assertions.goal_has_why = true;
+            console.log(`    ✅  Why journaled for new goal`);
+          } else {
+            console.warn(`    ⚠️  Could not write why: ${whyErr.message}`);
+          }
+        } catch (err) {
+          console.warn(`    ⚠️  Why write failed: ${err.message}`);
+        }
+      } else {
+        console.warn(`    ⚠️  Goal creation response missing ID: ${JSON.stringify(createResult)}`);
+      }
+    } catch (err) {
+      console.warn(`    ⚠️  Goal creation failed: ${err.message}`);
+    }
+  } else {
+    console.log(`\n⚠️  No goal suggestion detected in this session. Coach may need more sessions to surface one.`);
+    console.log(`    Tip: Run with --days 3 to give the coach more turns to suggest a goal.`);
+  }
+
+  // Print assertion results
+  console.log('\n🎯  Goal Suggestion Test Assertions:');
+  console.log(`    Session completed:         ${assertions.session_completed ? '✅ PASS' : '⚠️  incomplete'}`);
+  console.log(`    Goal suggestion fired:     ${assertions.goal_suggestion_fired ? '✅ PASS' : '❌ FAIL (no suggestion in this session)'}`);
+  console.log(`    Goal created in DB:        ${assertions.goal_created_in_db ? '✅ PASS' : '❌ FAIL'}`);
+  console.log(`    Goal has why entry:        ${assertions.goal_has_why ? '✅ PASS' : '❌ FAIL'}`);
+
+  const passed = Object.values(assertions).filter(Boolean).length;
+  const total = Object.values(assertions).length;
+  console.log(`\n    Result: ${passed}/${total} assertions passed\n`);
+}
+
 // ── Main simulation ────────────────────────────────────────────────────────────
 async function main() {
-  const { days, startDate, persona: personaKey, clean } = parseArgs();
+  const { days, startDate, persona: personaKey, clean, testWhyBuilding, testGoalSuggestion } = parseArgs();
+
+  // Route to specialized test flows
+  if (testWhyBuilding) {
+    return runWhyBuildingTest({ personaKey, startDate, clean });
+  }
+  if (testGoalSuggestion) {
+    return runGoalSuggestionTest({ personaKey, startDate, clean });
+  }
 
   const persona = PERSONAS[personaKey];
   if (!persona) {
@@ -523,6 +1155,9 @@ async function main() {
       sessions_completed: 0,
       sessions_incomplete: 0,
       flags_by_type: {},
+      avg_why_deepening_quality: null,
+      why_evolution_events: 0,
+      goals_with_multiple_whys: 0,
     },
     backend_summary: {
       final_follow_through_7day: null,
@@ -539,10 +1174,12 @@ async function main() {
   };
 
   let totalQualityScores = [];
+  let totalWhyDeepeningScores = [];
 
   // ── Cross-session state — carries forward across days ─────────────────────
   const crossSessionState = {
     yesterdayCommitment: null,
+    prevGoalWhysCounts: {}, // goalId → whys count from previous session
   };
 
   // ── Graceful interrupt handler — write partial report ──
@@ -625,9 +1262,11 @@ async function main() {
       checklist: { wins: false, honest: false, plan: false, identity: false },
       conversation: [],
       backend_state: null,
+      goals_why_snapshot: [],
     };
 
     const sessionQualityScores = [];
+    const sessionWhyDeepeningScores = [];
     const MAX_TURNS = 16;
     let turn = 0;
 
@@ -670,7 +1309,23 @@ async function main() {
       quality: null,
     });
 
+    // ── Assert whys context after INIT (pre-conversation) ─────────────────
+    await assertWhysContext(supabase, userId);
+
     // ── Conversation loop ──────────────────────────────────────────────────
+    // Fetch current goal whys once per session to pass to scoring
+    let sessionGoalWhys = [];
+    try {
+      const { data: goalsForWhys } = await supabase
+        .from('goals')
+        .select('id, title, whys')
+        .eq('user_id', userId)
+        .eq('status', 'active');
+      sessionGoalWhys = selectGoalWhysForScoring(goalsForWhys ?? []);
+    } catch {
+      // Non-fatal — scoring will just have no whys context
+    }
+
     while (!sessionState.is_complete && turn < MAX_TURNS) {
       turn++;
 
@@ -686,6 +1341,8 @@ async function main() {
         dailyEvent,
         yesterdayCommitment: crossSessionState.yesterdayCommitment,
         assignedTraits,
+        dayNumber: day,
+        whyPool: persona.whyPool ?? null,
       });
 
       printUser(userMsg);
@@ -744,7 +1401,7 @@ async function main() {
 
       printCoach(coachMsg);
 
-      // Score the coach message
+      // Score the coach message (including why-deepening quality)
       const quality = await scoreCoachMessage({
         persona,
         userProfile: persona.profile,
@@ -752,12 +1409,18 @@ async function main() {
         turnNumber: turn,
         previousUserMessage: prevUserMsg,
         coachMessage: coachMsg,
+        goalWhys: sessionGoalWhys,
       });
 
       printQuality(quality);
 
       sessionQualityScores.push(quality.score);
       totalQualityScores.push(quality.score);
+
+      if (quality.why_deepening_quality != null) {
+        sessionWhyDeepeningScores.push(quality.why_deepening_quality);
+        totalWhyDeepeningScores.push(quality.why_deepening_quality);
+      }
 
       // Track flags globally
       for (const flag of quality.flags) {
@@ -800,14 +1463,36 @@ async function main() {
       sessionQualityScores.length > 0
         ? Math.round((sessionQualityScores.reduce((a, b) => a + b, 0) / sessionQualityScores.length) * 100) / 100
         : null;
+    const sessionAvgWhyQuality = sessionWhyDeepeningScores.length > 0
+      ? Math.round((sessionWhyDeepeningScores.reduce((a, b) => a + b, 0) / sessionWhyDeepeningScores.length) * 100) / 100
+      : null;
 
     // Update cross-session state for the next day
     crossSessionState.yesterdayCommitment = sessionState.tomorrow_commitment ?? null;
 
     // Run backend validation and store result
     console.log(`\n🔍  Backend validation:`);
-    const backendState = await validateBackend(supabase, userId, simulatedDate);
+    const backendState = await validateBackend(supabase, userId, simulatedDate, crossSessionState.prevGoalWhysCounts);
     sessionRecord.backend_state = backendState;
+
+    // Build goals_why_snapshot for this session and update prevGoalWhysCounts
+    if (backendState.goals_snapshot && backendState.goals_snapshot.length > 0) {
+      sessionRecord.goals_why_snapshot = backendState.goals_snapshot.map((g) => ({
+        goal_title: g.title,
+        whys_count: g.whys_count,
+        latest_why: g.latest_why,
+        // session_avg_why_deepening_quality is a session-wide average across all turns, not goal-specific
+        session_avg_why_deepening_quality: sessionAvgWhyQuality,
+      }));
+      // Update cross-session prev counts for next day's comparison
+      for (const g of backendState.goals_snapshot) {
+        crossSessionState.prevGoalWhysCounts[g.goal_id] = g.whys_count;
+      }
+      // Track why evolution events for summary
+      if (backendState.why_evolution_events && backendState.why_evolution_events.length > 0) {
+        report.summary.why_evolution_events += backendState.why_evolution_events.length;
+      }
+    }
 
     report.sessions.push(sessionRecord);
 
@@ -937,7 +1622,7 @@ async function main() {
     report.trait_detection = null;
   }
 
-  finalizeReport(report, totalQualityScores);
+  finalizeReport(report, totalQualityScores, totalWhyDeepeningScores);
   console.log(`\n✅  Simulation complete. Report saved to:\n    ${REPORT_PATH}\n`);
   if (clean) {
     console.log(`✅  Clean run complete. Pre-run snapshot saved to report.meta.pre_run_profile_snapshot\n`);
@@ -945,11 +1630,25 @@ async function main() {
 }
 
 // ── Finalize and write report ──────────────────────────────────────────────────
-function finalizeReport(report, totalQualityScores) {
+function finalizeReport(report, totalQualityScores, totalWhyDeepeningScores = []) {
   report.summary.avg_quality_score =
     totalQualityScores.length > 0
       ? Math.round((totalQualityScores.reduce((a, b) => a + b, 0) / totalQualityScores.length) * 100) / 100
       : 0;
+
+  // Why-deepening summary
+  report.summary.avg_why_deepening_quality =
+    totalWhyDeepeningScores.length > 0
+      ? Math.round((totalWhyDeepeningScores.reduce((a, b) => a + b, 0) / totalWhyDeepeningScores.length) * 100) / 100
+      : null;
+
+  // Count goals that ended up with multiple whys (from the final session's goals_why_snapshot)
+  const lastSessionWithGoals = [...report.sessions].reverse().find((s) => s.goals_why_snapshot?.length > 0);
+  if (lastSessionWithGoals) {
+    report.summary.goals_with_multiple_whys = lastSessionWithGoals.goals_why_snapshot.filter(
+      (g) => g.whys_count > 1,
+    ).length;
+  }
 
   try {
     writeFileSync(REPORT_PATH, JSON.stringify(report, null, 2), 'utf8');
