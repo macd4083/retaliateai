@@ -80,6 +80,8 @@ node --env-file=.env.simulation.local scripts/simulate-reflection.js \
 | `--start-date` | 30 days ago | Start date (YYYY-MM-DD) |
 | `--persona` | `ambitious_but_inconsistent` | Which persona to use |
 | `--clean` | `false` | **Recommended.** Wipes all previous sim data for `SIM_USER_ID` and resets the user profile to the persona definition before running. Without this, leftover patterns and profile data from prior runs will contaminate the coach's context. |
+| `--test-why-building` | `false` | Runs a focused **7-day** simulation specifically testing why evolution (see below). |
+| `--test-goal-suggestion` | `false` | Runs a **single-session** test that checks whether the coach suggests a new goal and validates the full suggestion → acceptance → why-journaling flow (see below). |
 
 ## Why `--clean` matters
 
@@ -96,13 +98,81 @@ node --env-file=.env.simulation.local scripts/simulate-reflection.js \
   --clean
 ```
 
+---
+
+## `--test-why-building`
+
+Runs a focused **7-day** simulation specifically testing how whys evolve over time:
+
+- **Day 1**: User has a goal with a shallow why ("I just want to make money")
+- **Day 3**: Coach runs `why_reconnect` exercise; user gives a deeper answer → why is updated or added
+- **Day 5**: User mentions a *new* reason → AI detects it's distinct and adds a second why
+- **Day 7**: Coach runs motivation check-in, should reference *specific* whys, not generic language
+
+**Output**: `scripts/why-building-report.json` with full why evolution history and pass/fail assertions.
+
+**Example:**
+```bash
+node --env-file=.env.simulation.local scripts/simulate-reflection.js \
+  --persona ambitious_but_inconsistent \
+  --start-date 2026-03-14 \
+  --clean \
+  --test-why-building
+```
+
+**Assertions checked:**
+- Day 1 — shallow why present in DB
+- Day 3 — `why_reconnect` exercise fired
+- Day 3 — why evolved (count changed)
+- Day 5 — additive why detected (goals has 2+ whys)
+- Day 7 — coach referenced a specific why text from the whys list
+
+---
+
+## `--test-goal-suggestion`
+
+Runs a **single-session** test that validates the full goal suggestion flow:
+
+1. Simulates a session where the coach surfaces a suggested goal via `extracted_data.goal_suggestion`
+2. Accepts the suggested goal (calls `api/create-goal.js`)
+3. Journals a why for the new goal
+4. Verifies the new goal appears in the DB with at least one why entry
+
+**Output**: Pass/fail assertions to console.
+
+**Example:**
+```bash
+node --env-file=.env.simulation.local scripts/simulate-reflection.js \
+  --persona ambitious_but_inconsistent \
+  --start-date 2026-03-14 \
+  --clean \
+  --test-goal-suggestion
+```
+
+**Assertions checked:**
+- Session completed
+- Goal suggestion fired in extracted_data
+- Goal created in Supabase
+- Goal has a why entry
+
+> **Note:** Goal suggestion requires the AI to naturally surface one in a single session. If it doesn't fire, try running without `--clean` so the coach has more context, or run multiple days first.
+
+---
+
 ### Available personas
 
-| Key | Name | Description |
-|-----|------|-------------|
-| `ambitious_but_inconsistent` | Alex | Building SaaS, ~60% follow-through |
-| `consistent_grinder` | Jordan | Consistent but surface-level, ~85% follow-through |
-| `creative_with_perfectionism` | Sam | Deep reflector but struggles to commit, ~50% follow-through |
+| Key | Name | Description | Why Pool |
+|-----|------|-------------|----------|
+| `ambitious_but_inconsistent` | Alex | Building SaaS, ~60% follow-through | ✅ shallow / deeper / additive |
+| `consistent_grinder` | Jordan | Consistent but surface-level, ~85% follow-through | ✅ shallow / deeper / additive |
+| `creative_with_perfectionism` | Sam | Deep reflector but struggles to commit, ~50% follow-through | ✅ shallow / deeper / additive |
+| `burnt_out_professional` | Maya | Corporate PM building a side project, ~55% follow-through | — (no goals seeded by default) |
+| `comeback_kid` | Darius | Recovering from burnout, cautious optimist, ~70% follow-through | — (no goals seeded by default) |
+
+The three primary personas (`ambitious_but_inconsistent`, `consistent_grinder`, `creative_with_perfectionism`) have `whyPool` defined with tiered responses. The why tier is selected based on the day number:
+- Days 1–7: `shallow` (surface-level answers)
+- Days 8–20: `deeper` (emotionally honest, realizing the real reason)
+- Days 21+: `additive` (60% chance) or `deeper` (40% chance)
 
 ---
 
@@ -172,7 +242,10 @@ Copilot will look at the flag reasons, cross-reference with `api/reflection-coac
     "avg_quality_score": 3.8,
     "sessions_completed": 28,
     "sessions_incomplete": 2,
-    "flags_by_type": { "GENERIC": 12, "THERAPIST_LANGUAGE": 3 }
+    "flags_by_type": { "GENERIC": 12, "THERAPIST_LANGUAGE": 3 },
+    "avg_why_deepening_quality": 3.4,
+    "why_evolution_events": 4,
+    "goals_with_multiple_whys": 2
   },
   "sessions": [
     {
@@ -183,22 +256,66 @@ Copilot will look at the flag reasons, cross-reference with `api/reflection-coac
       "avg_quality": 4.1,
       "exercises_run": ["depth_probe"],
       "checklist": { "wins": true, "honest": true, "plan": true, "identity": true },
+      "goals_why_snapshot": [
+        {
+          "goal_title": "Get Stackline to 20 paying customers",
+          "whys_count": 2,
+          "latest_why": "It stopped being about the product — it's about proving I'm someone who finishes things.",
+          "session_avg_why_deepening_quality": 4
+        }
+      ],
       "conversation": [...]
     }
   ],
-  "flagged_for_review": [
-    {
-      "date": "2025-12-05",
-      "turn": 6,
-      "coach_message": "How does that make you feel?",
-      "user_message_before": "I keep avoiding the hard stuff",
-      "session_stage": "honest",
-      "quality_score": 1,
-      "flags": ["THERAPIST_LANGUAGE"],
-      "reason": "Classic therapist question — violates SYSTEM_PROMPT core rules",
-      "session_id": "..."
-    }
-  ]
+  "flagged_for_review": [...]
+}
+```
+
+### `summary` why fields
+
+| Field | Description |
+|-------|-------------|
+| `avg_why_deepening_quality` | Average why-deepening quality score (1–5) across all turns where it was scored. `null` if no why questions were asked. |
+| `why_evolution_events` | Total number of sessions where a goal's why was added or replaced. |
+| `goals_with_multiple_whys` | Number of active goals that ended the simulation with 2+ whys. |
+
+### `goals_why_snapshot` per session
+
+Each session record now includes a `goals_why_snapshot` array — one entry per active goal:
+
+| Field | Description |
+|-------|-------------|
+| `goal_title` | Goal title |
+| `whys_count` | How many whys are in the goal's `whys[]` array at end of this session |
+| `latest_why` | The text of the most recently added/updated why |
+| `session_avg_why_deepening_quality` | Session-wide average why-deepening score from all coach messages in this session (not goal-specific) |
+
+---
+
+## `why-building-report.json`
+
+When you run `--test-why-building`, a separate `scripts/why-building-report.json` is written with:
+
+```json
+{
+  "meta": { "persona": "...", "start_date": "...", "run_at": "..." },
+  "assertions": {
+    "day1_shallow_why_present": true,
+    "day3_why_reconnect_fired": true,
+    "day3_why_evolved": true,
+    "day5_additive_why_detected": false,
+    "day7_specific_why_referenced": true
+  },
+  "why_evolution_history": [
+    { "goal_id": "...", "goal_title": "...", "event": "added", "prev_count": 0, "new_count": 1, "date": "2026-03-16" }
+  ],
+  "summary": {
+    "total_why_evolution_events": 3,
+    "final_whys_per_goal": [
+      { "goal_id": "...", "title": "...", "whys_count": 2, "whys": [...] }
+    ]
+  },
+  "days": [...]
 }
 ```
 
@@ -210,5 +327,7 @@ Copilot will look at the flag reasons, cross-reference with `api/reflection-coac
 |-----|---------------------|-------------------|-----------|
 | 30 days | ~270 | ~540 | ~$2–4 |
 | 90 days | ~810 | ~1,620 | ~$6–12 |
+| `--test-why-building` | ~63 | ~126 | ~$0.50–1 |
+| `--test-goal-suggestion` | ~9 | ~18 | ~$0.15 |
 
 > **Tip:** Use `--days 3` for a quick smoke test before a full run.

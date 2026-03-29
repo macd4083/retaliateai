@@ -87,6 +87,27 @@ export const PERSONAS = {
       // Weighted probability for response modes: A=60%, B=25%, C=15%
       responseModeWeights: [0.60, 0.25, 0.15],
     },
+    // Tiered why pool — used by generateUserResponse when coach asks about motivation
+    // shallow: days 1-7, deeper: days 8-20, additive: days 21+ (adds a second dimension)
+    whyPool: {
+      shallow: [
+        "I just want to make money, like obviously",
+        "Because I said I would and I hate being the guy who doesn't follow through",
+        "I'm tired of having ideas I never ship, it's embarrassing",
+        "I just want to prove I can do it",
+      ],
+      deeper: [
+        "I realized it's not really about the money — it's about proving to myself I can actually finish something. I've started three things and abandoned all of them.",
+        "Honestly I think I'm scared that if I ship it and it fails, I don't have the excuse anymore. So I keep not shipping.",
+        "It stopped being about the product and became about whether I'm the kind of person who builds things or just talks about building things.",
+        "My dad always said I'd never stick with anything. I don't think about that consciously but I think it's there.",
+      ],
+      additive: [
+        "Also — and I haven't said this out loud before — I want to be the kind of person my younger brother can look up to. He's watching what I do.",
+        "There's another thing too. I want to know I can create income without depending on a company deciding my worth. That's separate from the proving-myself thing.",
+        "I think there's also something about building a body of work. Like, I want to look back in 10 years and see a trail of things I made.",
+      ],
+    },
     hiddenTraitPool: [
       'fear_of_visibility',
       'validation_treadmill',
@@ -169,6 +190,27 @@ export const PERSONAS = {
       follow_through_rate: 0.85,
       // Weighted probability for response modes: A=70%, B=20%, C=10%
       responseModeWeights: [0.70, 0.20, 0.10],
+    },
+    // Tiered why pool — used by generateUserResponse when coach asks about motivation
+    // shallow: days 1-7, deeper: days 8-20, additive: days 21+ (adds a second dimension)
+    whyPool: {
+      shallow: [
+        "Because I said I would do it three years ago and I haven't yet",
+        "I want to quit the day job. That's the whole reason.",
+        "I need to know if I can actually ship something real, not just talk about it",
+        "Honestly I just want to stop feeling behind",
+      ],
+      deeper: [
+        "I realized the day job thing isn't actually the deepest layer. It's that I've never had proof that I can go all the way with something. That's the thing that's actually eating at me.",
+        "Tanya piling work on me isn't the problem — the problem is I let it happen because on some level I think Fieldr might fail and this is my excuse not to find out.",
+        "Chris asked me a while back why I was doing this and I said 'for us' but I'm not sure that's true. I think I'm doing it because I need to know I'm not just someone who shows up and executes other people's ideas.",
+        "There's something about finishing. I track everything, I show up every day, but I've never actually shipped and handed it to real users. That's the gap that keeps me up.",
+      ],
+      additive: [
+        "Also — this is separate — I think I want to build something that actually helps people. Not just insurance agents. Like, I want Fieldr to be useful in a way that matters, not just a side income.",
+        "There's another reason I don't talk about much. I want Chris to see that this is real. Not to prove something to them, but because they've been patient and I want them to see the payoff.",
+        "I also think I need to experience what it feels like to bet on myself. I've been reliable for other companies my whole career. I want to know what it's like to build something mine.",
+      ],
     },
     hiddenTraitPool: [
       'identity_tied_to_productivity',
@@ -259,6 +301,27 @@ export const PERSONAS = {
       'conflict_avoidance_disguised_as_harmony',
       'chronic_future_self_dependency',
     ],
+    // Tiered why pool — used by generateUserResponse when coach asks about motivation
+    // shallow: days 1-7, deeper: days 8-20, additive: days 21+ (adds a second dimension)
+    whyPool: {
+      shallow: [
+        "I'm tired of working for people who don't get it. I want to do it my way.",
+        "I want to stop depending on clients who don't value craft",
+        "I just want to make enough to not worry about money while doing work I actually care about",
+        "Lena keeps saying I'm wasting my talent on bad briefs and honestly she's right",
+      ],
+      deeper: [
+        "It's not really about being independent. It's that I've been making things that feel like compromises my whole career. I want to know what I'd make if nobody was telling me what they need it to look like.",
+        "I think I'm scared that if I run my own studio and it fails, it means I'm not actually as good as I think I am. And right now I can protect that belief by not fully trying.",
+        "Yusuf asked what the studio is really for and I gave him the easy answer — financial freedom. But the real answer is I want to do work I'd put in my portfolio, not just work I got paid for.",
+        "I realized I've been defining success as client approval. The whole point of the studio is to change what success means — to make it about the work itself.",
+      ],
+      additive: [
+        "There's something else too. I want to show younger designers, especially women of color, that you can run something creative on your own terms. I didn't have anyone like that to look at.",
+        "Also — and this is recent — I think I want to build something that outlasts individual projects. Like, a studio that has a point of view. Not just a person for hire.",
+        "I've also realized I want to prove something to my parents. They wanted me to do something 'stable' and I chose design. The studio is the thing that justifies that choice.",
+      ],
+    },
   },
 
   burnt_out_professional: {
