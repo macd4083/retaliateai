@@ -177,6 +177,14 @@ You have a goals array. Each goal may have: id, area, title, original_why, enric
 
 You also may have quiet_goals — goals that haven't come up in 14+ days. These are a soft permission: if a natural opening exists, one gentle check-in is fine. If there's no opening, skip entirely.
 
+GOAL CHECK-IN (goals_due_for_checkin):
+- These goals have been flagged for a periodic motivation check-in
+- If one of these goals naturally comes up, gently ask: does this goal still fire you up, or has something shifted?
+- This is not interrogation — it's curiosity. One soft question, nothing more.
+- If the user signals the goal has lost relevance, surface it and suggest they update it
+- Never force a check-in if the conversation is already going somewhere real
+- Only one check-in per session maximum
+
 CORE RULE: You are NOT managing the user through a goals framework. Goals are background knowledge. Use them when the moment is right — not because they're there.
 
 HARD LIMITS:
@@ -221,6 +229,14 @@ WHEN TO MAKE THE CONNECTION:
    → Set extracted_data.goal_depth_insight with the realization in their words
    → Set extracted_data.goal_id_referenced
 
+6. Goal motivation signal (goal_motivation_signal field):
+   → When running a goal check-in moment, populate goal_motivation_signal based on the user's energy/language about that goal
+   → "high" = strong engagement, fired up, talking with energy
+   → "medium" = still committed but quieter, more duty than desire
+   → "low" = going through the motions, mild disillusionment
+   → "lost" = user signals the goal no longer matters or they've moved on
+   → Leave null if no goal check-in happened this message
+
 WHAT NOT TO DO:
 - Never announce you're doing a "goal check-in"
 - Never ask about multiple goals in the same session
@@ -228,6 +244,11 @@ WHAT NOT TO DO:
 - Never ask the generic "why does that goal matter to you?" — you have context, use it
 - Never manufacture a moment that isn't there
 - Never surface a goal during wins stage
+
+FUTURE SELF BRIDGE FREQUENCY:
+- Connect current daily actions to the user's future self vision roughly once per week (not every session)
+- Track this via the exercises_run array: if 'future_self_bridge' has been run in the last 5 sessions' recent data, skip it
+- When you do surface it, make it feel earned, not scripted
 
 RETURN JSON EXACTLY (no markdown, no extra keys):
 {
@@ -247,7 +268,8 @@ RETURN JSON EXACTLY (no markdown, no extra keys):
     "goal_why_insight": null,
     "goal_vision_fragment": null,
     "goal_depth_insight": null,
-    "goal_suggestion": null
+    "goal_suggestion": null,
+    "goal_motivation_signal": null
   },
   "exercise_run": "none|gratitude_anchor|why_reconnect|evidence_audit|implementation_intention|values_clarification|future_self_bridge|ownership_reframe|triage_one_thing|identity_reinforcement|depth_probe",
   "checklist_updates": {"wins": false, "honest": false, "plan": false, "identity": false},
@@ -520,6 +542,20 @@ async function loadActiveGoals(userId) {
   } catch (_e) { return []; }
 }
 
+async function loadGoalsDueForCheckin(userId, clientToday) {
+  try {
+    const todayStr = today(clientToday);
+    const { data } = await supabase
+      .from('goals')
+      .select('id, title, why_it_matters, category, next_checkin_at')
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .lte('next_checkin_at', todayStr)
+      .not('next_checkin_at', 'is', null);
+    return data || [];
+  } catch (_e) { return []; }
+}
+
 // ── Classify intent ───────────────────────────────────────────────────────────
 
 async function classifyIntent(userMessage, sessionContext = {}) {
@@ -616,6 +652,30 @@ async function queueFollowUp(userId, sessionId, { context, question, check_back_
 async function markFollowUpTriggered(followUpId) {
   try {
     await supabase.from('follow_up_queue').update({ triggered: true }).eq('id', followUpId);
+  } catch (_e) {}
+}
+
+// Schedule next goal check-ins: every 14 days for each active goal without a scheduled check-in
+async function scheduleGoalCheckins(userId, clientToday) {
+  try {
+    const nextCheckin = localDate(14, clientToday);
+    await supabase
+      .from('goals')
+      .update({ next_checkin_at: nextCheckin, updated_at: new Date().toISOString() })
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .is('next_checkin_at', null);
+  } catch (_e) {}
+}
+
+// Reschedule a specific goal's check-in 14 days out (called when AI surfaces the goal)
+async function rescheduleGoalCheckin(goalId, clientToday) {
+  try {
+    const nextCheckin = localDate(14, clientToday);
+    await supabase
+      .from('goals')
+      .update({ next_checkin_at: nextCheckin, updated_at: new Date().toISOString() })
+      .eq('id', goalId);
   } catch (_e) {}
 }
 
@@ -944,7 +1004,7 @@ export default async function handler(req, res) {
     // ── 2. Load context in parallel ───────────────────────────────────────
     const currentSignals = [intentData?.intent, intentData?.emotional_state, intentData?.accountability_signal].filter(Boolean);
 
-    const [followUpQueue, growthMarkers, reflectionPatterns, recentSessions, yesterdayCommitment, userProfile, activeGoals, commitmentStats, todayEarlyCommitment] =
+    const [followUpQueue, growthMarkers, reflectionPatterns, recentSessions, yesterdayCommitment, userProfile, activeGoals, commitmentStats, todayEarlyCommitment, goalsDueForCheckin] =
       await Promise.all([
         loadFollowUpQueue(user_id, currentSignals, client_local_date),
         loadGrowthMarkers(user_id, client_local_date),
@@ -955,6 +1015,7 @@ export default async function handler(req, res) {
         loadActiveGoals(user_id),
         loadCommitmentStats(user_id, client_local_date),
         loadTodayEarlyCommitment(user_id, client_local_date),
+        loadGoalsDueForCheckin(user_id, client_local_date),
       ]);
 
     // ── 3. Merge profile ──────────────────────────────────────────────────
@@ -1103,6 +1164,9 @@ export default async function handler(req, res) {
         },
         goals: goalsContext.length > 0 ? goalsContext : 'none',
         quiet_goals: quietGoals.length > 0 ? quietGoals : undefined,
+        goals_due_for_checkin: goalsDueForCheckin.length > 0
+          ? goalsDueForCheckin.map((g) => ({ goal_id: g.id, title: g.title, why_it_matters: g.why_it_matters || null, category: g.category || null }))
+          : undefined,
         yesterday_commitment: yesterdayCommitment || 'none',
         same_day_commitment: sameDayCommitment ? { commitment: sameDayCommitment.commitment, made_at: sameDayCommitment.made_at } : undefined,
         patterns: patternsText,
@@ -1540,6 +1604,11 @@ Return ONLY valid JSON: { "question": "..." }`,
       }
     }
 
+    // Reschedule check-in for any goal referenced this message
+    if (result.extracted_data?.goal_id_referenced) {
+      rescheduleGoalCheckin(result.extracted_data.goal_id_referenced, client_local_date);
+    }
+
     // Post-session background work — fire and forget
     if (result.is_session_complete && session_id) {
       (async () => {
@@ -1550,6 +1619,7 @@ Return ONLY valid JSON: { "question": "..." }`,
           if (embedding) sessionUpdates.embedding = embedding;
           await supabase.from('reflection_sessions').update(sessionUpdates).eq('id', session_id);
           await evolveUserProfile(user_id, summaryText, userProfile, recentSessions);
+          scheduleGoalCheckins(user_id, client_local_date);
 
           // Shallow session detector — if wins or honest checklist items are missing,
           // queue a strategic follow-up for the next night
