@@ -72,7 +72,7 @@ export default function InsightsV2() {
   async function loadActiveGoals() {
     const { data } = await supabase
       .from('goals')
-      .select('id, title, why_it_matters, category, status, created_at')
+      .select('id, title, why_it_matters, category, whys, status, created_at, vision_snapshot, last_mentioned_at')
       .eq('user_id', user.id)
       .eq('status', 'active')
       .order('created_at', { ascending: true })
@@ -504,29 +504,63 @@ export default function InsightsV2() {
             <section>
               <h2 className="text-white font-semibold text-base mb-3">Your Goals</h2>
               <div className="space-y-3">
-                {activeGoals.map((goal, i) => (
-                  <div
-                    key={goal.id || i}
-                    className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4"
-                  >
-                    <div className="flex items-start gap-3">
-                      <span className="text-lg mt-0.5">🎯</span>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-white font-medium text-sm leading-snug">{goal.title}</p>
-                        {goal.why_it_matters && (
-                          <p className="text-zinc-500 text-xs mt-1.5 leading-relaxed italic">
-                            &ldquo;{goal.why_it_matters}&rdquo;
-                          </p>
-                        )}
-                        {goal.category && (
-                          <span className="inline-block mt-2 px-2 py-0.5 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-400 text-xs">
-                            {goal.category.replace('_', ' ')}
-                          </span>
-                        )}
+                {activeGoals.map((goal, i) => {
+                  // Build whys list: use whys array if populated, fall back to why_it_matters
+                  const whysList = Array.isArray(goal.whys) && goal.whys.length > 0
+                    ? [...goal.whys].reverse() // newest first
+                    : (goal.why_it_matters ? [{ text: goal.why_it_matters, added_at: null, source: 'original' }] : []);
+
+                  return (
+                    <div
+                      key={goal.id || i}
+                      className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4"
+                    >
+                      <div className="flex items-start gap-3">
+                        <span className="text-lg mt-0.5">🎯</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="text-white font-medium text-sm leading-snug">{goal.title}</p>
+                            {goal.category && (
+                              <span className="flex-shrink-0 px-2 py-0.5 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-400 text-xs">
+                                {goal.category.replace('_', ' ')}
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Whys list */}
+                          {whysList.length > 0 && (
+                            <div className="mt-2 space-y-1.5">
+                              <p className="text-zinc-500 text-xs uppercase tracking-widest">Why this matters</p>
+                              {whysList.map((w, j) => (
+                                <div key={j} className="flex items-start gap-1.5">
+                                  <span className="text-zinc-600 text-xs mt-0.5 flex-shrink-0">"</span>
+                                  <p className="text-zinc-400 text-xs leading-relaxed italic flex-1">
+                                    {w.text}
+                                    {w.added_at && (
+                                      <span className="text-zinc-600 not-italic ml-1">
+                                        · {new Date(w.added_at + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                                      </span>
+                                    )}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Vision snapshot */}
+                          {goal.vision_snapshot && (
+                            <div className="mt-2 pt-2 border-t border-zinc-800">
+                              <p className="text-zinc-500 text-xs uppercase tracking-widest mb-1">Vision</p>
+                              <p className="text-zinc-500 text-xs leading-relaxed italic">
+                                &ldquo;{goal.vision_snapshot}&rdquo;
+                              </p>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </section>
           )}

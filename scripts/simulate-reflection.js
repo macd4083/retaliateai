@@ -168,7 +168,7 @@ async function validateBackend(supabase, userId, simulatedDate) {
   try {
     const { data: goals } = await supabase
       .from('goals')
-      .select('title, category, why_it_matters')
+      .select('title, category, why_it_matters, whys, last_mentioned_at')
       .eq('user_id', userId)
       .eq('status', 'active');
 
@@ -177,13 +177,21 @@ async function validateBackend(supabase, userId, simulatedDate) {
         title: g.title,
         category: g.category,
         why_it_matters: g.why_it_matters,
+        whys: Array.isArray(g.whys) ? g.whys : [],
+        last_mentioned_at: g.last_mentioned_at,
       }));
       console.log(`    🎯  Goals (${goals.length} active):`);
       for (const g of goals) {
-        const why = g.why_it_matters
-          ? `"${g.why_it_matters.length > 80 ? `${g.why_it_matters.slice(0, 80)}...` : g.why_it_matters}"`
+        const whysArr = Array.isArray(g.whys) ? g.whys : [];
+        const latestWhy = whysArr.length > 0
+          ? whysArr[whysArr.length - 1].text
+          : (g.why_it_matters || null);
+        const whyDisplay = latestWhy
+          ? `"${latestWhy.length > 80 ? `${latestWhy.slice(0, 80)}...` : latestWhy}"`
           : 'not set';
-        console.log(`        "${g.title}" [${g.category ?? 'uncategorized'}] — why: ${why}`);
+        const whyCount = whysArr.length > 0 ? ` (${whysArr.length} why${whysArr.length !== 1 ? 's' : ''})` : '';
+        const lastMentioned = g.last_mentioned_at ? ` | last mentioned: ${g.last_mentioned_at}` : '';
+        console.log(`        "${g.title}" [${g.category ?? 'uncategorized'}] — latest why: ${whyDisplay}${whyCount}${lastMentioned}`);
       }
     } else {
       console.log(`    🎯  Goals: none active`);
@@ -207,6 +215,7 @@ async function validateBackend(supabase, userId, simulatedDate) {
 async function fetchProfileSnapshot(supabase, userId) {
   let profile = null;
   let narratives = [];
+  let goals = [];
 
   try {
     const { data } = await supabase
@@ -226,7 +235,24 @@ async function fetchProfileSnapshot(supabase, userId) {
     console.warn(`    ⚠️  generate-pattern-narrative failed in profile snapshot: ${err.message}`);
   }
 
-  return { profile, narratives };
+  try {
+    const { data: goalsData } = await supabase
+      .from('goals')
+      .select('title, category, why_it_matters, whys, last_mentioned_at')
+      .eq('user_id', userId)
+      .eq('status', 'active');
+    goals = (goalsData ?? []).map((g) => ({
+      title: g.title,
+      category: g.category,
+      why_it_matters: g.why_it_matters,
+      whys: Array.isArray(g.whys) ? g.whys : [],
+      last_mentioned_at: g.last_mentioned_at,
+    }));
+  } catch (err) {
+    console.warn(`    ⚠️  final goals query failed: ${err.message}`);
+  }
+
+  return { profile, narratives, goals };
 }
 
 // ── Supabase setup ─────────────────────────────────────────────────────────────
@@ -433,6 +459,7 @@ async function seedUserProfile(supabase, userId, persona) {
       why_it_matters: g.why_it_matters || null,
       category: g.category || null,
       status: 'active',
+      whys: [],
     }));
     const { error: goalsErr } = await supabase.from('goals').insert(goalRows);
     if (goalsErr) {
@@ -505,6 +532,7 @@ async function main() {
       narrative_sample: null,
       user_profile_snapshot: null,
       generated_narratives: [],
+      final_goals_snapshot: [],
     },
     sessions: [],
     flagged_for_review: [],
@@ -822,7 +850,7 @@ async function main() {
 
   // ── Fetch final profile snapshot and generated narratives ─────────────────
   try {
-    const { profile, narratives } = await fetchProfileSnapshot(supabase, userId);
+    const { profile, narratives, goals } = await fetchProfileSnapshot(supabase, userId);
     report.backend_summary.user_profile_snapshot = {
       identity_statement: profile?.identity_statement ?? null,
       big_goal: profile?.big_goal ?? null,
@@ -832,8 +860,22 @@ async function main() {
       growth_areas: profile?.growth_areas ?? [],
     };
     report.backend_summary.generated_narratives = narratives ?? [];
+    report.backend_summary.final_goals_snapshot = goals ?? [];
     console.log(`\n📋  Profile snapshot captured`);
     console.log(`💬  ${narratives.length} narratives generated`);
+    if (goals.length > 0) {
+      console.log(`\n🎯  Final goals state (${goals.length} active):`);
+      for (const g of goals) {
+        const whysArr = g.whys ?? [];
+        console.log(`    "${g.title}" [${g.category ?? 'uncategorized'}] — ${whysArr.length} why${whysArr.length !== 1 ? 's' : ''} developed`);
+        for (const w of whysArr) {
+          const src = w.source ? ` [${w.source}]` : '';
+          const date = w.added_at ? ` · ${w.added_at}` : '';
+          const text = w.text?.length > 100 ? `${w.text.slice(0, 100)}...` : (w.text ?? '');
+          console.log(`        "${text}"${src}${date}`);
+        }
+      }
+    }
   } catch (err) {
     console.warn(`    ⚠️  fetchProfileSnapshot failed: ${err.message}`);
   }

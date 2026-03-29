@@ -173,15 +173,34 @@ depth_probe (use naturally mid-conversation, not as a named exercise):
 
 GOAL CONNECTION — WHEN AND HOW TO BUILD MEANING
 
-You have a goals array. Each goal may have: id, area, title, original_why, enriched_why, vision_snapshot, depth_insights (array of {date, insight}), days_since_mentioned, suggested_next_action.
+You have a goals array. Each goal may have: id, area, title, whys (array of {text, added_at, source, motivation_signal}), vision_snapshot, depth_insights (array of {date, insight}), days_since_mentioned, suggested_next_action.
+
+GOAL WHYS (whys array):
+- Each goal has a list of whys — reasons the user has articulated at different points in time
+- All whys are provided as context so you know what motivations have been named before
+- When you surface a goal and get a meaningful why response, you MUST decide:
+  a. REPLACE: If the new why is a deeper/stronger/more specific version of an existing why → replace that one (set goal_why_replace_index to its 0-based index)
+  b. ADD: If the new why is genuinely different from all existing ones — a distinct new motivating reason → add it
+  c. SKIP: If the user didn't articulate anything meaningful → skip (leave goal_why_action null)
+- Set extracted_data.goal_why_action: "replace" | "add" | null
+- Set extracted_data.goal_why_replace_index: (number, 0-based index in whys array) only if action="replace"
+- Set extracted_data.goal_why_insight: the captured why text (their actual words)
+- Set extracted_data.goal_id_referenced: the goal's id
+
+WHY-BUILDING TRIGGER (when to ask about why):
+- You decide when the moment is right — there is NO fixed schedule
+- Good moments: user references a goal with high energy, user is struggling with a goal and you want to reconnect them, motivation signal is "medium" or "low", after a miss connected to a goal, user accepts a suggested goal, it's been a while since this goal's why was explored
+- You can run why-building for any goal any number of times across sessions — revisiting whys is valuable, not redundant
+- Bad moments: user is already doing deep honest work on something else, session is about to close, user signals they want to move on
+- NEVER ask "why does this goal matter to you?" verbatim — use their context
+- If they have existing whys, reference them: "You said once this was about [why]. Is that still the thing that makes it real for you — or has something shifted?"
+- If they have NO whys yet: "What's the thing that makes [goal title] actually matter — not the goal itself, but what's underneath it?"
 
 You also may have quiet_goals — goals that haven't come up in 14+ days. These are a soft permission: if a natural opening exists, one gentle check-in is fine. If there's no opening, skip entirely.
 
 GOAL CHECK-IN (goals_due_for_checkin):
-- These goals have been flagged for a periodic motivation check-in
-- If one of these goals naturally comes up, gently ask: does this goal still fire you up, or has something shifted?
-- This is not interrogation — it's curiosity. One soft question, nothing more.
-- If the user signals the goal has lost relevance, surface it and suggest they update it
+- goals_due_for_checkin is a SOFT HINT that this goal hasn't been explored recently — not an instruction to force a check-in
+- If one of these goals naturally comes up, gently explore their motivation around it
 - Never force a check-in if the conversation is already going somewhere real
 - Only one check-in per session maximum
 
@@ -198,7 +217,7 @@ WHEN TO MAKE THE CONNECTION:
 1. User mentions something that connects to a goal and reports it like a fact
    → They're reporting, not realizing the significance
    → Don't just celebrate — help them feel what it means
-   → Use the richest context available: if enriched_why exists use it. If vision_snapshot exists use it.
+   → Use the richest context available: if whys has entries use the most resonant one. If vision_snapshot exists use it.
    → "That's not just [what they did]. You've been working toward [goal title]. What was that like?"
    → Set extracted_data.goal_id_referenced to the goal's id
 
@@ -206,9 +225,8 @@ WHEN TO MAKE THE CONNECTION:
    → One question that goes under the surface behavior
    → Priority order of what to reference:
      a. If depth_insights exist for this goal: "You realized once [most recent insight]. How does that connect to what's making it hard now?"
-     b. If enriched_why exists: "You said this is really about [enriched_why]. What happens to that when you avoid it?"
-     c. If only original_why: "You set this goal because [original_why]. Is that still true — or has something shifted?"
-     d. If nothing: "What's the real thing that makes this hard to show up for?"
+     b. If whys has entries: "You said this is really about [most recent why text]. What happens to that when you avoid it?"
+     c. If whys is empty: "You set this goal. What's the real thing that makes it hard to show up for?"
    → Set extracted_data.goal_id_referenced to the goal's id
 
 3. User questions a goal's relevance
@@ -241,7 +259,6 @@ WHAT NOT TO DO:
 - Never announce you're doing a "goal check-in"
 - Never ask about multiple goals in the same session
 - Never redirect a conversation that's already going somewhere real just to fit in a goal
-- Never ask the generic "why does that goal matter to you?" — you have context, use it
 - Never manufacture a moment that isn't there
 - Never surface a goal during wins stage
 
@@ -266,6 +283,8 @@ RETURN JSON EXACTLY (no markdown, no extra keys):
     "depth_insight": null,
     "goal_id_referenced": null,
     "goal_why_insight": null,
+    "goal_why_action": null,
+    "goal_why_replace_index": null,
     "goal_vision_fragment": null,
     "goal_depth_insight": null,
     "goal_suggestion": null,
@@ -524,7 +543,7 @@ async function loadActiveGoals(userId) {
   try {
     const { data } = await supabase
       .from('goals')
-      .select('id, title, why_it_matters, category, enriched_why, vision_snapshot, depth_insights, last_mentioned_at, suggested_next_action')
+      .select('id, title, why_it_matters, category, whys, vision_snapshot, depth_insights, last_mentioned_at, suggested_next_action')
       .eq('user_id', userId)
       .eq('status', 'active')
       .limit(6);
@@ -852,7 +871,10 @@ Given the session summary and current user profile, extract:
 8. why_update: ONLY if their why deepened or clarified — otherwise null
 9. blockers_update: ONLY if new blockers clearly emerged or existing ones evolved — otherwise null. Array of strings max 5.
 10. future_self_update: ONLY if the user expressed a clearer, stronger, or evolved version of their 1-year vision — otherwise null.
-11. goal_updates: array of { goal_id, enriched_why, vision_fragment, depth_insight, last_mentioned_date } for any goals that were meaningfully discussed. Only include fields that have new content — null otherwise. Empty array if no goals were discussed.
+11. goal_updates: array of { goal_id, why_insight, why_action, why_replace_index, vision_fragment, depth_insight, last_mentioned_date } for any goals that were meaningfully discussed. Only include fields that have new content — null otherwise. Empty array if no goals were discussed.
+    - why_insight: the captured why text in their actual words (or null)
+    - why_action: "add" | "replace" | null (add if new distinct motivation, replace if deeper version of existing)
+    - why_replace_index: 0-based index of the why to replace (only set when why_action="replace")
 
 Rules:
 - Use their actual words, not clinical language
@@ -933,9 +955,40 @@ Return valid JSON only:
       for (const gu of evolution.goal_updates) {
         if (!gu.goal_id) continue;
         const goalUpdates = {};
-        if (gu.enriched_why) goalUpdates.enriched_why = gu.enriched_why;
         if (gu.vision_fragment) goalUpdates.vision_snapshot = gu.vision_fragment;
         if (gu.last_mentioned_date) goalUpdates.last_mentioned_at = gu.last_mentioned_date;
+
+        // Handle why_insight — append to whys array (evolve pass always adds, never replaces blindly unless index given)
+        if (gu.why_insight) {
+          supabase
+            .from('goals')
+            .select('whys, why_it_matters')
+            .eq('id', gu.goal_id)
+            .eq('user_id', userId)
+            .maybeSingle()
+            .then(({ data }) => {
+              let currentWhys = Array.isArray(data?.whys) ? [...data.whys] : [];
+              if (currentWhys.length === 0 && data?.why_it_matters) {
+                currentWhys = [{ text: data.why_it_matters, added_at: null, source: 'original' }];
+              }
+              const newWhy = {
+                text: gu.why_insight,
+                added_at: gu.last_mentioned_date || new Date().toISOString().split('T')[0],
+                source: 'evolve_pass',
+                motivation_signal: null,
+                session_id: null,
+              };
+              if (gu.why_action === 'replace' && typeof gu.why_replace_index === 'number' && currentWhys[gu.why_replace_index]) {
+                currentWhys[gu.why_replace_index] = newWhy;
+              } else {
+                currentWhys.push(newWhy);
+              }
+              return supabase.from('goals').update({ ...goalUpdates, whys: currentWhys }).eq('id', gu.goal_id).eq('user_id', userId);
+            })
+            .then(() => {}).catch(() => {});
+          if (!gu.depth_insight) continue; // why_insight handled above, skip simple update unless depth_insight also present
+        }
+
         if (gu.depth_insight) {
           // Append depth insight — fetch first, then update
           supabase
@@ -1120,8 +1173,9 @@ export default async function handler(req, res) {
             id: g.id,
             area: g.category,
             title: g.title,
-            original_why: g.why_it_matters || null,
-            enriched_why: g.enriched_why || null,
+            whys: Array.isArray(g.whys) && g.whys.length > 0
+              ? g.whys
+              : (g.why_it_matters ? [{ text: g.why_it_matters, source: 'original' }] : []),
             vision_snapshot: g.vision_snapshot || null,
             depth_insights: g.depth_insights?.length > 0 ? g.depth_insights : null,
             suggested_next_action: g.suggested_next_action || null,
@@ -1536,18 +1590,49 @@ Return ONLY valid JSON: { "question": "..." }`,
     // ── Goal write-backs (fire-and-forget, all fail silently) ─────────────
     const clientToday = today(client_local_date);
 
-    // Goal why insight — write to goals.enriched_why and update last_mentioned_at
+    // Goal why insight — smart append/replace to goals.whys array
     if (result.extracted_data?.goal_why_insight && result.extracted_data?.goal_id_referenced) {
       const goalId = result.extracted_data.goal_id_referenced;
-      supabase
-        .from('goals')
-        .update({
-          enriched_why: result.extracted_data.goal_why_insight,
-          last_mentioned_at: clientToday,
-        })
-        .eq('id', goalId)
-        .eq('user_id', user_id)
-        .then(() => {}).catch(() => {});
+      const action = result.extracted_data.goal_why_action;
+      const replaceIndex = result.extracted_data.goal_why_replace_index;
+      const newWhy = {
+        text: result.extracted_data.goal_why_insight,
+        added_at: clientToday,
+        source: 'reflection_session',
+        motivation_signal: result.extracted_data.goal_motivation_signal || null,
+        session_id: session_id || null,
+      };
+
+      (async () => {
+        try {
+          const { data: goalData } = await supabase
+            .from('goals')
+            .select('whys, why_it_matters')
+            .eq('id', goalId)
+            .eq('user_id', user_id)
+            .single();
+
+          let currentWhys = Array.isArray(goalData?.whys) ? [...goalData.whys] : [];
+
+          // Seed from original why if empty
+          if (currentWhys.length === 0 && goalData?.why_it_matters) {
+            currentWhys = [{ text: goalData.why_it_matters, added_at: null, source: 'original' }];
+          }
+
+          if (action === 'replace' && typeof replaceIndex === 'number' && currentWhys[replaceIndex]) {
+            currentWhys[replaceIndex] = newWhy;
+          } else {
+            // add (or default if action is null/missing)
+            currentWhys.push(newWhy);
+          }
+
+          await supabase
+            .from('goals')
+            .update({ whys: currentWhys, last_mentioned_at: clientToday })
+            .eq('id', goalId)
+            .eq('user_id', user_id);
+        } catch (_e) { /* fail silently */ }
+      })();
     }
 
     // Goal vision fragment — write to goals.vision_snapshot and update last_mentioned_at
@@ -1597,16 +1682,21 @@ Return ONLY valid JSON: { "question": "..." }`,
           context: `goal_suggestion: action=${suggestion.action}, goal_id=${suggestion.goal_id}, reason="${suggestion.reason}"`,
           question: suggestion.action === 'pause'
             ? `Last time you mentioned you might want to pause your goal around "${goalTitle}". Is that still where you're at?`
-            : `You mentioned something shifting around one of your goals. What's your thinking now?`,
+            : `You mentioned wanting to work on "${goalTitle}". Before we dive in — what makes that actually matter to you? Not the goal itself, but what's underneath it?`,
           check_back_after: 1,
           trigger_condition: 'always',
         }, client_local_date).catch(() => {});
       }
     }
 
-    // Reschedule check-in for any goal referenced this message
+    // Update last_mentioned_at for any goal referenced this message
     if (result.extracted_data?.goal_id_referenced) {
-      rescheduleGoalCheckin(result.extracted_data.goal_id_referenced, client_local_date);
+      supabase
+        .from('goals')
+        .update({ last_mentioned_at: clientToday })
+        .eq('id', result.extracted_data.goal_id_referenced)
+        .eq('user_id', user_id)
+        .then(() => {}).catch(() => {});
     }
 
     // Post-session background work — fire and forget
@@ -1619,7 +1709,6 @@ Return ONLY valid JSON: { "question": "..." }`,
           if (embedding) sessionUpdates.embedding = embedding;
           await supabase.from('reflection_sessions').update(sessionUpdates).eq('id', session_id);
           await evolveUserProfile(user_id, summaryText, userProfile, recentSessions);
-          scheduleGoalCheckins(user_id, client_local_date);
 
           // Shallow session detector — if wins or honest checklist items are missing,
           // queue a strategic follow-up for the next night
