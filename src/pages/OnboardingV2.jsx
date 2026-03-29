@@ -9,46 +9,30 @@ const DEFAULT_LIFE_AREA_OPTIONS = [
   { emoji: '💼', label: 'Career & Business' },
   { emoji: '🏋️', label: 'Health & Fitness' },
   { emoji: '❤️', label: 'Relationships' },
-  { emoji: '🧠', label: 'Personal Growth' },
+  { emoji: '🧠', label: 'Mental Health' },
+  { emoji: '🌱', label: 'Personal Growth' },
   { emoji: '💰', label: 'Money & Finance' },
+  { emoji: '🎓', label: 'Education' },
+  { emoji: '🎮', label: 'Gaming' },
   { emoji: '🎨', label: 'Creativity' },
   { emoji: '🙏', label: 'Spirituality' },
-  { emoji: '🎓', label: 'Education' },
-  { emoji: '🏠', label: 'Family' },
-  { emoji: '🌍', label: 'Travel' },
-  { emoji: '🎮', label: 'Hobbies' },
-  { emoji: '🧘', label: 'Mental Health' },
-  { emoji: '🍕', label: 'Food & Cooking' },
-  { emoji: '📚', label: 'Learning' },
-  { emoji: '🎵', label: 'Music' },
-  { emoji: '⚽', label: 'Sports' },
-  { emoji: '🏡', label: 'Home & Environment' },
-  { emoji: '🤝', label: 'Community' },
 ];
 
 const GOAL_PLACEHOLDERS = {
   'Career & Business': 'Build and launch my SaaS app',
   'Health & Fitness': 'Run a 5K and exercise 4x a week',
   'Relationships': 'Deepen my closest friendships',
+  'Mental Health': 'Build consistent self-care and therapy habits',
   'Personal Growth': 'Build a consistent morning routine',
   'Money & Finance': 'Save 3 months of living expenses',
+  'Education': 'Complete an online course in my field',
+  'Gaming': 'Hit a rank goal or grow my stream',
   'Creativity': 'Complete my first creative project',
   'Spirituality': 'Build a daily mindfulness practice',
-  'Education': 'Complete an online course in my field',
-  'Family': 'Spend quality time with family every week',
-  'Travel': 'Take one meaningful trip this year',
-  'Hobbies': 'Dedicate weekly time to a hobby I love',
-  'Mental Health': 'Build consistent self-care habits',
-  'Food & Cooking': 'Cook at home 4 nights a week',
-  'Learning': 'Read 12 books this year',
-  'Music': 'Learn to play a song I love',
-  'Sports': 'Join a local sports team or league',
-  'Home & Environment': 'Create a space I love coming home to',
-  'Community': 'Give back to my local community regularly',
 };
 
 const MIN_LIFE_AREAS = 3;
-const MAX_LIFE_AREAS = 6;
+const MAX_LIFE_AREAS = 5;
 
 const BLOCKER_OPTIONS = [
   'Procrastination',
