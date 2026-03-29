@@ -151,7 +151,7 @@ export const goalsHelpers = {
         .select()
         .single();
 
-      if (error) throw error;
+      if (error) throw new Error(`appendGoalWhy failed: ${error.message}`);
       return data;
     } catch (err) {
       throw err;
