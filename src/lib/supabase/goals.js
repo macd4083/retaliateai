@@ -36,6 +36,7 @@ export const goalsHelpers = {
       .from('goals')
       .insert({
         user_id: userId,
+        whys: [],
         ...goalData,
       })
       .select()
@@ -108,12 +109,52 @@ export const goalsHelpers = {
     const today = new Date().toISOString().slice(0, 10);
     const { data, error } = await supabase
       .from('goals')
-      .select('id, title, why_it_matters, category, next_checkin_at, created_at')
+      .select('id, title, why_it_matters, whys, category, next_checkin_at, created_at')
       .eq('user_id', userId)
       .eq('status', 'active')
       .lte('next_checkin_at', today)
       .not('next_checkin_at', 'is', null);
     if (error) throw error;
     return data || [];
+  },
+
+  // Append a new why to a goal's whys array, or replace one at a given index.
+  // action: 'add' | 'replace'
+  // replaceIndex: 0-based index in current whys array (only used when action='replace')
+  async appendGoalWhy(goalId, userId, newWhy, action = 'add', replaceIndex = null) {
+    try {
+      const { data: goalData } = await supabase
+        .from('goals')
+        .select('whys, why_it_matters')
+        .eq('id', goalId)
+        .eq('user_id', userId)
+        .single();
+
+      let currentWhys = Array.isArray(goalData?.whys) ? [...goalData.whys] : [];
+
+      // Seed from original why if empty
+      if (currentWhys.length === 0 && goalData?.why_it_matters) {
+        currentWhys = [{ text: goalData.why_it_matters, added_at: null, source: 'original' }];
+      }
+
+      if (action === 'replace' && typeof replaceIndex === 'number' && currentWhys[replaceIndex]) {
+        currentWhys[replaceIndex] = newWhy;
+      } else {
+        currentWhys.push(newWhy);
+      }
+
+      const { data, error } = await supabase
+        .from('goals')
+        .update({ whys: currentWhys })
+        .eq('id', goalId)
+        .eq('user_id', userId)
+        .select()
+        .single();
+
+      if (error) throw new Error(`appendGoalWhy failed: ${error.message}`);
+      return data;
+    } catch (err) {
+      throw err;
+    }
   },
 };
