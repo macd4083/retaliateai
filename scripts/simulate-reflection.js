@@ -106,6 +106,7 @@ async function validateBackend(supabase, userId, simulatedDate) {
     trajectory: null,
     patterns_accumulated: [],
     narrative_sample: null,
+    goals_snapshot: [],
   };
 
   // 1. Commitment stats
@@ -161,6 +162,34 @@ async function validateBackend(supabase, userId, simulatedDate) {
     }
   } catch (err) {
     console.warn(`    ⚠️  reflection_patterns query failed: ${err.message}`);
+  }
+
+  // 3. Goals snapshot
+  try {
+    const { data: goals } = await supabase
+      .from('goals')
+      .select('title, category, why_it_matters')
+      .eq('user_id', userId)
+      .eq('status', 'active');
+
+    if (goals && goals.length > 0) {
+      backendState.goals_snapshot = goals.map((g) => ({
+        title: g.title,
+        category: g.category,
+        why_it_matters: g.why_it_matters,
+      }));
+      console.log(`    🎯  Goals (${goals.length} active):`);
+      for (const g of goals) {
+        const why = g.why_it_matters
+          ? `"${g.why_it_matters.length > 80 ? `${g.why_it_matters.slice(0, 80)}...` : g.why_it_matters}"`
+          : 'not set';
+        console.log(`        "${g.title}" [${g.category ?? 'uncategorized'}] — why: ${why}`);
+      }
+    } else {
+      console.log(`    🎯  Goals: none active`);
+    }
+  } catch (err) {
+    console.warn(`    ⚠️  goals query failed: ${err.message}`);
   }
 
   return backendState;
@@ -394,6 +423,23 @@ async function seedUserProfile(supabase, userId, persona) {
     console.warn(`  ⚠️  Could not seed user profile: ${error.message}`);
   } else {
     console.log(`    🌱  Profile seeded for persona: ${persona.name}`);
+  }
+
+  // Insert goals from persona definition
+  if (persona.profile?.goals && persona.profile.goals.length > 0) {
+    const goalRows = persona.profile.goals.map((g) => ({
+      user_id: userId,
+      title: g.title,
+      why_it_matters: g.why_it_matters || null,
+      category: g.category || null,
+      status: 'active',
+    }));
+    const { error: goalsErr } = await supabase.from('goals').insert(goalRows);
+    if (goalsErr) {
+      console.warn(`  ⚠️  Could not seed goals: ${goalsErr.message}`);
+    } else {
+      console.log(`    🎯  ${goalRows.length} goal(s) seeded`);
+    }
   }
 }
 

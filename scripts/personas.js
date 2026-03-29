@@ -24,6 +24,23 @@ export const PERSONAS = {
       identity_statement: "I'm someone who builds things that matter",
       life_areas: ['work', 'fitness', 'relationships'],
       blockers: ['perfectionism', 'distraction', 'fear_of_shipping'],
+      goals: [
+        {
+          title: 'Get Stackline to 20 paying customers by end of Q2',
+          why_it_matters: 'I want to prove I can build something real and stop talking about it',
+          category: 'work',
+        },
+        {
+          title: 'Restart a consistent gym habit — 3x per week',
+          why_it_matters: "I feel better when I move and I've let it slip for too long",
+          category: 'fitness',
+        },
+        {
+          title: 'Stop ghosting my friends — reach out to at least one person each week',
+          why_it_matters: "I've been so heads-down on Stackline that I'm losing touch with people who matter",
+          category: 'relationships',
+        },
+      ],
     },
     recurringBlockers: ['distraction', 'perfectionism', 'fear_of_shipping', 'scope_creep'],
     recurringStrengths: ['ships_when_pushed', 'strong_product_vision'],
@@ -90,6 +107,23 @@ export const PERSONAS = {
       identity_statement: 'I show up every day no matter what',
       life_areas: ['work', 'side project', 'health'],
       blockers: ['emotional_avoidance', 'overworking', 'surface_level_reflection'],
+      goals: [
+        {
+          title: 'Get Fieldr to 50 beta users and quit the day job by December',
+          why_it_matters: "I've been saying I'll do this for 3 years — I need to know I can actually finish something",
+          category: 'side project',
+        },
+        {
+          title: 'Stop overworking on weekends — protect at least one full day off per week',
+          why_it_matters: "Chris is right that I'm burning out — I don't want to lose the relationship over this",
+          category: 'health',
+        },
+        {
+          title: 'Ship the onboarding email sequence for Fieldr',
+          why_it_matters: 'Beta users are dropping off and I know better onboarding would help — I just keep avoiding it',
+          category: 'work',
+        },
+      ],
     },
     recurringBlockers: ['overworking', 'emotional_avoidance', 'surface_level_reflection'],
     recurringStrengths: ['shows_up_daily', 'pushes_through_when_tired'],
@@ -156,6 +190,23 @@ export const PERSONAS = {
       identity_statement: "I'm a builder of beautiful things that actually work",
       life_areas: ['creative work', 'business', 'personal growth'],
       blockers: ['perfectionism', 'overthinking', 'fear_of_rejection'],
+      goals: [
+        {
+          title: 'Land 3 retainer clients for Greyspace Studio and hit $6k/month by June',
+          why_it_matters: "I'm tired of working for people who don't care about craft — I want to do it on my own terms",
+          category: 'business',
+        },
+        {
+          title: 'Send proposals within 48 hours of discovery calls — stop overthinking them',
+          why_it_matters: "Lena is right — I lose clients by hesitating. Done is better than perfect.",
+          category: 'creative work',
+        },
+        {
+          title: 'Do a personal creative project for myself every month — not for clients',
+          why_it_matters: 'I got into design because I loved making things — I need to remember that outside of client work',
+          category: 'personal growth',
+        },
+      ],
     },
     recurringBlockers: ['perfectionism', 'overthinking', 'fear_of_rejection', 'avoidance_of_sales'],
     recurringStrengths: ['deep_self_awareness', 'strong_creative_output'],
