@@ -198,11 +198,14 @@ WHY-BUILDING TRIGGER (when to ask about why):
 
 You also may have quiet_goals — goals that haven't come up in 14+ days. These are a soft permission: if a natural opening exists, one gentle check-in is fine. If there's no opening, skip entirely.
 
-GOAL CHECK-IN (goals_due_for_checkin):
-- goals_due_for_checkin is a SOFT HINT that this goal hasn't been explored recently — not an instruction to force a check-in
-- If one of these goals naturally comes up, gently explore their motivation around it
-- Never force a check-in if the conversation is already going somewhere real
-- Only one check-in per session maximum
+GOALS NEEDING WHY-BUILDING (goals_need_why_building):
+- These goals need their "why" captured or deepened — this is the ONLY reason they appear here
+- has_whys: false means this goal has never had a why articulated — this is the highest priority: get their first why before anything else
+- has_whys: true means a previous why exists but it's time to revisit and deepen it — reference their existing whys and explore whether it's still true or has shifted
+- If one of these goals naturally comes up in the session, make the why-building happen
+- If no natural opening exists, don't force it — but create one gently if you can
+- Only one why-building moment per session maximum
+- This is NOT a generic "check in on goal progress" — it is specifically about understanding motivation depth
 
 CORE RULE: You are NOT managing the user through a goals framework. Goals are background knowledge. Use them when the moment is right — not because they're there.
 
@@ -543,7 +546,7 @@ async function loadActiveGoals(userId) {
   try {
     const { data } = await supabase
       .from('goals')
-      .select('id, title, why_it_matters, category, whys, vision_snapshot, depth_insights, last_mentioned_at, suggested_next_action')
+      .select('id, title, why_it_matters, category, whys, vision_snapshot, depth_insights, last_mentioned_at, suggested_next_action, next_checkin_at')
       .eq('user_id', userId)
       .eq('status', 'active')
       .limit(6);
@@ -561,19 +564,6 @@ async function loadActiveGoals(userId) {
   } catch (_e) { return []; }
 }
 
-async function loadGoalsDueForCheckin(userId, clientToday) {
-  try {
-    const todayStr = today(clientToday);
-    const { data } = await supabase
-      .from('goals')
-      .select('id, title, why_it_matters, category, next_checkin_at')
-      .eq('user_id', userId)
-      .eq('status', 'active')
-      .lte('next_checkin_at', todayStr)
-      .not('next_checkin_at', 'is', null);
-    return data || [];
-  } catch (_e) { return []; }
-}
 
 // ── Classify intent ───────────────────────────────────────────────────────────
 
@@ -671,30 +661,6 @@ async function queueFollowUp(userId, sessionId, { context, question, check_back_
 async function markFollowUpTriggered(followUpId) {
   try {
     await supabase.from('follow_up_queue').update({ triggered: true }).eq('id', followUpId);
-  } catch (_e) {}
-}
-
-// Schedule next goal check-ins: every 14 days for each active goal without a scheduled check-in
-async function scheduleGoalCheckins(userId, clientToday) {
-  try {
-    const nextCheckin = localDate(14, clientToday);
-    await supabase
-      .from('goals')
-      .update({ next_checkin_at: nextCheckin, updated_at: new Date().toISOString() })
-      .eq('user_id', userId)
-      .eq('status', 'active')
-      .is('next_checkin_at', null);
-  } catch (_e) {}
-}
-
-// Reschedule a specific goal's check-in 14 days out (called when AI surfaces the goal)
-async function rescheduleGoalCheckin(goalId, clientToday) {
-  try {
-    const nextCheckin = localDate(14, clientToday);
-    await supabase
-      .from('goals')
-      .update({ next_checkin_at: nextCheckin, updated_at: new Date().toISOString() })
-      .eq('id', goalId);
   } catch (_e) {}
 }
 
@@ -1057,7 +1023,7 @@ export default async function handler(req, res) {
     // ── 2. Load context in parallel ───────────────────────────────────────
     const currentSignals = [intentData?.intent, intentData?.emotional_state, intentData?.accountability_signal].filter(Boolean);
 
-    const [followUpQueue, growthMarkers, reflectionPatterns, recentSessions, yesterdayCommitment, userProfile, activeGoals, commitmentStats, todayEarlyCommitment, goalsDueForCheckin] =
+    const [followUpQueue, growthMarkers, reflectionPatterns, recentSessions, yesterdayCommitment, userProfile, activeGoals, commitmentStats, todayEarlyCommitment] =
       await Promise.all([
         loadFollowUpQueue(user_id, currentSignals, client_local_date),
         loadGrowthMarkers(user_id, client_local_date),
@@ -1068,7 +1034,6 @@ export default async function handler(req, res) {
         loadActiveGoals(user_id),
         loadCommitmentStats(user_id, client_local_date),
         loadTodayEarlyCommitment(user_id, client_local_date),
-        loadGoalsDueForCheckin(user_id, client_local_date),
       ]);
 
     // ── 3. Merge profile ──────────────────────────────────────────────────
@@ -1200,6 +1165,14 @@ export default async function handler(req, res) {
         note: "hasn't come up recently — if a natural opening exists, one soft check-in is fine. If no opening, skip it.",
       }));
 
+    // Goals that need why-building: no whys yet (first-time capture) OR scheduled for why-building today
+    const todayForCheckin = today(client_local_date);
+    const goalsNeedWhyBuilding = activeGoals.filter((g) => {
+      const hasNoWhys = !Array.isArray(g.whys) || g.whys.length === 0;
+      const isDue = g.next_checkin_at && g.next_checkin_at <= todayForCheckin;
+      return hasNoWhys || isDue;
+    });
+
     const contextBlock = {
       role: 'user',
       content: JSON.stringify({
@@ -1218,8 +1191,17 @@ export default async function handler(req, res) {
         },
         goals: goalsContext.length > 0 ? goalsContext : 'none',
         quiet_goals: quietGoals.length > 0 ? quietGoals : undefined,
-        goals_due_for_checkin: goalsDueForCheckin.length > 0
-          ? goalsDueForCheckin.map((g) => ({ goal_id: g.id, title: g.title, why_it_matters: g.why_it_matters || null, category: g.category || null }))
+        goals_need_why_building: goalsNeedWhyBuilding.length > 0
+          ? goalsNeedWhyBuilding.map((g) => {
+              const hasWhys = Array.isArray(g.whys) && g.whys.length > 0;
+              return {
+                goal_id: g.id,
+                title: g.title,
+                category: g.category || null,
+                whys: hasWhys ? g.whys : [],
+                has_whys: hasWhys,
+              };
+            })
           : undefined,
         yesterday_commitment: yesterdayCommitment || 'none',
         same_day_commitment: sameDayCommitment ? { commitment: sameDayCommitment.commitment, made_at: sameDayCommitment.made_at } : undefined,
@@ -1633,6 +1615,20 @@ Return ONLY valid JSON: { "question": "..." }`,
             .eq('user_id', user_id);
         } catch (_e) { /* fail silently */ }
       })();
+    }
+
+    // Schedule next why-building check-in based on motivation signal after a successful why capture
+    if (result.extracted_data?.goal_why_insight && result.extracted_data?.goal_id_referenced) {
+      const motivationSignal = result.extracted_data.goal_motivation_signal;
+      const daysMap = { high: 21, medium: 14, low: 7, lost: 3 };
+      const daysUntilNext = daysMap[motivationSignal] ?? 14;
+      const nextWhyCheckin = localDate(daysUntilNext, client_local_date);
+      supabase
+        .from('goals')
+        .update({ next_checkin_at: nextWhyCheckin, updated_at: new Date().toISOString() })
+        .eq('id', result.extracted_data.goal_id_referenced)
+        .eq('user_id', user_id)
+        .then(() => {}).catch(() => {});
     }
 
     // Goal vision fragment — write to goals.vision_snapshot and update last_mentioned_at
