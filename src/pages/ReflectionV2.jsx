@@ -273,6 +273,8 @@ export default function ReflectionV2() {
   const [summaryCardData, setSummaryCardData] = useState({});
   const [followThroughStats, setFollowThroughStats] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [pendingGoalSuggestion, setPendingGoalSuggestion] = useState(null);
+  const [pendingWhyCapture, setPendingWhyCapture] = useState(null); // { goalId, title }
 
   const timeContext = getTimeContext();
 
@@ -467,6 +469,29 @@ export default function ReflectionV2() {
           stage: state.current_stage,
         })
         .catch(() => {});
+
+      // If we're capturing a why for a newly accepted goal, save this message as the why
+      if (pendingWhyCapture) {
+        const { goalId } = pendingWhyCapture;
+        setPendingWhyCapture(null);
+        // Read current whys and append (safe even if already empty on a new goal)
+        supabase
+          .from('goals')
+          .select('whys')
+          .eq('id', goalId)
+          .eq('user_id', user.id)
+          .maybeSingle()
+          .then(({ data: gd }) => {
+            const current = Array.isArray(gd?.whys) ? gd.whys : [];
+            const newEntry = { text: userText, added_at: new Date().toISOString(), source: 'user_journal' };
+            return supabase
+              .from('goals')
+              .update({ whys: [...current, newEntry] })
+              .eq('id', goalId)
+              .eq('user_id', user.id);
+          })
+          .catch(() => {});
+      }
     }
 
     // Add typing indicator
@@ -634,6 +659,11 @@ export default function ReflectionV2() {
           reflectionHelpers.updateSession(sid, dbUpdates).catch(() => {});
       }
 
+      // Handle new goal suggestion from coach
+      if (data.goal_suggestion_pending?.action === 'new_goal' && data.goal_suggestion_pending?.title) {
+        setPendingGoalSuggestion(data.goal_suggestion_pending);
+      }
+
       if (isSessionComplete) {
         setIsComplete(true);
         const finalStreak = streak + 1;
@@ -741,8 +771,43 @@ export default function ReflectionV2() {
     } catch (_e) {}
   }
 
+  // ── Handle goal suggestion acceptance ────────────────────────────────────
 
-  // ── Handle chip selection ─────────────────────────────────────────────���───
+  async function handleAcceptGoalSuggestion() {
+    if (!pendingGoalSuggestion) return;
+    const { title, category } = pendingGoalSuggestion;
+    setPendingGoalSuggestion(null);
+    try {
+      const res = await fetch('/api/create-goal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: user.id, title, category: category || null }),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      const newGoalId = data.goal?.id;
+
+      // Inject coach message asking for why
+      const whyMsg = {
+        id: `ai-${Date.now()}`,
+        role: 'assistant',
+        content: `Nice — what makes "${title}" actually matter to you? Not the goal itself, but what's underneath it?`,
+        chips: null,
+        message_type: 'question',
+        card_data: null,
+        isTyping: false,
+      };
+      const withWhy = [...messagesRef.current, whyMsg];
+      messagesRef.current = withWhy;
+      setMessages(withWhy);
+
+      if (newGoalId) {
+        setPendingWhyCapture({ goalId: newGoalId, title });
+      }
+    } catch (_e) {}
+  }
+
+  // ── Handle chip selection ─────────────────────────────────────────────────
 
   function handleChipSelect(chip, messageId) {
     if (isLoading) return;
@@ -823,6 +888,34 @@ export default function ReflectionV2() {
                   </button>
                 </div>
               )}
+
+              {/* Inline goal suggestion card */}
+              {pendingGoalSuggestion && (
+                <div className="mx-0 mt-3 mb-2 bg-zinc-900 border border-zinc-700 rounded-2xl p-4">
+                  <p className="text-zinc-400 text-xs uppercase tracking-widest mb-2">Suggested goal</p>
+                  <p className="text-white font-medium text-sm mb-1">{pendingGoalSuggestion.title}</p>
+                  {pendingGoalSuggestion.category && (
+                    <span className="inline-block px-2 py-0.5 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-400 text-xs mb-3">
+                      {pendingGoalSuggestion.category.replace('_', ' ')}
+                    </span>
+                  )}
+                  <div className="flex gap-2 mt-3">
+                    <button
+                      onClick={handleAcceptGoalSuggestion}
+                      className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-xl text-sm font-medium transition-colors"
+                    >
+                      Add this goal
+                    </button>
+                    <button
+                      onClick={() => setPendingGoalSuggestion(null)}
+                      className="px-4 py-2 text-zinc-400 hover:text-white rounded-xl text-sm transition-colors"
+                    >
+                      Not now
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div ref={messagesEndRef} />
             </>
           )}

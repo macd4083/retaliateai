@@ -19,21 +19,21 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'user_id and title are required' });
     }
 
-    // Combine description and why_it_matters
-    let fullDescription = description || '';
-    if (why_it_matters) {
-      fullDescription = fullDescription 
-        ? `${fullDescription}\n\nWhy this matters: ${why_it_matters}`
-        : `Why this matters: ${why_it_matters}`;
-    }
+    // Seed whys array from why_it_matters if provided
+    const now = new Date().toISOString();
+    const initialWhys = why_it_matters
+      ? [{ text: why_it_matters, added_at: now, source: 'user_journal' }]
+      : [];
 
     // Create the goal - matches your schema exactly
     const { data, error } = await supabase
       .from('goals')
       .insert({
-        user_id:  user_id,
-        title:  title,
-        description: fullDescription || null,
+        user_id: user_id,
+        title: title,
+        description: description || null,
+        why_it_matters: why_it_matters || null,
+        whys: initialWhys,
         category: category || null,
         status: 'active',
         // target_date, created_at, updated_at, completed_at will be handled by database defaults

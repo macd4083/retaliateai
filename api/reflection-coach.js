@@ -258,6 +258,13 @@ WHEN TO MAKE THE CONNECTION:
    → "lost" = user signals the goal no longer matters or they've moved on
    → Leave null if no goal check-in happened this message
 
+7. Suggesting a new goal (when user mentions they want to pursue something new):
+   → Only suggest if the user explicitly indicates they want to track it as a goal
+   → Set extracted_data.goal_suggestion: { "action": "new_goal", "title": "concise goal title", "category": "health|career|relationships|finances|learning|creativity|mindset|other" }
+   → DO NOT set goal_id (this is a brand-new goal, not an existing one)
+   → After suggesting, tell the user you'll add it — they'll confirm in the UI
+   → Only one new goal suggestion per session
+
 WHAT NOT TO DO:
 - Never announce you're doing a "goal check-in"
 - Never ask about multiple goals in the same session
@@ -1165,12 +1172,10 @@ export default async function handler(req, res) {
         note: "hasn't come up recently — if a natural opening exists, one soft check-in is fine. If no opening, skip it.",
       }));
 
-    // Goals that need why-building: no whys yet (first-time capture) OR scheduled for why-building today
-    const todayForCheckin = today(client_local_date);
+    // Goals that need why-building: only goals with no whys (first-time capture)
+    // There is no clock-based schedule — the AI decides when to revisit whys for goals that already have them
     const goalsNeedWhyBuilding = activeGoals.filter((g) => {
-      const hasNoWhys = !Array.isArray(g.whys) || g.whys.length === 0;
-      const isDue = g.next_checkin_at && g.next_checkin_at <= todayForCheckin;
-      return hasNoWhys || isDue;
+      return !Array.isArray(g.whys) || g.whys.length === 0;
     });
 
     const contextBlock = {
@@ -1617,20 +1622,6 @@ Return ONLY valid JSON: { "question": "..." }`,
       })();
     }
 
-    // Schedule next why-building check-in based on motivation signal after a successful why capture
-    if (result.extracted_data?.goal_why_insight && result.extracted_data?.goal_id_referenced) {
-      const motivationSignal = result.extracted_data.goal_motivation_signal;
-      const daysMap = { high: 21, medium: 14, low: 7, lost: 3 };
-      const daysUntilNext = daysMap[motivationSignal] ?? 14;
-      const nextWhyCheckin = localDate(daysUntilNext, client_local_date);
-      supabase
-        .from('goals')
-        .update({ next_checkin_at: nextWhyCheckin, updated_at: new Date().toISOString() })
-        .eq('id', result.extracted_data.goal_id_referenced)
-        .eq('user_id', user_id)
-        .then(() => {}).catch(() => {});
-    }
-
     // Goal vision fragment — write to goals.vision_snapshot and update last_mentioned_at
     if (result.extracted_data?.goal_vision_fragment && result.extracted_data?.goal_id_referenced) {
       const goalId = result.extracted_data.goal_id_referenced;
@@ -1669,10 +1660,14 @@ Return ONLY valid JSON: { "question": "..." }`,
         .then(() => {}).catch(() => {});
     }
 
-    // Goal suggestion — queue as a follow-up for next session
+    // Goal suggestion — handle new_goal and pause actions
     if (result.extracted_data?.goal_suggestion) {
       const suggestion = result.extracted_data.goal_suggestion;
-      if (suggestion.action && suggestion.goal_id) {
+      if (suggestion.action === 'new_goal' && suggestion.title) {
+        // New goal suggestion: pass it through in the response so the frontend can show accept/dismiss UI
+        // The frontend will call create-goal if accepted; no server-side creation here
+        result.goal_suggestion_pending = suggestion;
+      } else if (suggestion.action && suggestion.goal_id) {
         const goalTitle = activeGoals.find(g => g.id === suggestion.goal_id)?.title || 'that goal';
         queueFollowUp(user_id, session_id, {
           context: `goal_suggestion: action=${suggestion.action}, goal_id=${suggestion.goal_id}, reason="${suggestion.reason}"`,
