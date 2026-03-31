@@ -46,6 +46,10 @@ export default function InsightsV2() {
   const [commitmentStats, setCommitmentStats]     = useState(null);
   const [loading, setLoading]                     = useState(true);
   const [activeGoals, setActiveGoals]             = useState([]);
+  const [showAddGoal, setShowAddGoal]             = useState(false);
+  const [newGoalTitle, setNewGoalTitle]           = useState('');
+  const [newGoalCategory, setNewGoalCategory]     = useState('');
+  const [savingGoal, setSavingGoal]               = useState(false);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -78,6 +82,31 @@ export default function InsightsV2() {
       .order('created_at', { ascending: true })
       .limit(5);
     setActiveGoals(data || []);
+  }
+
+  async function handleSaveGoal() {
+    if (!newGoalTitle.trim()) return;
+    setSavingGoal(true);
+    try {
+      const { error } = await supabase.from('goals').insert({
+        user_id: user.id,
+        title: newGoalTitle.trim(),
+        category: newGoalCategory || null,
+        status: 'active',
+        why_it_matters: null,
+        whys: [],
+      });
+      if (error) {
+        console.error('Failed to save goal:', error.message);
+        return;
+      }
+      setNewGoalTitle('');
+      setNewGoalCategory('');
+      setShowAddGoal(false);
+      await loadActiveGoals();
+    } finally {
+      setSavingGoal(false);
+    }
   }
 
   async function loadProfile() {
@@ -500,9 +529,68 @@ export default function InsightsV2() {
           )}
 
           {/* ── Section 4.5: Your Goals ───────────────────────────────── */}
-          {activeGoals.length > 0 && (
-            <section>
-              <h2 className="text-white font-semibold text-base mb-3">Your Goals</h2>
+          <section>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-white font-semibold text-base">Your Goals</h2>
+              <button
+                onClick={() => setShowAddGoal((v) => !v)}
+                className="text-zinc-400 hover:text-white text-sm flex items-center gap-1 transition-colors"
+              >
+                + Add
+              </button>
+            </div>
+
+            {/* Inline add-goal form */}
+            {showAddGoal && (
+              <div className="bg-zinc-900 border border-zinc-700 rounded-2xl p-4 mb-3 space-y-3">
+                <input
+                  type="text"
+                  value={newGoalTitle}
+                  onChange={(e) => setNewGoalTitle(e.target.value)}
+                  placeholder="Goal title"
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-500"
+                />
+                <select
+                  value={newGoalCategory}
+                  onChange={(e) => setNewGoalCategory(e.target.value)}
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-sm text-zinc-300 focus:outline-none focus:border-zinc-500"
+                >
+                  <option value="">Category (optional)</option>
+                  <option value="health">Health</option>
+                  <option value="career">Career</option>
+                  <option value="relationships">Relationships</option>
+                  <option value="finances">Finances</option>
+                  <option value="learning">Learning</option>
+                  <option value="creativity">Creativity</option>
+                  <option value="mindset">Mindset</option>
+                  <option value="other">Other</option>
+                </select>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleSaveGoal}
+                    disabled={!newGoalTitle.trim() || savingGoal}
+                    className="px-4 py-2 bg-red-600 hover:bg-red-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-sm font-medium transition-colors"
+                  >
+                    {savingGoal ? 'Saving…' : 'Save'}
+                  </button>
+                  <button
+                    onClick={() => { setShowAddGoal(false); setNewGoalTitle(''); setNewGoalCategory(''); }}
+                    className="px-4 py-2 text-zinc-400 hover:text-white rounded-xl text-sm transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+                <p className="text-zinc-600 text-xs">Your coach will ask why this matters in your next session.</p>
+              </div>
+            )}
+
+            {activeGoals.length === 0 && !showAddGoal && (
+              <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
+                <p className="text-zinc-500 text-sm">No active goals yet. Add one and your coach will help you understand why it matters.</p>
+              </div>
+            )}
+
+            {activeGoals.length > 0 && (
               <div className="space-y-3">
                 {activeGoals.map((goal, i) => {
                   // Build whys list: use whys array if populated, fall back to why_it_matters
@@ -547,6 +635,10 @@ export default function InsightsV2() {
                             </div>
                           )}
 
+                          {whysList.length === 0 && (
+                            <p className="text-zinc-600 text-xs mt-1 italic">No why yet — talk about this in your next session</p>
+                          )}
+
                           {/* Vision snapshot */}
                           {goal.vision_snapshot && (
                             <div className="mt-2 pt-2 border-t border-zinc-800">
@@ -562,8 +654,8 @@ export default function InsightsV2() {
                   );
                 })}
               </div>
-            </section>
-          )}
+            )}
+          </section>
 
           {/* ── Section 5: Right Now ──────────────────────────────────── */}
           {livingProfile?.short_term_state && (
