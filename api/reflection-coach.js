@@ -1308,7 +1308,7 @@ export default async function handler(req, res) {
     // Goals that need why-building: goals with no whys (first-time capture) OR
     // goals where motivation_signal is low/struggling (follow-through declining),
     // but skip goals whose most recent why was captured within the last 2 days
-    const twoDaysAgo = localDate(-2, clientDate);
+    const twoDaysAgo = localDate(-2, client_local_date);
     const goalsNeedWhyBuilding = activeGoals.filter((g) => {
       if (!Array.isArray(g.whys) || g.whys.length === 0) return true;
       const lastWhy = g.whys[g.whys.length - 1];
