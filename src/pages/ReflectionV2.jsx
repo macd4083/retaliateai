@@ -19,9 +19,8 @@ function getTimeContext() {
   return { period: 'late', greeting: 'Hey' };
 }
 
-const STAGES = [
+const BASE_STAGES = [
   { id: 'wins', label: 'Wins' },
-  { id: 'commitment_checkin', label: 'Check-in' },
   { id: 'honest', label: 'Honest' },
   { id: 'tomorrow', label: 'Tomorrow' },
   { id: 'close', label: 'Close' },
@@ -39,11 +38,11 @@ const DEFAULT_CHECKLIST = { wins: false, honest: false, plan: false, identity: f
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function ProgressBar({ currentStage }) {
-  const stageIndex = STAGES.findIndex((s) => s.id === currentStage);
+function ProgressBar({ currentStage, stages }) {
+  const stageIndex = stages.findIndex((s) => s.id === currentStage);
   return (
     <div className="flex items-center justify-center gap-3 py-3">
-      {STAGES.map((stage, i) => {
+      {stages.map((stage, i) => {
         const isComplete = i < stageIndex;
         const isActive = i === stageIndex;
         return (
@@ -66,7 +65,7 @@ function ProgressBar({ currentStage }) {
                 {stage.label}
               </span>
             </div>
-            {i < STAGES.length - 1 && (
+            {i < stages.length - 1 && (
               <div className={`w-8 h-px mb-4 ${i < stageIndex ? 'bg-red-700' : 'bg-zinc-700'}`} />
             )}
           </div>
@@ -277,6 +276,7 @@ export default function ReflectionV2() {
     exercises_run: [],
     wins_asked_for_more: false,
     honest_depth: false,
+    yesterday_commitment: null,
     commitment_checkin_done: false,
   });
   const [summaryCardData, setSummaryCardData] = useState({});
@@ -286,6 +286,17 @@ export default function ReflectionV2() {
   const [pendingWhyCapture, setPendingWhyCapture] = useState(null); // { goalId, title }
 
   const timeContext = getTimeContext();
+
+  // Dynamic stages — include commitment_checkin only when there's a yesterday commitment
+  const stages = sessionState.yesterday_commitment
+    ? [
+        { id: 'wins', label: 'Wins' },
+        { id: 'commitment_checkin', label: 'Check-in' },
+        { id: 'honest', label: 'Honest' },
+        { id: 'tomorrow', label: 'Tomorrow' },
+        { id: 'close', label: 'Close' },
+      ]
+    : BASE_STAGES;
 
   // Keep messagesRef in sync with messages state
   useEffect(() => {
@@ -353,6 +364,12 @@ export default function ReflectionV2() {
       setSessionId(session.id);
       setIsComplete(session.is_complete);
 
+      // Fetch yesterday's commitment — non-critical, fail silently
+      let fetchedYesterdayCommitment = null;
+      try {
+        fetchedYesterdayCommitment = await reflectionHelpers.getYesterdayCommitment(user.id);
+      } catch (_e) {}
+
       const restoredState = {
         current_stage: session.current_stage || 'wins',
         mood_end_of_day: session.mood_end_of_day || null,
@@ -367,7 +384,8 @@ export default function ReflectionV2() {
         exercises_run: Array.isArray(session.exercises_run) ? session.exercises_run : [],
         wins_asked_for_more: false,
         honest_depth: false,
-        commitment_checkin_done: session.commitment_checkin_done || false,
+        yesterday_commitment: session.yesterday_commitment || fetchedYesterdayCommitment || null,
+        commitment_checkin_done: session.commitment_checkin_done === true,
       };
       setSessionState(restoredState);
 
@@ -544,10 +562,11 @@ export default function ReflectionV2() {
             session_state: {
               ...state,
               is_first_message: isInit,
-              yesterday_commitment: yesterdayCommitment,
+              yesterday_commitment: state.yesterday_commitment,
+              commitment_checkin_done: state.commitment_checkin_done,
+              yesterday_commitment_in_state: !!state.yesterday_commitment,
               consecutive_excuses: state.consecutive_excuses || 0,
               checklist: state.checklist || { ...DEFAULT_CHECKLIST },
-              commitment_checkin_done: state.commitment_checkin_done || false,
             },
             history: isInit ? [] : buildHistory(currentMsgs),
             user_message: userText,
@@ -653,6 +672,9 @@ export default function ReflectionV2() {
         if (data.wins_asked_for_more === true) newState.wins_asked_for_more = true;
         if (data.honest_depth === true) newState.honest_depth = true;
         if (data.commitment_checkin_done === true) newState.commitment_checkin_done = true;
+        if (data.extracted_data?.yesterday_commitment && !newState.yesterday_commitment) {
+          newState.yesterday_commitment = data.extracted_data.yesterday_commitment;
+        }
         setSessionState(newState);
 
         const dbUpdates = {};
@@ -667,6 +689,9 @@ export default function ReflectionV2() {
         if (data.extracted_data?.self_hype_message)
           dbUpdates.self_hype_message = data.extracted_data.self_hype_message;
         if (data.stage_advance && data.new_stage) dbUpdates.current_stage = data.new_stage;
+        if (data.commitment_checkin_done === true && !state.commitment_checkin_done) {
+          dbUpdates.commitment_checkin_done = true;
+        }
         if (Object.keys(dbUpdates).length > 0)
           reflectionHelpers.updateSession(sid, dbUpdates).catch(() => {});
       }
@@ -775,6 +800,7 @@ export default function ReflectionV2() {
           exercises_run: [],
           wins_asked_for_more: false,
           honest_depth: false,
+          yesterday_commitment: null,
           commitment_checkin_done: false,
         });
         initCalledRef.current = false;
@@ -864,7 +890,7 @@ export default function ReflectionV2() {
     <AppShellV2 title="Nightly Reflection">
       <div className="flex flex-col h-full">
         <div className="flex-shrink-0 border-b border-zinc-800 bg-zinc-950">
-          <ProgressBar currentStage={isComplete ? 'complete' : sessionState.current_stage} />
+          <ProgressBar currentStage={isComplete ? 'complete' : sessionState.current_stage} stages={stages} />
         </div>
 
         <div className="flex-1 overflow-y-auto px-4 py-4">
