@@ -32,6 +32,7 @@ const supabase = createClient(
  *
  * ALTER TABLE reflection_sessions ADD COLUMN IF NOT EXISTS summary text;
  * ALTER TABLE reflection_sessions ADD COLUMN IF NOT EXISTS embedding vector(1536);
+ * ALTER TABLE reflection_sessions ADD COLUMN IF NOT EXISTS commitment_checkin_done boolean DEFAULT false;
  *
  * -- Goal-linked commitment tracking
  * CREATE TABLE IF NOT EXISTS goal_commitment_log (
@@ -301,7 +302,7 @@ RETURN JSON EXACTLY (no markdown, no extra keys):
   "assistant_message": "your message (2-3 sentences, one question)",
   "chips": [{"label": "string", "value": "string"}] | null,
   "stage_advance": false,
-  "new_stage": "wins|honest|tomorrow|close|complete" | null,
+  "new_stage": "wins|commitment_checkin|honest|tomorrow|close|complete" | null,
   "extracted_data": {
     "mood": null,
     "win_text": null,
@@ -383,13 +384,14 @@ function daysFromNow(n, clientDate) {
 
 // ── Stage advancement heuristic ───────────────────────────────────────────────
 
-function deriveStageHint(sessionState, classifierChecklist, messageCount) {
+function deriveStageHint(sessionState, classifierChecklist, messageCount, serverYesterdayCommitment) {
   const stage = sessionState.current_stage || 'wins';
   const cl = { ...(sessionState.checklist || {}), ...(classifierChecklist || {}) };
   const hasPlan = !!sessionState.tomorrow_commitment;
   // wins → commitment_checkin (if yesterday's commitment exists and hasn't been checked in yet)
   if (stage === 'wins' && cl.wins && messageCount >= 4 && sessionState.wins_asked_for_more === true) {
-    return sessionState.yesterday_commitment && !sessionState.commitment_checkin_done
+    const hasYesterdayCommitment = !!(sessionState.yesterday_commitment || serverYesterdayCommitment);
+    return hasYesterdayCommitment && !sessionState.commitment_checkin_done
       ? 'commitment_checkin'
       : 'honest';
   }
@@ -1222,7 +1224,7 @@ export default async function handler(req, res) {
 
     // ── 6b. Stage hint ─────────────────────────────────────────────────
     const messageCount = history.length;
-    const suggestedNextStage = deriveStageHint(session_state, intentData?.checklist_content, messageCount);
+    const suggestedNextStage = deriveStageHint(session_state, intentData?.checklist_content, messageCount, yesterdayCommitment);
 
     // ── 7. Session state analysis for instructions ────────────────────────
     const mergedChecklist = { ...(session_state.checklist || {}), ...(intentData?.checklist_content || {}) };
@@ -1488,11 +1490,9 @@ export default async function handler(req, res) {
       messages.push({
         role: 'user',
         content: `Open the ${stage} stage of tonight's reflection. Greeting: "${getTimeGreeting(client_tz_offset)}". ${
-          yesterdayCommitment
-            ? `Yesterday's commitment was: "${yesterdayCommitment}". Open by asking specifically how THAT went — use their exact words from the commitment. Make it personal. Then offer mood chips.`
-            : sameDayCommitment
-              ? `This morning they committed to: "${sameDayCommitment.commitment}". Open by checking in on how that went today before starting the reflection. Then offer mood chips.`
-              : 'No commitment on record. Open with a warm greeting and mood chips.'
+          sameDayCommitment
+            ? `This morning they committed to: "${sameDayCommitment.commitment}". Open by checking in on how that went today before starting the reflection. Then offer mood chips.`
+            : 'Open with a warm greeting and mood chips.'
         } ${streak > 1 ? `${streak}-night streak — acknowledge briefly.` : ''} Start with mood chips: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful 🙏","value":"grateful"},{"label":"Motivated 💪","value":"motivated"},{"label":"Okay 😐","value":"okay"},{"label":"Tired 😴","value":"tired"},{"label":"Stressed 😤","value":"stressed"}]`,
       });
     }
@@ -1547,6 +1547,14 @@ export default async function handler(req, res) {
     result.follow_up_queued = result.follow_up_queued || false;
     result.wins_asked_for_more = result.wins_asked_for_more === true;
     result.honest_depth = result.honest_depth === true;
+    result.commitment_checkin_done = result.commitment_checkin_done === true;
+
+    // Safety guard — prevent hallucinated stage values from GPT
+    const VALID_STAGES = ['wins', 'commitment_checkin', 'honest', 'tomorrow', 'close', 'complete'];
+    if (result.new_stage && !VALID_STAGES.includes(result.new_stage)) {
+      result.new_stage = null;
+      result.stage_advance = false;
+    }
 
     // Safety strip — never re-run a blocked exercise
     if (result.exercise_run !== 'none' && sessionExercisesRun.includes(result.exercise_run)) {
@@ -1635,7 +1643,7 @@ Return ONLY valid JSON: { "question": "..." }`,
       );
     }
 
-    if (session_id && (result.stage_advance || result.extracted_data || result.is_session_complete)) {
+    if (session_id && (result.stage_advance || result.extracted_data || result.is_session_complete || result.commitment_checkin_done)) {
       const updates = {};
       if (result.stage_advance && result.new_stage) updates.current_stage = result.new_stage;
       if (result.extracted_data?.mood) updates.mood_end_of_day = result.extracted_data.mood;
@@ -1647,6 +1655,7 @@ Return ONLY valid JSON: { "question": "..." }`,
         }
       }
       if (result.extracted_data?.self_hype_message) updates.self_hype_message = result.extracted_data.self_hype_message;
+      if (result.commitment_checkin_done) updates.commitment_checkin_done = true;
       if (result.is_session_complete) {
         updates.is_complete = true;
         updates.completed_at = new Date().toISOString();
