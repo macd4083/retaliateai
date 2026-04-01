@@ -33,6 +33,24 @@ const supabase = createClient(
  * ALTER TABLE reflection_sessions ADD COLUMN IF NOT EXISTS summary text;
  * ALTER TABLE reflection_sessions ADD COLUMN IF NOT EXISTS embedding vector(1536);
  *
+ * -- Goal-linked commitment tracking
+ * CREATE TABLE IF NOT EXISTS goal_commitment_log (
+ *   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+ *   user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+ *   session_id uuid REFERENCES reflection_sessions(id) ON DELETE SET NULL,
+ *   goal_id uuid REFERENCES goals(id) ON DELETE CASCADE,  -- null = no goal linked
+ *   commitment_text text NOT NULL,
+ *   date date NOT NULL,
+ *   kept boolean,           -- null = pending, true = kept, false = missed
+ *   evaluated_at timestamptz,
+ *   created_at timestamptz DEFAULT now()
+ * );
+ * CREATE INDEX IF NOT EXISTS goal_commitment_log_user_goal ON goal_commitment_log(user_id, goal_id, date DESC);
+ * CREATE INDEX IF NOT EXISTS goal_commitment_log_user_date ON goal_commitment_log(user_id, date DESC);
+ *
+ * -- Drop next_checkin_at from goals (replaced by behavioral motivation scoring)
+ * ALTER TABLE goals DROP COLUMN IF EXISTS next_checkin_at;
+ *
  * ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS values text[];
  * ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS short_term_state text;
  * ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS long_term_patterns text[];
@@ -61,6 +79,14 @@ const supabase = createClient(
 const DEFAULT_CHECKLIST = { wins: false, honest: false, plan: false, identity: false };
 const MIN_DEEP_SESSION_MESSAGE_COUNT = 6;
 const MAX_DEPTH_INSIGHTS_RETAINED = 4;
+
+// ── Motivation signal thresholds ──────────────────────────────────────────────
+const MOTIVATION_STRONG_THRESHOLD = 0.7;   // ≥70% follow-through → strong
+const MOTIVATION_MEDIUM_THRESHOLD = 0.4;   // ≥40% follow-through → medium; <40% → low
+const MIN_EVALUABLE_COMMITMENTS = 3;       // minimum logged entries before signal is meaningful
+const MIN_SAMPLES_FOR_LOW_SIGNAL = 5;      // need ≥5 samples to classify as "low" vs "unknown"
+const TRAJECTORY_DELTA_THRESHOLD = 0.1;   // >10% rate change between halves = improving/declining
+const DAYS_SILENT_FOR_STRUGGLING = 7;      // goal not mentioned in 7+ days + declining = struggling
 
 // ── System prompt ─────────────────────────────────────────────────────────────
 
@@ -173,7 +199,7 @@ depth_probe (use naturally mid-conversation, not as a named exercise):
 
 GOAL CONNECTION — WHEN AND HOW TO BUILD MEANING
 
-You have a goals array. Each goal may have: id, area, title, whys (array of {text, added_at, source, motivation_signal}), vision_snapshot, depth_insights (array of {date, insight}), days_since_mentioned, suggested_next_action.
+You have a goals array. Each goal may have: id, area, title, whys (array of {text, added_at, source, motivation_signal}), vision_snapshot, depth_insights (array of {date, insight}), days_since_mentioned, suggested_next_action, motivation_signal ("strong"|"medium"|"low"|"struggling"|"unknown").
 
 GOAL WHYS (whys array):
 - Each goal has a list of whys — reasons the user has articulated at different points in time
@@ -189,7 +215,9 @@ GOAL WHYS (whys array):
 
 WHY-BUILDING TRIGGER (when to ask about why):
 - You decide when the moment is right — there is NO fixed schedule
-- Good moments: user references a goal with high energy, user is struggling with a goal and you want to reconnect them, motivation signal is "medium" or "low", after a miss connected to a goal, user accepts a suggested goal, it's been a while since this goal's why was explored
+- Good moments: user references a goal with high energy, user is struggling with a goal and you want to reconnect them, motivation_signal is "low" or "struggling" (meaning their commitment follow-through for this goal is declining), after a miss connected to a goal, user accepts a suggested goal
+- motivation_signal is derived from behavioral data — commitment follow-through rate for this goal over the last 14 days. "struggling" = declining trajectory + goal hasn't been mentioned in 7+ days. "low" = below 40% follow-through. "medium" = 40-69%. "strong" = 70%+. "unknown" = not enough data yet.
+- When motivation_signal is "low" or "struggling" AND the goal comes up naturally, PRIORITIZE why-building or why_reconnect for that goal
 - You can run why-building for any goal any number of times across sessions — revisiting whys is valuable, not redundant
 - Bad moments: user is already doing deep honest work on something else, session is about to close, user signals they want to move on
 - NEVER ask "why does this goal matter to you?" verbatim — use their context
@@ -250,15 +278,7 @@ WHEN TO MAKE THE CONNECTION:
    → Set extracted_data.goal_depth_insight with the realization in their words
    → Set extracted_data.goal_id_referenced
 
-6. Goal motivation signal (goal_motivation_signal field):
-   → When running a goal check-in moment, populate goal_motivation_signal based on the user's energy/language about that goal
-   → "high" = strong engagement, fired up, talking with energy
-   → "medium" = still committed but quieter, more duty than desire
-   → "low" = going through the motions, mild disillusionment
-   → "lost" = user signals the goal no longer matters or they've moved on
-   → Leave null if no goal check-in happened this message
-
-7. Suggesting a new goal (when user mentions they want to pursue something new):
+6. Suggesting a new goal (when user mentions they want to pursue something new):
    → Only suggest if the user explicitly indicates they want to track it as a goal
    → Set extracted_data.goal_suggestion: { "action": "new_goal", "title": "concise goal title", "category": "health|career|relationships|finances|learning|creativity|mindset|other" }
    → DO NOT set goal_id (this is a brand-new goal, not an existing one)
@@ -297,8 +317,7 @@ RETURN JSON EXACTLY (no markdown, no extra keys):
     "goal_why_replace_index": null,
     "goal_vision_fragment": null,
     "goal_depth_insight": null,
-    "goal_suggestion": null,
-    "goal_motivation_signal": null
+    "goal_suggestion": null
   },
   "exercise_run": "none|gratitude_anchor|why_reconnect|evidence_audit|implementation_intention|values_clarification|future_self_bridge|ownership_reframe|triage_one_thing|identity_reinforcement|depth_probe",
   "checklist_updates": {"wins": false, "honest": false, "plan": false, "identity": false},
@@ -553,7 +572,7 @@ async function loadActiveGoals(userId) {
   try {
     const { data } = await supabase
       .from('goals')
-      .select('id, title, why_it_matters, category, whys, vision_snapshot, depth_insights, last_mentioned_at, suggested_next_action, next_checkin_at')
+      .select('id, title, why_it_matters, category, whys, vision_snapshot, depth_insights, last_mentioned_at, suggested_next_action')
       .eq('user_id', userId)
       .eq('status', 'active')
       .limit(6);
@@ -571,6 +590,92 @@ async function loadActiveGoals(userId) {
   } catch (_e) { return []; }
 }
 
+
+// ── Goal commitment stats loader ──────────────────────────────────────────────
+
+async function loadGoalCommitmentStats(userId, clientDate) {
+  try {
+    const sinceDate = localDate(-14, clientDate);
+    const todayStr = today(clientDate);
+    const midpoint = localDate(-7, clientDate);
+
+    const { data: logs } = await supabase
+      .from('goal_commitment_log')
+      .select('goal_id, date, kept')
+      .eq('user_id', userId)
+      .gte('date', sinceDate)
+      .lte('date', todayStr)
+      .not('kept', 'is', null);
+
+    if (!logs || logs.length === 0) return [];
+
+    // Group by goal_id
+    const byGoal = {};
+    for (const log of logs) {
+      const gid = log.goal_id || '__unlinked__';
+      if (!byGoal[gid]) byGoal[gid] = { kept: 0, total: 0, dates: [] };
+      byGoal[gid].total++;
+      if (log.kept) byGoal[gid].kept++;
+      byGoal[gid].dates.push(log.date);
+    }
+
+    return Object.entries(byGoal).map(([goalId, stats]) => {
+      const recentLogs = logs.filter(
+        (l) => (l.goal_id || '__unlinked__') === goalId && l.date > midpoint
+      );
+      const priorLogs = logs.filter(
+        (l) => (l.goal_id || '__unlinked__') === goalId && l.date <= midpoint
+      );
+      const recentRate =
+        recentLogs.length > 0
+          ? recentLogs.filter((l) => l.kept).length / recentLogs.length
+          : null;
+      const priorRate =
+        priorLogs.length > 0
+          ? priorLogs.filter((l) => l.kept).length / priorLogs.length
+          : null;
+
+      let trajectory = 'stable';
+      if (recentRate !== null && priorRate !== null) {
+        if (recentRate - priorRate > TRAJECTORY_DELTA_THRESHOLD) trajectory = 'improving';
+        else if (priorRate - recentRate > TRAJECTORY_DELTA_THRESHOLD) trajectory = 'declining';
+      }
+
+      const sortedDates = [...stats.dates].sort();
+      const lastDate = sortedDates[sortedDates.length - 1];
+      const days_since_last_commitment = lastDate
+        ? Math.floor((new Date(todayStr) - new Date(lastDate)) / 86400000)
+        : null;
+
+      return {
+        goal_id: goalId === '__unlinked__' ? null : goalId,
+        rate_last_14: stats.total >= MIN_EVALUABLE_COMMITMENTS ? stats.kept / stats.total : null,
+        trajectory,
+        kept_last_14: stats.kept,
+        total_last_14: stats.total,
+        days_since_last_commitment,
+      };
+    });
+  } catch (_e) { return []; }
+}
+
+// ── Compute goal motivation signal (pure, no DB) ──────────────────────────────
+
+function computeGoalMotivationSignal(goalStats, goal) {
+  // goalStats: { rate_last_14, trajectory, total_last_14, days_since_last_commitment }
+  // goal: { days_since_mentioned }
+  if (!goalStats || goalStats.total_last_14 < MIN_EVALUABLE_COMMITMENTS) return 'unknown';
+  const { rate_last_14, trajectory } = goalStats;
+  const daysSilent = goal.days_since_mentioned ?? 999;
+
+  if (rate_last_14 >= MOTIVATION_STRONG_THRESHOLD && trajectory !== 'declining') return 'strong';
+  if (rate_last_14 >= MOTIVATION_MEDIUM_THRESHOLD && trajectory !== 'declining') return 'medium';
+  if (trajectory === 'declining' || (rate_last_14 < MOTIVATION_MEDIUM_THRESHOLD && goalStats.total_last_14 >= MIN_SAMPLES_FOR_LOW_SIGNAL)) {
+    if (daysSilent >= DAYS_SILENT_FOR_STRUGGLING) return 'struggling';
+    return 'low';
+  }
+  return 'medium';
+}
 
 // ── Classify intent ───────────────────────────────────────────────────────────
 
@@ -1030,7 +1135,7 @@ export default async function handler(req, res) {
     // ── 2. Load context in parallel ───────────────────────────────────────
     const currentSignals = [intentData?.intent, intentData?.emotional_state, intentData?.accountability_signal].filter(Boolean);
 
-    const [followUpQueue, growthMarkers, reflectionPatterns, recentSessions, yesterdayCommitment, userProfile, activeGoals, commitmentStats, todayEarlyCommitment] =
+    const [followUpQueue, growthMarkers, reflectionPatterns, recentSessions, yesterdayCommitment, userProfile, activeGoalsRaw, commitmentStats, todayEarlyCommitment, goalCommitmentStats] =
       await Promise.all([
         loadFollowUpQueue(user_id, currentSignals, client_local_date),
         loadGrowthMarkers(user_id, client_local_date),
@@ -1041,7 +1146,18 @@ export default async function handler(req, res) {
         loadActiveGoals(user_id),
         loadCommitmentStats(user_id, client_local_date),
         loadTodayEarlyCommitment(user_id, client_local_date),
+        loadGoalCommitmentStats(user_id, client_local_date),
       ]);
+
+    // Attach motivation signal to each goal
+    const activeGoals = activeGoalsRaw.map((g) => {
+      const gStats = goalCommitmentStats.find((s) => s.goal_id === g.id) || null;
+      return {
+        ...g,
+        motivation_signal: computeGoalMotivationSignal(gStats, g),
+        commitment_stats: gStats || null,
+      };
+    });
 
     // ── 3. Merge profile ──────────────────────────────────────────────────
     const profile = {
@@ -1151,6 +1267,7 @@ export default async function handler(req, res) {
             vision_snapshot: g.vision_snapshot || null,
             depth_insights: g.depth_insights?.length > 0 ? g.depth_insights : null,
             suggested_next_action: g.suggested_next_action || null,
+            motivation_signal: g.motivation_signal || 'unknown',
           };
           // Only include days_since_mentioned if it's meaningful (goal was tracked before)
           if (g.days_since_mentioned !== null && g.days_since_mentioned > 7) {
@@ -1172,10 +1289,12 @@ export default async function handler(req, res) {
         note: "hasn't come up recently — if a natural opening exists, one soft check-in is fine. If no opening, skip it.",
       }));
 
-    // Goals that need why-building: only goals with no whys (first-time capture)
-    // There is no clock-based schedule — the AI decides when to revisit whys for goals that already have them
+    // Goals that need why-building: goals with no whys (first-time capture) OR
+    // goals where motivation_signal is low/struggling (follow-through declining)
     const goalsNeedWhyBuilding = activeGoals.filter((g) => {
-      return !Array.isArray(g.whys) || g.whys.length === 0;
+      const noWhys = !Array.isArray(g.whys) || g.whys.length === 0;
+      const lowMotivation = g.motivation_signal === 'low' || g.motivation_signal === 'struggling';
+      return noWhys || lowMotivation;
     });
 
     const contextBlock = {
@@ -1205,6 +1324,8 @@ export default async function handler(req, res) {
                 category: g.category || null,
                 whys: hasWhys ? g.whys : [],
                 has_whys: hasWhys,
+                motivation_signal: g.motivation_signal,
+                commitment_rate: g.commitment_stats?.rate_last_14 ?? null,
               };
             })
           : undefined,
@@ -1520,6 +1641,59 @@ Return ONLY valid JSON: { "question": "..." }`,
       }
     }
 
+    // Extract goal-linked commitments when tomorrow_commitment is first set
+    if (result.extracted_data?.tomorrow_commitment && !session_state.tomorrow_commitment && activeGoals.length > 0) {
+      (async () => {
+        try {
+          const commitmentText = result.extracted_data.tomorrow_commitment;
+          const goalList = activeGoals.map((g) => ({ id: g.id, title: g.title, category: g.category }));
+          const extraction = await openai.chat.completions.create({
+            model: 'gpt-4o-mini',
+            messages: [
+              {
+                role: 'system',
+                content: `You extract goal links from a commitment string. Split the commitment into individual commitments if multiple are present (e.g. "go to gym and work on app" → two items). For each, match to the most relevant goal_id from the goals list, or null if none fit clearly.
+Return ONLY valid JSON: { "items": [{ "goal_id": "uuid or null", "text": "commitment fragment", "confidence": "high|medium|low" }] }
+Only link when genuinely relevant. Do not force links. Multiple items can have the same goal_id. goal_id must be exactly from the provided list or null.`,
+              },
+              {
+                role: 'user',
+                content: JSON.stringify({ commitment: commitmentText, goals: goalList }),
+              },
+            ],
+            response_format: { type: 'json_object' },
+            temperature: 0.2,
+            max_tokens: 300,
+          });
+          const extracted = JSON.parse(extraction.choices[0].message.content);
+          const items = Array.isArray(extracted.items) ? extracted.items : [];
+          const clientToday = today(client_local_date);
+          for (const item of items) {
+            const goalId = item.goal_id && activeGoals.some((g) => g.id === item.goal_id) ? item.goal_id : null;
+            await supabase.from('goal_commitment_log').insert({
+              user_id,
+              session_id: session_id || null,
+              goal_id: goalId,
+              commitment_text: item.text || commitmentText,
+              date: clientToday,
+              kept: null,
+            });
+          }
+          // If no items extracted or all null, log one unlinked entry
+          if (items.length === 0) {
+            await supabase.from('goal_commitment_log').insert({
+              user_id,
+              session_id: session_id || null,
+              goal_id: null,
+              commitment_text: commitmentText,
+              date: clientToday,
+              kept: null,
+            });
+          }
+        } catch (_e) { /* fail silently */ }
+      })();
+    }
+
     if (result.extracted_data?.blocker_tags?.length) {
       dbPromises.push(upsertBlockerPatterns(user_id, result.extracted_data.blocker_tags, client_local_date));
     }
@@ -1586,7 +1760,7 @@ Return ONLY valid JSON: { "question": "..." }`,
         text: result.extracted_data.goal_why_insight,
         added_at: clientToday,
         source: 'reflection_session',
-        motivation_signal: result.extracted_data.goal_motivation_signal || null,
+        motivation_signal: null,  // computed behaviorally, not by AI extraction
         session_id: session_id || null,
       };
 
@@ -1744,6 +1918,36 @@ Return ONLY valid JSON: { "question": "...", "context": "brief context on why th
               }
             } catch (_e) { /* fail silently */ }
           }
+
+          // Evaluate yesterday's goal commitments now that this session is complete
+          try {
+            const yesterday = localDate(-1, client_local_date);
+            const { data: pendingLogs } = await supabase
+              .from('goal_commitment_log')
+              .select('id')
+              .eq('user_id', user_id)
+              .eq('date', yesterday)
+              .is('kept', null);
+            if (pendingLogs && pendingLogs.length > 0) {
+              await supabase
+                .from('goal_commitment_log')
+                .update({ kept: true, evaluated_at: new Date().toISOString() })
+                .eq('user_id', user_id)
+                .eq('date', yesterday)
+                .is('kept', null);
+            }
+          } catch (_e) { /* fail silently */ }
+
+          // Mark commitments from 2+ days ago that are still null as missed
+          try {
+            const twoDaysAgo = localDate(-2, client_local_date);
+            await supabase
+              .from('goal_commitment_log')
+              .update({ kept: false, evaluated_at: new Date().toISOString() })
+              .eq('user_id', user_id)
+              .lt('date', twoDaysAgo)
+              .is('kept', null);
+          } catch (_e) { /* fail silently */ }
         } catch (_e) {}
       })();
     }
