@@ -384,21 +384,23 @@ function daysFromNow(n, clientDate) {
 
 // ── Stage advancement heuristic ───────────────────────────────────────────────
 
-function deriveStageHint(sessionState, classifierChecklist, messageCount, serverYesterdayCommitment) {
+function deriveStageHint(sessionState, classifierChecklist) {
   const stage = sessionState.current_stage || 'wins';
   const cl = { ...(sessionState.checklist || {}), ...(classifierChecklist || {}) };
   const hasPlan = !!sessionState.tomorrow_commitment;
-  // wins → commitment_checkin (if yesterday's commitment exists and hasn't been checked in yet)
-  if (stage === 'wins' && cl.wins && messageCount >= 4 && sessionState.wins_asked_for_more === true) {
-    const hasYesterdayCommitment = !!(sessionState.yesterday_commitment || serverYesterdayCommitment);
-    return hasYesterdayCommitment && !sessionState.commitment_checkin_done
-      ? 'commitment_checkin'
-      : 'honest';
-  }
-  // commitment_checkin → honest (once check-in is done or there was no commitment)
+  const hasYesterdayCommitment = !!sessionState.yesterday_commitment;
+
+  // wins → commitment_checkin (only when there's a yesterday commitment)
+  if (stage === 'wins' && cl.wins && sessionState.wins_asked_for_more === true && hasYesterdayCommitment) return 'commitment_checkin';
+  // wins → honest (skip commitment_checkin when there's no yesterday commitment)
+  if (stage === 'wins' && cl.wins && sessionState.wins_asked_for_more === true && !hasYesterdayCommitment) return 'honest';
+  // commitment_checkin → honest (always — the tone of honest is set by AI based on what they said)
   if (stage === 'commitment_checkin' && sessionState.commitment_checkin_done === true) return 'honest';
+  // honest → tomorrow
   if (stage === 'honest' && cl.honest && sessionState.honest_depth === true) return 'tomorrow';
+  // tomorrow → close
   if (stage === 'tomorrow' && hasPlan) return 'close';
+  // close → complete
   if (stage === 'close' && cl.identity && hasPlan) return 'complete';
   return null;
 }
@@ -1224,14 +1226,14 @@ export default async function handler(req, res) {
 
     // ── 6b. Stage hint ─────────────────────────────────────────────────
     const messageCount = history.length;
-    const suggestedNextStage = deriveStageHint(session_state, intentData?.checklist_content, messageCount, yesterdayCommitment);
+    const suggestedNextStage = deriveStageHint(session_state, intentData?.checklist_content);
 
     // ── 7. Session state analysis for instructions ────────────────────────
     const mergedChecklist = { ...(session_state.checklist || {}), ...(intentData?.checklist_content || {}) };
     const tomorrowFilled = !!session_state.tomorrow_commitment;
     const sessionReadyToClose = tomorrowFilled && mergedChecklist.wins && (mergedChecklist.identity || messageCount >= 10);
     const forceClose = messageCount >= 14 && tomorrowFilled && mergedChecklist.wins;
-    const depthProbeNeeded = intentData?.depth_opportunity && !sessionExercisesRun.includes('depth_probe');
+    const depthProbeNeeded = intentData?.depth_opportunity && !sessionExercisesRun.includes('depth_probe') && session_state.current_stage === 'honest' && !mergedChecklist.honest;
     const hasMissInSession = Array.isArray(session_state.misses) && session_state.misses.length > 0;
     const honestMissing = !mergedChecklist.honest && !hasMissInSession && messageCount >= 4;
     const identityMissing = !mergedChecklist.identity && messageCount >= 6;
@@ -1402,7 +1404,7 @@ export default async function handler(req, res) {
             ? `RUN: ${suggestedExercise}. first_time=${isFirstTimeExercise}. Fill ALL placeholders with user's actual words — never output [bracket placeholders]. Set exercise_run="${suggestedExercise}".`
             : null,
           depthProbeNeeded
-            ? `DEPTH OPPORTUNITY: Go deeper here. Ask WHY or surface the belief underneath. Use a depth_probe question naturally. Set exercise_run="depth_probe". Store any insight in extracted_data.depth_insight. IMPORTANT: Do NOT frame this as goal-specific unless the user is actively discussing their tomorrow commitment or directly referencing a goal — keep depth probes grounded in what the user just said, not in the goals framework.`
+            ? `DEPTH OPPORTUNITY (honest stage only): The user is in the honest stage and gave a depth opportunity. Go deeper here. Ask WHY or surface the belief underneath. Use a depth_probe question naturally. Set exercise_run="depth_probe". Store any insight in extracted_data.depth_insight. Only probe for depth when current_stage === 'honest' and the honest checklist item is not yet complete. IMPORTANT: Do NOT frame this as goal-specific unless the user is directly referencing a goal — keep depth probes grounded in what the user just said.`
             : null,
           session_state.wins?.length > 0 && Array.isArray(session_state.wins) && session_state.current_stage !== 'wins'
             ? `CALLBACK: The user mentioned these wins earlier: ${session_state.wins.map(w => typeof w === 'string' ? w : w?.text).filter(Boolean).join(', ')}. If relevant, reference these by name when asking about follow-through or identity. Never re-ask what you already know.`
@@ -1433,7 +1435,7 @@ export default async function handler(req, res) {
             if (session_state.commitment_checkin_done) return null;
             const yc = session_state.yesterday_commitment || yesterdayCommitment;
             if (!yc) return null;
-            return `COMMITMENT CHECK-IN: The user is now in the commitment_checkin stage. Their commitment from yesterday was: "${yc}". Ask ONE natural question about how that went — use their exact words from the commitment. This is the bridge between wins and honest: if they kept it, celebrate briefly and flow into honest. If they missed it, acknowledge it warmly and let it naturally become the first honest moment — a missed commitment IS an honest moment. After the user responds, set commitment_checkin_done: true and stage_advance: true, new_stage: "honest". Do NOT drill the commitment further once answered.`;
+            return `## STAGE: COMMITMENT CHECK-IN\nYou are here only when session.current_stage === 'commitment_checkin'.\n- Reference yesterday's exact commitment text: "${yc}"\n- Ask exactly ONE question about how it went. Use their words, not generic language.\n- If they kept it → acknowledge the follow-through warmly and absorb it into momentum. Set commitment_checkin_done: true and advance to honest stage.\n- If they missed it or it was partial → their answer IS the honest stage opener. Do not probe further here. Set commitment_checkin_done: true and advance to honest stage. The honest exploration begins from this point.\n- Never ask twice. One exchange only. Always set commitment_checkin_done: true after their response, regardless of outcome.`;
           })(),
           identityMissing && !sessionReadyToClose
             ? `IDENTITY MISSING: Find a natural moment to ask what their actions say about who they're becoming. E.g. "What does [their action] say about who you're becoming?"`
