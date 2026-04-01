@@ -282,6 +282,9 @@ WHEN TO MAKE THE CONNECTION:
    → After suggesting, tell the user you'll add it — they'll confirm in the UI
    → Only one new goal suggestion per session
 
+7. LIGHTWEIGHT WHY — COMMITMENT PLANNING:
+   When the user states their tomorrow commitment and it connects to a goal you're tracking, ask ONE lightweight question: "What's making that the priority tomorrow?" — only if their message doesn't already contain a motivation signal (i.e. they didn't say "because...", "I need to...", or volunteer a reason inline). This is NOT a full why-building exercise — one question only, no follow-up drilling. If they answer with a motivation, set goal_why_action: "add", goal_why_insight to their actual words, goal_id_referenced to the matching goal, and goal_commitment_why: true so the write-back uses source "commitment_planning". Skip entirely if: the commitment message already explains why, no goal match is clear, or a full why-building moment already happened this session.
+
 WHAT NOT TO DO:
 - Never announce you're doing a "goal check-in"
 - Never redirect a conversation that's already going somewhere real just to fit in a goal
@@ -312,7 +315,8 @@ RETURN JSON EXACTLY (no markdown, no extra keys):
     "goal_why_replace_index": null,
     "goal_vision_fragment": null,
     "goal_depth_insight": null,
-    "goal_suggestion": null
+    "goal_suggestion": null,
+    "goal_commitment_why": false
   },
   "exercise_run": "none|gratitude_anchor|why_reconnect|evidence_audit|implementation_intention|values_clarification|future_self_bridge|ownership_reframe|triage_one_thing|identity_reinforcement|depth_probe",
   "checklist_updates": {"wins": false, "honest": false, "plan": false, "identity": false},
@@ -1756,7 +1760,7 @@ Only link when genuinely relevant. Do not force links. Multiple items can have t
       const newWhy = {
         text: result.extracted_data.goal_why_insight,
         added_at: clientToday,
-        source: 'reflection_session',
+        source: result.extracted_data.goal_commitment_why === true ? 'commitment_planning' : 'reflection_session',
         motivation_signal: null,  // computed behaviorally, not by AI extraction
         session_id: session_id || null,
       };
