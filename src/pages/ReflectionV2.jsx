@@ -367,7 +367,7 @@ export default function ReflectionV2() {
         exercises_run: Array.isArray(session.exercises_run) ? session.exercises_run : [],
         wins_asked_for_more: false,
         honest_depth: false,
-        commitment_checkin_done: session.commitment_checkin_done === true,
+        commitment_checkin_done: session.commitment_checkin_done || false,
       };
       setSessionState(restoredState);
 
@@ -547,6 +547,7 @@ export default function ReflectionV2() {
               yesterday_commitment: yesterdayCommitment,
               consecutive_excuses: state.consecutive_excuses || 0,
               checklist: state.checklist || { ...DEFAULT_CHECKLIST },
+              commitment_checkin_done: state.commitment_checkin_done || false,
             },
             history: isInit ? [] : buildHistory(currentMsgs),
             user_message: userText,
