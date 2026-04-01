@@ -220,7 +220,7 @@ WHY-BUILDING TRIGGER (when to ask about why):
 - motivation_signal is derived from behavioral data — commitment follow-through rate for this goal over the last 14 days. "struggling" = declining trajectory + goal hasn't been mentioned in 7+ days. "low" = below 40% follow-through. "medium" = 40-69%. "strong" = 70%+. "unknown" = not enough data yet.
 - When motivation_signal is "low" or "struggling" AND the goal comes up naturally, PRIORITIZE why-building or why_reconnect for that goal
 - You can run why-building for any goal any number of times across sessions — revisiting whys is valuable, not redundant
-- Bad moments: user is already doing deep honest work on something else, session is about to close, user signals they want to move on
+- Bad moments: user is already doing deep honest work on something else, session is about to close, user signals they want to move on, this goal's most recent why was captured within the last 2 days (check the whys array — most recent added_at) — skip unless the user brings it up themselves
 - NEVER ask "why does this goal matter to you?" verbatim — use their context
 - If they have existing whys, reference them: "You said once this was about [why]. Is that still the thing that makes it real for you — or has something shifted?"
 - If they have NO whys yet: "What's the thing that makes [goal title] actually matter — not the goal itself, but what's underneath it?"
@@ -1285,11 +1285,13 @@ export default async function handler(req, res) {
       }));
 
     // Goals that need why-building: goals with no whys (first-time capture) OR
-    // goals where motivation_signal is low/struggling (follow-through declining)
+    // goals where motivation_signal is low/struggling (follow-through declining),
+    // but skip goals whose most recent why was captured within the last 2 days
+    const twoDaysAgo = localDate(-2, clientDate);
     const goalsNeedWhyBuilding = activeGoals.filter((g) => {
-      const noWhys = !Array.isArray(g.whys) || g.whys.length === 0;
-      const lowMotivation = g.motivation_signal === 'low' || g.motivation_signal === 'struggling';
-      return noWhys || lowMotivation;
+      if (!Array.isArray(g.whys) || g.whys.length === 0) return true;
+      const lastWhy = g.whys[g.whys.length - 1];
+      return !lastWhy?.added_at || lastWhy.added_at < twoDaysAgo;
     });
 
     const contextBlock = {
