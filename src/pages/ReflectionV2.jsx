@@ -284,6 +284,9 @@ export default function ReflectionV2() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [pendingGoalSuggestion, setPendingGoalSuggestion] = useState(null);
   const [pendingWhyCapture, setPendingWhyCapture] = useState(null); // { goalId, title }
+  const [activeGoals, setActiveGoals] = useState([]);
+  const [showGoalChips, setShowGoalChips] = useState(false);
+  const [selectedGoalChips, setSelectedGoalChips] = useState([]);
 
   const timeContext = getTimeContext();
 
@@ -396,6 +399,16 @@ export default function ReflectionV2() {
       } catch (streakErr) {
         console.error('[initSession] getReflectionStreak failed:', streakErr);
       }
+
+      // Active goals — non-critical, fail silently
+      try {
+        const { data: goalsData } = await supabase
+          .from('goals')
+          .select('id, title, category')
+          .eq('user_id', user.id)
+          .eq('status', 'active');
+        setActiveGoals(goalsData || []);
+      } catch (_e) {}
 
       // Message load — critical
       let existingMessages;
@@ -701,6 +714,12 @@ export default function ReflectionV2() {
         setPendingGoalSuggestion(data.goal_suggestion_pending);
       }
 
+      // Show goal chips composer when coach asks the tomorrow commitment question
+      if (data.show_goal_chips === true) {
+        setShowGoalChips(true);
+        setSelectedGoalChips([]);
+      }
+
       if (isSessionComplete) {
         setIsComplete(true);
         const finalStreak = streak + 1;
@@ -858,10 +877,25 @@ export default function ReflectionV2() {
 
   function handleSend() {
     const text = inputValue.trim();
-    if (!text || isLoading) return;
+    const hasNoContent = !text && selectedGoalChips.length === 0;
+    if (hasNoContent || isLoading) return;
     setInputValue('');
-    sendMessage(text);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
+
+    let fullMessage = text;
+    if (showGoalChips && selectedGoalChips.length > 0) {
+      const chipText = selectedGoalChips.join(' + ');
+      if (chipText && text) {
+        fullMessage = `${chipText}. ${text}`;
+      } else {
+        fullMessage = chipText || text;
+      }
+    }
+
+    setShowGoalChips(false);
+    setSelectedGoalChips([]);
+
+    sendMessage(fullMessage);
   }
 
   function handleKeyDown(e) {
@@ -974,20 +1008,64 @@ export default function ReflectionV2() {
               </div>
             )}
             <div className="flex items-end gap-3">
-            <textarea
-              ref={textareaRef}
-              value={inputValue}
-              onChange={handleTextareaChange}
-              onKeyDown={handleKeyDown}
-              disabled={isLoading || isInitializing}
-              placeholder={isComplete ? 'Anything else on your mind...' : (STAGE_PLACEHOLDERS[sessionState.current_stage] || 'Tell me more...')}
-              rows={1}
-              className="flex-1 bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-500 resize-none focus:outline-none focus:border-zinc-500 transition-colors disabled:opacity-50"
-              style={{ minHeight: '44px', maxHeight: '120px' }}
-            />
+            {showGoalChips && activeGoals.length > 0 ? (
+              <div className="flex-1 border border-zinc-700 rounded-2xl bg-zinc-900 overflow-hidden">
+                <div className="flex flex-wrap gap-2 p-3 border-b border-zinc-700">
+                  {activeGoals.map((goal) => {
+                    const isSelected = selectedGoalChips.includes(goal.title);
+                    return (
+                      <button
+                        key={goal.id}
+                        onClick={() => {
+                          setSelectedGoalChips((prev) =>
+                            isSelected ? prev.filter((t) => t !== goal.title) : [...prev, goal.title]
+                          );
+                        }}
+                        disabled={isLoading || isInitializing}
+                        className={`rounded-full px-3 py-1.5 text-sm transition-colors ${
+                          isSelected
+                            ? 'bg-red-600 border border-red-600 text-white'
+                            : 'border border-zinc-600 text-zinc-300 bg-transparent'
+                        }`}
+                      >
+                        {goal.title}
+                      </button>
+                    );
+                  })}
+                </div>
+                <textarea
+                  ref={textareaRef}
+                  value={inputValue}
+                  onChange={handleTextareaChange}
+                  onKeyDown={handleKeyDown}
+                  disabled={isLoading || isInitializing}
+                  placeholder="Anything else on your mind..."
+                  rows={1}
+                  className="w-full bg-transparent px-4 py-3 text-sm text-white placeholder-zinc-500 resize-none focus:outline-none"
+                  style={{ minHeight: '44px', maxHeight: '120px' }}
+                />
+              </div>
+            ) : (
+              <textarea
+                ref={textareaRef}
+                value={inputValue}
+                onChange={handleTextareaChange}
+                onKeyDown={handleKeyDown}
+                disabled={isLoading || isInitializing}
+                placeholder={isComplete ? 'Anything else on your mind...' : (STAGE_PLACEHOLDERS[sessionState.current_stage] || 'Tell me more...')}
+                rows={1}
+                className="flex-1 bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-500 resize-none focus:outline-none focus:border-zinc-500 transition-colors disabled:opacity-50"
+                style={{ minHeight: '44px', maxHeight: '120px' }}
+              />
+            )}
             <button
               onClick={handleSend}
-              disabled={!inputValue.trim() || isLoading || isInitializing}
+              disabled={
+                (showGoalChips
+                  ? selectedGoalChips.length === 0 && !inputValue.trim()
+                  : !inputValue.trim()
+                ) || isLoading || isInitializing
+              }
               className="w-10 h-10 rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center flex-shrink-0"
             >
               <Send className="w-4 h-4 text-white" />
