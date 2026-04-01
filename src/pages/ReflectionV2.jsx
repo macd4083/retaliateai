@@ -21,6 +21,7 @@ function getTimeContext() {
 
 const STAGES = [
   { id: 'wins', label: 'Wins' },
+  { id: 'commitment_checkin', label: 'Check-in' },
   { id: 'honest', label: 'Honest' },
   { id: 'tomorrow', label: 'Tomorrow' },
   { id: 'close', label: 'Close' },
@@ -28,6 +29,7 @@ const STAGES = [
 
 const STAGE_PLACEHOLDERS = {
   wins: 'How are you feeling tonight?',
+  commitment_checkin: 'How did it go?',
   honest: 'Tell me more...',
   tomorrow: 'What will you commit to?',
   close: 'Write yourself a message...',
@@ -275,6 +277,7 @@ export default function ReflectionV2() {
     exercises_run: [],
     wins_asked_for_more: false,
     honest_depth: false,
+    commitment_checkin_done: false,
   });
   const [summaryCardData, setSummaryCardData] = useState({});
   const [followThroughStats, setFollowThroughStats] = useState(null);
@@ -616,7 +619,7 @@ export default function ReflectionV2() {
         })
         .catch(() => {});
 
-      if (data.extracted_data || data.stage_advance || data.checklist_updates || data.consecutive_excuses !== undefined || data.wins_asked_for_more || data.honest_depth) {
+      if (data.extracted_data || data.stage_advance || data.checklist_updates || data.consecutive_excuses !== undefined || data.wins_asked_for_more || data.honest_depth || data.commitment_checkin_done) {
         const newState = { ...state };
         if (data.extracted_data?.mood) newState.mood_end_of_day = data.extracted_data.mood;
         if (data.extracted_data?.win_text)
@@ -647,6 +650,7 @@ export default function ReflectionV2() {
         }
         if (data.wins_asked_for_more === true) newState.wins_asked_for_more = true;
         if (data.honest_depth === true) newState.honest_depth = true;
+        if (data.commitment_checkin_done === true) newState.commitment_checkin_done = true;
         setSessionState(newState);
 
         const dbUpdates = {};

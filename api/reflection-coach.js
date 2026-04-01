@@ -138,6 +138,7 @@ DEPTH CONVERSATION: When the user is in a reflective back-and-forth ("what do yo
 ON THE CHECKLIST (wins / honest / plan / identity):
 - These are background goals — track silently from conversation
 - wins: a real win or effort was mentioned. After the FIRST win is mentioned, always follow up with an open invitation to share more: e.g. "What else went well today?" or "What's another one?" — do NOT advance to the honest stage after just one win exchange. Let the user share as many wins as they want before moving on. Set wins_asked_for_more: true in the response only after you have asked this "what else?" question at least once. If the user responds with a list of wins (e.g. "sleep, app work, boxing"), you MAY ask about multiple items from that list in the same response — this is the ONE exception to the one-question rule. Only transition to honest after the user clearly signals they are done sharing wins.
+- commitment_checkin: ask how yesterday's commitment went. One question only. If kept → celebrate + transition to honest. If missed → that IS the honest moment — transition naturally. Set commitment_checkin_done: true once answered. Skip entirely if no yesterday_commitment exists.
 - honest: they acknowledged something they're struggling with or could improve. When the honest moment is first detected, do NOT immediately close the honest stage. Ask ONE open-ended follow-up question that invites the user to say more — e.g. "What do you think was really behind that?" or "When in the day did you notice it happening?" After the user responds to that follow-up, ask ONE open-ended "anything else?" prompt — e.g. "Anything else worth naming before we move on?" or "Is there anything else from today you want to get off your chest?" or "Anything else that's been sitting with you?" — to give them space to share more honest moments. Only after the user has responded to the "anything else?" prompt (or clearly signaled they're done) should you set honest_depth: true in the response.
 - plan: a concrete tomorrow commitment was stated
 - identity: they made a statement about who they are or are becoming
@@ -283,7 +284,7 @@ WHEN TO MAKE THE CONNECTION:
    → Only one new goal suggestion per session
 
 7. LIGHTWEIGHT WHY — COMMITMENT PLANNING:
-   When the user states their tomorrow commitment and it connects to a goal you're tracking, ask ONE lightweight question: "What's making that the priority tomorrow?" — only if their message doesn't already contain a motivation signal (i.e. they didn't say "because...", "I need to...", or volunteer a reason inline). This is NOT a full why-building exercise — one question only, no follow-up drilling. If they answer with a motivation, set goal_why_action: "add", goal_why_insight to their actual words, goal_id_referenced to the matching goal, and goal_commitment_why: true so the write-back uses source "commitment_planning". Skip entirely if: the commitment message already explains why, no goal match is clear, or a full why-building moment already happened this session.
+   When the user states their tomorrow commitment and it connects to a goal you're tracking, ask ONE lightweight question: "What's making that the priority tomorrow?" — only if their message doesn't already contain a motivation signal (i.e. they didn't say "because...", "I need to...", or volunteer a reason inline). This is NOT a full why-building exercise — one question only, no follow-up drilling. If they answer with a motivation, set goal_why_action: "add", goal_why_insight to their actual words, goal_id_referenced to the matching goal, and goal_commitment_why: true so the write-back uses source "commitment_planning". Skip entirely if: the commitment message already contains a motivation signal (words like "because", "I need to", "so that", "want to", "trying to", or the user volunteers a reason inline), no goal match is clear, or a full why-building moment already happened this session for this goal.
 
 WHAT NOT TO DO:
 - Never announce you're doing a "goal check-in"
@@ -322,6 +323,7 @@ RETURN JSON EXACTLY (no markdown, no extra keys):
   "checklist_updates": {"wins": false, "honest": false, "plan": false, "identity": false},
   "wins_asked_for_more": false,
   "honest_depth": false,
+  "commitment_checkin_done": false,
   "follow_up_queued": false,
   "is_session_complete": false
 }`;
@@ -385,7 +387,14 @@ function deriveStageHint(sessionState, classifierChecklist, messageCount) {
   const stage = sessionState.current_stage || 'wins';
   const cl = { ...(sessionState.checklist || {}), ...(classifierChecklist || {}) };
   const hasPlan = !!sessionState.tomorrow_commitment;
-  if (stage === 'wins' && cl.wins && messageCount >= 4 && sessionState.wins_asked_for_more === true) return 'honest';
+  // wins → commitment_checkin (if yesterday's commitment exists and hasn't been checked in yet)
+  if (stage === 'wins' && cl.wins && messageCount >= 4 && sessionState.wins_asked_for_more === true) {
+    return sessionState.yesterday_commitment && !sessionState.commitment_checkin_done
+      ? 'commitment_checkin'
+      : 'honest';
+  }
+  // commitment_checkin → honest (once check-in is done or there was no commitment)
+  if (stage === 'commitment_checkin' && sessionState.commitment_checkin_done === true) return 'honest';
   if (stage === 'honest' && cl.honest && sessionState.honest_depth === true) return 'tomorrow';
   if (stage === 'tomorrow' && hasPlan) return 'close';
   if (stage === 'close' && cl.identity && hasPlan) return 'complete';
@@ -1354,6 +1363,8 @@ export default async function handler(req, res) {
           message_count: messageCount,
           wins_asked_for_more: session_state.wins_asked_for_more === true,
           honest_depth: session_state.honest_depth === true,
+          commitment_checkin_done: session_state.commitment_checkin_done === true,
+          yesterday_commitment_in_state: !!(session_state.yesterday_commitment || yesterdayCommitment),
           session_wins_captured: Array.isArray(session_state.wins)
             ? session_state.wins.map(w => typeof w === 'string' ? w : w?.text).filter(Boolean)
             : [],
@@ -1389,7 +1400,7 @@ export default async function handler(req, res) {
             ? `RUN: ${suggestedExercise}. first_time=${isFirstTimeExercise}. Fill ALL placeholders with user's actual words — never output [bracket placeholders]. Set exercise_run="${suggestedExercise}".`
             : null,
           depthProbeNeeded
-            ? `DEPTH OPPORTUNITY: Go deeper here. Ask WHY or surface the belief underneath. Use a depth_probe question naturally. Set exercise_run="depth_probe". Store any insight in extracted_data.depth_insight.`
+            ? `DEPTH OPPORTUNITY: Go deeper here. Ask WHY or surface the belief underneath. Use a depth_probe question naturally. Set exercise_run="depth_probe". Store any insight in extracted_data.depth_insight. IMPORTANT: Do NOT frame this as goal-specific unless the user is actively discussing their tomorrow commitment or directly referencing a goal — keep depth probes grounded in what the user just said, not in the goals framework.`
             : null,
           session_state.wins?.length > 0 && Array.isArray(session_state.wins) && session_state.current_stage !== 'wins'
             ? `CALLBACK: The user mentioned these wins earlier: ${session_state.wins.map(w => typeof w === 'string' ? w : w?.text).filter(Boolean).join(', ')}. If relevant, reference these by name when asking about follow-through or identity. Never re-ask what you already know.`
@@ -1415,6 +1426,13 @@ export default async function handler(req, res) {
                   : `E.g. "Where did you feel like you weren't fully showing up today?" or "Is there a moment from today that's still sitting with you?" or "What part of today are you least proud of — not what you'd fix, just what happened?"`
               } Goal is self-awareness about TODAY, not action planning. Do NOT ask "what would you do differently" — that belongs in tomorrow. Weave it naturally. Once a miss is named and you have asked one specific follow-up about it, ask one open "anything else?" prompt before closing the honest stage — e.g. "Anything else worth naming before we move on?" or "Is there anything else from today you want to get off your chest?" — then set honest_depth: true only after the user has responded to that prompt or clearly signaled they're done.`
             : null,
+          (() => {
+            if (session_state.current_stage !== 'commitment_checkin') return null;
+            if (session_state.commitment_checkin_done) return null;
+            const yc = session_state.yesterday_commitment || yesterdayCommitment;
+            if (!yc) return null;
+            return `COMMITMENT CHECK-IN: The user is now in the commitment_checkin stage. Their commitment from yesterday was: "${yc}". Ask ONE natural question about how that went — use their exact words from the commitment. This is the bridge between wins and honest: if they kept it, celebrate briefly and flow into honest. If they missed it, acknowledge it warmly and let it naturally become the first honest moment — a missed commitment IS an honest moment. After the user responds, set commitment_checkin_done: true and stage_advance: true, new_stage: "honest". Do NOT drill the commitment further once answered.`;
+          })(),
           identityMissing && !sessionReadyToClose
             ? `IDENTITY MISSING: Find a natural moment to ask what their actions say about who they're becoming. E.g. "What does [their action] say about who you're becoming?"`
             : null,
