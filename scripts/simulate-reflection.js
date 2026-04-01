@@ -32,8 +32,13 @@ import { gradeTraitDetection } from './grade-trait-detection.js';
 // ── Resolve paths ──────────────────────────────────────────────────────────────
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const REPORT_PATH = join(__dirname, 'simulation-report.json');
+const DEFAULT_REPORT_PATH = join(__dirname, 'simulation-report.json');
 const WHY_BUILDING_REPORT_PATH = join(__dirname, 'why-building-report.json');
+
+// ── Scenario follow-through probabilities ─────────────────────────────────────
+// In 'mixed' scenario: probability of missing after keeping, and keeping after missing
+const MISS_AFTER_KEEP_PROBABILITY = 0.4;
+const KEEP_AFTER_MISS_PROBABILITY = 0.7;
 
 // ── Parse CLI args ─────────────────────────────────────────────────────────────
 function parseArgs() {
@@ -45,6 +50,9 @@ function parseArgs() {
     clean: false,
     testWhyBuilding: false,
     testGoalSuggestion: false,
+    scenario: 'mixed',     // 'kept_streak' | 'miss_streak' | 'mixed' | 'cold_start'
+    dryRun: false,
+    reportPath: null,      // custom output path for report JSON
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -54,6 +62,16 @@ function parseArgs() {
     else if (args[i] === '--clean') result.clean = true;
     else if (args[i] === '--test-why-building') result.testWhyBuilding = true;
     else if (args[i] === '--test-goal-suggestion') result.testGoalSuggestion = true;
+    else if (args[i] === '--scenario' && args[i + 1]) result.scenario = args[++i];
+    else if (args[i] === '--dry-run') result.dryRun = true;
+    else if (args[i] === '--report-path' && args[i + 1]) result.reportPath = args[++i];
+  }
+
+  // Validate scenario
+  const validScenarios = ['kept_streak', 'miss_streak', 'mixed', 'cold_start'];
+  if (!validScenarios.includes(result.scenario)) {
+    console.error(`❌  Invalid --scenario "${result.scenario}" — must be one of: ${validScenarios.join(', ')}`);
+    process.exit(1);
   }
 
   // Default start date: 30 days ago
@@ -67,6 +85,16 @@ function parseArgs() {
   }
 
   return result;
+}
+
+// ── Array shuffle utility (Fisher-Yates) ─────────────────────────────────────
+function shuffleArray(array) {
+  const shuffled = [...array];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
 }
 
 // ── Date utilities ─────────────────────────────────────────────────────────────
@@ -418,7 +446,14 @@ function printQuality(quality) {
   const whyStr = quality.why_deepening_quality != null
     ? ` | why-depth: ${quality.why_deepening_quality}/5`
     : '';
-  console.log(`    ↳ Quality: ${quality.score}/5${flagStr}${whyStr}`);
+  const extras = [
+    quality.stage_appropriate === false ? 'off-stage' : null,
+    quality.used_their_words === false ? 'generic' : null,
+    quality.asked_one_question === false ? '≠1-question' : null,
+    quality.advanced_correctly === false ? 'bad-advance' : null,
+  ].filter(Boolean);
+  const extrasStr = extras.length ? ` | ⚑ ${extras.join(', ')}` : '';
+  console.log(`    ↳ Quality: ${quality.score}/5${flagStr}${whyStr}${extrasStr}`);
 }
 
 function printSummary({ completed, stage, exercises, turns }) {
@@ -1096,7 +1131,10 @@ async function runGoalSuggestionTest({ personaKey, startDate, clean }) {
 
 // ── Main simulation ────────────────────────────────────────────────────────────
 async function main() {
-  const { days, startDate, persona: personaKey, clean, testWhyBuilding, testGoalSuggestion } = parseArgs();
+  const { days, startDate, persona: personaKey, clean, testWhyBuilding, testGoalSuggestion, scenario, dryRun, reportPath } = parseArgs();
+
+  // Resolve final report output path
+  const REPORT_PATH = reportPath ?? DEFAULT_REPORT_PATH;
 
   // Route to specialized test flows
   if (testWhyBuilding) {
@@ -1122,9 +1160,16 @@ async function main() {
 
   console.log(`\n🚀  Starting simulation`);
   console.log(`    Persona:    ${personaKey} (${persona.name})`);
-  console.log(`    Days:       ${days}`);
+  console.log(`    Days:       ${dryRun ? 1 : days}${dryRun ? ' (dry-run)' : ''}`);
   console.log(`    Start date: ${startDate}`);
-  console.log(`    User ID:    ${userId}\n`);
+  console.log(`    User ID:    [set via SIM_USER_ID]`);
+  console.log(`    Scenario:   ${scenario}`);
+  if (reportPath) console.log(`    Report:     ${REPORT_PATH}`);
+  console.log('');
+
+  // ── Persona drift factor for long simulations ─────────────────────────────
+  // Gradually reduces Mode C (deflection) probability over 30+ days
+  const personaDriftFactor = days >= 30 ? 0.5 : 0;
 
   // ── Draw hidden traits from the persona's pool ────────────────────────────
   const traitPool = persona.hiddenTraitPool ?? [];
@@ -1136,16 +1181,31 @@ async function main() {
   });
   console.log('');
 
+  // ── Shuffled event queue — avoid repeating events until the full bank is used ──
+  const eventBankRaw = persona.dailyEventBank ?? [];
+  let eventQueue = [];
+
+  function nextDailyEvent() {
+    if (eventBankRaw.length === 0) return null;
+    if (eventQueue.length === 0) {
+      // Shuffle event bank and load into queue (no repeats until full bank exhausted)
+      eventQueue = shuffleArray(eventBankRaw);
+    }
+    return eventQueue.shift();
+  }
+
   // ── Report state ──
   const report = {
     meta: {
       persona: personaKey,
       start_date: startDate,
-      days_simulated: days,
+      days_simulated: dryRun ? 1 : days,
       user_id: userId,
       run_at: new Date().toISOString(),
       assigned_traits: assignedTraits.map((t) => ({ id: t.id, label: t.label })),
       clean: clean,
+      scenario,
+      dry_run: dryRun,
       pre_run_profile_snapshot: null,
       clean_result: null,
     },
@@ -1158,6 +1218,12 @@ async function main() {
       avg_why_deepening_quality: null,
       why_evolution_events: 0,
       goals_with_multiple_whys: 0,
+      commitment_checkin_coverage: {
+        fired: 0,
+        resolved: 0,
+        should_have_fired: 0,
+        miss_rate: null,
+      },
     },
     backend_summary: {
       final_follow_through_7day: null,
@@ -1179,6 +1245,7 @@ async function main() {
   // ── Cross-session state — carries forward across days ─────────────────────
   const crossSessionState = {
     yesterdayCommitment: null,
+    lastFollowedThrough: null, // whether user followed through on the most recent commitment
     prevGoalWhysCounts: {}, // goalId → whys count from previous session
   };
 
@@ -1187,7 +1254,7 @@ async function main() {
   process.on('SIGINT', () => {
     interrupted = true;
     console.log('\n\n⚠️  Interrupted — writing partial report...');
-    finalizeReport(report, totalQualityScores);
+    finalizeReport(report, totalQualityScores, totalWhyDeepeningScores, REPORT_PATH);
     process.exit(0);
   });
 
@@ -1214,7 +1281,8 @@ async function main() {
   }
 
   // ── Day loop ──────────────────────────────────────────────────────────────
-  for (let day = 1; day <= days; day++) {
+  const totalDays = dryRun ? 1 : days;
+  for (let day = 1; day <= totalDays; day++) {
     if (interrupted) break;
 
     const simulatedDate = addDays(startDate, day - 1);
@@ -1223,11 +1291,8 @@ async function main() {
     const moods = persona.tendencies.mood_distribution;
     const mood = moods[(day - 1) % moods.length];
 
-    // Draw today's daily event randomly from the persona's event bank
-    const eventBank = persona.dailyEventBank ?? [];
-    const dailyEvent = eventBank.length > 0
-      ? eventBank[Math.floor(Math.random() * eventBank.length)]
-      : null;
+    // Draw today's daily event from the shuffled queue (no repeats until full bank used)
+    const dailyEvent = nextDailyEvent();
 
     separator(day, simulatedDate);
     if (dailyEvent) {
@@ -1236,6 +1301,27 @@ async function main() {
 
     // Create session row
     const sessionId = await createSessionRow(supabase, userId, simulatedDate);
+
+    // Determine followedThrough for this day based on scenario
+    let followedThroughToday = null;
+    if (crossSessionState.yesterdayCommitment) {
+      if (scenario === 'kept_streak') {
+        followedThroughToday = true;
+      } else if (scenario === 'miss_streak') {
+        followedThroughToday = false;
+      } else if (scenario === 'cold_start') {
+        followedThroughToday = null;
+      } else {
+        // 'mixed': alternate or use persona's follow-through rate
+        if (crossSessionState.lastFollowedThrough === true) {
+          followedThroughToday = Math.random() < MISS_AFTER_KEEP_PROBABILITY;
+        } else if (crossSessionState.lastFollowedThrough === false) {
+          followedThroughToday = Math.random() < KEEP_AFTER_MISS_PROBABILITY;
+        } else {
+          followedThroughToday = Math.random() < persona.tendencies.follow_through_rate;
+        }
+      }
+    }
 
     // Per-session state
     let history = [];
@@ -1246,10 +1332,15 @@ async function main() {
       exercises_run: [],
       consecutive_excuses: 0,
       is_complete: false,
+      commitment_checkin_done: false,
+      yesterday_commitment_in_state: crossSessionState.yesterdayCommitment !== null && scenario !== 'cold_start',
     };
 
     // Track what the persona has shared this session (for realistic response gen)
-    const sessionContext = { sharedWins: null, sharedMisses: null, sharedTomorrow: null };
+    const sessionContext = { sharedWins: null, sharedMisses: null, sharedTomorrow: null, sharedCheckin: null };
+
+    // Track stage sequence for this session
+    const stageSequence = [sessionState.current_stage];
 
     const sessionRecord = {
       date: simulatedDate,
@@ -1260,6 +1351,10 @@ async function main() {
       avg_quality: null,
       exercises_run: [],
       checklist: { wins: false, honest: false, plan: false, identity: false },
+      checkin_stage_fired: false,
+      checkin_stage_resolved: false,
+      stage_sequence: [],
+      anomalies: [],
       conversation: [],
       backend_state: null,
       goals_why_snapshot: [],
@@ -1274,7 +1369,11 @@ async function main() {
     const initResult = await callCoach({
       user_id: userId,
       session_id: sessionId,
-      session_state: sessionState,
+      session_state: {
+        ...sessionState,
+        yesterday_commitment: (scenario !== 'cold_start' ? crossSessionState.yesterdayCommitment : null) || null,
+        commitment_checkin_done: sessionState.commitment_checkin_done,
+      },
       history: [],
       user_message: '__INIT__',
       context: { client_local_date: simulatedDate },
@@ -1286,6 +1385,7 @@ async function main() {
     // Update session state from INIT
     if (initResult.stage_advance && initResult.new_stage) {
       sessionState.current_stage = initResult.new_stage;
+      if (!stageSequence.includes(initResult.new_stage)) stageSequence.push(initResult.new_stage);
     }
     if (initResult.checklist_updates) {
       sessionState.checklist = { ...sessionState.checklist, ...initResult.checklist_updates };
@@ -1295,6 +1395,9 @@ async function main() {
     }
     if (typeof initResult.consecutive_excuses === 'number') {
       sessionState.consecutive_excuses = initResult.consecutive_excuses;
+    }
+    if (initResult.commitment_checkin_done === true) {
+      sessionState.commitment_checkin_done = true;
     }
     if (initResult.is_session_complete) {
       sessionState.is_complete = true;
@@ -1339,10 +1442,12 @@ async function main() {
         mood,
         sessionContext,
         dailyEvent,
-        yesterdayCommitment: crossSessionState.yesterdayCommitment,
+        yesterdayCommitment: scenario !== 'cold_start' ? crossSessionState.yesterdayCommitment : null,
+        followedThrough: followedThroughToday,
         assignedTraits,
         dayNumber: day,
         whyPool: persona.whyPool ?? null,
+        personaDriftFactor,
       });
 
       printUser(userMsg);
@@ -1351,6 +1456,7 @@ async function main() {
       if (sessionState.current_stage === 'wins') sessionContext.sharedWins = userMsg;
       if (sessionState.current_stage === 'honest') sessionContext.sharedMisses = userMsg;
       if (sessionState.current_stage === 'tomorrow') sessionContext.sharedTomorrow = userMsg;
+      if (sessionState.current_stage === 'commitment_checkin') sessionContext.sharedCheckin = userMsg;
 
       history.push({ role: 'user', content: userMsg });
 
@@ -1358,7 +1464,11 @@ async function main() {
       const result = await callCoach({
         user_id: userId,
         session_id: sessionId,
-        session_state: sessionState,
+        session_state: {
+          ...sessionState,
+          yesterday_commitment: (scenario !== 'cold_start' ? crossSessionState.yesterdayCommitment : null) || null,
+          commitment_checkin_done: sessionState.commitment_checkin_done,
+        },
         history,
         user_message: userMsg,
         context: { client_local_date: simulatedDate },
@@ -1374,10 +1484,13 @@ async function main() {
       }
 
       const prevUserMsg = userMsg;
+      const prevStage = sessionState.current_stage;
+      const stageAdvanced = !!(result.stage_advance && result.new_stage);
 
       // Update session state
       if (result.stage_advance && result.new_stage) {
         sessionState.current_stage = result.new_stage;
+        if (!stageSequence.includes(result.new_stage)) stageSequence.push(result.new_stage);
       }
       if (result.checklist_updates) {
         sessionState.checklist = { ...sessionState.checklist, ...result.checklist_updates };
@@ -1393,8 +1506,19 @@ async function main() {
       if (typeof result.consecutive_excuses === 'number') {
         sessionState.consecutive_excuses = result.consecutive_excuses;
       }
+      if (result.commitment_checkin_done === true) {
+        sessionState.commitment_checkin_done = true;
+      }
       if (result.is_session_complete) {
         sessionState.is_complete = true;
+      }
+
+      // Track commitment_checkin stage appearances
+      if (prevStage === 'commitment_checkin' || sessionState.current_stage === 'commitment_checkin') {
+        sessionRecord.checkin_stage_fired = true;
+      }
+      if (sessionState.commitment_checkin_done) {
+        sessionRecord.checkin_stage_resolved = true;
       }
 
       history.push({ role: 'assistant', content: coachMsg });
@@ -1410,6 +1534,7 @@ async function main() {
         previousUserMessage: prevUserMsg,
         coachMessage: coachMsg,
         goalWhys: sessionGoalWhys,
+        stageAdvanced,
       });
 
       printQuality(quality);
@@ -1459,6 +1584,16 @@ async function main() {
     sessionRecord.turns = turn;
     sessionRecord.exercises_run = sessionState.exercises_run;
     sessionRecord.checklist = sessionState.checklist;
+    sessionRecord.checkin_stage_fired = sessionRecord.checkin_stage_fired || stageSequence.includes('commitment_checkin');
+    sessionRecord.checkin_stage_resolved = sessionState.commitment_checkin_done;
+    sessionRecord.stage_sequence = [...stageSequence];
+
+    // Detect anomalies: commitment_checkin should fire when yesterday's commitment exists
+    const hadYesterdayCommitment = crossSessionState.yesterdayCommitment !== null && scenario !== 'cold_start';
+    if (hadYesterdayCommitment && !sessionRecord.checkin_stage_fired) {
+      sessionRecord.anomalies.push('commitment_checkin skipped despite yesterday commitment existing');
+    }
+
     sessionRecord.avg_quality =
       sessionQualityScores.length > 0
         ? Math.round((sessionQualityScores.reduce((a, b) => a + b, 0) / sessionQualityScores.length) * 100) / 100
@@ -1469,6 +1604,24 @@ async function main() {
 
     // Update cross-session state for the next day
     crossSessionState.yesterdayCommitment = sessionState.tomorrow_commitment ?? null;
+
+    // Determine followedThrough for this session (did wins mention following through on yesterday's commitment?)
+    if (hadYesterdayCommitment) {
+      crossSessionState.lastFollowedThrough = followedThroughToday;
+    } else {
+      crossSessionState.lastFollowedThrough = null;
+    }
+
+    // Update commitment_checkin_coverage stats
+    if (hadYesterdayCommitment) {
+      report.summary.commitment_checkin_coverage.should_have_fired++;
+    }
+    if (sessionRecord.checkin_stage_fired) {
+      report.summary.commitment_checkin_coverage.fired++;
+    }
+    if (sessionRecord.checkin_stage_resolved) {
+      report.summary.commitment_checkin_coverage.resolved++;
+    }
 
     // Run backend validation and store result
     console.log(`\n🔍  Backend validation:`);
@@ -1510,8 +1663,24 @@ async function main() {
     });
 
     // Small delay between days to avoid rate limiting
-    if (day < days) {
+    if (day < totalDays) {
       await new Promise((r) => setTimeout(r, 500));
+    }
+
+    // --dry-run: print full conversation and exit after day 1
+    if (dryRun) {
+      console.log('\n📋  DRY-RUN complete — full conversation for day 1:');
+      for (const entry of sessionRecord.conversation) {
+        // For INIT (turn 0), coach speaks first; for all other turns, user speaks then coach responds
+        if (entry.turn === 0) {
+          if (entry.coach) console.log(`🤖  ${entry.coach}`);
+        } else {
+          if (entry.user) console.log(`👤  ${entry.user}`);
+          if (entry.coach) console.log(`🤖  ${entry.coach}`);
+        }
+      }
+      console.log('\n✅  Dry-run finished. No report written.\n');
+      process.exit(0);
     }
   }
 
@@ -1622,7 +1791,7 @@ async function main() {
     report.trait_detection = null;
   }
 
-  finalizeReport(report, totalQualityScores, totalWhyDeepeningScores);
+  finalizeReport(report, totalQualityScores, totalWhyDeepeningScores, REPORT_PATH);
   console.log(`\n✅  Simulation complete. Report saved to:\n    ${REPORT_PATH}\n`);
   if (clean) {
     console.log(`✅  Clean run complete. Pre-run snapshot saved to report.meta.pre_run_profile_snapshot\n`);
@@ -1630,7 +1799,7 @@ async function main() {
 }
 
 // ── Finalize and write report ──────────────────────────────────────────────────
-function finalizeReport(report, totalQualityScores, totalWhyDeepeningScores = []) {
+function finalizeReport(report, totalQualityScores, totalWhyDeepeningScores = [], reportPath = DEFAULT_REPORT_PATH) {
   report.summary.avg_quality_score =
     totalQualityScores.length > 0
       ? Math.round((totalQualityScores.reduce((a, b) => a + b, 0) / totalQualityScores.length) * 100) / 100
@@ -1642,6 +1811,15 @@ function finalizeReport(report, totalQualityScores, totalWhyDeepeningScores = []
       ? Math.round((totalWhyDeepeningScores.reduce((a, b) => a + b, 0) / totalWhyDeepeningScores.length) * 100) / 100
       : null;
 
+  // Compute commitment_checkin_coverage miss_rate
+  const ccc = report.summary.commitment_checkin_coverage;
+  if (ccc.should_have_fired > 0) {
+    const misses = ccc.should_have_fired - ccc.fired;
+    ccc.miss_rate = `${Math.round((misses / ccc.should_have_fired) * 100)}%`;
+  } else {
+    ccc.miss_rate = 'n/a';
+  }
+
   // Count goals that ended up with multiple whys (from the final session's goals_why_snapshot)
   const lastSessionWithGoals = [...report.sessions].reverse().find((s) => s.goals_why_snapshot?.length > 0);
   if (lastSessionWithGoals) {
@@ -1651,7 +1829,7 @@ function finalizeReport(report, totalQualityScores, totalWhyDeepeningScores = []
   }
 
   try {
-    writeFileSync(REPORT_PATH, JSON.stringify(report, null, 2), 'utf8');
+    writeFileSync(reportPath, JSON.stringify(report, null, 2), 'utf8');
   } catch (err) {
     console.error('❌  Could not write report:', err.message);
   }

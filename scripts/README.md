@@ -80,8 +80,41 @@ node --env-file=.env.simulation.local scripts/simulate-reflection.js \
 | `--start-date` | 30 days ago | Start date (YYYY-MM-DD) |
 | `--persona` | `ambitious_but_inconsistent` | Which persona to use |
 | `--clean` | `false` | **Recommended.** Wipes all previous sim data for `SIM_USER_ID` and resets the user profile to the persona definition before running. Without this, leftover patterns and profile data from prior runs will contaminate the coach's context. |
+| `--scenario` | `mixed` | Commitment follow-through arc. Options: `kept_streak`, `miss_streak`, `mixed`, `cold_start` (see below) |
+| `--dry-run` | `false` | Run only 1 day, print the full conversation to stdout, and exit without writing the report JSON. Useful for fast sanity checks. |
+| `--report-path` | `scripts/simulation-report.json` | Custom output path for the report JSON |
 | `--test-why-building` | `false` | Runs a focused **7-day** simulation specifically testing why evolution (see below). |
 | `--test-goal-suggestion` | `false` | Runs a **single-session** test that checks whether the coach suggests a new goal and validates the full suggestion → acceptance → why-journaling flow (see below). |
+
+### `--scenario` options
+
+| Value | Behavior |
+|-------|----------|
+| `kept_streak` | Biases every day toward follow-through on yesterday's commitment (`followedThrough: true`). Good for testing the happy path through `commitment_checkin`. |
+| `miss_streak` | Biases every day toward missing commitments (`followedThrough: false`). Tests how the coach responds to repeated non-follow-through. |
+| `mixed` | Alternates realistically — after a kept commitment the user is more likely to miss the next, and vice versa. This is the default and most realistic arc. |
+| `cold_start` | Simulates a user who has never used the app before — no yesterday commitment, no streak. The `commitment_checkin` stage never fires. |
+
+### `--dry-run`
+
+Runs only day 1, prints the full conversation to stdout, and exits without writing any report JSON. Useful for quickly verifying the simulator is wired correctly before a long run:
+
+```bash
+node --env-file=.env.simulation.local scripts/simulate-reflection.js \
+  --persona consistent_grinder \
+  --clean \
+  --dry-run
+```
+
+### `--report-path`
+
+Write the simulation report to a custom location instead of the default `scripts/simulation-report.json`:
+
+```bash
+node --env-file=.env.simulation.local scripts/simulate-reflection.js \
+  --days 90 \
+  --report-path /tmp/sim-run-2026-04.json
+```
 
 ## Why `--clean` matters
 
@@ -161,18 +194,56 @@ node --env-file=.env.simulation.local scripts/simulate-reflection.js \
 
 ### Available personas
 
-| Key | Name | Description | Why Pool |
-|-----|------|-------------|----------|
-| `ambitious_but_inconsistent` | Alex | Building SaaS, ~60% follow-through | ✅ shallow / deeper / additive |
-| `consistent_grinder` | Jordan | Consistent but surface-level, ~85% follow-through | ✅ shallow / deeper / additive |
-| `creative_with_perfectionism` | Sam | Deep reflector but struggles to commit, ~50% follow-through | ✅ shallow / deeper / additive |
-| `burnt_out_professional` | Maya | Corporate PM building a side project, ~55% follow-through | — (no goals seeded by default) |
-| `comeback_kid` | Darius | Recovering from burnout, cautious optimist, ~70% follow-through | — (no goals seeded by default) |
+| Key | Name | Description | Why Pool | shameLevelOnMiss |
+|-----|------|-------------|----------|-----------------|
+| `ambitious_but_inconsistent` | Alex | Building SaaS, ~60% follow-through | ✅ shallow / deeper / additive | 5 (mid-range) |
+| `consistent_grinder` | Jordan | Consistent but surface-level, ~85% follow-through | ✅ shallow / deeper / additive | 2 (casual) |
+| `creative_with_perfectionism` | Sam | Deep reflector but struggles to commit, ~50% follow-through | ✅ shallow / deeper / additive | 8 (high shame) |
+| `burnt_out_professional` | Maya | Corporate PM building a side project, ~55% follow-through | ✅ shallow / deeper / additive | 7 (significant shame) |
+| `comeback_kid` | Darius | Recovering from burnout, cautious optimist, ~70% follow-through | ✅ shallow / deeper / additive | 4 (honest, not spiraling) |
 
 The three primary personas (`ambitious_but_inconsistent`, `consistent_grinder`, `creative_with_perfectionism`) have `whyPool` defined with tiered responses. The why tier is selected based on the day number:
 - Days 1–7: `shallow` (surface-level answers)
 - Days 8–20: `deeper` (emotionally honest, realizing the real reason)
 - Days 21+: `additive` (60% chance) or `deeper` (40% chance)
+
+All five personas now have `whyPool` (tiered), `shameLevelOnMiss` (0–10), and `openToDepthByDay(dayNumber)` defined.
+
+### `whyPool` and `shameLevelOnMiss` persona fields
+
+Each persona definition includes:
+
+**`whyPool`** — tiered object with three arrays (`shallow`, `deeper`, `additive`) used by `generateUserResponse` when the coach asks about motivation. Tier selection is based on `dayNumber`:
+- `shallow`: days 1–7 — surface-level, protective answers
+- `deeper`: days 8–20 — emotionally honest, the real reason
+- `additive`: days 21+ — a second, distinct dimension (60% of the time)
+
+**`shameLevelOnMiss`** (0–10) — controls how the persona responds during `commitment_checkin` when they missed:
+- 0–3: very casual, not a big deal
+- 4–6: a little embarrassed, brief honest reason
+- 7–10: defensive or avoidant, lots of justification
+
+**`openToDepthByDay(dayNumber)`** — function that returns a probability (0–1) that the persona will engage deeply with a reflective question. Increases as the simulation progresses to model real coaching impact.
+
+---
+
+## `commitment_checkin` Stage
+
+After the `wins` stage, if a yesterday commitment exists in session state, the coach routes through `commitment_checkin` before moving to `honest`. The simulator handles this as follows:
+
+1. `sessionState.commitment_checkin_done` and `yesterday_commitment_in_state` are tracked per day
+2. Both are forwarded to the API on every turn (in `session_state`)
+3. `generateUserResponse` receives `followedThrough` (determined by `--scenario` and cross-session history) and produces a realistic commitment check-in response
+4. After the day completes, `crossSessionState.lastFollowedThrough` is updated for the next day
+
+### How `--scenario` affects `commitment_checkin`
+
+| Scenario | `followedThrough` passed to user AI |
+|----------|-------------------------------------|
+| `kept_streak` | Always `true` |
+| `miss_streak` | Always `false` |
+| `mixed` | Alternates based on previous day's outcome |
+| `cold_start` | `null` — no yesterday commitment, stage never fires |
 
 ---
 
@@ -236,7 +307,10 @@ Copilot will look at the flag reasons, cross-reference with `api/reflection-coac
 
 ```json
 {
-  "meta": { "persona": "...", "start_date": "...", "days_simulated": 30, "user_id": "...", "run_at": "..." },
+  "meta": {
+    "persona": "...", "start_date": "...", "days_simulated": 30, "user_id": "...", "run_at": "...",
+    "scenario": "mixed", "dry_run": false
+  },
   "summary": {
     "total_turns": 247,
     "avg_quality_score": 3.8,
@@ -245,7 +319,13 @@ Copilot will look at the flag reasons, cross-reference with `api/reflection-coac
     "flags_by_type": { "GENERIC": 12, "THERAPIST_LANGUAGE": 3 },
     "avg_why_deepening_quality": 3.4,
     "why_evolution_events": 4,
-    "goals_with_multiple_whys": 2
+    "goals_with_multiple_whys": 2,
+    "commitment_checkin_coverage": {
+      "fired": 27,
+      "resolved": 25,
+      "should_have_fired": 29,
+      "miss_rate": "7%"
+    }
   },
   "sessions": [
     {
@@ -256,20 +336,50 @@ Copilot will look at the flag reasons, cross-reference with `api/reflection-coac
       "avg_quality": 4.1,
       "exercises_run": ["depth_probe"],
       "checklist": { "wins": true, "honest": true, "plan": true, "identity": true },
-      "goals_why_snapshot": [
-        {
-          "goal_title": "Get Stackline to 20 paying customers",
-          "whys_count": 2,
-          "latest_why": "It stopped being about the product — it's about proving I'm someone who finishes things.",
-          "session_avg_why_deepening_quality": 4
-        }
-      ],
+      "checkin_stage_fired": true,
+      "checkin_stage_resolved": true,
+      "stage_sequence": ["wins", "commitment_checkin", "honest", "tomorrow", "close"],
+      "anomalies": [],
+      "goals_why_snapshot": [...],
       "conversation": [...]
     }
   ],
   "flagged_for_review": [...]
 }
 ```
+
+### New per-day session fields
+
+| Field | Description |
+|-------|-------------|
+| `checkin_stage_fired` | `true` if `commitment_checkin` appeared in the stage sequence for this day |
+| `checkin_stage_resolved` | `true` if `commitment_checkin_done` became `true` by end of session |
+| `stage_sequence` | Array of stages visited in order, e.g. `["wins", "commitment_checkin", "honest", "tomorrow", "close"]` |
+| `anomalies` | Array of strings describing unexpected stage skips, e.g. `"commitment_checkin skipped despite yesterday commitment existing"` |
+
+### `commitment_checkin_coverage` summary stat
+
+| Field | Description |
+|-------|-------------|
+| `fired` | Number of days where `commitment_checkin` stage appeared |
+| `resolved` | Number of days where `commitment_checkin_done` became `true` |
+| `should_have_fired` | Number of days where a yesterday commitment existed (so the stage should have fired) |
+| `miss_rate` | `(should_have_fired - fired) / should_have_fired` as a percentage |
+
+### Enhanced `scoreCoachMessage` output fields
+
+Each message-level quality object in `conversation[].quality` now includes:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `score` | 1–5 | Overall quality score |
+| `flags` | string[] | Quality flags (GENERIC, THERAPIST_LANGUAGE, etc.) |
+| `reason` | string | One-sentence explanation |
+| `why_deepening_quality` | 1–5 or null | Only scored when coach asked about motivation/why |
+| `stage_appropriate` | boolean | Was this message appropriate for the current stage? |
+| `used_their_words` | boolean | Did the coach reference something specific the user said? |
+| `asked_one_question` | boolean | Did the coach ask exactly one question (not zero, not two+)? |
+| `advanced_correctly` | boolean or null | If a stage advance fired, was the transition appropriate? `null` if no advance. |
 
 ### `summary` why fields
 
@@ -321,13 +431,42 @@ When you run `--test-why-building`, a separate `scripts/why-building-report.json
 
 ---
 
+## SQL Setup
+
+### Initial setup (if not already done)
+
+Run the SQL in the Supabase SQL editor as described in [Setup](#setup) above.
+
+### `migrate-commitment-checkin.sql` — run this for `commitment_checkin` support
+
+This migration adds the `commitment_checkin_done` column and a performance index:
+
+```bash
+# Copy the contents of scripts/migrate-commitment-checkin.sql and run it in the Supabase SQL editor
+```
+
+```sql
+-- Add commitment_checkin_done to reflection_sessions
+ALTER TABLE reflection_sessions
+  ADD COLUMN IF NOT EXISTS commitment_checkin_done boolean DEFAULT false;
+
+-- Index for efficient yesterday-commitment lookup
+CREATE INDEX IF NOT EXISTS reflection_sessions_user_date
+  ON reflection_sessions(user_id, date DESC);
+```
+
+This is safe to run multiple times.
+
+---
+
 ## Cost Estimate
 
 | Run | GPT-4o turns (coach) | GPT-4o-mini turns | Est. cost |
 |-----|---------------------|-------------------|-----------|
 | 30 days | ~270 | ~540 | ~$2–4 |
 | 90 days | ~810 | ~1,620 | ~$6–12 |
+| `--dry-run` | ~9 | ~18 | ~$0.15 |
 | `--test-why-building` | ~63 | ~126 | ~$0.50–1 |
 | `--test-goal-suggestion` | ~9 | ~18 | ~$0.15 |
 
-> **Tip:** Use `--days 3` for a quick smoke test before a full run.
+> **Tip:** Use `--dry-run` for a fast sanity check before a full run.
