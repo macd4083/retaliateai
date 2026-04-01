@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Send, Moon, CheckCircle, Circle, RefreshCw } from 'lucide-react';
+import { Send, Moon, RefreshCw } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase/client';
@@ -45,21 +45,27 @@ function ProgressBar({ currentStage }) {
         const isComplete = i < stageIndex;
         const isActive = i === stageIndex;
         return (
-          <div key={stage.id} className="flex items-center gap-2">
+          <div key={stage.id} className="flex items-center gap-3">
             <div className="flex flex-col items-center gap-1">
-              {isComplete ? (
-                <CheckCircle className="w-4 h-4 text-red-500" />
-              ) : isActive ? (
-                <div className="w-4 h-4 rounded-full bg-red-600 ring-2 ring-red-400 ring-offset-1 ring-offset-zinc-950" />
-              ) : (
-                <Circle className="w-4 h-4 text-zinc-600" />
-              )}
-              <span className={`text-xs ${isActive ? 'text-red-400 font-medium' : isComplete ? 'text-red-600' : 'text-zinc-600'}`}>
+              <div
+                className={`rounded-full transition-all duration-200 ${
+                  isActive
+                    ? 'w-3 h-3 bg-red-500'
+                    : isComplete
+                    ? 'w-2 h-2 bg-red-700'
+                    : 'w-2 h-2 bg-zinc-600'
+                }`}
+              />
+              <span
+                className={`text-xs font-medium transition-opacity duration-200 ${
+                  isActive ? 'text-red-400 opacity-100' : 'opacity-0 select-none'
+                }`}
+              >
                 {stage.label}
               </span>
             </div>
             {i < STAGES.length - 1 && (
-              <div className={`w-8 h-px mb-4 ${i < stageIndex ? 'bg-red-600' : 'bg-zinc-700'}`} />
+              <div className={`w-8 h-px mb-4 ${i < stageIndex ? 'bg-red-700' : 'bg-zinc-700'}`} />
             )}
           </div>
         );
