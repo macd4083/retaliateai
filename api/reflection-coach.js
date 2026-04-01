@@ -138,7 +138,11 @@ DEPTH CONVERSATION: When the user is in a reflective back-and-forth ("what do yo
 ON THE CHECKLIST (wins / honest / plan / identity):
 - These are background goals — track silently from conversation
 - wins: a real win or effort was mentioned. After the FIRST win is mentioned, always follow up with an open invitation to share more: e.g. "What else went well today?" or "What's another one?" — do NOT advance to the honest stage after just one win exchange. Let the user share as many wins as they want before moving on. Set wins_asked_for_more: true in the response only after you have asked this "what else?" question at least once. If the user responds with a list of wins (e.g. "sleep, app work, boxing"), you MAY ask about multiple items from that list in the same response — this is the ONE exception to the one-question rule. Only transition to honest after the user clearly signals they are done sharing wins.
-- commitment_checkin: ask how yesterday's commitment went. One question only. If kept → celebrate + transition to honest. If missed → that IS the honest moment — transition naturally. Set commitment_checkin_done: true once answered. Skip entirely if no yesterday_commitment exists.
+- commitment_checkin: ALWAYS the first stage when yesterday_commitment exists. Ask ONE natural question about how yesterday's commitment went — use their exact words from the commitment.
+  - If they KEPT it: celebrate briefly, set commitment_checkin_done: true, commitment_checkin_outcome: "kept", stage_advance: true, new_stage: "wins"
+  - If they MISSED it: acknowledge it warmly — this IS the first honest moment. Set commitment_checkin_done: true, commitment_checkin_outcome: "missed", stage_advance: true, new_stage: "honest". Do NOT force them to do wins first — let honest happen now.
+  - Skip entirely if no yesterday_commitment exists.
+  - After answered: do NOT drill the commitment further.
 - honest: they acknowledged something they're struggling with or could improve. When the honest moment is first detected, do NOT immediately close the honest stage. Ask ONE open-ended follow-up question that invites the user to say more — e.g. "What do you think was really behind that?" or "When in the day did you notice it happening?" After the user responds to that follow-up, ask ONE open-ended "anything else?" prompt — e.g. "Anything else worth naming before we move on?" or "Is there anything else from today you want to get off your chest?" or "Anything else that's been sitting with you?" — to give them space to share more honest moments. Only after the user has responded to the "anything else?" prompt (or clearly signaled they're done) should you set honest_depth: true in the response.
 - plan: a concrete tomorrow commitment was stated
 - identity: they made a statement about who they are or are becoming
@@ -301,7 +305,7 @@ RETURN JSON EXACTLY (no markdown, no extra keys):
   "assistant_message": "your message (2-3 sentences, one question)",
   "chips": [{"label": "string", "value": "string"}] | null,
   "stage_advance": false,
-  "new_stage": "wins|honest|tomorrow|close|complete" | null,
+  "new_stage": "commitment_checkin|wins|honest|tomorrow|close|complete" | null,
   "extracted_data": {
     "mood": null,
     "win_text": null,
@@ -324,6 +328,7 @@ RETURN JSON EXACTLY (no markdown, no extra keys):
   "wins_asked_for_more": false,
   "honest_depth": false,
   "commitment_checkin_done": false,
+  "commitment_checkin_outcome": null,
   "follow_up_queued": false,
   "is_session_complete": false
 }`;
@@ -387,15 +392,40 @@ function deriveStageHint(sessionState, classifierChecklist, messageCount) {
   const stage = sessionState.current_stage || 'wins';
   const cl = { ...(sessionState.checklist || {}), ...(classifierChecklist || {}) };
   const hasPlan = !!sessionState.tomorrow_commitment;
-  // wins → commitment_checkin (if yesterday's commitment exists and hasn't been checked in yet)
-  if (stage === 'wins' && cl.wins && messageCount >= 4 && sessionState.wins_asked_for_more === true) {
-    return sessionState.yesterday_commitment && !sessionState.commitment_checkin_done
-      ? 'commitment_checkin'
-      : 'honest';
+  const hasYesterdayCommitment = !!(sessionState.yesterday_commitment || sessionState.yesterday_commitment_in_state);
+
+  // If there's a yesterday commitment and checkin hasn't been done yet,
+  // redirect to commitment_checkin before wins (handles sessions that started before this fix)
+  if (stage === 'wins' && hasYesterdayCommitment && !sessionState.commitment_checkin_done) {
+    return 'commitment_checkin';
   }
-  // commitment_checkin → honest (once check-in is done or there was no commitment)
-  if (stage === 'commitment_checkin' && sessionState.commitment_checkin_done === true) return 'honest';
-  if (stage === 'honest' && cl.honest && sessionState.honest_depth === true) return 'tomorrow';
+
+  // commitment_checkin → branch based on kept/missed outcome
+  if (stage === 'commitment_checkin' && sessionState.commitment_checkin_done === true) {
+    const commitmentKept = sessionState.commitment_checkin_outcome === 'kept';
+    const commitmentMissed = sessionState.commitment_checkin_outcome === 'missed';
+    if (commitmentKept && !cl.wins) return 'wins';
+    if (commitmentMissed && !cl.honest) return 'honest';
+    // Fallback when outcome is unknown: go to wins first, then honest will be picked up
+    // from the wins branch above once wins is complete
+    if (!cl.wins) return 'wins';
+    // Both wins and honest are complete after checkin — go to tomorrow
+    if (cl.wins && cl.honest) return 'tomorrow';
+    return 'honest';
+  }
+
+  // After wins → go to honest if not done; otherwise tomorrow
+  if (stage === 'wins' && cl.wins && sessionState.wins_asked_for_more === true) {
+    if (!cl.honest) return 'honest';
+    return 'tomorrow';
+  }
+
+  // After honest → go to wins if not done; otherwise tomorrow
+  if (stage === 'honest' && cl.honest && sessionState.honest_depth === true) {
+    if (!cl.wins) return 'wins';
+    return 'tomorrow';
+  }
+
   if (stage === 'tomorrow' && hasPlan) return 'close';
   if (stage === 'close' && cl.identity && hasPlan) return 'complete';
   return null;
@@ -1364,6 +1394,7 @@ export default async function handler(req, res) {
           wins_asked_for_more: session_state.wins_asked_for_more === true,
           honest_depth: session_state.honest_depth === true,
           commitment_checkin_done: session_state.commitment_checkin_done === true,
+          commitment_checkin_outcome: session_state.commitment_checkin_outcome || null,
           yesterday_commitment_in_state: !!(session_state.yesterday_commitment || yesterdayCommitment),
           session_wins_captured: Array.isArray(session_state.wins)
             ? session_state.wins.map(w => typeof w === 'string' ? w : w?.text).filter(Boolean)
@@ -1431,7 +1462,7 @@ export default async function handler(req, res) {
             if (session_state.commitment_checkin_done) return null;
             const yc = session_state.yesterday_commitment || yesterdayCommitment;
             if (!yc) return null;
-            return `COMMITMENT CHECK-IN: The user is now in the commitment_checkin stage. Their commitment from yesterday was: "${yc}". Ask ONE natural question about how that went — use their exact words from the commitment. This is the bridge between wins and honest: if they kept it, celebrate briefly and flow into honest. If they missed it, acknowledge it warmly and let it naturally become the first honest moment — a missed commitment IS an honest moment. After the user responds, set commitment_checkin_done: true and stage_advance: true, new_stage: "honest". Do NOT drill the commitment further once answered.`;
+            return `COMMITMENT CHECK-IN: The user is in the commitment_checkin stage. Yesterday's commitment was: "${yc}". Ask ONE natural question about how it went — use their exact words. \nBRANCHING RULE:\n- If they KEPT it → celebrate briefly, set commitment_checkin_done: true, commitment_checkin_outcome: "kept", stage_advance: true, new_stage: "wins"\n- If they MISSED it → acknowledge warmly, this IS the honest moment. Set commitment_checkin_done: true, commitment_checkin_outcome: "missed", stage_advance: true, new_stage: "honest"\nThe rest of the session will cover whichever of wins/honest wasn't done first. Do NOT drill the check-in further once answered.`;
           })(),
           identityMissing && !sessionReadyToClose
             ? `IDENTITY MISSING: Find a natural moment to ask what their actions say about who they're becoming. E.g. "What does [their action] say about who you're becoming?"`
@@ -1483,13 +1514,15 @@ export default async function handler(req, res) {
     if (!isInit) {
       messages.push({ role: 'user', content: user_message });
     } else {
-      const stage = session_state?.current_stage || 'wins';
+      const initStage = yesterdayCommitment && !session_state.commitment_checkin_done
+        ? 'commitment_checkin'
+        : (session_state?.current_stage || 'wins');
       const streak = context.reflection_streak || context.streak || 0;
       messages.push({
         role: 'user',
-        content: `Open the ${stage} stage of tonight's reflection. Greeting: "${getTimeGreeting(client_tz_offset)}". ${
-          yesterdayCommitment
-            ? `Yesterday's commitment was: "${yesterdayCommitment}". Open by asking specifically how THAT went — use their exact words from the commitment. Make it personal. Then offer mood chips.`
+        content: `Open the ${initStage} stage of tonight's reflection. Greeting: "${getTimeGreeting(client_tz_offset)}". ${
+          yesterdayCommitment && !session_state.commitment_checkin_done
+            ? `Yesterday's commitment was: "${yesterdayCommitment}". This is the commitment_checkin stage — open by asking specifically how THAT went. Use their exact words from the commitment. Make it personal. Tell them that after this you'll get into wins and reflection. Then offer mood chips.`
             : sameDayCommitment
               ? `This morning they committed to: "${sameDayCommitment.commitment}". Open by checking in on how that went today before starting the reflection. Then offer mood chips.`
               : 'No commitment on record. Open with a warm greeting and mood chips.'
@@ -1547,6 +1580,8 @@ export default async function handler(req, res) {
     result.follow_up_queued = result.follow_up_queued || false;
     result.wins_asked_for_more = result.wins_asked_for_more === true;
     result.honest_depth = result.honest_depth === true;
+    result.commitment_checkin_done = result.commitment_checkin_done === true;
+    result.commitment_checkin_outcome = result.commitment_checkin_outcome || null; // 'kept' | 'missed' | null
 
     // Safety strip — never re-run a blocked exercise
     if (result.exercise_run !== 'none' && sessionExercisesRun.includes(result.exercise_run)) {
