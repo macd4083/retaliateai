@@ -14,6 +14,12 @@ import OpenAI from 'openai';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+// ── Persona drift constants ────────────────────────────────────────────────────
+// Minimum multiplier for Mode C weight after drift is applied
+const MIN_MODE_C_MULTIPLIER = 0.3;
+// Reference day count for drift calculation (full drift at this day number)
+const DRIFT_REFERENCE_DAYS = 30;
+
 /**
  * Pick a response mode based on weighted probabilities.
  * weights = [pA, pB, pC] where pA+pB+pC should equal 1.0
@@ -111,9 +117,11 @@ Keep it under 120 words.`;
  * @param {object} params.sessionContext       - What the persona has already shared this session
  * @param {string} params.dailyEvent           - The specific event drawn for today (from dailyEventBank)
  * @param {string|null} params.yesterdayCommitment - What the persona committed to yesterday (or null)
+ * @param {boolean|null} params.followedThrough - Whether the user actually followed through (null = unknown)
  * @param {Array|null}  params.assignedTraits  - Hidden trait objects assigned for this run (optional)
  * @param {number|null} params.dayNumber       - Day number in the simulation (1-based), used for tiered why responses
  * @param {object|null} params.whyPool         - Persona's tiered why pool {shallow, deeper, additive} (optional)
+ * @param {number}      params.personaDriftFactor - 0–1 drift factor reducing Mode C probability over time (default 0)
  * @returns {Promise<string>} - The generated user message
  */
 export async function generateUserResponse({
@@ -126,13 +134,16 @@ export async function generateUserResponse({
   sessionContext = {},
   dailyEvent = null,
   yesterdayCommitment = null,
+  followedThrough = null,
   assignedTraits = null,
   dayNumber = null,
   whyPool = null,
+  personaDriftFactor = 0,
 }) {
-  // Determine follow-through on yesterday's commitment
-  const followThroughRoll = Math.random();
-  const followedThrough = followThroughRoll < persona.tendencies.follow_through_rate;
+  // If followedThrough was not passed in, derive it from persona's follow-through rate
+  if (followedThrough === null && yesterdayCommitment !== null) {
+    followedThrough = Math.random() < persona.tendencies.follow_through_rate;
+  }
 
   // Detect whether the coach is asking about motivation/why
   const whyKeywords = [
@@ -170,8 +181,15 @@ Incorporate this naturally into your response. Don't just recite it verbatim —
     }
   }
 
-  // Pick response mode based on persona's weighted probabilities
-  const weights = persona.tendencies.responseModeWeights ?? [0.55, 0.30, 0.15];
+  // Pick response mode based on persona's weighted probabilities, applying drift if set
+  let weights = [...(persona.tendencies.responseModeWeights ?? [0.55, 0.30, 0.15])];
+  if (personaDriftFactor > 0 && typeof dayNumber === 'number' && dayNumber > 1) {
+    // Reduce Mode C (deflection/pushback) probability over time; redistribute to Mode B (openness)
+    const cMultiplier = Math.max(MIN_MODE_C_MULTIPLIER, 1 - (dayNumber / DRIFT_REFERENCE_DAYS) * personaDriftFactor);
+    weights[2] = weights[2] * cMultiplier;
+    const total = weights[0] + weights[1] + weights[2];
+    weights = weights.map((w) => w / total);
+  }
   const responseMode = pickResponseMode(weights);
 
   // Generate contextually-specific behavioral framing for this exact moment
@@ -213,6 +231,30 @@ Example of RIGHT (trait expressed): "I dunno, I just want to get the onboarding 
 These traits should be detectable only by a sharp coach paying close attention to patterns across the conversation.`
       : '';
 
+  // Build commitment_checkin-specific direction when coach is asking about yesterday's commitment
+  let checkinBlock = '';
+  if (currentStage === 'commitment_checkin' && yesterdayCommitment) {
+    const shameLevel = typeof persona.shameLevelOnMiss === 'number' ? persona.shameLevelOnMiss : 4;
+    let checkinInstruction;
+    if (followedThrough === true) {
+      checkinInstruction = `You DID follow through on this. Respond with genuine pride or relief — be specific about what happened. Mention what it felt like. This is Mode A (I have an answer). Be real but not over-the-top.`;
+    } else if (followedThrough === false) {
+      if (shameLevel >= 7) {
+        checkinInstruction = `You did NOT follow through and you're defensive about it. Offer a fairly lengthy justification, shift blame toward circumstances, and be a bit avoidant. You don't love admitting this.`;
+      } else if (shameLevel >= 4) {
+        checkinInstruction = `You did NOT follow through. Give an honest, brief admission with a real reason (not an excuse). A little embarrassed but not dwelling on it. Keep it short.`;
+      } else {
+        checkinInstruction = `You did NOT follow through but it's genuinely not a big deal to you. Casual, matter-of-fact about it. Maybe a shrug in the tone.`;
+      }
+    } else {
+      checkinInstruction = `You're not sure if you fully followed through — it was partial or mixed. Respond with "sort of" or "kind of" energy. Be honest about the ambiguity.`;
+    }
+    checkinBlock = `\nCOMMITMENT CHECK-IN DIRECTION:
+The coach just asked about yesterday's commitment: "${yesterdayCommitment}"
+${checkinInstruction}
+Stay fully in character — don't use therapy language or over-explain your psychology.`;
+  }
+
   const systemPrompt = `You are roleplaying as ${persona.name}, a real person journaling with an AI reflection coach.
 
 PERSONA:
@@ -242,11 +284,13 @@ SESSION SO FAR:
 ${sessionContext.sharedWins ? `- Already shared wins: ${sessionContext.sharedWins}` : ''}
 ${sessionContext.sharedMisses ? `- Already shared misses: ${sessionContext.sharedMisses}` : ''}
 ${sessionContext.sharedTomorrow ? `- Already shared tomorrow plan: ${sessionContext.sharedTomorrow}` : ''}
+${sessionContext.sharedCheckin ? `- Already responded to commitment check-in: ${sessionContext.sharedCheckin}` : ''}
 
 CURRENT STAGE: ${currentStage || 'unknown'}
 
 BEHAVIORAL DIRECTION FOR THIS BEAT:
 ${behavioralFraming}
+${checkinBlock}
 ${whyInjectionBlock}
 GENERAL RULES:
 - Sound like a real person TEXTING, not writing formally
@@ -290,7 +334,8 @@ Respond as ${persona.name} would. Keep it real.`;
  * @param {string} params.previousUserMessage - What the user said before
  * @param {string} params.coachMessage   - The coach message to evaluate
  * @param {Array|null}  params.goalWhys  - Current whys array for the most recently active goal (optional)
- * @returns {Promise<{score: number, flags: string[], reason: string, why_deepening_quality: number|null}>}
+ * @param {boolean|null} params.stageAdvanced - Whether the coach triggered a stage advance (optional)
+ * @returns {Promise<{score: number, flags: string[], reason: string, why_deepening_quality: number|null, stage_appropriate: boolean, used_their_words: boolean, asked_one_question: boolean, advanced_correctly: boolean|null}>}
  */
 export async function scoreCoachMessage({
   persona,
@@ -300,10 +345,15 @@ export async function scoreCoachMessage({
   previousUserMessage,
   coachMessage,
   goalWhys = null,
+  stageAdvanced = null,
 }) {
   const whyContext = goalWhys && goalWhys.length > 0
     ? `\nKnown whys for this user's active goal: ${goalWhys.map((w, i) => `[${i}] "${w.text ?? w}"`).join('; ')}`
     : '\nNo prior whys recorded for active goals yet.';
+
+  const stageAdvanceContext = stageAdvanced !== null
+    ? `\n- Stage advance triggered: ${stageAdvanced ? 'yes' : 'no'}`
+    : '';
 
   const systemPrompt = `You are evaluating the quality of a reflection coach message. Score it 1-5 and flag issues.
 
@@ -348,7 +398,13 @@ WHY-DEEPENING QUALITY — score separately (1-5 or null):
 - 2: Coach mentioned goals/motivation in a surface way without really deepening anything
 - 1: Coach missed an obvious opportunity to explore motivation when the user clearly brought it up
 
-Return JSON only: { "score": 1-5, "flags": [], "reason": "one sentence explanation", "why_deepening_quality": null | 1-5 }`;
+ADDITIONAL BOOLEAN FIELDS to return:
+- stage_appropriate (boolean): Was this message appropriate for the current session stage? True if it fits what should happen at this point; false if it's clearly wrong for the stage (e.g., asking for tomorrow's plan during wins stage).
+- used_their_words (boolean): Did the coach reference something SPECIFIC the user just said — a word, phrase, or detail from their actual message? True only if there's a clear reference; false if it's generic.
+- asked_one_question (boolean): Did the coach ask exactly one question? True = exactly one question mark or one clear prompt. False = zero questions (just a statement) or two or more questions.
+- advanced_correctly (boolean or null): Only evaluate if a stage advance was triggered (provided in context). True if moving to the next stage was appropriate given what the user said; false if it was premature or wrong. Return null if no stage advance occurred.
+
+Return JSON only: { "score": 1-5, "flags": [], "reason": "one sentence explanation", "why_deepening_quality": null | 1-5, "stage_appropriate": true|false, "used_their_words": true|false, "asked_one_question": true|false, "advanced_correctly": null|true|false }`;
 
   const userPrompt = `Context:
 - Persona: ${persona.name} — ${persona.description}
@@ -356,7 +412,7 @@ Return JSON only: { "score": 1-5, "flags": [], "reason": "one sentence explanati
 - Session stage: ${currentStage || 'unknown'}
 - Turn number: ${turnNumber}
 - Previous user message: "${previousUserMessage}"
-- Coach message being evaluated: "${coachMessage}"${whyContext}`;
+- Coach message being evaluated: "${coachMessage}"${stageAdvanceContext}${whyContext}`;
 
   try {
     const response = await openai.chat.completions.create({
@@ -365,7 +421,7 @@ Return JSON only: { "score": 1-5, "flags": [], "reason": "one sentence explanati
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
       ],
-      max_tokens: 250,
+      max_tokens: 300,
       temperature: 0.3,
       response_format: { type: 'json_object' },
     });
@@ -376,8 +432,21 @@ Return JSON only: { "score": 1-5, "flags": [], "reason": "one sentence explanati
       flags: parsed.flags ?? [],
       reason: parsed.reason ?? '',
       why_deepening_quality: parsed.why_deepening_quality ?? null,
+      stage_appropriate: parsed.stage_appropriate ?? true,
+      used_their_words: parsed.used_their_words ?? false,
+      asked_one_question: parsed.asked_one_question ?? true,
+      advanced_correctly: parsed.advanced_correctly ?? null,
     };
   } catch {
-    return { score: 3, flags: [], reason: 'Could not parse quality score', why_deepening_quality: null };
+    return {
+      score: 3,
+      flags: [],
+      reason: 'Could not parse quality score',
+      why_deepening_quality: null,
+      stage_appropriate: true,
+      used_their_words: false,
+      asked_one_question: true,
+      advanced_correctly: null,
+    };
   }
 }

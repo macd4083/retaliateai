@@ -87,6 +87,10 @@ export const PERSONAS = {
       // Weighted probability for response modes: A=60%, B=25%, C=15%
       responseModeWeights: [0.60, 0.25, 0.15],
     },
+    // How ashamed Alex feels when missing a commitment (0-10): mid-range — a little embarrassed but not spiraling
+    shameLevelOnMiss: 5,
+    // Probability of engaging deeply with a reflective question by day number
+    openToDepthByDay: (dayNumber) => Math.min(0.9, 0.25 + dayNumber * 0.022),
     // Tiered why pool — used by generateUserResponse when coach asks about motivation
     // shallow: days 1-7, deeper: days 8-20, additive: days 21+ (adds a second dimension)
     whyPool: {
@@ -191,6 +195,10 @@ export const PERSONAS = {
       // Weighted probability for response modes: A=70%, B=20%, C=10%
       responseModeWeights: [0.70, 0.20, 0.10],
     },
+    // Jordan rarely feels shame about misses — treats them as data, not failures
+    shameLevelOnMiss: 2,
+    // Probability of engaging deeply by day — starts very low, rises slowly (Jordan resists depth)
+    openToDepthByDay: (dayNumber) => Math.min(0.75, 0.10 + dayNumber * 0.018),
     // Tiered why pool — used by generateUserResponse when coach asks about motivation
     // shallow: days 1-7, deeper: days 8-20, additive: days 21+ (adds a second dimension)
     whyPool: {
@@ -295,6 +303,10 @@ export const PERSONAS = {
       // Weighted probability for response modes: A=30%, B=55%, C=15%
       responseModeWeights: [0.30, 0.55, 0.15],
     },
+    // Sam has high shame about misses — the perfectionism makes every miss feel like evidence of inadequacy
+    shameLevelOnMiss: 8,
+    // Sam already starts fairly open to depth (self-aware by default)
+    openToDepthByDay: (dayNumber) => Math.min(0.95, 0.55 + dayNumber * 0.015),
     hiddenTraitPool: [
       'fear_of_visibility',
       'intellectual_procrastination',
@@ -382,6 +394,34 @@ export const PERSONAS = {
       // Weighted probability for response modes: A=45%, B=40%, C=15%
       responseModeWeights: [0.45, 0.40, 0.15],
     },
+    // Maya feels significant shame about misses — she already feels like she's failing at everything
+    shameLevelOnMiss: 7,
+    // Maya starts fairly open but energy-gated — depth comes in waves
+    openToDepthByDay: (dayNumber) => {
+      // Dips on tired days, rises as trust builds
+      const base = Math.min(0.85, 0.30 + dayNumber * 0.018);
+      return base;
+    },
+    // Tiered why pool — used by generateUserResponse when coach asks about motivation
+    whyPool: {
+      shallow: [
+        "I need a way out. That's it. I can't keep doing this forever.",
+        "If I don't build something of my own I'm going to resent my life and I don't want that",
+        "I keep watching Eli grow up and thinking — I want to actually be present for him, not just surviving",
+        "Devon has been so patient. I want to be able to say it was worth it eventually",
+      ],
+      deeper: [
+        "I realized it's not even about quitting anymore. It's that every day I don't make progress on Calmlog I feel a little less like myself. Like the real me is being buried under everyone else's roadmap.",
+        "Calmlog started as a way out but now I think it's also proof — proof that the version of me who had ideas and ambition is still in here somewhere and didn't completely disappear after Eli was born.",
+        "I had a moment on the train where I thought: what if I get to 50 and I've been 'about to make a change' my whole life? That's the real fear. Calmlog isn't about money. It's about not becoming that person.",
+        "I think the deepest thing is — I don't want Eli to grow up watching me disappear into a job I don't believe in. I want him to see me build something. That's the example I want to set.",
+      ],
+      additive: [
+        "There's something else I haven't said out loud much. I want to help people who feel the way I feel right now. Not as some noble mission — I just know exactly what they need because I'm living it.",
+        "Also — and this is recent — I realized I'm done waiting for permission or the right conditions. Calmlog is how I take control of my time again. Not eventually. Now.",
+        "I also want to prove something to my old manager who basically implied I'd never do anything ambitious outside of work. I know that's petty. But it's there.",
+      ],
+    },
     hiddenTraitPool: [
       'identity_tied_to_productivity',
       'conflict_avoidance_disguised_as_harmony',
@@ -447,6 +487,30 @@ export const PERSONAS = {
       follow_through_rate: 0.7,
       // Weighted probability for response modes: A=45%, B=45%, C=10%
       responseModeWeights: [0.45, 0.45, 0.10],
+    },
+    // Darius has moderate shame about misses — aware he's protecting himself, but honest about it
+    shameLevelOnMiss: 4,
+    // Darius is already pretty open — started open to depth, continues that way
+    openToDepthByDay: (dayNumber) => Math.min(0.92, 0.50 + dayNumber * 0.014),
+    // Tiered why pool — used by generateUserResponse when coach asks about motivation
+    whyPool: {
+      shallow: [
+        "I want to prove I can build something sustainable without destroying myself in the process",
+        "1,000 subscribers feels like the number where it becomes real. Where I can say I actually did it.",
+        "Nia keeps believing in me and I don't want to let her down, honestly",
+        "I need to know that what happened eight months ago made me better at something, not just smaller",
+      ],
+      deeper: [
+        "I've been thinking about this a lot. The newsletter isn't really about subscribers. It's proof that I can come back from something genuinely hard and build again. Not just survive — actually build.",
+        "There's something about wanting to be useful to people in the exact situation I was in. Thomas's messages make me think I'm actually helping someone. That's new for me — not building to prove something, building because it matters to someone.",
+        "I think the real reason I keep going is that stopping would mean the burnout won. Like if I don't build something real out of this, the whole experience was just damage. I need it to mean something.",
+        "Priya asked what I'm actually afraid of and I said failure, but that's not quite it. What I'm afraid of is doing everything right and still ending up back where I was. Like the collapse was inevitable and will happen again.",
+      ],
+      additive: [
+        "There's something else underneath all of this. I want to show people — not in a preachy way — that you don't have to choose between ambition and recovery. That was the thing nobody told me when I burned out.",
+        "Also — I realized recently that I'm building for the version of me from eight months ago. The person who needed to know this was possible. That's who I'm writing for.",
+        "I think there's a third thing too: I want to look back in five years and see a body of work that has a point of view. Not just content. Something that has my actual perspective in it.",
+      ],
     },
     hiddenTraitPool: [
       'fear_of_success_as_abandonment',
