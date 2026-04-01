@@ -138,13 +138,21 @@ DEPTH CONVERSATION: When the user is in a reflective back-and-forth ("what do yo
 ON THE CHECKLIST (wins / honest / plan / identity):
 - These are background goals — track silently from conversation
 - wins: a real win or effort was mentioned. After the FIRST win is mentioned, always follow up with an open invitation to share more: e.g. "What else went well today?" or "What's another one?" — do NOT advance to the honest stage after just one win exchange. Let the user share as many wins as they want before moving on. Set wins_asked_for_more: true in the response only after you have asked this "what else?" question at least once. If the user responds with a list of wins (e.g. "sleep, app work, boxing"), you MAY ask about multiple items from that list in the same response — this is the ONE exception to the one-question rule. Only transition to honest after the user clearly signals they are done sharing wins.
+- checkin: the user has responded to a question about yesterday's commitment. This stage only exists when yesterday_commitment is present. When current_stage is "checkin": ask ONE question about how yesterday's commitment went — use their exact words from the commitment. Do NOT ask about today's wins or today's misses yet. Read their response: if they kept it, acknowledge it briefly and connect it to momentum, then transition naturally to honest. If they missed it or partially missed it, treat that as the opening of the honest stage — their miss IS the first honest moment. Set checkin_done: true once they've responded and the conversation has moved past the commitment check. Never ask a second question about the commitment during checkin — one question, read the response, move forward.
 - honest: they acknowledged something they're struggling with or could improve. When the honest moment is first detected, do NOT immediately close the honest stage. Ask ONE open-ended follow-up question that invites the user to say more — e.g. "What do you think was really behind that?" or "When in the day did you notice it happening?" After the user responds to that follow-up, ask ONE open-ended "anything else?" prompt — e.g. "Anything else worth naming before we move on?" or "Is there anything else from today you want to get off your chest?" or "Anything else that's been sitting with you?" — to give them space to share more honest moments. Only after the user has responded to the "anything else?" prompt (or clearly signaled they're done) should you set honest_depth: true in the response.
 - plan: a concrete tomorrow commitment was stated
 - identity: they made a statement about who they are or are becoming
-- After ~8 messages, if items are still empty, weave them in naturally
+- If wins and checkin are covered (or checkin stage is not present) but honest is still missing, gently probe: "Where did you feel like you weren't fully showing up today?"
 - Never say "you haven't completed X" — natural human transitions only
 - If honest is missing after wins are covered, gently probe with self-awareness questions like: "Where did you feel like you weren't fully showing up today?" or "Is there a moment from today that's still sitting with you?" or "What part of today are you least proud of — not what you'd fix, just what happened?" The goal of the honest stage is self-awareness and honest naming of who they were TODAY — NOT planning or action. Do NOT ask "what would you do differently" or any future-action questions during the honest stage — those belong in the tomorrow stage.
 - If identity is missing near the end, ask: "What does [their actions/plan] say about who you're becoming?"
+
+TOMORROW COMMITMENT + WHY:
+When the user is in the "tomorrow" stage and states their commitment:
+- Read the commitment text. If it already contains a motivation signal (e.g. "because", "so I can", "I need to", "want to", "trying to") — do NOT ask why. They've already told you.
+- If the commitment is purely action-based with no motivation embedded (e.g. "I'm going to the gym"), ask ONE lightweight why question: "What's making that the priority tomorrow?" — not a full why-building exercise, just one line.
+- Capture the response as part of the commitment context. Do not drill it.
+- This is not the place for the 3x why exercise. Keep it light.
 
 ON KNOWING WHEN TO CLOSE:
 - When tomorrow_commitment is filled AND the user's tone is resolved/satisfied → wrap
@@ -381,13 +389,23 @@ function daysFromNow(n, clientDate) {
 
 // ── Stage advancement heuristic ───────────────────────────────────────────────
 
-function deriveStageHint(sessionState, classifierChecklist, messageCount) {
+function deriveStageHint(sessionState, classifierChecklist) {
   const stage = sessionState.current_stage || 'wins';
   const cl = { ...(sessionState.checklist || {}), ...(classifierChecklist || {}) };
   const hasPlan = !!sessionState.tomorrow_commitment;
-  if (stage === 'wins' && cl.wins && messageCount >= 4 && sessionState.wins_asked_for_more === true) return 'honest';
+  const hasYesterdayCommitment = !!sessionState.yesterday_commitment;
+
+  // wins → checkin (only if there's a yesterday commitment to check on)
+  if (stage === 'wins' && cl.wins && sessionState.wins_asked_for_more === true && hasYesterdayCommitment) return 'checkin';
+  // wins → honest (if no yesterday commitment, skip checkin entirely)
+  if (stage === 'wins' && cl.wins && sessionState.wins_asked_for_more === true && !hasYesterdayCommitment) return 'honest';
+  // checkin → honest (checkin always leads into honest — response tone is set by the AI)
+  if (stage === 'checkin' && sessionState.checkin_done === true) return 'honest';
+  // honest → tomorrow
   if (stage === 'honest' && cl.honest && sessionState.honest_depth === true) return 'tomorrow';
+  // tomorrow → close
   if (stage === 'tomorrow' && hasPlan) return 'close';
+  // close → complete
   if (stage === 'close' && cl.identity && hasPlan) return 'complete';
   return null;
 }
@@ -1213,7 +1231,7 @@ export default async function handler(req, res) {
 
     // ── 6b. Stage hint ─────────────────────────────────────────────────
     const messageCount = history.length;
-    const suggestedNextStage = deriveStageHint(session_state, intentData?.checklist_content, messageCount);
+    const suggestedNextStage = deriveStageHint(session_state, intentData?.checklist_content);
 
     // ── 7. Session state analysis for instructions ────────────────────────
     const mergedChecklist = { ...(session_state.checklist || {}), ...(intentData?.checklist_content || {}) };
@@ -1354,6 +1372,8 @@ export default async function handler(req, res) {
           message_count: messageCount,
           wins_asked_for_more: session_state.wins_asked_for_more === true,
           honest_depth: session_state.honest_depth === true,
+          checkin_done: session_state.checkin_done === true,
+          yesterday_commitment_confirmed: session_state.checkin_done === true ? 'done' : (yesterdayCommitment ? 'pending' : 'none'),
           session_wins_captured: Array.isArray(session_state.wins)
             ? session_state.wins.map(w => typeof w === 'string' ? w : w?.text).filter(Boolean)
             : [],
@@ -1617,7 +1637,7 @@ Return ONLY valid JSON: { "question": "..." }`,
       );
     }
 
-    if (session_id && (result.stage_advance || result.extracted_data || result.is_session_complete)) {
+    if (session_id && (result.stage_advance || result.extracted_data || result.is_session_complete || result.checkin_done)) {
       const updates = {};
       if (result.stage_advance && result.new_stage) updates.current_stage = result.new_stage;
       if (result.extracted_data?.mood) updates.mood_end_of_day = result.extracted_data.mood;
@@ -1629,6 +1649,7 @@ Return ONLY valid JSON: { "question": "..." }`,
         }
       }
       if (result.extracted_data?.self_hype_message) updates.self_hype_message = result.extracted_data.self_hype_message;
+      if (result.checkin_done === true) updates.checkin_done = true;
       if (result.is_session_complete) {
         updates.is_complete = true;
         updates.completed_at = new Date().toISOString();
