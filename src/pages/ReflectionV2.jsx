@@ -367,6 +367,7 @@ export default function ReflectionV2() {
         exercises_run: Array.isArray(session.exercises_run) ? session.exercises_run : [],
         wins_asked_for_more: false,
         honest_depth: false,
+        commitment_checkin_done: session.commitment_checkin_done === true,
       };
       setSessionState(restoredState);
 
@@ -773,6 +774,7 @@ export default function ReflectionV2() {
           exercises_run: [],
           wins_asked_for_more: false,
           honest_depth: false,
+          commitment_checkin_done: false,
         });
         initCalledRef.current = false;
         setIsInitializing(true);
