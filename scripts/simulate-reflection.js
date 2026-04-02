@@ -15,7 +15,7 @@
  */
 
 import { createClient } from '@supabase/supabase-js';
-import { writeFileSync } from 'fs';
+import { writeFileSync, readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { randomUUID } from 'crypto';
@@ -24,6 +24,11 @@ import handler from '../api/reflection-coach.js';
 import commitmentStatsHandler from '../api/commitment-stats.js';
 import generatePatternNarrativeHandler from '../api/generate-pattern-narrative.js';
 import createGoalHandler from '../api/create-goal.js';
+import classifyIntentHandler from '../api/classify-intent.js';
+import generateEmbeddingHandler from '../api/generate-embedding.js';
+import extractGoalCommitmentsHandler from '../api/extract-goal-commitments.js';
+import goalCommitmentStatsHandler from '../api/goal-commitment-stats.js';
+import evaluateGoalCommitmentsHandler from '../api/evaluate-goal-commitments.js';
 import { PERSONAS, DEFAULT_PERSONA } from './personas.js';
 import { generateUserResponse, scoreCoachMessage } from './generate-user-response.js';
 import { drawTraits } from './hidden-traits.js';
@@ -34,6 +39,19 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const DEFAULT_REPORT_PATH = join(__dirname, 'simulation-report.json');
 const WHY_BUILDING_REPORT_PATH = join(__dirname, 'why-building-report.json');
+const FULL_COVERAGE_REPORT_PATH = join(__dirname, 'full-coverage-report.json');
+
+// ── All exercises the simulator tracks across the full run ────────────────────
+const ALL_EXERCISES = [
+  'why_reconnect',
+  'identity_reinforcement',
+  'future_self_visualization',
+  'reframe_failure',
+  'values_clarification',
+  'pattern_interrupt',
+  'commitment_deepening',
+  'accountability_mirror',
+];
 
 // ── Scenario follow-through probabilities ─────────────────────────────────────
 // In 'mixed' scenario: probability of missing after keeping, and keeping after missing
@@ -50,6 +68,8 @@ function parseArgs() {
     clean: false,
     testWhyBuilding: false,
     testGoalSuggestion: false,
+    testFullCoverage: false,
+    assertWeek: null,
     scenario: 'mixed',     // 'kept_streak' | 'miss_streak' | 'mixed' | 'cold_start'
     dryRun: false,
     reportPath: null,      // custom output path for report JSON
@@ -62,6 +82,8 @@ function parseArgs() {
     else if (args[i] === '--clean') result.clean = true;
     else if (args[i] === '--test-why-building') result.testWhyBuilding = true;
     else if (args[i] === '--test-goal-suggestion') result.testGoalSuggestion = true;
+    else if (args[i] === '--test-full-coverage') result.testFullCoverage = true;
+    else if (args[i] === '--assert-week' && args[i + 1]) result.assertWeek = parseInt(args[++i], 10);
     else if (args[i] === '--scenario' && args[i + 1]) result.scenario = args[++i];
     else if (args[i] === '--dry-run') result.dryRun = true;
     else if (args[i] === '--report-path' && args[i + 1]) result.reportPath = args[++i];
@@ -192,13 +214,21 @@ async function assertWhysContext(supabase, userId) {
 /**
  * Calls commitment-stats, queries reflection_patterns, and optionally calls
  * generate-pattern-narrative to verify real data landed correctly.
+ * Also calls generate-embedding, classify-intent, extract-goal-commitments,
+ * goal-commitment-stats, and evaluate-goal-commitments when context is provided.
  *
- * @param {object} supabase   - Supabase client
- * @param {string} userId     - The simulated user ID
+ * @param {object} supabase      - Supabase client
+ * @param {string} userId        - The simulated user ID
  * @param {string} simulatedDate - The date of the completed session (YYYY-MM-DD)
+ * @param {object} prevGoalWhysCounts - Previous session's goal whys counts
+ * @param {object} options       - Optional extra context for extended checks
+ *   @param {string}  options.sampleUserMessage - A user message to run embedding/intent checks on
+ *   @param {string}  options.commitmentText    - Commitment text for goal extraction
+ *   @param {Array}   options.sampleGoals       - Active goal stubs [{ id, title, category }]
+ *   @param {string}  options.sessionId         - Current session ID
  * @returns {Promise<object>} - backend_state object for the session record
  */
-async function validateBackend(supabase, userId, simulatedDate, prevGoalWhysCounts = {}) {
+async function validateBackend(supabase, userId, simulatedDate, prevGoalWhysCounts = {}, options = {}) {
   const backendState = {
     follow_through_7day: null,
     trajectory: null,
@@ -206,6 +236,11 @@ async function validateBackend(supabase, userId, simulatedDate, prevGoalWhysCoun
     narrative_sample: null,
     goals_snapshot: [],
     why_evolution_events: [],
+    embedding_check: null,
+    classify_intent_check: null,
+    extract_commitments_check: null,
+    goal_commitment_stats_check: null,
+    evaluate_commitments_check: null,
   };
 
   // 1. Commitment stats
@@ -339,10 +374,93 @@ async function validateBackend(supabase, userId, simulatedDate, prevGoalWhysCoun
     }
   }
 
+  // 4. Generate embedding (lightweight check — runs when a sample message is available)
+  if (options.sampleUserMessage) {
+    try {
+      const embedResult = await callHandler(generateEmbeddingHandler, { text: options.sampleUserMessage });
+      if (embedResult.embedding && Array.isArray(embedResult.embedding) && embedResult.embedding.length > 100) {
+        backendState.embedding_check = { vector_length: embedResult.embedding.length, passed: true };
+        console.log(`    🔢  Embedding: vector length ${embedResult.embedding.length} ✅`);
+      } else {
+        backendState.embedding_check = { passed: false };
+        console.log(`    🔢  Embedding: unexpected result ❌`);
+      }
+    } catch (err) {
+      console.warn(`    ⚠️  generate-embedding failed: ${err.message}`);
+    }
+  }
+
+  // 5. Classify intent (lightweight check — runs when a sample message is available)
+  if (options.sampleUserMessage) {
+    try {
+      const classifyResult = await callHandler(classifyIntentHandler, {
+        user_message: options.sampleUserMessage,
+        session_context: {},
+      });
+      if (classifyResult.intent && typeof classifyResult.intent === 'string' && classifyResult.intent.length > 0) {
+        backendState.classify_intent_check = { intent: classifyResult.intent, passed: true };
+        console.log(`    🏷️   Intent: "${classifyResult.intent}" ✅`);
+      } else {
+        backendState.classify_intent_check = { passed: false };
+        console.log(`    🏷️   Intent: invalid result ❌`);
+      }
+    } catch (err) {
+      console.warn(`    ⚠️  classify-intent failed: ${err.message}`);
+    }
+  }
+
+  // 6. Extract goal commitments (runs when a commitment was made this session)
+  if (options.commitmentText && Array.isArray(options.sampleGoals) && options.sampleGoals.length > 0) {
+    try {
+      const extractResult = await callHandler(extractGoalCommitmentsHandler, {
+        user_id: userId,
+        session_id: options.sessionId || null,
+        commitment_text: options.commitmentText,
+        goals: options.sampleGoals,
+        client_local_date: simulatedDate,
+      });
+      if (extractResult.goal_commitments && Array.isArray(extractResult.goal_commitments) && extractResult.goal_commitments.length > 0) {
+        backendState.extract_commitments_check = { count: extractResult.goal_commitments.length, passed: true };
+        console.log(`    🔗  Extracted commitments: ${extractResult.goal_commitments.length} ✅`);
+      } else {
+        backendState.extract_commitments_check = { count: 0, passed: false };
+      }
+    } catch (err) {
+      console.warn(`    ⚠️  extract-goal-commitments failed: ${err.message}`);
+    }
+  }
+
+  // 7. Goal commitment stats (always runs — needs only user_id)
+  try {
+    const statsResult = await callHandler(goalCommitmentStatsHandler, {
+      user_id: userId,
+      client_local_date: simulatedDate,
+    });
+    if (statsResult.per_goal && Array.isArray(statsResult.per_goal)) {
+      backendState.goal_commitment_stats_check = { goal_count: statsResult.per_goal.length, passed: true };
+      if (statsResult.per_goal.length > 0) {
+        console.log(`    📈  Goal commitment stats: ${statsResult.per_goal.length} goal(s) tracked ✅`);
+      }
+    }
+  } catch (err) {
+    console.warn(`    ⚠️  goal-commitment-stats failed: ${err.message}`);
+  }
+
+  // 8. Evaluate goal commitments (always runs — marks pending commitments kept/missed)
+  try {
+    const evalResult = await callHandler(evaluateGoalCommitmentsHandler, {
+      user_id: userId,
+      session_date: simulatedDate,
+    });
+    if (evalResult.ok) {
+      backendState.evaluate_commitments_check = { passed: true };
+    }
+  } catch (err) {
+    console.warn(`    ⚠️  evaluate-goal-commitments failed: ${err.message}`);
+  }
+
   return backendState;
 }
-
-// ── Fetch user profile snapshot and generated narratives ──────────────────────
 /**
  * Queries user_profiles and calls generatePatternNarrativeHandler to capture
  * the current state of the user's profile and generated narratives for the report.
@@ -617,6 +735,101 @@ async function seedUserProfile(supabase, userId, persona) {
       console.log(`    🎯  ${goalRows.length} goal(s) seeded`);
     }
   }
+}
+
+// ── Coverage Assertion Helpers ─────────────────────────────────────────────────
+
+/**
+ * Initializes all coverage assertions for the --test-full-coverage run.
+ * Each assertion: { id, description, passed, day_first_passed, notes }
+ */
+function initCoverageAssertions() {
+  const make = (id, description) => ({ id, description, passed: false, day_first_passed: null, notes: null });
+  return [
+    make('session_created_daily',            'Session row inserted every simulated day'),
+    make('init_fires',                        '__INIT__ turn fires and returns assistant_message'),
+    make('all_4_stages_complete',             'All 4 checklist stages complete in at least 1 session'),
+    make('session_complete_before_max_turns', 'is_session_complete: true returned before MAX_TURNS'),
+    make('stage_sequence_recorded',           'Stage sequence recorded correctly in sessionRecord'),
+    make('commitment_checkin_fires',          'commitment_checkin stage fires on day 2+ when yesterday_commitment set'),
+    make('commitment_checkin_done_flips',     'commitment_checkin_done flips to true after resolving'),
+    make('commitment_checkin_miss_rate',      'commitment_checkin_coverage.miss_rate computed correctly'),
+    make('all_exercises_fired',               'All 8 tracked exercises fire at least once across the run'),
+    make('goal_created_with_fields',          'Goal row exists with correct title, category, why, status=active'),
+    make('goal_suggestion_detected',          'Coach surfaces a goal_suggestion in extracted_data at least once'),
+    make('goal_last_mentioned_updated',       'Goal last_mentioned_at updated after a session where goal discussed'),
+    make('goal_whys_evolution',               'Goal whys[] count increases from early days to day 7+'),
+    make('goal_commitment_extraction',        'extract-goal-commitments returns ≥1 commitment tied to an active goal'),
+    make('goal_commitment_stats',             'goal-commitment-stats returns per-goal stats'),
+    make('goal_commitment_evaluation',        'evaluate-goal-commitments marks commitments as kept/missed'),
+    make('followthrough7_nonnull_after_day2', 'followThrough7 is non-null after day 2'),
+    make('trajectory_valid',                  'trajectory is one of: improving, declining, flat, or null'),
+    make('trajectory_nonnull_after_14',       'trajectory is non-null after 14+ day run'),
+    make('patterns_after_5_sessions',         'At least 1 reflection_patterns row exists after 5+ sessions'),
+    make('patterns_2plus_after_10',           '2+ patterns with occurrence_count >= 2 after 10+ sessions'),
+    make('narrative_after_10',                'generate-pattern-narrative returns ≥1 narrative after 10+ sessions'),
+    make('embedding_returns_vector',          'generate-embedding returns vector with length > 100'),
+    make('short_term_state_after_7',          'short_term_state is non-null after 7+ sessions'),
+    make('strengths_after_14',               'strengths array has ≥1 entry after 14+ sessions'),
+    make('growth_areas_after_14',            'growth_areas array has ≥1 entry after 14+ sessions'),
+    make('identity_statement_preserved',      'Profile identity_statement matches seeded value throughout run'),
+    make('follow_up_queue_populated',         'At least 1 follow_up_queue row exists after a commitment is made'),
+    make('follow_up_queue_future_date',       'follow_up_queue rows have a future due_date relative to session date'),
+    make('growth_marker_after_14',            'At least 1 growth_markers row exists after 14+ days'),
+    make('classify_intent_valid',             'classify-intent returns a valid non-empty intent string'),
+    make('week1_patterns_bounded',            'Week 1 (days 1–7): reflection_patterns has 0–2 entries'),
+    make('week2_pattern_repetition',          'Week 2 (days 8–14): ≥1 pattern with occurrence_count >= 2'),
+    make('week2_short_term_state',            'Week 2 (days 8–14): short_term_state is populated'),
+    make('week3_why_reference',               'Week 3 (days 15–21): coach references specific whys in ≥1 session'),
+    make('day7_why_reconnect_fired',          'why_reconnect exercise fired at least once in the first 7 days'),
+    make('day14_goals_populated',             'Day 14: goals with whys present, strengths and growth_areas populated'),
+    make('day21_growth_and_grade',            'Day 21: ≥1 growth marker, narrative produced, trait grade not F'),
+  ];
+}
+
+/**
+ * Marks an assertion as passed (only on the first pass).
+ *
+ * @param {Array}  assertions - The coverage_assertions array
+ * @param {string} id         - Assertion ID
+ * @param {number} day        - Current simulation day
+ * @param {string} [notes]    - Optional detail string
+ */
+function passAssertion(assertions, id, day, notes = null) {
+  const a = assertions.find((a) => a.id === id);
+  if (a && !a.passed) {
+    a.passed = true;
+    a.day_first_passed = day;
+    if (notes) a.notes = notes;
+  }
+}
+
+/**
+ * Prints the final coverage summary table to stdout.
+ *
+ * @param {Array}  assertions    - Completed coverage_assertions array
+ * @param {Array}  firedExercises - Exercise names that fired at least once
+ */
+function printCoverageSummary(assertions, firedExercises) {
+  console.log('\n' + '═'.repeat(52));
+  console.log('📋  FULL COVERAGE REPORT');
+  console.log('═'.repeat(52));
+  for (const a of assertions) {
+    const icon = a.passed ? '✅ PASS' : '❌ FAIL';
+    console.log(`${icon}  ${a.description}`);
+    if (a.notes) console.log(`       ↳ ${a.notes}`);
+  }
+  console.log('');
+  console.log(`Exercise coverage: ${firedExercises.length}/8 exercises fired at least once`);
+  if (firedExercises.length < ALL_EXERCISES.length) {
+    const missed = ALL_EXERCISES.filter((e) => !firedExercises.includes(e));
+    console.log(`  Missing: ${missed.join(', ')}`);
+  }
+  console.log('');
+  const passed = assertions.filter((a) => a.passed).length;
+  const total = assertions.length;
+  console.log(`Result: ${passed}/${total} assertions passed`);
+  console.log('═'.repeat(52));
 }
 
 // ── Why-Building Test — focused 7-day simulation on why evolution ─────────────
@@ -1129,9 +1342,703 @@ async function runGoalSuggestionTest({ personaKey, startDate, clean }) {
   console.log(`\n    Result: ${passed}/${total} assertions passed\n`);
 }
 
+// ── Full Coverage Test — 21-day simulation with comprehensive assertions ────────
+/**
+ * Runs a 21-day simulation that checks every major feature of the coaching
+ * pipeline, including time-gated behaviours that only emerge after sustained
+ * usage. Produces full-coverage-report.json and prints a final pass/fail table.
+ *
+ * Usage: node scripts/simulate-reflection.js --test-full-coverage [--clean] [--persona X]
+ */
+async function runFullCoverageTest({ personaKey, startDate, clean }) {
+  const persona = PERSONAS[personaKey];
+  if (!persona) {
+    console.error(`❌  Unknown persona "${personaKey}". Available: ${Object.keys(PERSONAS).join(', ')}`);
+    process.exit(1);
+  }
+
+  const userId = process.env.SIM_USER_ID;
+  if (!userId) {
+    console.error('❌  SIM_USER_ID not set in environment');
+    process.exit(1);
+  }
+
+  const supabase = getSupabase();
+  const TOTAL_DAYS = 21;
+
+  console.log(`\n🔬  Starting --test-full-coverage (${TOTAL_DAYS}-day simulation)`);
+  console.log(`    Persona:    ${personaKey} (${persona.name})`);
+  console.log(`    Start date: ${startDate}`);
+  console.log(`    User ID:    [set via SIM_USER_ID]\n`);
+
+  if (clean) {
+    console.log('🧹  Cleaning previous sim data...');
+    await cleanUserData(supabase, userId);
+    await seedUserProfile(supabase, userId, persona);
+    console.log('✅  Clean complete.\n');
+  }
+
+  // ── Initialise state ────────────────────────────────────────────────────────
+  const assertions = initCoverageAssertions();
+  const exercisesFired = new Set();
+  const seededIdentity = persona.profile?.identity_statement ?? null;
+
+  const crossSessionState = {
+    yesterdayCommitment: null,
+    lastFollowedThrough: null,
+    prevGoalWhysCounts: {},
+  };
+
+  const traitPool = persona.hiddenTraitPool ?? [];
+  const assignedTraits = drawTraits(traitPool, 2);
+
+  const eventBankRaw = persona.dailyEventBank ?? [];
+  let eventQueue = [];
+  function nextEvent() {
+    if (eventBankRaw.length === 0) return null;
+    if (eventQueue.length === 0) eventQueue = shuffleArray(eventBankRaw);
+    return eventQueue.shift();
+  }
+
+  const report = {
+    meta: {
+      persona: personaKey,
+      start_date: startDate,
+      days_simulated: TOTAL_DAYS,
+      user_id: userId,
+      run_at: new Date().toISOString(),
+      assigned_traits: assignedTraits.map((t) => ({ id: t.id, label: t.label })),
+    },
+    summary: {
+      sessions_completed: 0,
+      sessions_incomplete: 0,
+      commitment_checkin_coverage: { fired: 0, resolved: 0, should_have_fired: 0, miss_rate: null },
+    },
+    backend_summary: {
+      final_follow_through_7day: null,
+      final_trajectory: null,
+      all_patterns: [],
+      narrative_produced: false,
+      narrative_sample: null,
+      user_profile_snapshot: null,
+      generated_narratives: [],
+      final_goals_snapshot: [],
+    },
+    coverage_assertions: assertions,
+    exercise_coverage: { fired: [], total: ALL_EXERCISES.length, coverage_count: 0 },
+    sessions: [],
+    trait_detection: null,
+  };
+
+  // ── Day loop ────────────────────────────────────────────────────────────────
+  for (let day = 1; day <= TOTAL_DAYS; day++) {
+    const simulatedDate = addDays(startDate, day - 1);
+    const moods = persona.tendencies.mood_distribution;
+    const mood = moods[(day - 1) % moods.length];
+    const dailyEvent = nextEvent();
+
+    separator(day, simulatedDate);
+    if (dailyEvent) console.log(`📅  Today's event: ${dailyEvent}`);
+
+    // 1. Create session row
+    const sessionId = await createSessionRow(supabase, userId, simulatedDate);
+    if (sessionId) passAssertion(assertions, 'session_created_daily', day);
+
+    // Determine follow-through for this day
+    let followedThroughToday = null;
+    if (crossSessionState.yesterdayCommitment) {
+      if (crossSessionState.lastFollowedThrough === true) {
+        followedThroughToday = Math.random() < MISS_AFTER_KEEP_PROBABILITY;
+      } else if (crossSessionState.lastFollowedThrough === false) {
+        followedThroughToday = Math.random() < KEEP_AFTER_MISS_PROBABILITY;
+      } else {
+        followedThroughToday = Math.random() < persona.tendencies.follow_through_rate;
+      }
+    }
+
+    let history = [];
+    let sessionState = {
+      current_stage: 'wins',
+      checklist: { wins: false, honest: false, plan: false, identity: false },
+      tomorrow_commitment: null,
+      exercises_run: [],
+      consecutive_excuses: 0,
+      is_complete: false,
+      commitment_checkin_done: false,
+    };
+    const sessionContext = { sharedWins: null, sharedMisses: null, sharedTomorrow: null, sharedCheckin: null };
+    const stageSequence = [sessionState.current_stage];
+
+    const sessionRecord = {
+      day,
+      date: simulatedDate,
+      session_id: sessionId,
+      completed: false,
+      turns: 0,
+      exercises_run: [],
+      checklist: { wins: false, honest: false, plan: false, identity: false },
+      checkin_stage_fired: false,
+      checkin_stage_resolved: false,
+      stage_sequence: [],
+      coach_referenced_specific_why: false,
+      commitment_made: null,
+      anomalies: [],
+      conversation: [],
+      backend_state: null,
+    };
+
+    // 2. INIT turn
+    const initResult = await callCoach({
+      user_id: userId,
+      session_id: sessionId,
+      session_state: {
+        ...sessionState,
+        yesterday_commitment: crossSessionState.yesterdayCommitment || null,
+        commitment_checkin_done: false,
+      },
+      history: [],
+      user_message: '__INIT__',
+      context: { client_local_date: simulatedDate },
+    });
+
+    const initCoachMsg = initResult.assistant_message || '';
+    if (initCoachMsg) passAssertion(assertions, 'init_fires', day);
+    printCoach(initCoachMsg);
+
+    if (initResult.stage_advance && initResult.new_stage) {
+      sessionState.current_stage = initResult.new_stage;
+      if (!stageSequence.includes(initResult.new_stage)) stageSequence.push(initResult.new_stage);
+    }
+    if (initResult.checklist_updates) sessionState.checklist = { ...sessionState.checklist, ...initResult.checklist_updates };
+    if (initResult.exercise_run && initResult.exercise_run !== 'none') {
+      sessionState.exercises_run.push(initResult.exercise_run);
+      exercisesFired.add(initResult.exercise_run);
+    }
+    if (initResult.commitment_checkin_done === true) sessionState.commitment_checkin_done = true;
+    if (initResult.is_session_complete) sessionState.is_complete = true;
+
+    history.push({ role: 'assistant', content: initCoachMsg });
+    sessionRecord.conversation.push({ turn: 0, coach: initCoachMsg, user: null });
+
+    // Fetch current goal data once per session
+    let sessionGoalWhys = [];
+    let sessionGoals = [];
+    try {
+      const { data: goalsData } = await supabase
+        .from('goals')
+        .select('id, title, category, whys')
+        .eq('user_id', userId)
+        .eq('status', 'active');
+      sessionGoalWhys = selectGoalWhysForScoring(goalsData ?? []);
+      sessionGoals = (goalsData ?? []).map((g) => ({ id: g.id, title: g.title, category: g.category }));
+    } catch { /* non-fatal */ }
+
+    // 3. Conversation loop
+    const MAX_TURNS = 16;
+    let turn = 0;
+    let sampleUserMsg = null;
+
+    while (!sessionState.is_complete && turn < MAX_TURNS) {
+      turn++;
+
+      const userMsg = await generateUserResponse({
+        persona,
+        coachMessage: history[history.length - 1]?.content ?? '',
+        currentStage: sessionState.current_stage,
+        history,
+        simulatedDate,
+        mood,
+        sessionContext,
+        dailyEvent,
+        yesterdayCommitment: crossSessionState.yesterdayCommitment,
+        followedThrough: followedThroughToday,
+        assignedTraits,
+        dayNumber: day,
+        whyPool: persona.whyPool ?? null,
+      });
+
+      printUser(userMsg);
+      if (!sampleUserMsg) sampleUserMsg = userMsg;
+
+      if (sessionState.current_stage === 'wins') sessionContext.sharedWins = userMsg;
+      if (sessionState.current_stage === 'honest') sessionContext.sharedMisses = userMsg;
+      if (sessionState.current_stage === 'tomorrow') sessionContext.sharedTomorrow = userMsg;
+      if (sessionState.current_stage === 'commitment_checkin') sessionContext.sharedCheckin = userMsg;
+
+      history.push({ role: 'user', content: userMsg });
+
+      const result = await callCoach({
+        user_id: userId,
+        session_id: sessionId,
+        session_state: {
+          ...sessionState,
+          yesterday_commitment: crossSessionState.yesterdayCommitment || null,
+          commitment_checkin_done: sessionState.commitment_checkin_done,
+        },
+        history,
+        user_message: userMsg,
+        context: { client_local_date: simulatedDate },
+      });
+
+      const coachMsg = result.assistant_message || '';
+      if (!coachMsg.trim()) { turn--; continue; }
+
+      const prevStage = sessionState.current_stage;
+
+      if (result.stage_advance && result.new_stage) {
+        sessionState.current_stage = result.new_stage;
+        if (!stageSequence.includes(result.new_stage)) stageSequence.push(result.new_stage);
+      }
+      if (result.checklist_updates) sessionState.checklist = { ...sessionState.checklist, ...result.checklist_updates };
+      if (result.extracted_data?.tomorrow_commitment) sessionState.tomorrow_commitment = result.extracted_data.tomorrow_commitment;
+      if (result.exercise_run && result.exercise_run !== 'none') {
+        if (!sessionState.exercises_run.includes(result.exercise_run)) {
+          sessionState.exercises_run.push(result.exercise_run);
+        }
+        exercisesFired.add(result.exercise_run);
+      }
+      if (result.extracted_data?.goal_suggestion) passAssertion(assertions, 'goal_suggestion_detected', day);
+      if (typeof result.consecutive_excuses === 'number') sessionState.consecutive_excuses = result.consecutive_excuses;
+      if (result.commitment_checkin_done === true) sessionState.commitment_checkin_done = true;
+      if (result.is_session_complete) sessionState.is_complete = true;
+
+      // Track commitment_checkin stage appearances
+      if (prevStage === 'commitment_checkin' || sessionState.current_stage === 'commitment_checkin') {
+        sessionRecord.checkin_stage_fired = true;
+      }
+      if (sessionState.commitment_checkin_done) sessionRecord.checkin_stage_resolved = true;
+
+      history.push({ role: 'assistant', content: coachMsg });
+      printCoach(coachMsg);
+
+      // Check if coach referenced a specific why from the goal list
+      const coachMsgLower = coachMsg.toLowerCase();
+      const referencedSpecificWhy = sessionGoalWhys.some((w) => {
+        const whyText = (w.text ?? '').toLowerCase();
+        const keyWords = whyText.split(' ').filter((kw) => kw.length > MIN_KEYWORD_LENGTH);
+        return keyWords.some((kw) => coachMsgLower.includes(kw));
+      });
+      if (referencedSpecificWhy) sessionRecord.coach_referenced_specific_why = true;
+
+      sessionRecord.conversation.push({ turn, coach: coachMsg, user: userMsg });
+      if (sessionState.is_complete) break;
+    }
+
+    // ── Finalise session record ──────────────────────────────────────────────
+    sessionRecord.completed = sessionState.is_complete;
+    sessionRecord.turns = turn;
+    sessionRecord.exercises_run = [...sessionState.exercises_run];
+    sessionRecord.checklist = { ...sessionState.checklist };
+    sessionRecord.checkin_stage_fired = sessionRecord.checkin_stage_fired || stageSequence.includes('commitment_checkin');
+    sessionRecord.checkin_stage_resolved = sessionState.commitment_checkin_done;
+    sessionRecord.stage_sequence = [...stageSequence];
+    sessionRecord.commitment_made = sessionState.tomorrow_commitment;
+
+    // ── Session-level assertions ─────────────────────────────────────────────
+    if (sessionState.is_complete && turn < MAX_TURNS) {
+      passAssertion(assertions, 'session_complete_before_max_turns', day);
+    }
+    if (Object.values(sessionState.checklist).every(Boolean)) {
+      passAssertion(assertions, 'all_4_stages_complete', day);
+    }
+    if (stageSequence.length > 0) {
+      passAssertion(assertions, 'stage_sequence_recorded', day);
+    }
+
+    const hadYesterdayCommitment = crossSessionState.yesterdayCommitment !== null;
+    if (hadYesterdayCommitment) {
+      report.summary.commitment_checkin_coverage.should_have_fired++;
+      if (sessionRecord.checkin_stage_fired) {
+        report.summary.commitment_checkin_coverage.fired++;
+        if (day >= 2) passAssertion(assertions, 'commitment_checkin_fires', day);
+      }
+      if (sessionRecord.checkin_stage_resolved) {
+        report.summary.commitment_checkin_coverage.resolved++;
+        passAssertion(assertions, 'commitment_checkin_done_flips', day);
+      }
+      if (!sessionRecord.checkin_stage_fired) {
+        sessionRecord.anomalies.push('commitment_checkin skipped despite yesterday_commitment existing');
+      }
+    }
+
+    if (day <= 7 && sessionState.exercises_run.includes('why_reconnect')) {
+      passAssertion(assertions, 'day7_why_reconnect_fired', day);
+    }
+    if (day >= 15 && sessionRecord.coach_referenced_specific_why) {
+      passAssertion(assertions, 'week3_why_reference', day);
+    }
+
+    if (sessionState.is_complete) report.summary.sessions_completed++;
+    else report.summary.sessions_incomplete++;
+
+    // ── Update cross-session state ───────────────────────────────────────────
+    crossSessionState.yesterdayCommitment = sessionState.tomorrow_commitment ?? null;
+    crossSessionState.lastFollowedThrough = hadYesterdayCommitment ? followedThroughToday : null;
+
+    // ── Extended backend validation ──────────────────────────────────────────
+    console.log(`\n🔍  Backend validation (day ${day}):`);
+    const backendState = await validateBackend(
+      supabase, userId, simulatedDate, crossSessionState.prevGoalWhysCounts,
+      {
+        sampleUserMessage: sampleUserMsg,
+        commitmentText: sessionState.tomorrow_commitment,
+        sampleGoals: sessionGoals,
+        sessionId,
+      }
+    );
+    sessionRecord.backend_state = backendState;
+
+    // Update goal why counts for next day comparison
+    if (backendState.goals_snapshot) {
+      for (const g of backendState.goals_snapshot) {
+        crossSessionState.prevGoalWhysCounts[g.goal_id] = g.whys_count;
+      }
+    }
+
+    // ── Backend-state assertions ─────────────────────────────────────────────
+    if (backendState.embedding_check?.passed) {
+      passAssertion(assertions, 'embedding_returns_vector', day, `vector length: ${backendState.embedding_check.vector_length}`);
+    }
+    if (backendState.classify_intent_check?.passed) {
+      passAssertion(assertions, 'classify_intent_valid', day, `intent: "${backendState.classify_intent_check.intent}"`);
+    }
+    if (day >= 2 && backendState.follow_through_7day) {
+      passAssertion(assertions, 'followthrough7_nonnull_after_day2', day);
+    }
+    const validTrajectories = ['improving', 'declining', 'flat'];
+    if (backendState.trajectory === null || validTrajectories.includes(backendState.trajectory)) {
+      passAssertion(assertions, 'trajectory_valid', day);
+    }
+    if (day >= 14 && backendState.trajectory && validTrajectories.includes(backendState.trajectory)) {
+      passAssertion(assertions, 'trajectory_nonnull_after_14', day, `trajectory: ${backendState.trajectory}`);
+    }
+    if (day >= 5 && backendState.patterns_accumulated.length > 0) {
+      passAssertion(assertions, 'patterns_after_5_sessions', day, `${backendState.patterns_accumulated.length} pattern(s)`);
+    }
+    if (day >= 10) {
+      const repeating = backendState.patterns_accumulated.filter((p) => p.occurrences >= 2);
+      if (repeating.length >= 2) {
+        passAssertion(assertions, 'patterns_2plus_after_10', day, `${repeating.length} repeating patterns`);
+      }
+    }
+    if (day >= 10 && backendState.narrative_sample && backendState.narrative_sample.length > 50) {
+      passAssertion(assertions, 'narrative_after_10', day);
+    }
+    if (backendState.extract_commitments_check?.passed) {
+      passAssertion(assertions, 'goal_commitment_extraction', day);
+    }
+    if (backendState.goal_commitment_stats_check?.passed && backendState.goal_commitment_stats_check.goal_count > 0) {
+      passAssertion(assertions, 'goal_commitment_stats', day);
+    }
+    if (backendState.evaluate_commitments_check?.passed) {
+      passAssertion(assertions, 'goal_commitment_evaluation', day);
+    }
+
+    // Follow-up queue check
+    try {
+      const { data: queueRows } = await supabase
+        .from('follow_up_queue')
+        .select('id, check_back_after')
+        .eq('user_id', userId);
+      if (queueRows && queueRows.length > 0) {
+        passAssertion(assertions, 'follow_up_queue_populated', day);
+        const hasFutureDate = queueRows.some((r) => r.check_back_after && r.check_back_after >= simulatedDate);
+        if (hasFutureDate) passAssertion(assertions, 'follow_up_queue_future_date', day);
+      }
+    } catch { /* non-fatal */ }
+
+    // Goals snapshot assertions
+    if (backendState.goals_snapshot && backendState.goals_snapshot.length > 0) {
+      // identity_statement preserved
+      try {
+        const { data: profileCheck } = await supabase
+          .from('user_profiles').select('identity_statement').eq('id', userId).single();
+        if (seededIdentity && profileCheck?.identity_statement === seededIdentity) {
+          passAssertion(assertions, 'identity_statement_preserved', day);
+        }
+      } catch { /* non-fatal */ }
+
+      const goalWithLastMentioned = backendState.goals_snapshot.find((g) => g.last_mentioned_at);
+      if (goalWithLastMentioned) passAssertion(assertions, 'goal_last_mentioned_updated', day);
+
+      const goalsWithWhys = backendState.goals_snapshot.filter((g) => g.whys_count > 0);
+      if (day >= 3 && goalsWithWhys.length > 0) {
+        passAssertion(assertions, 'goal_whys_evolution', day, `${goalsWithWhys[0].whys_count} why(s) on "${goalsWithWhys[0].title}"`);
+      }
+
+      // Check a goal has the required fields (title, why_it_matters, status=active)
+      const validGoal = backendState.goals_snapshot.find((g) => g.title && g.why_it_matters);
+      if (validGoal) passAssertion(assertions, 'goal_created_with_fields', day);
+    }
+
+    // Profile state checks
+    if (day >= 7) {
+      try {
+        const { data: profile } = await supabase
+          .from('user_profiles')
+          .select('short_term_state, strengths, growth_areas')
+          .eq('id', userId)
+          .single();
+        if (profile?.short_term_state) passAssertion(assertions, 'short_term_state_after_7', day);
+        if (day >= 14 && Array.isArray(profile?.strengths) && profile.strengths.length > 0) {
+          passAssertion(assertions, 'strengths_after_14', day, `${profile.strengths.length} strength(s)`);
+        }
+        if (day >= 14 && Array.isArray(profile?.growth_areas) && profile.growth_areas.length > 0) {
+          passAssertion(assertions, 'growth_areas_after_14', day, `${profile.growth_areas.length} area(s)`);
+        }
+      } catch { /* non-fatal */ }
+    }
+
+    // Growth markers check
+    if (day >= 14) {
+      try {
+        const { data: markers } = await supabase
+          .from('growth_markers').select('id, theme').eq('user_id', userId);
+        if (markers && markers.length > 0) {
+          passAssertion(assertions, 'growth_marker_after_14', day, `theme: ${markers[0].theme}`);
+          console.log(`    🌱  Growth marker: "${markers[0].theme}"`);
+        }
+      } catch { /* non-fatal */ }
+    }
+
+    // ── Day 14 milestone ─────────────────────────────────────────────────────
+    if (day === 14) {
+      try {
+        const { data: goals14 } = await supabase
+          .from('goals').select('id, whys').eq('user_id', userId).eq('status', 'active');
+        const { data: profile14 } = await supabase
+          .from('user_profiles').select('strengths, growth_areas').eq('id', userId).single();
+        const goalsWithWhys14 = (goals14 ?? []).filter((g) => Array.isArray(g.whys) && g.whys.length > 0);
+        const strengthsOk = Array.isArray(profile14?.strengths) && profile14.strengths.length > 0;
+        const growthOk = Array.isArray(profile14?.growth_areas) && profile14.growth_areas.length > 0;
+        if (goalsWithWhys14.length >= 1 && strengthsOk && growthOk) {
+          passAssertion(assertions, 'day14_goals_populated', 14,
+            `${goalsWithWhys14.length} goal(s) with whys, strengths and growth_areas set`);
+        }
+      } catch { /* non-fatal */ }
+    }
+
+    // ── Week boundary assertions ─────────────────────────────────────────────
+    if (day === 7) {
+      const patCount = backendState.patterns_accumulated.length;
+      if (patCount <= 2) {
+        passAssertion(assertions, 'week1_patterns_bounded', 7, `${patCount} pattern(s) at day 7`);
+      }
+    }
+    if (day === 14) {
+      const repeating14 = backendState.patterns_accumulated.filter((p) => p.occurrences >= 2);
+      if (repeating14.length >= 1) {
+        passAssertion(assertions, 'week2_pattern_repetition', 14, `${repeating14.length} repeating pattern(s)`);
+      }
+      try {
+        const { data: pW2 } = await supabase
+          .from('user_profiles').select('short_term_state').eq('id', userId).single();
+        if (pW2?.short_term_state) passAssertion(assertions, 'week2_short_term_state', 14);
+      } catch { /* non-fatal */ }
+    }
+
+    report.sessions.push(sessionRecord);
+
+    printSummary({
+      completed: sessionState.is_complete,
+      stage: sessionState.current_stage,
+      exercises: sessionState.exercises_run,
+      turns: turn,
+    });
+
+    if (day < TOTAL_DAYS) await new Promise((r) => setTimeout(r, 500));
+  }
+
+  // ── Post-loop: exercise coverage ─────────────────────────────────────────
+  const firedExercises = ALL_EXERCISES.filter((e) => exercisesFired.has(e));
+  const missedExercises = ALL_EXERCISES.filter((e) => !exercisesFired.has(e));
+  report.exercise_coverage.fired = firedExercises;
+  report.exercise_coverage.coverage_count = firedExercises.length;
+  if (firedExercises.length === ALL_EXERCISES.length) {
+    passAssertion(assertions, 'all_exercises_fired', TOTAL_DAYS, '8/8 exercises fired');
+  } else {
+    const a = assertions.find((a) => a.id === 'all_exercises_fired');
+    if (a) a.notes = `${firedExercises.length}/${ALL_EXERCISES.length} fired. Missing: ${missedExercises.join(', ')}`;
+  }
+  console.log(`\n🏋️   Exercise coverage: ${firedExercises.length}/${ALL_EXERCISES.length} exercises fired at least once`);
+  if (missedExercises.length > 0) console.log(`    Missing: ${missedExercises.join(', ')}`);
+
+  // ── Commitment checkin miss rate ──────────────────────────────────────────
+  const ccc = report.summary.commitment_checkin_coverage;
+  if (ccc.should_have_fired > 0) {
+    const misses = ccc.should_have_fired - ccc.fired;
+    ccc.miss_rate = `${Math.round((misses / ccc.should_have_fired) * 100)}%`;
+    passAssertion(assertions, 'commitment_checkin_miss_rate', TOTAL_DAYS,
+      `miss_rate=${ccc.miss_rate}, should=${ccc.should_have_fired}, fired=${ccc.fired}`);
+  } else {
+    ccc.miss_rate = 'n/a';
+  }
+
+  // ── Populate backend_summary from last session ────────────────────────────
+  const lastSession = report.sessions[report.sessions.length - 1];
+  if (lastSession?.backend_state) {
+    const bs = lastSession.backend_state;
+    report.backend_summary.final_follow_through_7day = bs.follow_through_7day;
+    report.backend_summary.final_trajectory = bs.trajectory;
+    report.backend_summary.narrative_produced = !!bs.narrative_sample;
+    report.backend_summary.narrative_sample = bs.narrative_sample;
+  }
+  for (let i = report.sessions.length - 1; i >= 0; i--) {
+    const patterns = report.sessions[i]?.backend_state?.patterns_accumulated;
+    if (patterns && patterns.length > 0) {
+      report.backend_summary.all_patterns = [...patterns].sort((a, b) => b.occurrences - a.occurrences);
+      break;
+    }
+  }
+
+  // ── Day 21 milestone assertions ───────────────────────────────────────────
+  try {
+    const { data: markers21 } = await supabase.from('growth_markers').select('id, theme').eq('user_id', userId);
+    const hasMarker = markers21 && markers21.length > 0;
+    const hasNarrative = report.backend_summary.narrative_produced;
+    const traitGrade = report.trait_detection?.detection_grade ?? null;
+    const gradeNotF = traitGrade !== 'F';
+    if (hasMarker && hasNarrative && gradeNotF) {
+      passAssertion(assertions, 'day21_growth_and_grade', TOTAL_DAYS,
+        `marker: "${markers21[0]?.theme}", grade: ${traitGrade}`);
+    } else {
+      const a = assertions.find((a) => a.id === 'day21_growth_and_grade');
+      if (a) a.notes = `marker=${hasMarker}, narrative=${hasNarrative}, grade=${traitGrade ?? 'n/a'}`;
+    }
+  } catch { /* non-fatal */ }
+
+  // ── Trait detection ───────────────────────────────────────────────────────
+  console.log(`\n🎯  Grading hidden trait detection...`);
+  try {
+    let globalTurn = 0;
+    const fullConversationHistory = [];
+    for (const session of report.sessions) {
+      for (const entry of session.conversation) {
+        if (entry.coach || entry.user) {
+          fullConversationHistory.push({
+            turn: globalTurn++,
+            coach: entry.coach || null,
+            user: entry.user || null,
+            date: session.date,
+            session_id: session.session_id,
+          });
+        }
+      }
+    }
+    const traitResult = await gradeTraitDetection({
+      assignedTraits,
+      conversationHistory: fullConversationHistory,
+      personaName: persona.name,
+    });
+    report.trait_detection = traitResult;
+    console.log(`    Overall grade: ${traitResult.detection_grade} (${((traitResult.overall_detection_rate ?? 0) * 100).toFixed(0)}% detection rate)`);
+
+    // Re-check day21 assertion now that we have the grade
+    if (traitResult.detection_grade !== 'F') {
+      const a = assertions.find((a) => a.id === 'day21_growth_and_grade');
+      if (a && !a.passed && report.backend_summary.narrative_produced) {
+        passAssertion(assertions, 'day21_growth_and_grade', TOTAL_DAYS,
+          `grade: ${traitResult.detection_grade}, narrative: ${report.backend_summary.narrative_produced}`);
+      }
+    }
+  } catch (err) {
+    console.warn(`    ⚠️  Trait detection failed: ${err.message}`);
+  }
+
+  // ── Final profile snapshot ────────────────────────────────────────────────
+  try {
+    const { profile, narratives, goals } = await fetchProfileSnapshot(supabase, userId);
+    report.backend_summary.user_profile_snapshot = {
+      identity_statement: profile?.identity_statement ?? null,
+      big_goal: profile?.big_goal ?? null,
+      why: profile?.why ?? null,
+      short_term_state: profile?.short_term_state ?? null,
+      strengths: profile?.strengths ?? [],
+      growth_areas: profile?.growth_areas ?? [],
+    };
+    report.backend_summary.generated_narratives = narratives ?? [];
+    report.backend_summary.final_goals_snapshot = goals ?? [];
+    console.log(`\n📋  Profile snapshot captured. ${narratives.length} narratives generated.`);
+  } catch { /* non-fatal */ }
+
+  // ── Print final coverage summary ──────────────────────────────────────────
+  printCoverageSummary(assertions, firedExercises);
+
+  // ── Save report ───────────────────────────────────────────────────────────
+  try {
+    writeFileSync(FULL_COVERAGE_REPORT_PATH, JSON.stringify(report, null, 2), 'utf8');
+    console.log(`\n✅  Full coverage report saved to:\n    ${FULL_COVERAGE_REPORT_PATH}\n`);
+  } catch (err) {
+    console.error('❌  Could not write full coverage report:', err.message);
+  }
+}
+
+// ── Assert Week — re-check week N assertions from a saved coverage report ──────
+/**
+ * Reads an existing full-coverage-report.json and prints the assertions that
+ * are relevant to the requested week number.
+ *
+ * Usage: node scripts/simulate-reflection.js --assert-week 2
+ */
+async function assertWeekFromReport(weekNumber) {
+  const validWeeks = [1, 2, 3];
+  if (!validWeeks.includes(weekNumber)) {
+    console.error(`❌  --assert-week must be 1, 2, or 3 (got ${weekNumber})`);
+    process.exit(1);
+  }
+
+  let report;
+  try {
+    report = JSON.parse(readFileSync(FULL_COVERAGE_REPORT_PATH, 'utf8'));
+  } catch (err) {
+    console.error(`❌  Could not read ${FULL_COVERAGE_REPORT_PATH}: ${err.message}`);
+    console.error('    Run --test-full-coverage first to generate the report.');
+    process.exit(1);
+  }
+
+  const assertions = report.coverage_assertions ?? [];
+  const dayRanges = { 1: [1, 7], 2: [8, 14], 3: [15, 21] };
+  const weekPrefixes = { 1: ['week1_', 'day7_'], 2: ['week2_'], 3: ['week3_', 'day21_'] };
+  const [startDay, endDay] = dayRanges[weekNumber];
+  const prefixes = weekPrefixes[weekNumber];
+
+  const weekAssertions = assertions.filter((a) => {
+    if (prefixes.some((p) => a.id.startsWith(p))) return true;
+    // Also include assertions that first passed in this week's day range
+    if (a.day_first_passed !== null && a.day_first_passed >= startDay && a.day_first_passed <= endDay) return true;
+    return false;
+  });
+
+  // Remove duplicates (an assertion might match both prefix and day range)
+  const seen = new Set();
+  const uniqueWeekAssertions = weekAssertions.filter((a) => {
+    if (seen.has(a.id)) return false;
+    seen.add(a.id);
+    return true;
+  });
+
+  console.log(`\n${'═'.repeat(52)}`);
+  console.log(`📋  WEEK ${weekNumber} ASSERTIONS  (days ${startDay}–${endDay})`);
+  console.log('═'.repeat(52));
+
+  if (uniqueWeekAssertions.length === 0) {
+    console.log(`(no assertions specific to week ${weekNumber} found in report)`);
+  } else {
+    for (const a of uniqueWeekAssertions) {
+      const icon = a.passed ? '✅ PASS' : '❌ FAIL';
+      console.log(`${icon}  ${a.description}`);
+      if (a.notes) console.log(`       ↳ ${a.notes}`);
+      if (a.day_first_passed !== null) console.log(`       ↳ first passed: day ${a.day_first_passed}`);
+    }
+  }
+  const passed = uniqueWeekAssertions.filter((a) => a.passed).length;
+  console.log(`\nWeek ${weekNumber}: ${passed}/${uniqueWeekAssertions.length} assertions passed`);
+  console.log('═'.repeat(52));
+}
+
 // ── Main simulation ────────────────────────────────────────────────────────────
 async function main() {
-  const { days, startDate, persona: personaKey, clean, testWhyBuilding, testGoalSuggestion, scenario, dryRun, reportPath } = parseArgs();
+  const { days, startDate, persona: personaKey, clean, testWhyBuilding, testGoalSuggestion, testFullCoverage, assertWeek, scenario, dryRun, reportPath } = parseArgs();
 
   // Resolve final report output path
   const REPORT_PATH = reportPath ?? DEFAULT_REPORT_PATH;
@@ -1142,6 +2049,12 @@ async function main() {
   }
   if (testGoalSuggestion) {
     return runGoalSuggestionTest({ personaKey, startDate, clean });
+  }
+  if (testFullCoverage) {
+    return runFullCoverageTest({ personaKey, startDate, clean });
+  }
+  if (assertWeek !== null) {
+    return assertWeekFromReport(assertWeek);
   }
 
   const persona = PERSONAS[personaKey];

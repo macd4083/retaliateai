@@ -85,6 +85,8 @@ node --env-file=.env.simulation.local scripts/simulate-reflection.js \
 | `--report-path` | `scripts/simulation-report.json` | Custom output path for the report JSON |
 | `--test-why-building` | `false` | Runs a focused **7-day** simulation specifically testing why evolution (see below). |
 | `--test-goal-suggestion` | `false` | Runs a **single-session** test that checks whether the coach suggests a new goal and validates the full suggestion → acceptance → why-journaling flow (see below). |
+| `--test-full-coverage` | `false` | Runs a **21-day** simulation with explicit pass/fail assertions for every major feature. Outputs `full-coverage-report.json` (see below). |
+| `--assert-week N` | — | Reads an existing `full-coverage-report.json` and re-checks assertions for week N (1, 2, or 3). Useful for re-grading without re-running the full simulation. |
 
 ### `--scenario` options
 
@@ -189,6 +191,120 @@ node --env-file=.env.simulation.local scripts/simulate-reflection.js \
 - Goal has a why entry
 
 > **Note:** Goal suggestion requires the AI to naturally surface one in a single session. If it doesn't fire, try running without `--clean` so the coach has more context, or run multiple days first.
+
+---
+
+## `--test-full-coverage`
+
+Runs a **21-day** simulation that exercises every major feature of the coaching pipeline, including behaviours that only emerge after sustained usage (week 2 patterns, week 3 why references, growth markers, etc.).
+
+**Usage:**
+```bash
+node --env-file=.env.simulation.local scripts/simulate-reflection.js \
+  --persona ambitious_but_inconsistent \
+  --start-date 2026-01-01 \
+  --clean \
+  --test-full-coverage
+```
+
+**Output:** `scripts/full-coverage-report.json` (see structure below), plus a printed summary:
+
+```
+════════════════════════════════════════════════════
+📋  FULL COVERAGE REPORT
+════════════════════════════════════════════════════
+✅ PASS  Session row inserted every simulated day
+✅ PASS  __INIT__ turn fires and returns assistant_message
+✅ PASS  All 4 checklist stages complete in at least 1 session
+❌ FAIL  growth_markers row exists after 14+ days
+...
+Exercise coverage: 6/8 exercises fired at least once
+  Missing: commitment_deepening, accountability_mirror
+
+Result: 30/38 assertions passed
+════════════════════════════════════════════════════
+```
+
+### Assertions checked
+
+The run verifies **38 assertions** across 14 feature areas:
+
+| Category | Assertions |
+|----------|------------|
+| **Core session flow** | Session created, INIT fires, all 4 checklist stages complete, session_complete before max turns, stage sequence recorded |
+| **Commitment check-in** | commitment_checkin fires on day 2+, commitment_checkin_done flips, miss_rate computed |
+| **Exercises** | All 8 exercises fire at least once: `why_reconnect`, `identity_reinforcement`, `future_self_visualization`, `reframe_failure`, `values_clarification`, `pattern_interrupt`, `commitment_deepening`, `accountability_mirror` |
+| **Goals** | Goal row exists with correct fields, goal_suggestion detected, last_mentioned_at updated, whys[] evolution, commitment extraction, commitment stats, commitment evaluation |
+| **Commitment stats** | followThrough7 non-null after day 2, trajectory valid value, trajectory non-null after 14 days |
+| **Patterns & narrative** | ≥1 pattern after 5 sessions, ≥2 repeating patterns after 10 sessions, narrative produced after 10 sessions |
+| **Embeddings** | generate-embedding returns vector with length > 100 |
+| **Profile evolution** | short_term_state after 7 days, strengths after 14 days, growth_areas after 14 days, identity_statement preserved |
+| **Follow-up queue** | Queue populated after commitment, rows have future due_date |
+| **Growth markers** | ≥1 growth_markers row after 14+ days |
+| **Intent classification** | classify-intent returns valid intent string |
+| **Week 1 (days 1–7)** | Patterns bounded (0–2 entries), why_reconnect fired |
+| **Week 2 (days 8–14)** | ≥1 repeating pattern, short_term_state populated, goals/strengths/growth_areas milestone |
+| **Week 3 (days 15–21)** | Coach references specific whys, growth marker + narrative + trait grade milestone |
+
+### `full-coverage-report.json` structure
+
+```json
+{
+  "meta": { "persona": "...", "start_date": "...", "days_simulated": 21, "run_at": "..." },
+  "summary": {
+    "sessions_completed": 19,
+    "sessions_incomplete": 2,
+    "commitment_checkin_coverage": { "fired": 15, "resolved": 14, "should_have_fired": 17, "miss_rate": "12%" }
+  },
+  "coverage_assertions": [
+    {
+      "id": "session_created_daily",
+      "description": "Session row inserted every simulated day",
+      "passed": true,
+      "day_first_passed": 1,
+      "notes": null
+    }
+  ],
+  "exercise_coverage": {
+    "fired": ["why_reconnect", "identity_reinforcement", "..."],
+    "total": 8,
+    "coverage_count": 6
+  },
+  "backend_summary": { "..." },
+  "sessions": [ { "day": 1, "..." } ],
+  "trait_detection": { "..." }
+}
+```
+
+---
+
+## `--assert-week N`
+
+Re-checks week N assertions from an existing `scripts/full-coverage-report.json` without re-running the simulation. Useful for reviewing results after the fact.
+
+**Usage:**
+```bash
+# After a --test-full-coverage run:
+node --env-file=.env.simulation.local scripts/simulate-reflection.js --assert-week 2
+```
+
+**Output:**
+```
+════════════════════════════════════════════════════
+📋  WEEK 2 ASSERTIONS  (days 8–14)
+════════════════════════════════════════════════════
+✅ PASS  Week 2 (days 8–14): ≥1 pattern with occurrence_count >= 2
+       ↳ 2 repeating patterns
+       ↳ first passed: day 12
+✅ PASS  Week 2 (days 8–14): short_term_state is populated
+       ↳ first passed: day 10
+❌ FAIL  Day 14: goals with whys present, strengths and growth_areas populated
+
+Week 2: 2/3 assertions passed
+════════════════════════════════════════════════════
+```
+
+`N` must be 1, 2, or 3. The report file must already exist (run `--test-full-coverage` first).
 
 ---
 
@@ -468,5 +584,8 @@ This is safe to run multiple times.
 | `--dry-run` | ~9 | ~18 | ~$0.15 |
 | `--test-why-building` | ~63 | ~126 | ~$0.50–1 |
 | `--test-goal-suggestion` | ~9 | ~18 | ~$0.15 |
+| `--test-full-coverage` | ~189 | ~756 | ~$2–4 |
+
+> **Note:** `--test-full-coverage` includes extra API calls (embedding, classify-intent, extract-goal-commitments, goal-commitment-stats, evaluate-goal-commitments) after each session, which adds to the GPT-4o-mini count and cost.
 
 > **Tip:** Use `--dry-run` for a fast sanity check before a full run.
