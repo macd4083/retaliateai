@@ -58,6 +58,7 @@ const supabase = createClient(
  * ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS growth_areas text[];
  * ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS strengths text[];
  * ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS profile_updated_at timestamptz;
+ * ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS consecutive_excuse_sessions int DEFAULT 0;
  *
  * CREATE OR REPLACE FUNCTION match_reflection_sessions(
  *   query_embedding vector(1536),
@@ -97,14 +98,13 @@ PERSONALITY:
 - Smart, honest friend who has read every self-development book but doesn't sound like it
 - Warm but direct. You notice things and say them. Not preachy, not generic
 - Casual language. Short sentences. Real talk
-- 2-3 sentences max per message. One question only. Never dump
+- 2-3 sentences max per message. Never dump
 - Celebrate wins with genuine energy, not corporate cheerleading
 - Do NOT let people off the hook — ask the follow-up question that actually matters
 
 CORE RULES:
 - NEVER validate excuses. Acknowledge frustration, pivot to what's in their control
 - NEVER be a therapist. Be a coach. Forward-focused, action-oriented
-- NEVER ask two questions at once
 - NEVER be generic — use their actual words, goals, and why
 - NEVER catastrophize or pile on when struggling
 - ALWAYS connect observations back to their identity and future self
@@ -132,7 +132,6 @@ METACOGNITIVE QUESTIONING PRINCIPLES:
 - Ask questions that name the pattern without naming it: "Is this the first time that's happened, or does this show up in other places too?"
 - Ask questions about the decision moment: "At what point in the day did you decide not to do it?" — the answer usually reveals the real blocker
 - When someone achieves something: "What made today different?" — not "great job!" — help them understand the mechanism so they can replicate it
-- One question. Always one. Never a list. Never two questions in the same message.
 
 DEPTH CONVERSATION: When the user is in a reflective back-and-forth ("what do you think" style exchange), allow the chain to continue naturally. Multiple consecutive "what do you think" exchanges are GOOD — do not prematurely pivot to action or next stage. Only close a depth thread when the user has reached an insight or naturally signals they want to move on. When the user answers a reflective/opinion question with their own reflection, the coach IS ALLOWED to follow up with another reflective question — do not count this as "drilling a topic".
 
@@ -577,7 +576,7 @@ async function loadUserProfile(userId) {
   try {
     const { data } = await supabase
       .from('user_profiles')
-      .select('full_name, display_name, bio, identity_statement, big_goal, why, future_self, life_areas, blockers, exercises_explained, values, short_term_state, long_term_patterns, growth_areas, strengths')
+      .select('full_name, display_name, bio, identity_statement, big_goal, why, future_self, life_areas, blockers, exercises_explained, values, short_term_state, long_term_patterns, growth_areas, strengths, consecutive_excuse_sessions')
       .eq('id', userId)
       .maybeSingle();
     return data || null;
@@ -1192,8 +1191,13 @@ export default async function handler(req, res) {
       strengths: userProfile?.strengths || [],
     };
 
-    // ── 4. Consecutive excuses ────────────────────────────────────────────
+    // ── 4. Consecutive excuses ────────────────────────────────────────────────
     let consecutiveExcuses = session_state.consecutive_excuses || 0;
+    const crossSessionExcuses = userProfile?.consecutive_excuse_sessions || 0;
+
+    // Use whichever is higher — cross-session count persists across days
+    const effectiveConsecutiveExcuses = Math.max(consecutiveExcuses, crossSessionExcuses);
+
     if (intentData?.accountability_signal === 'excuse') consecutiveExcuses += 1;
     else if (intentData?.accountability_signal === 'ownership') consecutiveExcuses = 0;
 
@@ -1402,7 +1406,7 @@ export default async function handler(req, res) {
           dueFollowUp ? 'PRIORITY: Surface follow_up_due question first.' : null,
           dueGrowthMarker ? 'Weave in growth_marker_due check-in naturally.' : null,
           intentData?.accountability_signal === 'excuse'
-            ? `ANTI-EXCUSE: consecutive_excuses=${consecutiveExcuses}. Use their specific words. Follow the protocol.`
+            ? `ANTI-EXCUSE: consecutive_excuses=${effectiveConsecutiveExcuses}. Use their specific words. Follow the protocol.`
             : null,
           suggestedExercise !== 'none'
             ? `RUN: ${suggestedExercise}. first_time=${isFirstTimeExercise}. Fill ALL placeholders with user's actual words — never output [bracket placeholders]. Set exercise_run="${suggestedExercise}".`
@@ -1467,6 +1471,24 @@ export default async function handler(req, res) {
             if (topPattern.occurrence_count < 2) return null;
             return `PATTERN AWARENESS: The user's most recurring pattern is "${topPattern.label}" (${topPattern.occurrence_count}x). If they say or do something that looks like this pattern — even obliquely — ask a question that helps them SEE it, not name it for them. Never say "I notice you keep doing X" or "this sounds like your ${topPattern.label} pattern". Instead, ask something like: "What's making it hard to just ship it as-is?" or "You said you'd do this yesterday — what happened between then and now?" The goal is to surface the pattern through their own answer, not your observation. Use naturally. Once per session max. Do NOT interrupt a good moment to force it in.`;
           })(),
+          (() => {
+            // Instruction 4 — recurring missed commitment detection
+            if (recentSessions.length < 2) return null;
+            const todayCommitment = session_state.yesterday_commitment || yesterdayCommitment;
+            if (!todayCommitment) return null;
+
+            // Count how many consecutive prior sessions committed to the same thing (prefix match)
+            const commitmentPrefix = todayCommitment.toLowerCase().slice(0, 20);
+            const missedStreak = recentSessions.filter(s =>
+              s.tomorrow_commitment &&
+              s.tomorrow_commitment.toLowerCase().includes(commitmentPrefix)
+            ).length;
+
+            if (missedStreak >= 2) {
+              return `RECURRING MISS: The user has committed to "${todayCommitment}" ${missedStreak}+ days in a row without following through. Do NOT re-ask "what's holding you back?" — they've already answered that. Instead, name the pattern directly and warmly: "You've said you'd do this ${missedStreak} days in a row. Something keeps getting in the way — what's actually going on?" This is a pattern interrupt. Be direct but warm. Do NOT soften it into another generic depth probe.`;
+            }
+            return null;
+          })(),
           sessionExercisesRun.length > 0
             ? `ALREADY RUN: ${sessionExercisesRun.join(', ')}. Do NOT repeat.`
             : null,
@@ -1479,7 +1501,7 @@ export default async function handler(req, res) {
               ? `READY TO CLOSE: wins + plan covered. If tone is resolved, wrap warmly. End with an identity statement. Set is_session_complete:true. Do NOT keep drilling.`
               : null,
           'Use their actual words — never be generic.',
-          'One question only. 2-3 sentences max.',
+          '2-3 sentences max.',
           'NEVER drill a topic already answered.',
         ].filter(Boolean),
       }),
@@ -1988,6 +2010,19 @@ Return ONLY valid JSON: { "question": "...", "context": "brief context on why th
     }
 
     result.consecutive_excuses = consecutiveExcuses;
+
+    // Persist cross-session excuse count to user_profiles
+    if (intentData?.accountability_signal === 'excuse') {
+      supabase.from('user_profiles')
+        .update({ consecutive_excuse_sessions: effectiveConsecutiveExcuses + 1 })
+        .eq('id', user_id)
+        .then(() => {}).catch(() => {});
+    } else if (intentData?.accountability_signal === 'ownership') {
+      supabase.from('user_profiles')
+        .update({ consecutive_excuse_sessions: 0 })
+        .eq('id', user_id)
+        .then(() => {}).catch(() => {});
+    }
 
     return res.status(200).json(result);
 
