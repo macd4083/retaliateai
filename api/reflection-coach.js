@@ -310,7 +310,6 @@ RETURN JSON EXACTLY (no markdown, no extra keys):
     "mood": null,
     "win_text": null,
     "miss_text": null,
-    "blocker_tags": [],
     "tomorrow_commitment": null,
     "self_hype_message": null,
     "depth_insight": null,
@@ -522,24 +521,12 @@ async function loadGrowthMarkers(userId, clientDate) {
   } catch (_e) { return []; }
 }
 
-async function loadReflectionPatterns(userId, clientDate) {
-  try {
-    const { data } = await supabase
-      .from('reflection_patterns')
-      .select('label, occurrence_count, pattern_type')
-      .eq('user_id', userId)
-      .gte('last_seen_date', localDate(-30, clientDate))
-      .order('occurrence_count', { ascending: false })
-      .limit(5);
-    return data || [];
-  } catch (_e) { return []; }
-}
 
 async function loadRecentSessionsSummary(userId) {
   try {
     const { data } = await supabase
       .from('reflection_sessions')
-      .select('date, wins, misses, tomorrow_commitment, current_stage, checklist, mood_end_of_day, summary, blocker_tags')
+      .select('date, wins, misses, tomorrow_commitment, current_stage, checklist, mood_end_of_day, summary')
       .eq('user_id', userId)
       .eq('is_complete', true)
       .order('date', { ascending: false })
@@ -817,28 +804,6 @@ async function upsertGrowthMarker(userId, theme, { exercise_run, check_in_messag
   } catch (_e) {}
 }
 
-async function upsertBlockerPatterns(userId, blockerTags, clientDate) {
-  if (!blockerTags || blockerTags.length === 0) return;
-  const todayStr = today(clientDate);
-  for (const tag of blockerTags) {
-    try {
-      const { data: existing } = await supabase
-        .from('reflection_patterns').select('id, occurrence_count')
-        .eq('user_id', userId).eq('pattern_type', 'blocker').eq('label', tag).maybeSingle();
-      if (existing) {
-        await supabase.from('reflection_patterns')
-          .update({ occurrence_count: existing.occurrence_count + 1, last_seen_date: todayStr, updated_at: new Date().toISOString() })
-          .eq('id', existing.id);
-      } else {
-        await supabase.from('reflection_patterns').insert({
-          user_id: userId, pattern_type: 'blocker', label: tag,
-          occurrence_count: 1, last_seen_date: todayStr, first_seen_date: todayStr,
-        });
-      }
-    } catch (_e) {}
-  }
-}
-
 // ── Vector search + profile evolution helpers ─────────────────────────────────
 
 async function generateEmbedding(text) {
@@ -881,11 +846,9 @@ function generateSessionSummary(sessionState, result, profile, dateStr) {
   const insight = result.extracted_data?.depth_insight || sessionState.depth_insight || null;
   const exercises = Array.isArray(sessionState.exercises_run) ? sessionState.exercises_run.join(', ') : 'none';
   const mood = sessionState.mood_end_of_day || result.extracted_data?.mood || null;
-  const blockers = Array.isArray(sessionState.blocker_tags) ? sessionState.blocker_tags.join(', ') : null;
 
   let summary = `Session ${dateStr}: ${name} worked on ${wins}.`;
   if (miss) summary += ` Honest moment: ${miss}.`;
-  if (blockers) summary += ` Blockers: ${blockers}.`;
   if (commitment) summary += ` Tomorrow's plan: ${commitment}.`;
   if (insight) summary += ` Depth insight: ${insight}.`;
   if (exercises !== 'none') summary += ` Exercises: ${exercises}.`;
@@ -1151,11 +1114,10 @@ export default async function handler(req, res) {
     // ── 2. Load context in parallel ───────────────────────────────────────
     const currentSignals = [intentData?.intent, intentData?.emotional_state, intentData?.accountability_signal].filter(Boolean);
 
-    const [followUpQueue, growthMarkers, reflectionPatterns, recentSessions, yesterdayCommitment, userProfile, activeGoalsRaw, commitmentStats, todayEarlyCommitment, goalCommitmentStats] =
+    const [followUpQueue, growthMarkers, recentSessions, yesterdayCommitment, userProfile, activeGoalsRaw, commitmentStats, todayEarlyCommitment, goalCommitmentStats] =
       await Promise.all([
         loadFollowUpQueue(user_id, currentSignals, client_local_date),
         loadGrowthMarkers(user_id, client_local_date),
-        loadReflectionPatterns(user_id, client_local_date),
         loadRecentSessionsSummary(user_id),
         loadYesterdayCommitment(user_id, client_local_date),
         loadUserProfile(user_id),
@@ -1251,21 +1213,12 @@ export default async function handler(req, res) {
     const exercisesExplained = Array.isArray(profile.exercises_explained) ? profile.exercises_explained : [];
     const isFirstTimeExercise = suggestedExercise !== 'none' && !exercisesExplained.includes(suggestedExercise);
 
-    const patternsText = reflectionPatterns.length > 0
-      ? reflectionPatterns.map((p) => `${p.label}(${p.occurrence_count}x)`).join('; ')
-      : 'none';
-
     const recentSessionsText = recentSessions.slice(0, 3).map((s) => {
-      const blockers = Array.isArray(s.blocker_tags) ? s.blocker_tags.join(', ') : '';
       if (s.summary) {
-        let line = `${s.date}: ${s.summary}`;
-        if (blockers) line += ` blockers=[${blockers}]`;
-        return line;
+        return `${s.date}: ${s.summary}`;
       }
       const wins = Array.isArray(s.wins) ? s.wins.map((w) => (typeof w === 'string' ? w : w.text)).filter(Boolean) : [];
-      let line = `${s.date}: wins=[${wins.slice(0, 2).join(', ')}] commitment="${s.tomorrow_commitment || ''}"`;
-      if (blockers) line += ` blockers=[${blockers}]`;
-      return line;
+      return `${s.date}: wins=[${wins.slice(0, 2).join(', ')}] commitment="${s.tomorrow_commitment || ''}"`;
     }).join(' | ') || 'none';
 
     // ── 8b. Memory search for question/advice/memory_query/reflective intents ────────
@@ -1365,7 +1318,6 @@ export default async function handler(req, res) {
           : undefined,
         yesterday_commitment: yesterdayCommitment || 'none',
         same_day_commitment: sameDayCommitment ? { commitment: sameDayCommitment.commitment, made_at: sameDayCommitment.made_at } : undefined,
-        patterns: patternsText,
         recent_sessions: recentSessionsText,
         relevant_memories: relevantMemories.length > 0
           ? relevantMemories.map((m) => ({ date: m.date, summary: m.summary, similarity: m.similarity }))
@@ -1395,7 +1347,6 @@ export default async function handler(req, res) {
           session_misses_captured: Array.isArray(session_state.misses)
             ? session_state.misses.map(m => typeof m === 'string' ? m : m?.text).filter(Boolean)
             : [],
-          session_blockers_captured: session_state.blocker_tags || [],
           depth_insight_captured: session_state.depth_insight || null,
         },
         intent: {
@@ -1439,19 +1390,14 @@ export default async function handler(req, res) {
             const capturedMisses = Array.isArray(session_state.misses)
               ? session_state.misses.map(m => typeof m === 'string' ? m : m?.text).filter(Boolean)
               : [];
-            const capturedBlockers = Array.isArray(session_state.blocker_tags) ? session_state.blocker_tags : [];
-            if (capturedWins.length === 0 && capturedMisses.length === 0 && capturedBlockers.length === 0) return null;
-            return `REFERENCE WHAT THEY SAID: The user has already shared: wins=[${capturedWins.join(', ')}], misses=[${capturedMisses.join(', ')}], blockers=[${capturedBlockers.join(', ')}]. Your next question MUST reference at least one of these specifically. Never ask a generic question when you have their real words.`;
+            if (capturedWins.length === 0 && capturedMisses.length === 0) return null;
+            return `REFERENCE WHAT THEY SAID: The user has already shared: wins=[${capturedWins.join(', ')}], misses=[${capturedMisses.join(', ')}]. Your next question MUST reference at least one of these specifically. Never ask a generic question when you have their real words.`;
           })(),
           goalMissingWhy && !sessionReadyToClose && !forceClose
             ? `WHY MISSING (HIGHEST PRIORITY): The goal "${goalMissingWhy.title}" (id: ${goalMissingWhy.id}) has never had a why captured. If any natural moment exists this session — especially during wins, honest, or when this goal comes up — ask what makes it actually matter. Use their words and context, not generic language. When they answer, you MUST set extracted_data.goal_why_insight to their response, extracted_data.goal_why_action to "add", and extracted_data.goal_id_referenced to exactly "${goalMissingWhy.id}". Do not skip setting goal_id_referenced — without it the why is silently lost.`
             : null,
           honestMissing
-            ? `HONEST MISSING: Gently probe for a miss or honest moment with self-awareness questions. ${
-                reflectionPatterns.length > 0
-                  ? `Their recurring pattern is "${reflectionPatterns[0].label}" — if it came up today, help them name it. E.g. "Did ${reflectionPatterns[0].label.replace(/_/g, ' ')} show up anywhere today?" or "Was there a moment where you held back and you're not sure why?"`
-                  : `E.g. "Where did you feel like you weren't fully showing up today?" or "Is there a moment from today that's still sitting with you?" or "What part of today are you least proud of — not what you'd fix, just what happened?"`
-              } Goal is self-awareness about TODAY, not action planning. Do NOT ask "what would you do differently" — that belongs in tomorrow. Weave it naturally. Once a miss is named and you have asked one specific follow-up about it, ask one open "anything else?" prompt before closing the honest stage — e.g. "Anything else worth naming before we move on?" or "Is there anything else from today you want to get off your chest?" — then set honest_depth: true only after the user has responded to that prompt or clearly signaled they're done.`
+            ? `HONEST MISSING: Gently probe for a miss or honest moment with self-awareness questions. E.g. "Where did you feel like you weren't fully showing up today?" or "Is there a moment from today that's still sitting with you?" or "What part of today are you least proud of — not what you'd fix, just what happened?" Goal is self-awareness about TODAY, not action planning. Do NOT ask "what would you do differently" — that belongs in tomorrow. Weave it naturally. Once a miss is named and you have asked one specific follow-up about it, ask one open "anything else?" prompt before closing the honest stage — e.g. "Anything else worth naming before we move on?" or "Is there anything else from today you want to get off your chest?" — then set honest_depth: true only after the user has responded to that prompt or clearly signaled they're done.`
             : null,
           (() => {
             if (session_state.current_stage !== 'commitment_checkin') return null;
@@ -1480,14 +1426,7 @@ export default async function handler(req, res) {
             return `PROGRESS AWARENESS: You have ${recentSessions.length} recent sessions of data. If it's natural in the wins conversation, ask ONE question that helps the user notice their own growth — using only what's real in their history. E.g. if they mention finishing something, ask "Is that something you would have followed through on a month ago?" or "How does that compare to where you were when you started?" Do NOT state their progress for them. Ask the question that makes THEM see it. Only do this once per session, and only if it genuinely fits the conversation. Never fabricate history.`;
           })(),
           (() => {
-            // Instruction 3 — pattern-aware metacognitive questioning
-            if (reflectionPatterns.length === 0 || messageCount < 2) return null;
-            const topPattern = reflectionPatterns[0];
-            if (topPattern.occurrence_count < 2) return null;
-            return `PATTERN AWARENESS: The user's most recurring pattern is "${topPattern.label}" (${topPattern.occurrence_count}x). If they say or do something that looks like this pattern — even obliquely — ask a question that helps them SEE it, not name it for them. Never say "I notice you keep doing X" or "this sounds like your ${topPattern.label} pattern". Instead, ask something like: "What's making it hard to just ship it as-is?" or "You said you'd do this yesterday — what happened between then and now?" The goal is to surface the pattern through their own answer, not your observation. Use naturally. Once per session max. Do NOT interrupt a good moment to force it in.`;
-          })(),
-          (() => {
-            // Instruction 4 — recurring missed commitment detection
+            // Instruction 3 — recurring missed commitment detection
             if (recentSessions.length < 2) return null;
             const todayCommitment = session_state.yesterday_commitment || yesterdayCommitment;
             if (!todayCommitment) return null;
@@ -1764,10 +1703,6 @@ Only link when genuinely relevant. Do not force links. Multiple items can have t
           }
         } catch (_e) { /* fail silently */ }
       })();
-    }
-
-    if (result.extracted_data?.blocker_tags?.length) {
-      dbPromises.push(upsertBlockerPatterns(user_id, result.extracted_data.blocker_tags, client_local_date));
     }
 
     // Write wins to session row immediately when extracted (so data survives session interruption)
