@@ -102,7 +102,7 @@ export default async function handler(req, res) {
     // ── 1. Load sessions ──────────────────────────────────────────────────
     const { data: sessions } = await supabase
       .from('reflection_sessions')
-      .select('date, summary, wins, misses, tomorrow_commitment, mood_end_of_day, blocker_tags')
+      .select('date, summary, wins, misses, tomorrow_commitment, mood_end_of_day, blocker_tags, checklist')
       .eq('user_id', user_id)
       .eq('is_complete', true)
       .order('date', { ascending: false })
@@ -138,7 +138,7 @@ export default async function handler(req, res) {
     // ── 4. Load profile ───────────────────────────────────────────────────
     const { data: profile } = await supabase
       .from('user_profiles')
-      .select('identity_statement, big_goal, why, future_self, short_term_state, long_term_patterns, strengths, growth_areas')
+      .select('identity_statement, big_goal, why, future_self, values, short_term_state, long_term_patterns, strengths, growth_areas')
       .eq('id', user_id)
       .maybeSingle();
 
@@ -165,6 +165,7 @@ export default async function handler(req, res) {
       profile?.big_goal ? `Goal: "${profile.big_goal}"` : null,
       profile?.why ? `Why: "${profile.why}"` : null,
       profile?.future_self ? `Future self: "${profile.future_self}"` : null,
+      profile?.values ? `Values: ${Array.isArray(profile.values) ? profile.values.join(', ') : profile.values}` : null,
       profile?.short_term_state ? `Current state: ${profile.short_term_state}` : null,
     ].filter(Boolean).join('\n');
 
