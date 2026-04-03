@@ -164,7 +164,11 @@ export const PRACTICES = [
   },
 ];
 
-/** Look up a single practice by id. Returns undefined if not found. */
+/**
+ * Look up a single practice by id.
+ * @param {string} id — practice id to find
+ * @returns {Object|undefined} the matching practice, or undefined if not found
+ */
 export function getPractice(id) {
   return PRACTICES.find((p) => p.id === id);
 }
@@ -173,6 +177,7 @@ export function getPractice(id) {
  * Return practices that are relevant for a given set of user insight types.
  * @param {string[]} insightTypes  — e.g. ['blocker', 'identity_theme']
  * @param {string[]} excludeIds    — practice ids already run this session
+ * @returns {Object[]} matching practices
  */
 export function getPracticesForInsights(insightTypes, excludeIds = []) {
   return PRACTICES.filter(
@@ -184,8 +189,9 @@ export function getPracticesForInsights(insightTypes, excludeIds = []) {
 
 /**
  * Return practices matching a set of emotional/intent signals.
- * @param {string[]} signals   — emotional_state, intent values from classifier
- * @param {string[]} excludeIds
+ * @param {string[]} signals    — emotional_state, intent values from classifier
+ * @param {string[]} excludeIds — practice ids already run this session
+ * @returns {Object[]} matching practices
  */
 export function getPracticesForSignals(signals, excludeIds = []) {
   return PRACTICES.filter(
@@ -197,6 +203,8 @@ export function getPracticesForSignals(signals, excludeIds = []) {
 
 /**
  * Return all cold-start compatible practices (usable on first session).
+ * @param {string[]} excludeIds — practice ids already run this session
+ * @returns {Object[]} cold-start compatible practices
  */
 export function getColdStartPractices(excludeIds = []) {
   return PRACTICES.filter((p) => p.cold_start_compatible && !excludeIds.includes(p.id));
