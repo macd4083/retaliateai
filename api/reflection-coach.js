@@ -549,6 +549,68 @@ async function loadUserInsights(userId) {
   } catch (_e) { return []; }
 }
 
+// ── Pre-session state (computed from already-loaded arrays, zero new DB queries) ──
+
+function computePreSessionState(clientDate, { recentSessions = [], followUpQueue = [], growthMarkers = [], userInsights = [] } = {}) {
+  try {
+    const lastSession = recentSessions[0] || null;
+    let days_since_last_session = null;
+    let cold_start = false;
+    if (lastSession?.date) {
+      const todayStr = today(clientDate);
+      const [ty, tm, td] = todayStr.split('-').map(Number);
+      const [ly, lm, ld] = lastSession.date.split('-').map(Number);
+      const todayMs = new Date(ty, tm - 1, td).getTime();
+      const lastMs = new Date(ly, lm - 1, ld).getTime();
+      days_since_last_session = Math.round((todayMs - lastMs) / (1000 * 60 * 60 * 24));
+      cold_start = days_since_last_session > 7;
+    } else {
+      cold_start = true;
+    }
+
+    const follow_up_due = followUpQueue.length > 0
+      ? { question: followUpQueue[0].question, context: followUpQueue[0].context }
+      : null;
+
+    const growth_marker_due = growthMarkers.length > 0
+      ? { theme: growthMarkers[0].theme, check_in_message: growthMarkers[0].check_in_message }
+      : null;
+
+    let suggested_practice = null;
+    let suggested_practice_reason = null;
+    if (userInsights.length > 0) {
+      const insightWithPractice = userInsights.find((ins) => Array.isArray(ins.unlocked_practices) && ins.unlocked_practices.length > 0);
+      if (insightWithPractice) {
+        suggested_practice = insightWithPractice.unlocked_practices[0];
+        suggested_practice_reason = `user_insight: ${insightWithPractice.pattern_narrative || insightWithPractice.pattern_label || ''}`;
+      }
+    }
+
+    let returning_user_context = null;
+    if (lastSession) {
+      const parts = [];
+      if (days_since_last_session !== null) parts.push(`${days_since_last_session} day${days_since_last_session !== 1 ? 's' : ''} ago`);
+      if (lastSession.summary) {
+        parts.push(lastSession.summary);
+      } else if (lastSession.tomorrow_commitment) {
+        parts.push(`committed to "${lastSession.tomorrow_commitment}"`);
+      }
+      if (lastSession.mood_end_of_day) parts.push(`mood: ${lastSession.mood_end_of_day}`);
+      returning_user_context = parts.join('. ');
+    }
+
+    return {
+      days_since_last_session,
+      cold_start,
+      follow_up_due,
+      growth_marker_due,
+      suggested_practice,
+      suggested_practice_reason,
+      returning_user_context,
+    };
+  } catch (_e) { return {}; }
+}
+
 async function triggerInsightSynthesis(userId) {
   try {
     const baseUrl = process.env.VERCEL_URL
@@ -1171,6 +1233,11 @@ export default async function handler(req, res) {
       };
     });
 
+    // ── 2b. Pre-session state (init only, zero extra DB queries) ─────────
+    const preSessionState = isInit
+      ? computePreSessionState(client_local_date, { recentSessions, followUpQueue, growthMarkers, userInsights })
+      : null;
+
     // ── 3. Merge profile ──────────────────────────────────────────────────
     const profile = {
       display_name: context.display_name || userProfile?.display_name || userProfile?.full_name || null,
@@ -1434,7 +1501,24 @@ export default async function handler(req, res) {
         stage_hint: suggestedNextStage,
         ready_to_close: sessionReadyToClose,
         streak: context.reflection_streak || context.streak || 0,
+        pre_session_state: preSessionState || undefined,
         instructions: [
+          // ── Pre-session state opener instructions (isInit only) ───────────
+          preSessionState?.cold_start
+            ? `COLD START (${preSessionState.days_since_last_session ?? 'many'} days away): Do NOT open generically. Reference the gap directly and warmly. ${preSessionState.returning_user_context ? `Last session context: "${preSessionState.returning_user_context}".` : ''} Open with something specific that shows you remember them and have been thinking about where they left off.`
+            : null,
+          preSessionState?.follow_up_due && !preSessionState?.cold_start
+            ? `INIT FOLLOW-UP: A specific question was queued from their last session. Open with it naturally rather than a generic greeting. Context: "${preSessionState.follow_up_due.context}". Question: "${preSessionState.follow_up_due.question}".`
+            : null,
+          preSessionState?.growth_marker_due && !preSessionState?.follow_up_due && !preSessionState?.cold_start
+            ? `INIT GROWTH MARKER: Before offering mood chips, briefly surface the growth theme "${preSessionState.growth_marker_due.theme}" as a natural opener — e.g. "I've been thinking about [theme] and wanted to check in on that tonight." Do not announce it as a scheduled check-in.`
+            : null,
+          preSessionState?.suggested_practice && !preSessionState?.cold_start
+            ? `PRACTICE HINT: Tonight's recommended practice is "${preSessionState.suggested_practice}" (reason: ${preSessionState.suggested_practice_reason}). If momentum and tone align, guide the session toward this practice. Do not force it — wait for a natural opening.`
+            : null,
+          preSessionState && !preSessionState.cold_start && preSessionState.returning_user_context && !preSessionState.follow_up_due && !preSessionState.growth_marker_due
+            ? `RETURNING USER: Briefly acknowledge where they left off before offering mood chips. Context: "${preSessionState.returning_user_context}". One warm sentence — then move into the normal opener.`
+            : null,
           isMemoryMode
             ? `MEMORY MODE: The user asked a question or wants advice. PAUSE the stage workflow — do NOT advance stage or update checklist. Answer their question directly using relevant_memories and their profile data. Use their actual past words and patterns. Be specific, not generic. End your response with ONE question that naturally brings them back to the ${session_state.current_stage || 'wins'} stage.`
             : null,
@@ -2058,6 +2142,7 @@ Return ONLY valid JSON: { "question": "...", "context": "brief context on why th
     }
 
     result.consecutive_excuses = consecutiveExcuses;
+    if (preSessionState) result.pre_session_state = preSessionState;
 
     // Persist cross-session excuse count to user_profiles
     if (intentData?.accountability_signal === 'excuse') {
