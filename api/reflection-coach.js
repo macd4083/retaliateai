@@ -213,6 +213,7 @@ GOAL WHYS (whys array):
 - Set extracted_data.goal_why_replace_index: (number, 0-based index in whys array) only if action="replace"
 - Set extracted_data.goal_why_insight: the captured why text (their actual words)
 - Set extracted_data.goal_id_referenced: the goal's id
+- **CRITICAL: When you capture a why (set goal_why_insight), you MUST also set goal_id_referenced to the exact 'id' field of the matching goal from the goals array. The why is silently discarded if goal_id_referenced is missing or null. This is not optional.**
 
 WHY-BUILDING TRIGGER (when to ask about why):
 - You decide when the moment is right — there is NO fixed schedule
@@ -313,7 +314,7 @@ RETURN JSON EXACTLY (no markdown, no extra keys):
     "tomorrow_commitment": null,
     "self_hype_message": null,
     "depth_insight": null,
-    "goal_id_referenced": null,
+    "goal_id_referenced": null,  // REQUIRED when goal_why_insight is set — without this the why is silently discarded
     "goal_why_insight": null,
     "goal_why_action": null,
     "goal_why_replace_index": null,
@@ -1309,15 +1310,26 @@ export default async function handler(req, res) {
         note: "hasn't come up recently — if a natural opening exists, one soft check-in is fine. If no opening, skip it.",
       }));
 
-    // Goals that need why-building: goals with no whys (first-time capture) OR
-    // goals where motivation_signal is low/struggling (follow-through declining),
-    // but skip goals whose most recent why was captured within the last 2 days
+    // Goals that need why-building: goals with no whys (first-time capture, highest priority)
+    // OR goals with low/struggling motivation_signal whose last why was captured more than 2 days ago.
+    // Exclude goals with motivation_signal === 'strong' that already have whys — they don't need attention.
     const twoDaysAgo = localDate(-2, client_local_date);
     const goalsNeedWhyBuilding = activeGoals.filter((g) => {
-      if (!Array.isArray(g.whys) || g.whys.length === 0) return true;
-      const lastWhy = g.whys[g.whys.length - 1];
-      return !lastWhy?.added_at || lastWhy.added_at < twoDaysAgo;
+      const hasWhys = Array.isArray(g.whys) && g.whys.length > 0;
+      // No whys at all — highest priority regardless of signal
+      if (!hasWhys) return true;
+      // Strong signal with existing whys — not a priority
+      if (g.motivation_signal === 'strong') return false;
+      // Low/struggling signal — include only if last why was more than 2 days ago
+      if (g.motivation_signal === 'low' || g.motivation_signal === 'struggling') {
+        const lastWhy = g.whys[g.whys.length - 1];
+        return !lastWhy?.added_at || lastWhy.added_at < twoDaysAgo;
+      }
+      return false;
     });
+
+    // Highest-priority goal that has never had a why captured at all
+    const goalMissingWhy = goalsNeedWhyBuilding.find(g => !Array.isArray(g.whys) || g.whys.length === 0) ?? null;
 
     const contextBlock = {
       role: 'user',
@@ -1431,6 +1443,9 @@ export default async function handler(req, res) {
             if (capturedWins.length === 0 && capturedMisses.length === 0 && capturedBlockers.length === 0) return null;
             return `REFERENCE WHAT THEY SAID: The user has already shared: wins=[${capturedWins.join(', ')}], misses=[${capturedMisses.join(', ')}], blockers=[${capturedBlockers.join(', ')}]. Your next question MUST reference at least one of these specifically. Never ask a generic question when you have their real words.`;
           })(),
+          goalMissingWhy && !sessionReadyToClose && !forceClose
+            ? `WHY MISSING (HIGHEST PRIORITY): The goal "${goalMissingWhy.title}" (id: ${goalMissingWhy.id}) has never had a why captured. If any natural moment exists this session — especially during wins, honest, or when this goal comes up — ask what makes it actually matter. Use their words and context, not generic language. When they answer, you MUST set extracted_data.goal_why_insight to their response, extracted_data.goal_why_action to "add", and extracted_data.goal_id_referenced to exactly "${goalMissingWhy.id}". Do not skip setting goal_id_referenced — without it the why is silently lost.`
+            : null,
           honestMissing
             ? `HONEST MISSING: Gently probe for a miss or honest moment with self-awareness questions. ${
                 reflectionPatterns.length > 0
