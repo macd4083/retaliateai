@@ -21,6 +21,8 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+const NARRATIVE_CACHE_DAYS = 3;
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -32,6 +34,31 @@ export default async function handler(req, res) {
   }
 
   try {
+    // ── 0. Check cache ────────────────────────────────────────────────────
+    const { data: cachedInsight } = await supabase
+      .from('user_insights')
+      .select('id, narratives, session_count, synthesized_at')
+      .eq('user_id', user_id)
+      .order('synthesized_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const { count: currentSessionCount } = await supabase
+      .from('reflection_sessions')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', user_id)
+      .eq('is_complete', true);
+
+    const sessionCount = currentSessionCount || 0;
+
+    if (cachedInsight) {
+      const ageMs = Date.now() - new Date(cachedInsight.synthesized_at).getTime();
+      const ageDays = ageMs / (1000 * 60 * 60 * 24);
+      if (ageDays < NARRATIVE_CACHE_DAYS && cachedInsight.session_count === sessionCount) {
+        return res.status(200).json({ narratives: cachedInsight.narratives, cached: true });
+      }
+    }
+
     // ── 1. Load patterns (blockers + strengths, occurrence >= 2) ──────────
     const { data: patterns } = await supabase
       .from('reflection_patterns')
@@ -177,6 +204,23 @@ Return ONLY valid JSON:
     });
 
     const result = JSON.parse(completion.choices[0].message.content);
+
+    // ── 6. Persist narratives ─────────────────────────────────────────────
+    try {
+      if (cachedInsight?.id) {
+        await supabase
+          .from('user_insights')
+          .update({ narratives: result.narratives, session_count: sessionCount, synthesized_at: new Date().toISOString() })
+          .eq('id', cachedInsight.id);
+      } else {
+        await supabase
+          .from('user_insights')
+          .insert({ user_id, narratives: result.narratives, session_count: sessionCount });
+      }
+    } catch (_e) {
+      // persist failure is non-fatal
+    }
+
     return res.status(200).json({ narratives: result.narratives || [] });
   } catch (err) {
     console.error('generate-pattern-narrative error:', err);

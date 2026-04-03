@@ -17,6 +17,7 @@
 
 import OpenAI from 'openai';
 import { createClient } from '@supabase/supabase-js';
+import { classifyIntent, DEFAULT_CLASSIFICATION } from '../src/lib/classifier.js';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -693,52 +694,20 @@ function computeGoalMotivationSignal(goalStats, goal) {
   return 'medium';
 }
 
-// ── Classify intent ───────────────────────────────────────────────────────────
+// ── Goal commitment evaluation (fire-and-forget at session start) ─────────────
 
-async function classifyIntent(userMessage, sessionContext = {}) {
-  const CLASSIFIER_SYSTEM = `You are a message intent classifier for a nightly reflection coaching app.
-Return ONLY valid JSON:
-{
-  "intent": "<checkin|vent|question|advice_request|memory_query|stuck|celebrate|off_topic>",
-  "energy_level": "<low|medium|high>",
-  "accountability_signal": "<excuse|ownership|neutral>",
-  "emotional_state": "<frustrated|proud|anxious|flat|motivated|overwhelmed|reflective>",
-  "depth_opportunity": <true|false>,
-  "checklist_content": {"wins": false, "honest": false, "plan": false, "identity": false},
-  "suggested_exercise": "<none|gratitude_anchor|why_reconnect|evidence_audit|implementation_intention|values_clarification|future_self_bridge|ownership_reframe|triage_one_thing|identity_reinforcement|depth_probe>"
-}
-EXERCISE ROUTING: excuse→ownership_reframe | low+frustrated→gratitude_anchor | stuck→values_clarification | motivation vent→why_reconnect | self-doubt→evidence_audit | procrastination→implementation_intention | celebrate/proud→identity_reinforcement | overwhelmed→triage_one_thing | reflective/deep→future_self_bridge | surface answer to meaningful topic→depth_probe | memory_query→none | no signals→none
-depth_opportunity=true when: user gives a surface-level or deflecting answer to something meaningful, or reveals a belief/pattern worth exploring.
-CHECKLIST: wins=mentioned a real effort/win; honest=acknowledged a miss or struggle; plan=stated a specific tomorrow action; identity=made a self-identity statement.
-IMPORTANT: If tomorrow_commitment is already filled, do NOT suggest implementation_intention. If exercise is in exercises_run, return "none".
-ACCOUNTABILITY: excuse=blaming external | ownership=personal responsibility | neutral=factual
-No markdown. No explanation.`;
-
+async function runGoalCommitmentEvaluation(userId, clientDate) {
   try {
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [
-        { role: 'system', content: CLASSIFIER_SYSTEM },
-        {
-          role: 'user',
-          content: `[Stage: ${sessionContext.current_stage || 'wins'}]\n[tomorrow_commitment: ${sessionContext.tomorrow_commitment || 'none'}]\n[exercises_run: ${(sessionContext.exercises_run || []).join(', ') || 'none'}]\n[depth_probe_done: ${(sessionContext.exercises_run || []).includes('depth_probe')}]\nUser message: "${userMessage}"`,
-        },
-      ],
-      response_format: { type: 'json_object' },
-      temperature: 0.3,
-      max_tokens: 160,
+    const baseUrl = process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : 'http://localhost:3000';
+    await fetch(`${baseUrl}/api/evaluate-goal-commitments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: userId, session_date: clientDate }),
     });
-    return JSON.parse(completion.choices[0].message.content);
   } catch (_e) {
-    return {
-      intent: 'checkin',
-      energy_level: 'medium',
-      accountability_signal: 'neutral',
-      emotional_state: 'flat',
-      depth_opportunity: false,
-      checklist_content: { ...DEFAULT_CHECKLIST },
-      suggested_exercise: 'none',
-    };
+    // fire-and-forget — evaluation failure must never block the session
   }
 }
 
@@ -1140,12 +1109,12 @@ export default async function handler(req, res) {
       intentData = await classifyIntent(user_message, session_state);
     }
     if (!intentData) {
-      intentData = {
-        intent: 'checkin', energy_level: 'medium',
-        accountability_signal: 'neutral', emotional_state: 'flat',
-        depth_opportunity: false,
-        checklist_content: { ...DEFAULT_CHECKLIST }, suggested_exercise: 'none',
-      };
+      intentData = { ...DEFAULT_CLASSIFICATION };
+    }
+
+    // ── 1b. Evaluate goal commitments before loading stats ────────────────
+    if (client_local_date) {
+      await runGoalCommitmentEvaluation(user_id, client_local_date);
     }
 
     // ── 2. Load context in parallel ───────────────────────────────────────
@@ -1216,6 +1185,14 @@ export default async function handler(req, res) {
     // ── 5. Follow-ups & growth markers ───────────────────────────────────
     const dueFollowUp = followUpQueue.length > 0 ? followUpQueue[0] : null;
     const dueGrowthMarker = growthMarkers.length > 0 ? growthMarkers[0] : null;
+
+    const followUpInstruction = dueFollowUp
+      ? `\n\nFOLLOW-UP QUEUE: A follow-up question was queued from a previous session. Context: "${dueFollowUp.context}". Question to surface: "${dueFollowUp.question}". Weave this naturally into the session opening — do not announce it as a follow-up, just bring it up as if continuing the thread.`
+      : '';
+
+    const growthMarkerInstruction = dueGrowthMarker
+      ? `\n\nGROWTH MARKER CHECK-IN: 14 days ago you were working through the theme "${dueGrowthMarker.theme}". ${dueGrowthMarker.check_in_message ? `Original note: "${dueGrowthMarker.check_in_message}".` : ''} Surface this naturally in the session — ask how it's going with that theme. Do not announce it as a scheduled check-in.`
+      : '';
 
     // ── 6. Exercise cooldown + smart blocks ───────────────────────────────
     const sessionExercisesRun = Array.isArray(session_state.exercises_run) ? session_state.exercises_run : [];
@@ -1406,6 +1383,13 @@ export default async function handler(req, res) {
           depth_opportunity: intentData.depth_opportunity || false,
         },
         follow_up_due: dueFollowUp ? { context: dueFollowUp.context, question: dueFollowUp.question } : null,
+        pending_follow_up: dueFollowUp
+          ? {
+              id: dueFollowUp.id,
+              context: dueFollowUp.context,
+              question: dueFollowUp.question,
+            }
+          : undefined,
         growth_marker_due: dueGrowthMarker ? { theme: dueGrowthMarker.theme, msg: dueGrowthMarker.check_in_message } : null,
         exercise: { suggested: suggestedExercise, first_time: isFirstTimeExercise, explained: exercisesExplained },
         stage_hint: suggestedNextStage,
@@ -1523,7 +1507,8 @@ export default async function handler(req, res) {
     };
 
     // ── 9. Build messages ─────────────────────────────────────────────────
-    const messages = [{ role: 'system', content: SYSTEM_PROMPT }, contextBlock, ...history.slice(-18)];
+    const effectiveSystemPrompt = SYSTEM_PROMPT + followUpInstruction + growthMarkerInstruction;
+    const messages = [{ role: 'system', content: effectiveSystemPrompt }, contextBlock, ...history.slice(-18)];
 
     if (!isInit) {
       messages.push({ role: 'user', content: user_message });
@@ -1628,6 +1613,14 @@ export default async function handler(req, res) {
       dbPromises.push(markFollowUpTriggered(dueFollowUp.id));
     }
 
+    if (dueGrowthMarker) {
+      supabase
+        .from('growth_markers')
+        .update({ checked_in: true, updated_at: new Date().toISOString() })
+        .eq('id', dueGrowthMarker.id)
+        .then(() => {})
+        .catch(() => {});
+    }
     const exerciseRan = result.exercise_run && result.exercise_run !== 'none';
     if (exerciseRan && session_id) {
       dbPromises.push(
