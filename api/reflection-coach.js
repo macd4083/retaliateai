@@ -536,6 +536,32 @@ async function loadReflectionPatterns(userId, clientDate) {
   } catch (_e) { return []; }
 }
 
+async function loadUserInsights(userId) {
+  try {
+    const { data } = await supabase
+      .from('user_insights')
+      .select('id, pattern_label, pattern_type, pattern_narrative, trigger_context, user_quote, foothold, unlocked_practices, confidence_score')
+      .eq('user_id', userId)
+      .eq('is_active', true)
+      .order('confidence_score', { ascending: false })
+      .limit(5);
+    return data || [];
+  } catch (_e) { return []; }
+}
+
+async function triggerInsightSynthesis(userId) {
+  try {
+    const baseUrl = process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : 'http://localhost:3000';
+    fetch(`${baseUrl}/api/synthesize-insights`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: userId }),
+    }).catch(() => {});
+  } catch (_e) {}
+}
+
 async function loadRecentSessionsSummary(userId) {
   try {
     const { data } = await supabase
@@ -1120,7 +1146,7 @@ export default async function handler(req, res) {
     // ── 2. Load context in parallel ───────────────────────────────────────
     const currentSignals = [intentData?.intent, intentData?.emotional_state, intentData?.accountability_signal].filter(Boolean);
 
-    const [followUpQueue, growthMarkers, reflectionPatterns, recentSessions, yesterdayCommitment, userProfile, activeGoalsRaw, commitmentStats, todayEarlyCommitment, goalCommitmentStats] =
+    const [followUpQueue, growthMarkers, reflectionPatterns, recentSessions, yesterdayCommitment, userProfile, activeGoalsRaw, commitmentStats, todayEarlyCommitment, goalCommitmentStats, userInsights] =
       await Promise.all([
         loadFollowUpQueue(user_id, currentSignals, client_local_date),
         loadGrowthMarkers(user_id, client_local_date),
@@ -1132,6 +1158,7 @@ export default async function handler(req, res) {
         loadCommitmentStats(user_id, client_local_date),
         loadTodayEarlyCommitment(user_id, client_local_date),
         loadGoalCommitmentStats(user_id, client_local_date),
+        loadUserInsights(user_id),
       ]);
 
     // Attach motivation signal to each goal
@@ -1227,10 +1254,6 @@ export default async function handler(req, res) {
     // ── 8. Build compact context block ───────────────────────────────────
     const exercisesExplained = Array.isArray(profile.exercises_explained) ? profile.exercises_explained : [];
     const isFirstTimeExercise = suggestedExercise !== 'none' && !exercisesExplained.includes(suggestedExercise);
-
-    const patternsText = reflectionPatterns.length > 0
-      ? reflectionPatterns.map((p) => `${p.label}(${p.occurrence_count}x)`).join('; ')
-      : 'none';
 
     const recentSessionsText = recentSessions.slice(0, 3).map((s) => {
       const blockers = Array.isArray(s.blocker_tags) ? s.blocker_tags.join(', ') : '';
@@ -1342,7 +1365,23 @@ export default async function handler(req, res) {
           : undefined,
         yesterday_commitment: yesterdayCommitment || 'none',
         same_day_commitment: sameDayCommitment ? { commitment: sameDayCommitment.commitment, made_at: sameDayCommitment.made_at } : undefined,
-        patterns: patternsText,
+        active_insights: userInsights.length > 0
+          ? userInsights.map((ins) => ({
+              label: ins.pattern_label,
+              type: ins.pattern_type,
+              narrative: ins.pattern_narrative,
+              trigger: ins.trigger_context,
+              user_quote: ins.user_quote,
+              foothold: ins.foothold,
+              practices: ins.unlocked_practices,
+              confidence: ins.confidence_score,
+            }))
+          : undefined,
+        // Fall back to raw pattern labels only when no rich insights exist yet,
+        // to avoid duplicating information the coach already has via active_insights.
+        patterns: reflectionPatterns.length > 0 && userInsights.length === 0
+          ? reflectionPatterns.map((p) => `${p.label}(${p.occurrence_count}x)`).join('; ')
+          : undefined,
         recent_sessions: recentSessionsText,
         relevant_memories: relevantMemories.length > 0
           ? relevantMemories.map((m) => ({ date: m.date, summary: m.summary, similarity: m.similarity }))
@@ -2015,6 +2054,7 @@ Return ONLY valid JSON: { "question": "...", "context": "brief context on why th
           } catch (_e) { /* fail silently */ }
         } catch (_e) {}
       })();
+      triggerInsightSynthesis(user_id);
     }
 
     result.consecutive_excuses = consecutiveExcuses;
