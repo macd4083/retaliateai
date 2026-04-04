@@ -175,29 +175,7 @@ Step 3 (consecutive_excuses >= 3): Pull future_self. "The version of you that [f
 Never punitive. Always warm but direct.
 
 EXERCISE WORKFLOWS:
-
-gratitude_anchor: "Name one thing from today that's still working, even if it's small." → Reflect back + connect to identity. Chips: ["Still has momentum 💪","Small but real ✅","Hard to find one 😔"]
-
-why_reconnect: "You told me this matters because [actual why]. Does that still feel true?" → If yes: "So what's getting between you and that?" If no: "What changed?"
-
-evidence_audit: "Name three things you've done in the last 30 days that the version of you who's failing wouldn't have done."
-
-implementation_intention: "Not what you want to do — when exactly, day and time, and what's the first 2-minute action." Push back if vague. Store as tomorrow_commitment. STOP once specific.
-
-values_clarification: "If no one was watching and there were no consequences — what would you actually spend your time on?" → "What does that tell you about what actually matters?"
-
-future_self_bridge: "You told me in a year you want to be [actual future_self]. What would that version of you say about tonight?" → "What's one decision right now that moves toward that?"
-
-ownership_reframe: "What was the part that was in your control?" → If ownership: "That's the only part that matters. So what do you do with that?"
-
-triage_one_thing: "Out of everything you're carrying — what's the ONE thing that actually matters most?" → "What's one move on that one thing?"
-
-identity_reinforcement: Fill in their ACTUAL win/action (never use placeholders). "That's a pattern, not a one-off. What does [their specific action] say about who you're becoming?" Then: "You told me you're someone who [their actual identity_statement]. Tonight proves it." Run ONCE per session only.
-
-depth_probe (use naturally mid-conversation, not as a named exercise):
-  Triggered when: user gives a surface answer to a meaningful question, or a pattern appears
-  Examples: "Why do you think you keep coming back to that?" / "What's the story you're telling yourself about [X]?" / "What would have to be true about you for that to keep happening?"
-  After a depth answer: sit with it. Reflect back what you heard. Then one forward question.
+// Active exercise instruction injected below when selected
 
 GOAL CONNECTION — WHEN AND HOW TO BUILD MEANING
 
@@ -333,6 +311,24 @@ RETURN JSON EXACTLY (no markdown, no extra keys):
   "follow_up_queued": false,
   "is_session_complete": false
 }`;
+
+// ── Per-exercise coach instructions (injected only when that exercise is selected) ──
+
+const EXERCISE_PROMPTS = {
+  gratitude_anchor: `gratitude_anchor: "Name one thing from today that's still working, even if it's small." → Reflect back + connect to identity. Chips: ["Still has momentum 💪","Small but real ✅","Hard to find one 😔"]`,
+  why_reconnect: `why_reconnect: "You told me this matters because [actual why]. Does that still feel true?" → If yes: "So what's getting between you and that?" If no: "What changed?"`,
+  evidence_audit: `evidence_audit: "Name three things you've done in the last 30 days that the version of you who's failing wouldn't have done."`,
+  implementation_intention: `implementation_intention: "Not what you want to do — when exactly, day and time, and what's the first 2-minute action." Push back if vague. Store as tomorrow_commitment. STOP once specific.`,
+  values_clarification: `values_clarification: "If no one was watching and there were no consequences — what would you actually spend your time on?" → "What does that tell you about what actually matters?"`,
+  future_self_bridge: `future_self_bridge: "You told me in a year you want to be [actual future_self]. What would that version of you say about tonight?" → "What's one decision right now that moves toward that?"`,
+  ownership_reframe: `ownership_reframe: "What was the part that was in your control?" → If ownership: "That's the only part that matters. So what do you do with that?"`,
+  triage_one_thing: `triage_one_thing: "Out of everything you're carrying — what's the ONE thing that actually matters most?" → "What's one move on that one thing?"`,
+  identity_reinforcement: `identity_reinforcement: Fill in their ACTUAL win/action (never use placeholders). "That's a pattern, not a one-off. What does [their specific action] say about who you're becoming?" Then: "You told me you're someone who [their actual identity_statement]. Tonight proves it." Run ONCE per session only.`,
+  depth_probe: `depth_probe (use naturally mid-conversation, not as a named exercise):
+  Triggered when: user gives a surface answer to a meaningful question, or a pattern appears
+  Examples: "Why do you think you keep coming back to that?" / "What's the story you're telling yourself about [X]?" / "What would have to be true about you for that to keep happening?"
+  After a depth answer: sit with it. Reflect back what you heard. Then one forward question.`,
+};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -1164,6 +1160,287 @@ Return valid JSON only:
   } catch (_e) {}
 }
 
+// ── Session context assembly ──────────────────────────────────────────────────
+
+/**
+ * Builds the structured context object that is JSON-serialised into the GPT-4o
+ * user-role message.  Accepts all pre-loaded/pre-computed session data and
+ * derives any remaining values internally so the handler stays clean.
+ */
+function buildSessionContext({
+  profile,
+  goalsContext,
+  userInsights,
+  sessionState,
+  recentSessions,
+  reflectionPatterns,
+  commitmentStats,
+  followUpQueue,
+  growthMarkers,
+  suggestedPractice,
+  isFirstTimeExercise,
+  exercisesExplained,
+  intentData,
+  preSessionState,
+  yesterdayCommitment,
+  relevantMemories,
+  dueFollowUp,
+  dueGrowthMarker,
+  clientDate,
+  sameDayCommitment,
+  activeGoals,
+  quietGoals,
+  goalsNeedWhyBuilding,
+  messageCount,
+  consecutiveExcuses,
+  effectiveConsecutiveExcuses,
+  suggestedNextStage,
+  streak,
+}) {
+  // ── Derive internal values ─────────────────────────────────────────────
+  const sessionExercisesRun = Array.isArray(sessionState.exercises_run) ? sessionState.exercises_run : [];
+  const mergedChecklist = { ...(sessionState.checklist || {}), ...(intentData?.checklist_content || {}) };
+  const tomorrowFilled = !!sessionState.tomorrow_commitment;
+  const hasMissInSession = Array.isArray(sessionState.misses) && sessionState.misses.length > 0;
+  const honestMissing = !mergedChecklist.honest && !hasMissInSession && messageCount >= 4;
+  const identityMissing = !mergedChecklist.identity && messageCount >= 6;
+  const sessionReadyToClose = tomorrowFilled && mergedChecklist.wins && (mergedChecklist.identity || messageCount >= 10);
+  const forceClose = messageCount >= 14 && tomorrowFilled && mergedChecklist.wins;
+  const depthProbeNeeded = intentData?.depth_opportunity && !sessionExercisesRun.includes('depth_probe') && sessionState.current_stage === 'honest' && !mergedChecklist.honest;
+  const isMemoryMode = ['question', 'advice_request', 'memory_query'].includes(intentData?.intent);
+  const goalMissingWhy = goalsNeedWhyBuilding.find(g => !Array.isArray(g.whys) || g.whys.length === 0) ?? null;
+
+  const recentSessionsText = recentSessions.slice(0, 3).map((s) => {
+    const blockers = Array.isArray(s.blocker_tags) ? s.blocker_tags.join(', ') : '';
+    if (s.summary) {
+      let line = `${s.date}: ${s.summary}`;
+      if (blockers) line += ` blockers=[${blockers}]`;
+      return line;
+    }
+    const wins = Array.isArray(s.wins) ? s.wins.map((w) => (typeof w === 'string' ? w : w.text)).filter(Boolean) : [];
+    let line = `${s.date}: wins=[${wins.slice(0, 2).join(', ')}] commitment="${s.tomorrow_commitment || ''}"`;
+    if (blockers) line += ` blockers=[${blockers}]`;
+    return line;
+  }).join(' | ') || 'none';
+
+  return {
+    profile: {
+      name: profile.display_name,
+      identity: profile.identity_statement,
+      goal: profile.big_goal,
+      why: profile.why,
+      future_self: profile.future_self,
+      life_areas: Array.isArray(profile.life_areas) ? profile.life_areas.join(', ') : '',
+      values: Array.isArray(profile.values) && profile.values.length > 0 ? profile.values.join(', ') : undefined,
+      short_term_state: profile.short_term_state || undefined,
+      long_term_patterns: Array.isArray(profile.long_term_patterns) && profile.long_term_patterns.length > 0 ? profile.long_term_patterns : undefined,
+      growth_areas: Array.isArray(profile.growth_areas) && profile.growth_areas.length > 0 ? profile.growth_areas : undefined,
+      strengths: Array.isArray(profile.strengths) && profile.strengths.length > 0 ? profile.strengths : undefined,
+    },
+    goals: goalsContext.length > 0 ? goalsContext : 'none',
+    quiet_goals: quietGoals.length > 0 ? quietGoals : undefined,
+    goals_need_why_building: goalsNeedWhyBuilding.length > 0
+      ? goalsNeedWhyBuilding.map((g) => {
+          const hasWhys = Array.isArray(g.whys) && g.whys.length > 0;
+          return {
+            goal_id: g.id,
+            title: g.title,
+            category: g.category || null,
+            whys: hasWhys ? g.whys : [],
+            has_whys: hasWhys,
+            motivation_signal: g.motivation_signal,
+            commitment_rate: g.commitment_stats?.rate_last_14 ?? null,
+          };
+        })
+      : undefined,
+    yesterday_commitment: yesterdayCommitment || 'none',
+    same_day_commitment: sameDayCommitment ? { commitment: sameDayCommitment.commitment, made_at: sameDayCommitment.made_at } : undefined,
+    // user_insights takes priority — rich synthesised records with narrative/trigger/quote/foothold/practices
+    user_insights: userInsights.length > 0
+      ? userInsights.map((ins) => ({
+          label: ins.pattern_label,
+          type: ins.pattern_type,
+          narrative: ins.pattern_narrative,
+          trigger: ins.trigger_context,
+          user_quote: ins.user_quote,
+          foothold: ins.foothold,
+          practices: ins.unlocked_practices,
+          confidence: ins.confidence_score,
+        }))
+      : undefined,
+    // Fall back to raw pattern labels only when no rich insights exist yet
+    patterns: reflectionPatterns.length > 0 && userInsights.length === 0
+      ? reflectionPatterns.map((p) => `${p.label}(${p.occurrence_count}x)`).join('; ')
+      : undefined,
+    recent_sessions: recentSessionsText,
+    relevant_memories: relevantMemories.length > 0
+      ? relevantMemories.map((m) => ({ date: m.date, summary: m.summary, similarity: m.similarity }))
+      : undefined,
+    commitment_stats: commitmentStats
+      ? {
+          rate_last_7: Math.round(commitmentStats.rate7 * 100) / 100,
+          trajectory: commitmentStats.trajectory,
+          kept: commitmentStats.kept7,
+          total: commitmentStats.total7,
+        }
+      : undefined,
+    session: {
+      stage: sessionState.current_stage || 'wins',
+      checklist: mergedChecklist,
+      tomorrow_commitment: sessionState.tomorrow_commitment || null,
+      exercises_run: sessionExercisesRun,
+      consecutive_excuses: consecutiveExcuses,
+      message_count: messageCount,
+      wins_asked_for_more: sessionState.wins_asked_for_more === true,
+      honest_depth: sessionState.honest_depth === true,
+      commitment_checkin_done: sessionState.commitment_checkin_done === true,
+      yesterday_commitment_in_state: !!(sessionState.yesterday_commitment || yesterdayCommitment),
+      session_wins_captured: Array.isArray(sessionState.wins)
+        ? sessionState.wins.map(w => typeof w === 'string' ? w : w?.text).filter(Boolean)
+        : [],
+      session_misses_captured: Array.isArray(sessionState.misses)
+        ? sessionState.misses.map(m => typeof m === 'string' ? m : m?.text).filter(Boolean)
+        : [],
+      session_blockers_captured: sessionState.blocker_tags || [],
+      depth_insight_captured: sessionState.depth_insight || null,
+    },
+    intent: {
+      type: intentData.intent,
+      energy: intentData.energy_level,
+      accountability: intentData.accountability_signal,
+      emotion: intentData.emotional_state,
+      depth_opportunity: intentData.depth_opportunity || false,
+    },
+    follow_up_due: dueFollowUp ? { context: dueFollowUp.context, question: dueFollowUp.question } : null,
+    pending_follow_up: dueFollowUp
+      ? { id: dueFollowUp.id, context: dueFollowUp.context, question: dueFollowUp.question }
+      : undefined,
+    growth_marker_due: dueGrowthMarker ? { theme: dueGrowthMarker.theme, msg: dueGrowthMarker.check_in_message } : null,
+    exercise: { suggested: suggestedPractice, first_time: isFirstTimeExercise, explained: exercisesExplained },
+    stage_hint: suggestedNextStage,
+    ready_to_close: sessionReadyToClose,
+    streak,
+    pre_session_state: preSessionState || undefined,
+    instructions: [
+      // ── Pre-session state opener instructions (isInit only) ───────────
+      preSessionState?.cold_start
+        ? `COLD START (${preSessionState.days_since_last_session ?? 'many'} days away): Do NOT open generically. Reference the gap directly and warmly. ${preSessionState.returning_user_context ? `Last session context: "${preSessionState.returning_user_context}".` : ''} Open with something specific that shows you remember them and have been thinking about where they left off.`
+        : null,
+      preSessionState?.follow_up_due && !preSessionState?.cold_start
+        ? `INIT FOLLOW-UP: A specific question was queued from their last session. Open with it naturally rather than a generic greeting. Context: "${preSessionState.follow_up_due.context}". Question: "${preSessionState.follow_up_due.question}".`
+        : null,
+      preSessionState?.growth_marker_due && !preSessionState?.follow_up_due && !preSessionState?.cold_start
+        ? `INIT GROWTH MARKER: Before offering mood chips, briefly surface the growth theme "${preSessionState.growth_marker_due.theme}" as a natural opener — e.g. "I've been thinking about [theme] and wanted to check in on that tonight." Do not announce it as a scheduled check-in.`
+        : null,
+      preSessionState?.suggested_practice && !preSessionState?.cold_start
+        ? `PRACTICE HINT: Tonight's recommended practice is "${preSessionState.suggested_practice}" (reason: ${preSessionState.suggested_practice_reason}). If momentum and tone align, guide the session toward this practice. Do not force it — wait for a natural opening.`
+        : null,
+      preSessionState && !preSessionState.cold_start && preSessionState.returning_user_context && !preSessionState.follow_up_due && !preSessionState.growth_marker_due
+        ? `RETURNING USER: Briefly acknowledge where they left off before offering mood chips. Context: "${preSessionState.returning_user_context}". One warm sentence — then move into the normal opener.`
+        : null,
+      isMemoryMode
+        ? `MEMORY MODE: The user asked a question or wants advice. PAUSE the stage workflow — do NOT advance stage or update checklist. Answer their question directly using relevant_memories and their profile data. Use their actual past words and patterns. Be specific, not generic. End your response with ONE question that naturally brings them back to the ${sessionState.current_stage || 'wins'} stage.`
+        : null,
+      dueFollowUp ? 'PRIORITY: Surface follow_up_due question first.' : null,
+      dueGrowthMarker ? 'Weave in growth_marker_due check-in naturally.' : null,
+      intentData?.accountability_signal === 'excuse'
+        ? `ANTI-EXCUSE: consecutive_excuses=${effectiveConsecutiveExcuses}. Use their specific words. Follow the protocol.`
+        : null,
+      suggestedPractice !== 'none'
+        ? `RUN: ${suggestedPractice}. first_time=${isFirstTimeExercise}. Fill ALL placeholders with user's actual words — never output [bracket placeholders]. Set exercise_run="${suggestedPractice}".`
+        : null,
+      depthProbeNeeded
+        ? `DEPTH OPPORTUNITY (honest stage only): The user is in the honest stage and gave a depth opportunity. Go deeper here. Ask WHY or surface the belief underneath. Use a depth_probe question naturally. Set exercise_run="depth_probe". Store any insight in extracted_data.depth_insight. Only probe for depth when current_stage === 'honest' and the honest checklist item is not yet complete. IMPORTANT: Do NOT frame this as goal-specific unless the user is directly referencing a goal — keep depth probes grounded in what the user just said.`
+        : null,
+      sessionState.wins?.length > 0 && Array.isArray(sessionState.wins) && sessionState.current_stage !== 'wins'
+        ? `CALLBACK: The user mentioned these wins earlier: ${sessionState.wins.map(w => typeof w === 'string' ? w : w?.text).filter(Boolean).join(', ')}. If relevant, reference these by name when asking about follow-through or identity. Never re-ask what you already know.`
+        : null,
+      sessionState.depth_insight && !sessionReadyToClose
+        ? `DEPTH CALLBACK: Earlier the user surfaced this insight: "${sessionState.depth_insight}". If a natural moment arises (especially in 'close' stage), reflect it back to them once — e.g. "You said earlier [insight]. What does that mean for how you show up tomorrow?" Do this once only, warmly.`
+        : null,
+      (() => {
+        const capturedWins = Array.isArray(sessionState.wins)
+          ? sessionState.wins.map(w => typeof w === 'string' ? w : w?.text).filter(Boolean)
+          : [];
+        const capturedMisses = Array.isArray(sessionState.misses)
+          ? sessionState.misses.map(m => typeof m === 'string' ? m : m?.text).filter(Boolean)
+          : [];
+        const capturedBlockers = Array.isArray(sessionState.blocker_tags) ? sessionState.blocker_tags : [];
+        if (capturedWins.length === 0 && capturedMisses.length === 0 && capturedBlockers.length === 0) return null;
+        return `REFERENCE WHAT THEY SAID: The user has already shared: wins=[${capturedWins.join(', ')}], misses=[${capturedMisses.join(', ')}], blockers=[${capturedBlockers.join(', ')}]. Your next question MUST reference at least one of these specifically. Never ask a generic question when you have their real words.`;
+      })(),
+      goalMissingWhy && !sessionReadyToClose && !forceClose
+        ? `WHY MISSING (HIGHEST PRIORITY): The goal "${goalMissingWhy.title}" (id: ${goalMissingWhy.id}) has never had a why captured. If any natural moment exists this session — especially during wins, honest, or when this goal comes up — ask what makes it actually matter. Use their words and context, not generic language. When they answer, you MUST set extracted_data.goal_why_insight to their response, extracted_data.goal_why_action to "add", and extracted_data.goal_id_referenced to exactly "${goalMissingWhy.id}". Do not skip setting goal_id_referenced — without it the why is silently lost.`
+        : null,
+      honestMissing
+        ? `HONEST MISSING: Gently probe for a miss or honest moment with self-awareness questions. ${
+            reflectionPatterns.length > 0
+              ? `Their recurring pattern is "${reflectionPatterns[0].label}" — if it came up today, help them name it. E.g. "Did ${reflectionPatterns[0].label.replace(/_/g, ' ')} show up anywhere today?" or "Was there a moment where you held back and you're not sure why?"`
+              : `E.g. "Where did you feel like you weren't fully showing up today?" or "Is there a moment from today that's still sitting with you?" or "What part of today are you least proud of — not what you'd fix, just what happened?"`
+          } Goal is self-awareness about TODAY, not action planning. Do NOT ask "what would you do differently" — that belongs in tomorrow. Weave it naturally. Once a miss is named and you have asked one specific follow-up about it, ask one open "anything else?" prompt before closing the honest stage — e.g. "Anything else worth naming before we move on?" or "Is there anything else from today you want to get off your chest?" — then set honest_depth: true only after the user has responded to that prompt or clearly signaled they're done.`
+        : null,
+      (() => {
+        if (sessionState.current_stage !== 'commitment_checkin') return null;
+        if (sessionState.commitment_checkin_done) return null;
+        const yc = sessionState.yesterday_commitment || yesterdayCommitment;
+        if (!yc) return null;
+        return `## STAGE: COMMITMENT CHECK-IN\nYou are here only when session.current_stage === 'commitment_checkin'.\n- Reference yesterday's exact commitment text: "${yc}"\n- Ask exactly ONE question about how it went. Use their words, not generic language.\n- If they kept it → acknowledge the follow-through warmly and absorb it into momentum. Set commitment_checkin_done: true and advance to honest stage.\n- If they missed it or it was partial → their answer IS the honest stage opener. Do not probe further here. Set commitment_checkin_done: true and advance to honest stage. The honest exploration begins from this point.\n- Never ask twice. One exchange only. Always set commitment_checkin_done: true after their response, regardless of outcome.`;
+      })(),
+      identityMissing && !sessionReadyToClose
+        ? `IDENTITY MISSING: Find a natural moment to ask what their actions say about who they're becoming. E.g. "What does [their action] say about who you're becoming?"`
+        : null,
+      (() => {
+        if (!commitmentStats) return null;
+        const { rate7, trajectory: traj, total7 } = commitmentStats;
+        const commitmentStatsForInstruction = traj === 'declining' || (rate7 < 0.5 && total7 >= 5);
+        if (!commitmentStatsForInstruction) return null;
+        const ratePercent = Math.round(rate7 * 100);
+        return `COMMITMENT QUALITY: Follow-through rate is ${ratePercent}% (${commitmentStats.kept7}/${total7} last 7 days), trajectory is ${traj}. When the user is forming their commitment, gently suggest they scale it back to something they can absolutely guarantee. Say something like: "Given where you're at, let's make this something you can 100% do — we can push the intensity later. What's one small thing you'll actually show up for?" Do NOT lecture. Say it once, warmly, then let them commit to what they want.`;
+      })(),
+      (() => {
+        if (recentSessions.length < 3) return null;
+        const hasWins = recentSessions.some((s) => Array.isArray(s.wins) ? s.wins.length > 0 : !!s.summary);
+        if (!hasWins) return null;
+        return `PROGRESS AWARENESS: You have ${recentSessions.length} recent sessions of data. If it's natural in the wins conversation, ask ONE question that helps the user notice their own growth — using only what's real in their history. E.g. if they mention finishing something, ask "Is that something you would have followed through on a month ago?" or "How does that compare to where you were when you started?" Do NOT state their progress for them. Ask the question that makes THEM see it. Only do this once per session, and only if it genuinely fits the conversation. Never fabricate history.`;
+      })(),
+      (() => {
+        if (reflectionPatterns.length === 0 || messageCount < 2) return null;
+        const topPattern = reflectionPatterns[0];
+        if (topPattern.occurrence_count < 2) return null;
+        return `PATTERN AWARENESS: The user's most recurring pattern is "${topPattern.label}" (${topPattern.occurrence_count}x). If they say or do something that looks like this pattern — even obliquely — ask a question that helps them SEE it, not name it for them. Never say "I notice you keep doing X" or "this sounds like your ${topPattern.label} pattern". Instead, ask something like: "What's making it hard to just ship it as-is?" or "You said you'd do this yesterday — what happened between then and now?" The goal is to surface the pattern through their own answer, not your observation. Use naturally. Once per session max. Do NOT interrupt a good moment to force it in.`;
+      })(),
+      (() => {
+        if (recentSessions.length < 2) return null;
+        const todayCommitment = sessionState.yesterday_commitment || yesterdayCommitment;
+        if (!todayCommitment) return null;
+        const commitmentPrefix = todayCommitment.toLowerCase().slice(0, 20);
+        const missedStreak = recentSessions.filter(s =>
+          s.tomorrow_commitment &&
+          s.tomorrow_commitment.toLowerCase().includes(commitmentPrefix)
+        ).length;
+        if (missedStreak >= 2) {
+          return `RECURRING MISS: The user has committed to "${todayCommitment}" ${missedStreak}+ days in a row without following through. Do NOT re-ask "what's holding you back?" — they've already answered that. Instead, name the pattern directly and warmly: "You've said you'd do this ${missedStreak} days in a row. Something keeps getting in the way — what's actually going on?" This is a pattern interrupt. Be direct but warm. Do NOT soften it into another generic depth probe.`;
+        }
+        return null;
+      })(),
+      sessionExercisesRun.length > 0
+        ? `ALREADY RUN: ${sessionExercisesRun.join(', ')}. Do NOT repeat.`
+        : null,
+      suggestedNextStage && !isMemoryMode
+        ? `STAGE HINT: Ready to move to "${suggestedNextStage}". Transition naturally if conversation supports it. Set stage_advance:true, new_stage:"${suggestedNextStage}".`
+        : null,
+      forceClose
+        ? 'FORCE CLOSE: Session has gone long. Wins + plan covered. Wrap up NOW with a warm identity statement. Set is_session_complete:true. No more questions.'
+        : sessionReadyToClose
+          ? `READY TO CLOSE: wins + plan covered. If tone is resolved, wrap warmly. End with an identity statement. Set is_session_complete:true. Do NOT keep drilling.`
+          : null,
+      'Use their actual words — never be generic.',
+      '2-3 sentences max.',
+      'NEVER drill a topic already answered.',
+    ].filter(Boolean),
+  };
+}
+
 // ── Main handler ──────────────────────────────────────────────────────────────
 
 export default async function handler(req, res) {
@@ -1308,32 +1585,9 @@ export default async function handler(req, res) {
     const messageCount = history.length;
     const suggestedNextStage = deriveStageHint(session_state, intentData?.checklist_content);
 
-    // ── 7. Session state analysis for instructions ────────────────────────
-    const mergedChecklist = { ...(session_state.checklist || {}), ...(intentData?.checklist_content || {}) };
-    const tomorrowFilled = !!session_state.tomorrow_commitment;
-    const sessionReadyToClose = tomorrowFilled && mergedChecklist.wins && (mergedChecklist.identity || messageCount >= 10);
-    const forceClose = messageCount >= 14 && tomorrowFilled && mergedChecklist.wins;
-    const depthProbeNeeded = intentData?.depth_opportunity && !sessionExercisesRun.includes('depth_probe') && session_state.current_stage === 'honest' && !mergedChecklist.honest;
-    const hasMissInSession = Array.isArray(session_state.misses) && session_state.misses.length > 0;
-    const honestMissing = !mergedChecklist.honest && !hasMissInSession && messageCount >= 4;
-    const identityMissing = !mergedChecklist.identity && messageCount >= 6;
-
     // ── 8. Build compact context block ───────────────────────────────────
     const exercisesExplained = Array.isArray(profile.exercises_explained) ? profile.exercises_explained : [];
     const isFirstTimeExercise = suggestedExercise !== 'none' && !exercisesExplained.includes(suggestedExercise);
-
-    const recentSessionsText = recentSessions.slice(0, 3).map((s) => {
-      const blockers = Array.isArray(s.blocker_tags) ? s.blocker_tags.join(', ') : '';
-      if (s.summary) {
-        let line = `${s.date}: ${s.summary}`;
-        if (blockers) line += ` blockers=[${blockers}]`;
-        return line;
-      }
-      const wins = Array.isArray(s.wins) ? s.wins.map((w) => (typeof w === 'string' ? w : w.text)).filter(Boolean) : [];
-      let line = `${s.date}: wins=[${wins.slice(0, 2).join(', ')}] commitment="${s.tomorrow_commitment || ''}"`;
-      if (blockers) line += ` blockers=[${blockers}]`;
-      return line;
-    }).join(' | ') || 'none';
 
     // ── 8b. Memory search for question/advice/memory_query/reflective intents ────────
     const isMemoryMode = ['question', 'advice_request', 'memory_query'].includes(intentData?.intent);
@@ -1357,7 +1611,6 @@ export default async function handler(req, res) {
             suggested_next_action: g.suggested_next_action || null,
             motivation_signal: g.motivation_signal || 'unknown',
           };
-          // Only include days_since_mentioned if it's meaningful (goal was tracked before)
           if (g.days_since_mentioned !== null && g.days_since_mentioned > 7) {
             obj.days_since_mentioned = g.days_since_mentioned;
           }
@@ -1365,8 +1618,6 @@ export default async function handler(req, res) {
         })
       : [];
 
-    // Quiet goals: goals that have been tracked but haven't come up recently
-    // This is a soft permission to the coach — not an instruction to surface them
     const quietGoals = activeGoals
       .filter((g) => g.last_mentioned_at && g.days_since_mentioned > 14)
       .map((g) => ({
@@ -1377,17 +1628,11 @@ export default async function handler(req, res) {
         note: "hasn't come up recently — if a natural opening exists, one soft check-in is fine. If no opening, skip it.",
       }));
 
-    // Goals that need why-building: goals with no whys (first-time capture, highest priority)
-    // OR goals with low/struggling motivation_signal whose last why was captured more than 2 days ago.
-    // Exclude goals with motivation_signal === 'strong' that already have whys — they don't need attention.
     const twoDaysAgo = localDate(-2, client_local_date);
     const goalsNeedWhyBuilding = activeGoals.filter((g) => {
       const hasWhys = Array.isArray(g.whys) && g.whys.length > 0;
-      // No whys at all — highest priority regardless of signal
       if (!hasWhys) return true;
-      // Strong signal with existing whys — not a priority
       if (g.motivation_signal === 'strong') return false;
-      // Low/struggling signal — include only if last why was more than 2 days ago
       if (g.motivation_signal === 'low' || g.motivation_signal === 'struggling') {
         const lastWhy = g.whys[g.whys.length - 1];
         return !lastWhy?.added_at || lastWhy.added_at < twoDaysAgo;
@@ -1395,242 +1640,45 @@ export default async function handler(req, res) {
       return false;
     });
 
-    // Highest-priority goal that has never had a why captured at all
-    const goalMissingWhy = goalsNeedWhyBuilding.find(g => !Array.isArray(g.whys) || g.whys.length === 0) ?? null;
-
     const contextBlock = {
       role: 'user',
-      content: JSON.stringify({
-        profile: {
-          name: profile.display_name,
-          identity: profile.identity_statement,
-          goal: profile.big_goal,
-          why: profile.why,
-          future_self: profile.future_self,
-          life_areas: Array.isArray(profile.life_areas) ? profile.life_areas.join(', ') : '',
-          values: Array.isArray(profile.values) && profile.values.length > 0 ? profile.values.join(', ') : undefined,
-          short_term_state: profile.short_term_state || undefined,
-          long_term_patterns: Array.isArray(profile.long_term_patterns) && profile.long_term_patterns.length > 0 ? profile.long_term_patterns : undefined,
-          growth_areas: Array.isArray(profile.growth_areas) && profile.growth_areas.length > 0 ? profile.growth_areas : undefined,
-          strengths: Array.isArray(profile.strengths) && profile.strengths.length > 0 ? profile.strengths : undefined,
-        },
-        goals: goalsContext.length > 0 ? goalsContext : 'none',
-        quiet_goals: quietGoals.length > 0 ? quietGoals : undefined,
-        goals_need_why_building: goalsNeedWhyBuilding.length > 0
-          ? goalsNeedWhyBuilding.map((g) => {
-              const hasWhys = Array.isArray(g.whys) && g.whys.length > 0;
-              return {
-                goal_id: g.id,
-                title: g.title,
-                category: g.category || null,
-                whys: hasWhys ? g.whys : [],
-                has_whys: hasWhys,
-                motivation_signal: g.motivation_signal,
-                commitment_rate: g.commitment_stats?.rate_last_14 ?? null,
-              };
-            })
-          : undefined,
-        yesterday_commitment: yesterdayCommitment || 'none',
-        same_day_commitment: sameDayCommitment ? { commitment: sameDayCommitment.commitment, made_at: sameDayCommitment.made_at } : undefined,
-        active_insights: userInsights.length > 0
-          ? userInsights.map((ins) => ({
-              label: ins.pattern_label,
-              type: ins.pattern_type,
-              narrative: ins.pattern_narrative,
-              trigger: ins.trigger_context,
-              user_quote: ins.user_quote,
-              foothold: ins.foothold,
-              practices: ins.unlocked_practices,
-              confidence: ins.confidence_score,
-            }))
-          : undefined,
-        // Fall back to raw pattern labels only when no rich insights exist yet,
-        // to avoid duplicating information the coach already has via active_insights.
-        patterns: reflectionPatterns.length > 0 && userInsights.length === 0
-          ? reflectionPatterns.map((p) => `${p.label}(${p.occurrence_count}x)`).join('; ')
-          : undefined,
-        recent_sessions: recentSessionsText,
-        relevant_memories: relevantMemories.length > 0
-          ? relevantMemories.map((m) => ({ date: m.date, summary: m.summary, similarity: m.similarity }))
-          : undefined,
-        commitment_stats: commitmentStats
-          ? {
-              rate_last_7: Math.round(commitmentStats.rate7 * 100) / 100,
-              trajectory: commitmentStats.trajectory,
-              kept: commitmentStats.kept7,
-              total: commitmentStats.total7,
-            }
-          : undefined,
-        session: {
-          stage: session_state.current_stage || 'wins',
-          checklist: mergedChecklist,
-          tomorrow_commitment: session_state.tomorrow_commitment || null,
-          exercises_run: sessionExercisesRun,
-          consecutive_excuses: consecutiveExcuses,
-          message_count: messageCount,
-          wins_asked_for_more: session_state.wins_asked_for_more === true,
-          honest_depth: session_state.honest_depth === true,
-          commitment_checkin_done: session_state.commitment_checkin_done === true,
-          yesterday_commitment_in_state: !!(session_state.yesterday_commitment || yesterdayCommitment),
-          session_wins_captured: Array.isArray(session_state.wins)
-            ? session_state.wins.map(w => typeof w === 'string' ? w : w?.text).filter(Boolean)
-            : [],
-          session_misses_captured: Array.isArray(session_state.misses)
-            ? session_state.misses.map(m => typeof m === 'string' ? m : m?.text).filter(Boolean)
-            : [],
-          session_blockers_captured: session_state.blocker_tags || [],
-          depth_insight_captured: session_state.depth_insight || null,
-        },
-        intent: {
-          type: intentData.intent,
-          energy: intentData.energy_level,
-          accountability: intentData.accountability_signal,
-          emotion: intentData.emotional_state,
-          depth_opportunity: intentData.depth_opportunity || false,
-        },
-        follow_up_due: dueFollowUp ? { context: dueFollowUp.context, question: dueFollowUp.question } : null,
-        pending_follow_up: dueFollowUp
-          ? {
-              id: dueFollowUp.id,
-              context: dueFollowUp.context,
-              question: dueFollowUp.question,
-            }
-          : undefined,
-        growth_marker_due: dueGrowthMarker ? { theme: dueGrowthMarker.theme, msg: dueGrowthMarker.check_in_message } : null,
-        exercise: { suggested: suggestedExercise, first_time: isFirstTimeExercise, explained: exercisesExplained },
-        stage_hint: suggestedNextStage,
-        ready_to_close: sessionReadyToClose,
+      content: JSON.stringify(buildSessionContext({
+        profile,
+        goalsContext,
+        userInsights,
+        sessionState: session_state,
+        recentSessions,
+        reflectionPatterns,
+        commitmentStats,
+        followUpQueue,
+        growthMarkers,
+        suggestedPractice: suggestedExercise,
+        isFirstTimeExercise,
+        exercisesExplained,
+        intentData,
+        preSessionState,
+        yesterdayCommitment,
+        relevantMemories,
+        dueFollowUp,
+        dueGrowthMarker,
+        clientDate: client_local_date,
+        sameDayCommitment,
+        activeGoals,
+        quietGoals,
+        goalsNeedWhyBuilding,
+        messageCount,
+        consecutiveExcuses,
+        effectiveConsecutiveExcuses,
+        suggestedNextStage,
         streak: context.reflection_streak || context.streak || 0,
-        pre_session_state: preSessionState || undefined,
-        instructions: [
-          // ── Pre-session state opener instructions (isInit only) ───────────
-          preSessionState?.cold_start
-            ? `COLD START (${preSessionState.days_since_last_session ?? 'many'} days away): Do NOT open generically. Reference the gap directly and warmly. ${preSessionState.returning_user_context ? `Last session context: "${preSessionState.returning_user_context}".` : ''} Open with something specific that shows you remember them and have been thinking about where they left off.`
-            : null,
-          preSessionState?.follow_up_due && !preSessionState?.cold_start
-            ? `INIT FOLLOW-UP: A specific question was queued from their last session. Open with it naturally rather than a generic greeting. Context: "${preSessionState.follow_up_due.context}". Question: "${preSessionState.follow_up_due.question}".`
-            : null,
-          preSessionState?.growth_marker_due && !preSessionState?.follow_up_due && !preSessionState?.cold_start
-            ? `INIT GROWTH MARKER: Before offering mood chips, briefly surface the growth theme "${preSessionState.growth_marker_due.theme}" as a natural opener — e.g. "I've been thinking about [theme] and wanted to check in on that tonight." Do not announce it as a scheduled check-in.`
-            : null,
-          preSessionState?.suggested_practice && !preSessionState?.cold_start
-            ? `PRACTICE HINT: Tonight's recommended practice is "${preSessionState.suggested_practice}" (reason: ${preSessionState.suggested_practice_reason}). If momentum and tone align, guide the session toward this practice. Do not force it — wait for a natural opening.`
-            : null,
-          preSessionState && !preSessionState.cold_start && preSessionState.returning_user_context && !preSessionState.follow_up_due && !preSessionState.growth_marker_due
-            ? `RETURNING USER: Briefly acknowledge where they left off before offering mood chips. Context: "${preSessionState.returning_user_context}". One warm sentence — then move into the normal opener.`
-            : null,
-          isMemoryMode
-            ? `MEMORY MODE: The user asked a question or wants advice. PAUSE the stage workflow — do NOT advance stage or update checklist. Answer their question directly using relevant_memories and their profile data. Use their actual past words and patterns. Be specific, not generic. End your response with ONE question that naturally brings them back to the ${session_state.current_stage || 'wins'} stage.`
-            : null,
-          dueFollowUp ? 'PRIORITY: Surface follow_up_due question first.' : null,
-          dueGrowthMarker ? 'Weave in growth_marker_due check-in naturally.' : null,
-          intentData?.accountability_signal === 'excuse'
-            ? `ANTI-EXCUSE: consecutive_excuses=${effectiveConsecutiveExcuses}. Use their specific words. Follow the protocol.`
-            : null,
-          suggestedExercise !== 'none'
-            ? `RUN: ${suggestedExercise}. first_time=${isFirstTimeExercise}. Fill ALL placeholders with user's actual words — never output [bracket placeholders]. Set exercise_run="${suggestedExercise}".`
-            : null,
-          depthProbeNeeded
-            ? `DEPTH OPPORTUNITY (honest stage only): The user is in the honest stage and gave a depth opportunity. Go deeper here. Ask WHY or surface the belief underneath. Use a depth_probe question naturally. Set exercise_run="depth_probe". Store any insight in extracted_data.depth_insight. Only probe for depth when current_stage === 'honest' and the honest checklist item is not yet complete. IMPORTANT: Do NOT frame this as goal-specific unless the user is directly referencing a goal — keep depth probes grounded in what the user just said.`
-            : null,
-          session_state.wins?.length > 0 && Array.isArray(session_state.wins) && session_state.current_stage !== 'wins'
-            ? `CALLBACK: The user mentioned these wins earlier: ${session_state.wins.map(w => typeof w === 'string' ? w : w?.text).filter(Boolean).join(', ')}. If relevant, reference these by name when asking about follow-through or identity. Never re-ask what you already know.`
-            : null,
-          session_state.depth_insight && !sessionReadyToClose
-            ? `DEPTH CALLBACK: Earlier the user surfaced this insight: "${session_state.depth_insight}". If a natural moment arises (especially in 'close' stage), reflect it back to them once — e.g. "You said earlier [insight]. What does that mean for how you show up tomorrow?" Do this once only, warmly.`
-            : null,
-          (() => {
-            const capturedWins = Array.isArray(session_state.wins)
-              ? session_state.wins.map(w => typeof w === 'string' ? w : w?.text).filter(Boolean)
-              : [];
-            const capturedMisses = Array.isArray(session_state.misses)
-              ? session_state.misses.map(m => typeof m === 'string' ? m : m?.text).filter(Boolean)
-              : [];
-            const capturedBlockers = Array.isArray(session_state.blocker_tags) ? session_state.blocker_tags : [];
-            if (capturedWins.length === 0 && capturedMisses.length === 0 && capturedBlockers.length === 0) return null;
-            return `REFERENCE WHAT THEY SAID: The user has already shared: wins=[${capturedWins.join(', ')}], misses=[${capturedMisses.join(', ')}], blockers=[${capturedBlockers.join(', ')}]. Your next question MUST reference at least one of these specifically. Never ask a generic question when you have their real words.`;
-          })(),
-          goalMissingWhy && !sessionReadyToClose && !forceClose
-            ? `WHY MISSING (HIGHEST PRIORITY): The goal "${goalMissingWhy.title}" (id: ${goalMissingWhy.id}) has never had a why captured. If any natural moment exists this session — especially during wins, honest, or when this goal comes up — ask what makes it actually matter. Use their words and context, not generic language. When they answer, you MUST set extracted_data.goal_why_insight to their response, extracted_data.goal_why_action to "add", and extracted_data.goal_id_referenced to exactly "${goalMissingWhy.id}". Do not skip setting goal_id_referenced — without it the why is silently lost.`
-            : null,
-          honestMissing
-            ? `HONEST MISSING: Gently probe for a miss or honest moment with self-awareness questions. ${
-                reflectionPatterns.length > 0
-                  ? `Their recurring pattern is "${reflectionPatterns[0].label}" — if it came up today, help them name it. E.g. "Did ${reflectionPatterns[0].label.replace(/_/g, ' ')} show up anywhere today?" or "Was there a moment where you held back and you're not sure why?"`
-                  : `E.g. "Where did you feel like you weren't fully showing up today?" or "Is there a moment from today that's still sitting with you?" or "What part of today are you least proud of — not what you'd fix, just what happened?"`
-              } Goal is self-awareness about TODAY, not action planning. Do NOT ask "what would you do differently" — that belongs in tomorrow. Weave it naturally. Once a miss is named and you have asked one specific follow-up about it, ask one open "anything else?" prompt before closing the honest stage — e.g. "Anything else worth naming before we move on?" or "Is there anything else from today you want to get off your chest?" — then set honest_depth: true only after the user has responded to that prompt or clearly signaled they're done.`
-            : null,
-          (() => {
-            if (session_state.current_stage !== 'commitment_checkin') return null;
-            if (session_state.commitment_checkin_done) return null;
-            const yc = session_state.yesterday_commitment || yesterdayCommitment;
-            if (!yc) return null;
-            return `## STAGE: COMMITMENT CHECK-IN\nYou are here only when session.current_stage === 'commitment_checkin'.\n- Reference yesterday's exact commitment text: "${yc}"\n- Ask exactly ONE question about how it went. Use their words, not generic language.\n- If they kept it → acknowledge the follow-through warmly and absorb it into momentum. Set commitment_checkin_done: true and advance to honest stage.\n- If they missed it or it was partial → their answer IS the honest stage opener. Do not probe further here. Set commitment_checkin_done: true and advance to honest stage. The honest exploration begins from this point.\n- Never ask twice. One exchange only. Always set commitment_checkin_done: true after their response, regardless of outcome.`;
-          })(),
-          identityMissing && !sessionReadyToClose
-            ? `IDENTITY MISSING: Find a natural moment to ask what their actions say about who they're becoming. E.g. "What does [their action] say about who you're becoming?"`
-            : null,
-          (() => {
-            // Instruction 1 — commitment quality nudge when making the commitment (tomorrow stage)
-            if (!commitmentStats) return null;
-            const { rate7, trajectory: traj, total7 } = commitmentStats;
-            const commitmentStatsForInstruction = traj === 'declining' || (rate7 < 0.5 && total7 >= 5);
-            if (!commitmentStatsForInstruction) return null;
-            const ratePercent = Math.round(rate7 * 100);
-            return `COMMITMENT QUALITY: Follow-through rate is ${ratePercent}% (${commitmentStats.kept7}/${total7} last 7 days), trajectory is ${traj}. When the user is forming their commitment, gently suggest they scale it back to something they can absolutely guarantee. Say something like: "Given where you're at, let's make this something you can 100% do — we can push the intensity later. What's one small thing you'll actually show up for?" Do NOT lecture. Say it once, warmly, then let them commit to what they want.`;
-          })(),
-          (() => {
-            // Instruction 2 — progress framing during wins (only if enough recent session history)
-            if (recentSessions.length < 3) return null;
-            const hasWins = recentSessions.some((s) => Array.isArray(s.wins) ? s.wins.length > 0 : !!s.summary);
-            if (!hasWins) return null;
-            return `PROGRESS AWARENESS: You have ${recentSessions.length} recent sessions of data. If it's natural in the wins conversation, ask ONE question that helps the user notice their own growth — using only what's real in their history. E.g. if they mention finishing something, ask "Is that something you would have followed through on a month ago?" or "How does that compare to where you were when you started?" Do NOT state their progress for them. Ask the question that makes THEM see it. Only do this once per session, and only if it genuinely fits the conversation. Never fabricate history.`;
-          })(),
-          (() => {
-            // Instruction 3 — pattern-aware metacognitive questioning
-            if (reflectionPatterns.length === 0 || messageCount < 2) return null;
-            const topPattern = reflectionPatterns[0];
-            if (topPattern.occurrence_count < 2) return null;
-            return `PATTERN AWARENESS: The user's most recurring pattern is "${topPattern.label}" (${topPattern.occurrence_count}x). If they say or do something that looks like this pattern — even obliquely — ask a question that helps them SEE it, not name it for them. Never say "I notice you keep doing X" or "this sounds like your ${topPattern.label} pattern". Instead, ask something like: "What's making it hard to just ship it as-is?" or "You said you'd do this yesterday — what happened between then and now?" The goal is to surface the pattern through their own answer, not your observation. Use naturally. Once per session max. Do NOT interrupt a good moment to force it in.`;
-          })(),
-          (() => {
-            // Instruction 4 — recurring missed commitment detection
-            if (recentSessions.length < 2) return null;
-            const todayCommitment = session_state.yesterday_commitment || yesterdayCommitment;
-            if (!todayCommitment) return null;
-
-            // Count how many consecutive prior sessions committed to the same thing (prefix match)
-            const commitmentPrefix = todayCommitment.toLowerCase().slice(0, 20);
-            const missedStreak = recentSessions.filter(s =>
-              s.tomorrow_commitment &&
-              s.tomorrow_commitment.toLowerCase().includes(commitmentPrefix)
-            ).length;
-
-            if (missedStreak >= 2) {
-              return `RECURRING MISS: The user has committed to "${todayCommitment}" ${missedStreak}+ days in a row without following through. Do NOT re-ask "what's holding you back?" — they've already answered that. Instead, name the pattern directly and warmly: "You've said you'd do this ${missedStreak} days in a row. Something keeps getting in the way — what's actually going on?" This is a pattern interrupt. Be direct but warm. Do NOT soften it into another generic depth probe.`;
-            }
-            return null;
-          })(),
-          sessionExercisesRun.length > 0
-            ? `ALREADY RUN: ${sessionExercisesRun.join(', ')}. Do NOT repeat.`
-            : null,
-          suggestedNextStage && !isMemoryMode
-            ? `STAGE HINT: Ready to move to "${suggestedNextStage}". Transition naturally if conversation supports it. Set stage_advance:true, new_stage:"${suggestedNextStage}".`
-            : null,
-          forceClose
-            ? 'FORCE CLOSE: Session has gone long. Wins + plan covered. Wrap up NOW with a warm identity statement. Set is_session_complete:true. No more questions.'
-            : sessionReadyToClose
-              ? `READY TO CLOSE: wins + plan covered. If tone is resolved, wrap warmly. End with an identity statement. Set is_session_complete:true. Do NOT keep drilling.`
-              : null,
-          'Use their actual words — never be generic.',
-          '2-3 sentences max.',
-          'NEVER drill a topic already answered.',
-        ].filter(Boolean),
-      }),
+      })),
     };
 
     // ── 9. Build messages ─────────────────────────────────────────────────
-    const effectiveSystemPrompt = SYSTEM_PROMPT + followUpInstruction + growthMarkerInstruction;
+    const exerciseInstruction = suggestedExercise !== 'none' && EXERCISE_PROMPTS[suggestedExercise]
+      ? `\n\nEXERCISE WORKFLOW:\n${EXERCISE_PROMPTS[suggestedExercise]}`
+      : '';
+    const effectiveSystemPrompt = SYSTEM_PROMPT + followUpInstruction + growthMarkerInstruction + exerciseInstruction;
     const messages = [{ role: 'system', content: effectiveSystemPrompt }, contextBlock, ...history.slice(-18)];
 
     if (!isInit) {
