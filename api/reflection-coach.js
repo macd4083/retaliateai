@@ -1046,11 +1046,11 @@ Given the session summary and current user profile, extract:
 3. growth_areas: areas actively being worked on (max 4 strings)
 4. strengths: positive traits consistently shown (max 4 strings)
 5. values: core values surfaced in their language and choices (max 5 strings)
-6. identity_statement_update: ONLY if a stronger more specific identity statement clearly emerged — otherwise null
-7. big_goal_update: ONLY if their goal evolved or became clearer — otherwise null
-8. why_update: ONLY if their why deepened or clarified — otherwise null
+6. identity_statement_update: If the current value is null, derive one from this session. If non-null, update only if the session surfaces meaningfully new detail — otherwise null.
+7. big_goal_update: If the current value is null, derive one from this session. If non-null, update only if the goal evolved or became clearer — otherwise null.
+8. why_update: If the current value is null, derive one from this session. If non-null, update only if their why deepened or clarified — otherwise null.
 9. blockers_update: ONLY if new blockers clearly emerged or existing ones evolved — otherwise null. Array of strings max 5.
-10. future_self_update: ONLY if the user expressed a clearer, stronger, or evolved version of their 1-year vision — otherwise null.
+10. future_self_update: If the current value is null, derive one from this session. If non-null, update only if the user expressed a clearer or evolved version of their 1-year vision — otherwise null.
 11. goal_updates: array of { goal_id, why_insight, why_action, why_replace_index, vision_fragment, depth_insight, last_mentioned_date } for any goals that were meaningfully discussed. Only include fields that have new content — null otherwise. Empty array if no goals were discussed.
     - why_insight: the captured why text in their actual words (or null)
     - why_action: "add" | "replace" | null (add if new distinct motivation, replace if deeper version of existing)
@@ -1058,7 +1058,7 @@ Given the session summary and current user profile, extract:
 
 Rules:
 - Use their actual words, not clinical language
-- Only update identity_statement/big_goal/why/blockers/future_self if genuinely stronger version emerged
+- For identity_statement/big_goal/why/future_self: always populate if currently null; update if non-null only when this session adds meaningful new detail
 - Merge with existing profile — evolve, don't erase
 - Keep arrays concise, quality over quantity
 
@@ -1122,11 +1122,19 @@ Return valid JSON only:
       values: evolution.values,
       profile_updated_at: new Date().toISOString(),
     };
-    if (evolution.identity_statement_update) profileUpdates.identity_statement = evolution.identity_statement_update;
-    if (evolution.big_goal_update) profileUpdates.big_goal = evolution.big_goal_update;
-    if (evolution.why_update) profileUpdates.why = evolution.why_update;
+    if (evolution.identity_statement_update || !currentProfile?.identity_statement) {
+      if (evolution.identity_statement_update) profileUpdates.identity_statement = evolution.identity_statement_update;
+    }
+    if (evolution.big_goal_update || !currentProfile?.big_goal) {
+      if (evolution.big_goal_update) profileUpdates.big_goal = evolution.big_goal_update;
+    }
+    if (evolution.why_update || !currentProfile?.why) {
+      if (evolution.why_update) profileUpdates.why = evolution.why_update;
+    }
     if (evolution.blockers_update) profileUpdates.blockers = evolution.blockers_update;
-    if (evolution.future_self_update) profileUpdates.future_self = evolution.future_self_update;
+    if (evolution.future_self_update || !currentProfile?.future_self) {
+      if (evolution.future_self_update) profileUpdates.future_self = evolution.future_self_update;
+    }
 
     await supabase.from('user_profiles').update(profileUpdates).eq('id', userId);
 
