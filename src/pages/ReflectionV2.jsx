@@ -34,7 +34,7 @@ const STAGE_PLACEHOLDERS = {
   close: 'Write yourself a message...',
 };
 
-const DEFAULT_CHECKLIST = { wins: false, honest: false, plan: false, identity: false };
+const DEFAULT_CHECKLIST = { wins: false, commitment_checkin: false, honest: false, plan: false, identity: false };
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
