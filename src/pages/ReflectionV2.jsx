@@ -247,6 +247,7 @@ export default function ReflectionV2() {
 
   // Guard ref — initSession only ever runs once per mount
   const initCalledRef = useRef(false);
+  const initSentRef = useRef(false);
 
   // messagesRef always holds the latest messages array so sendMessage
   // never closes over a stale snapshot.
@@ -446,11 +447,14 @@ export default function ReflectionV2() {
         );
         setUsedChipMessageIds(usedIds);
       } else {
-        try {
-          await sendMessage('__INIT__', session.id, restoredState);
-        } catch (initMsgErr) {
-          console.error('[initSession] sendMessage __INIT__ failed:', initMsgErr);
-          throw initMsgErr;
+        if (!initSentRef.current) {
+          initSentRef.current = true;
+          try {
+            await sendMessage('__INIT__', session.id, restoredState);
+          } catch (initMsgErr) {
+            console.error('[initSession] sendMessage __INIT__ failed:', initMsgErr);
+            throw initMsgErr;
+          }
         }
       }
     } catch (error) {
@@ -823,6 +827,7 @@ export default function ReflectionV2() {
           commitment_checkin_done: false,
         });
         initCalledRef.current = false;
+        initSentRef.current = false;
         setIsInitializing(true);
         initSession();
       }
