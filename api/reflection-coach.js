@@ -18,6 +18,7 @@
 import OpenAI from 'openai';
 import { createClient } from '@supabase/supabase-js';
 import { classifyIntent, DEFAULT_CLASSIFICATION } from '../src/lib/classifier.js';
+import { getAuthenticatedUserId } from '../src/lib/auth.js';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -1450,6 +1451,13 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
+  let authenticatedUserId;
+  try {
+    authenticatedUserId = await getAuthenticatedUserId(req);
+  } catch (err) {
+    return res.status(401).json({ error: err.message });
+  }
+
   try {
     const {
       user_id, session_id,
@@ -1464,7 +1472,7 @@ export default async function handler(req, res) {
     const client_local_date = context.client_local_date || null;
     const client_tz_offset = context.client_tz_offset != null ? context.client_tz_offset : null;
 
-    if (!user_id || !user_message) {
+    if (!authenticatedUserId || !user_message) {
       return res.status(400).json({ error: 'user_id and user_message are required' });
     }
 
@@ -1481,7 +1489,7 @@ export default async function handler(req, res) {
 
     // ── 1b. Evaluate goal commitments before loading stats ────────────────
     if (client_local_date) {
-      await runGoalCommitmentEvaluation(user_id, client_local_date);
+      await runGoalCommitmentEvaluation(authenticatedUserId, client_local_date);
     }
 
     // ── 2. Load context in parallel ───────────────────────────────────────
@@ -1489,17 +1497,17 @@ export default async function handler(req, res) {
 
     const [followUpQueue, growthMarkers, reflectionPatterns, recentSessions, yesterdayCommitment, userProfile, activeGoalsRaw, commitmentStats, todayEarlyCommitment, goalCommitmentStats, userInsights] =
       await Promise.all([
-        loadFollowUpQueue(user_id, currentSignals, client_local_date),
-        loadGrowthMarkers(user_id, client_local_date),
-        loadReflectionPatterns(user_id, client_local_date),
-        loadRecentSessionsSummary(user_id),
-        loadYesterdayCommitment(user_id, client_local_date),
-        loadUserProfile(user_id),
-        loadActiveGoals(user_id),
-        loadCommitmentStats(user_id, client_local_date),
-        loadTodayEarlyCommitment(user_id, client_local_date),
-        loadGoalCommitmentStats(user_id, client_local_date),
-        loadUserInsights(user_id),
+        loadFollowUpQueue(authenticatedUserId, currentSignals, client_local_date),
+        loadGrowthMarkers(authenticatedUserId, client_local_date),
+        loadReflectionPatterns(authenticatedUserId, client_local_date),
+        loadRecentSessionsSummary(authenticatedUserId),
+        loadYesterdayCommitment(authenticatedUserId, client_local_date),
+        loadUserProfile(authenticatedUserId),
+        loadActiveGoals(authenticatedUserId),
+        loadCommitmentStats(authenticatedUserId, client_local_date),
+        loadTodayEarlyCommitment(authenticatedUserId, client_local_date),
+        loadGoalCommitmentStats(authenticatedUserId, client_local_date),
+        loadUserInsights(authenticatedUserId),
       ]);
 
     // Attach motivation signal to each goal
@@ -1608,7 +1616,7 @@ export default async function handler(req, res) {
     const shouldSearchMemories = isMemoryMode || intentData?.emotional_state === 'reflective';
     let relevantMemories = [];
     if (!isInit && shouldSearchMemories) {
-      relevantMemories = await searchRelevantMemories(user_id, user_message, 3);
+      relevantMemories = await searchRelevantMemories(authenticatedUserId, user_message, 3);
     }
 
     const goalsContext = activeGoals.length > 0
@@ -1788,7 +1796,7 @@ export default async function handler(req, res) {
       dbPromises.push(updateSessionExercise(session_id, result.exercise_run, consecutiveExcuses));
     }
     if (result.exercise_run && result.exercise_run !== 'none' && isFirstTimeExercise) {
-      dbPromises.push(markExerciseExplained(user_id, result.exercise_run, exercisesExplained));
+      dbPromises.push(markExerciseExplained(authenticatedUserId, result.exercise_run, exercisesExplained));
     }
     if (dueFollowUp) {
       dbPromises.push(markFollowUpTriggered(dueFollowUp.id));
@@ -1845,7 +1853,7 @@ Return ONLY valid JSON: { "question": "..." }`,
             followUpQuestion = `How has the work you did on ${exerciseName} been showing up since our last session?`;
           }
 
-          await queueFollowUp(user_id, session_id, {
+          await queueFollowUp(authenticatedUserId, session_id, {
             context: `${result.exercise_run} exercise run during reflection`,
             question: followUpQuestion,
             check_back_after: daysFromNow(3, client_local_date),
@@ -1854,7 +1862,7 @@ Return ONLY valid JSON: { "question": "..." }`,
         })()
       );
       dbPromises.push(
-        upsertGrowthMarker(user_id, result.exercise_run, {
+        upsertGrowthMarker(authenticatedUserId, result.exercise_run, {
           exercise_run: result.exercise_run,
           check_in_message: `How has your work on ${result.exercise_run.replace(/_/g, ' ')} been going?`,
         }, client_local_date)
@@ -1889,7 +1897,7 @@ Return ONLY valid JSON: { "question": "..." }`,
         dbPromises.push(
           supabase.from('user_profiles')
             .update({ last_session_completed_at: today(client_local_date) })
-            .eq('id', user_id).then(() => {}).catch(() => {})
+            .eq('id', authenticatedUserId).then(() => {}).catch(() => {})
         );
       }
     }
@@ -1924,7 +1932,7 @@ Only link when genuinely relevant. Do not force links. Multiple items can have t
           for (const item of items) {
             const goalId = item.goal_id && activeGoals.some((g) => g.id === item.goal_id) ? item.goal_id : null;
             await supabase.from('goal_commitment_log').insert({
-              user_id,
+              user_id: authenticatedUserId,
               session_id: session_id || null,
               goal_id: goalId,
               commitment_text: item.text || commitmentText,
@@ -1935,7 +1943,7 @@ Only link when genuinely relevant. Do not force links. Multiple items can have t
           // If no items extracted or all null, log one unlinked entry
           if (items.length === 0) {
             await supabase.from('goal_commitment_log').insert({
-              user_id,
+              user_id: authenticatedUserId,
               session_id: session_id || null,
               goal_id: null,
               commitment_text: commitmentText,
@@ -1948,7 +1956,7 @@ Only link when genuinely relevant. Do not force links. Multiple items can have t
     }
 
     if (result.extracted_data?.blocker_tags?.length) {
-      dbPromises.push(upsertBlockerPatterns(user_id, result.extracted_data.blocker_tags, client_local_date));
+      dbPromises.push(upsertBlockerPatterns(authenticatedUserId, result.extracted_data.blocker_tags, client_local_date));
     }
 
     // Write wins to session row immediately when extracted (so data survives session interruption)
@@ -2023,7 +2031,7 @@ Only link when genuinely relevant. Do not force links. Multiple items can have t
             .from('goals')
             .select('whys, why_it_matters')
             .eq('id', goalId)
-            .eq('user_id', user_id)
+            .eq('user_id', authenticatedUserId)
             .single();
 
           let currentWhys = Array.isArray(goalData?.whys) ? [...goalData.whys] : [];
@@ -2044,7 +2052,7 @@ Only link when genuinely relevant. Do not force links. Multiple items can have t
             .from('goals')
             .update({ whys: currentWhys, last_mentioned_at: clientToday })
             .eq('id', goalId)
-            .eq('user_id', user_id);
+            .eq('user_id', authenticatedUserId);
         } catch (_e) { /* fail silently */ }
       })();
     }
@@ -2059,7 +2067,7 @@ Only link when genuinely relevant. Do not force links. Multiple items can have t
           last_mentioned_at: clientToday,
         })
         .eq('id', goalId)
-        .eq('user_id', user_id)
+        .eq('user_id', authenticatedUserId)
         .then(() => {}).catch(() => {});
     }
 
@@ -2070,7 +2078,7 @@ Only link when genuinely relevant. Do not force links. Multiple items can have t
         .from('goals')
         .select('depth_insights')
         .eq('id', goalId)
-        .eq('user_id', user_id)
+        .eq('user_id', authenticatedUserId)
         .maybeSingle()
         .then(({ data }) => {
           const current = Array.isArray(data?.depth_insights) ? data.depth_insights : [];
@@ -2082,7 +2090,7 @@ Only link when genuinely relevant. Do not force links. Multiple items can have t
             .from('goals')
             .update({ depth_insights: updated, last_mentioned_at: clientToday })
             .eq('id', goalId)
-            .eq('user_id', user_id);
+            .eq('user_id', authenticatedUserId);
         })
         .then(() => {}).catch(() => {});
     }
@@ -2096,7 +2104,7 @@ Only link when genuinely relevant. Do not force links. Multiple items can have t
         result.goal_suggestion_pending = suggestion;
       } else if (suggestion.action && suggestion.goal_id) {
         const goalTitle = activeGoals.find(g => g.id === suggestion.goal_id)?.title || 'that goal';
-        queueFollowUp(user_id, session_id, {
+        queueFollowUp(authenticatedUserId, session_id, {
           context: `goal_suggestion: action=${suggestion.action}, goal_id=${suggestion.goal_id}, reason="${suggestion.reason}"`,
           question: suggestion.action === 'pause'
             ? `Last time you mentioned you might want to pause your goal around "${goalTitle}". Is that still where you're at?`
@@ -2113,7 +2121,7 @@ Only link when genuinely relevant. Do not force links. Multiple items can have t
         .from('goals')
         .update({ last_mentioned_at: clientToday })
         .eq('id', result.extracted_data.goal_id_referenced)
-        .eq('user_id', user_id)
+        .eq('user_id', authenticatedUserId)
         .then(() => {}).catch(() => {});
     }
 
@@ -2126,7 +2134,7 @@ Only link when genuinely relevant. Do not force links. Multiple items can have t
           const sessionUpdates = { summary: summaryText };
           if (embedding) sessionUpdates.embedding = embedding;
           await supabase.from('reflection_sessions').update(sessionUpdates).eq('id', session_id);
-          await evolveUserProfile(user_id, summaryText, userProfile, recentSessions);
+          await evolveUserProfile(authenticatedUserId, summaryText, userProfile, recentSessions);
 
           // Shallow session detector — if wins or honest checklist items are missing,
           // queue a strategic follow-up for the next night
@@ -2162,7 +2170,7 @@ Return ONLY valid JSON: { "question": "...", "context": "brief context on why th
               });
               const followUpData = JSON.parse(followUpCompletion.choices[0].message.content);
               if (followUpData.question) {
-                await queueFollowUp(user_id, session_id, {
+                await queueFollowUp(authenticatedUserId, session_id, {
                   context: followUpData.context || 'Auto-queued from shallow session detector',
                   question: followUpData.question,
                   check_back_after: daysFromNow(1, client_local_date),
@@ -2178,14 +2186,14 @@ Return ONLY valid JSON: { "question": "...", "context": "brief context on why th
             const { data: pendingLogs } = await supabase
               .from('goal_commitment_log')
               .select('id')
-              .eq('user_id', user_id)
+              .eq('user_id', authenticatedUserId)
               .eq('date', yesterday)
               .is('kept', null);
             if (pendingLogs && pendingLogs.length > 0) {
               await supabase
                 .from('goal_commitment_log')
                 .update({ kept: true, evaluated_at: new Date().toISOString() })
-                .eq('user_id', user_id)
+                .eq('user_id', authenticatedUserId)
                 .eq('date', yesterday)
                 .is('kept', null);
             }
@@ -2197,13 +2205,13 @@ Return ONLY valid JSON: { "question": "...", "context": "brief context on why th
             await supabase
               .from('goal_commitment_log')
               .update({ kept: false, evaluated_at: new Date().toISOString() })
-              .eq('user_id', user_id)
+              .eq('user_id', authenticatedUserId)
               .lt('date', twoDaysAgo)
               .is('kept', null);
           } catch (_e) { /* fail silently */ }
         } catch (_e) {}
       })();
-      triggerInsightSynthesis(user_id);
+      triggerInsightSynthesis(authenticatedUserId);
     }
 
     result.consecutive_excuses = consecutiveExcuses;
@@ -2213,12 +2221,12 @@ Return ONLY valid JSON: { "question": "...", "context": "brief context on why th
     if (intentData?.accountability_signal === 'excuse') {
       supabase.from('user_profiles')
         .update({ consecutive_excuse_sessions: effectiveConsecutiveExcuses + 1 })
-        .eq('id', user_id)
+        .eq('id', authenticatedUserId)
         .then(() => {}).catch(() => {});
     } else if (intentData?.accountability_signal === 'ownership') {
       supabase.from('user_profiles')
         .update({ consecutive_excuse_sessions: 0 })
-        .eq('id', user_id)
+        .eq('id', authenticatedUserId)
         .then(() => {}).catch(() => {});
     }
 

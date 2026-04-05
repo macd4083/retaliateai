@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { getAuthenticatedUserId } from '../src/lib/auth.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -10,12 +11,19 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
+  let authenticatedUserId;
+  try {
+    authenticatedUserId = await getAuthenticatedUserId(req);
+  } catch (err) {
+    return res.status(401).json({ error: err.message });
+  }
+
   try {
     const { user_id, title, description, why_it_matters, category } = req.body;
 
     console.log('Received goal creation request:', { user_id, title, category });
 
-    if (!user_id || !title) {
+    if (!authenticatedUserId || !title) {
       return res.status(400).json({ error: 'user_id and title are required' });
     }
 
@@ -29,7 +37,7 @@ export default async function handler(req, res) {
     const { data, error } = await supabase
       .from('goals')
       .insert({
-        user_id: user_id,
+        user_id: authenticatedUserId,
         title: title,
         description: description || null,
         why_it_matters: why_it_matters || null,
