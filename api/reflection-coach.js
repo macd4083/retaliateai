@@ -78,6 +78,33 @@ const supabase = createClient(
  *   ORDER BY embedding <=> query_embedding
  *   LIMIT match_count;
  * $$;
+ *
+ * -- Atomic JSONB array append with deduplication (run once in SQL editor):
+ * -- CREATE OR REPLACE FUNCTION append_jsonb_array_item(
+ * --   p_table text,
+ * --   p_column text,
+ * --   p_id uuid,
+ * --   p_item jsonb,
+ * --   p_dedup_key text DEFAULT NULL
+ * -- )
+ * -- RETURNS void
+ * -- LANGUAGE plpgsql
+ * -- AS $$
+ * -- BEGIN
+ * --   EXECUTE format(
+ * --     'UPDATE %I SET %I = CASE
+ * --        WHEN %2$I IS NULL THEN jsonb_build_array($1)
+ * --        WHEN $2 IS NOT NULL AND EXISTS (
+ * --          SELECT 1 FROM jsonb_array_elements(%2$I) el WHERE el->>$2 = $1->>$2
+ * --        ) THEN %2$I
+ * --        ELSE %2$I || jsonb_build_array($1)
+ * --      END,
+ * --      updated_at = now()
+ * --      WHERE id = $3',
+ * --     p_table, p_column
+ * --   ) USING p_item, p_dedup_key, p_id;
+ * -- END;
+ * -- $$;
  */
 
 const DEFAULT_CHECKLIST = { wins: false, honest: false, plan: false, identity: false };
@@ -1964,51 +1991,29 @@ Only link when genuinely relevant. Do not force links. Multiple items can have t
       dbPromises.push(upsertBlockerPatterns(authenticatedUserId, result.extracted_data.blocker_tags, client_local_date));
     }
 
-    // Write wins to session row immediately when extracted (so data survives session interruption)
+    // Write wins to session row atomically (avoids read-then-write race condition)
     if (session_id && result.extracted_data?.win_text) {
       dbPromises.push(
-        (async () => {
-          try {
-            const { data: current } = await supabase
-              .from('reflection_sessions')
-              .select('wins')
-              .eq('id', session_id)
-              .maybeSingle();
-            const existingWins = Array.isArray(current?.wins) ? current.wins : [];
-            const newWin = { text: result.extracted_data.win_text };
-            const alreadyThere = existingWins.some(w => (typeof w === 'string' ? w : w?.text) === result.extracted_data.win_text);
-            if (!alreadyThere) {
-              await supabase
-                .from('reflection_sessions')
-                .update({ wins: [...existingWins, newWin], updated_at: new Date().toISOString() })
-                .eq('id', session_id);
-            }
-          } catch (e) { console.error('Failed to persist win to session:', e); }
-        })()
+        supabase.rpc('append_jsonb_array_item', {
+          p_table: 'reflection_sessions',
+          p_column: 'wins',
+          p_id: session_id,
+          p_item: { text: result.extracted_data.win_text },
+          p_dedup_key: 'text',
+        }).catch((e) => console.error('Failed to persist win to session:', e))
       );
     }
 
-    // Write misses to session row immediately when extracted (so data survives session interruption)
+    // Write misses to session row atomically (avoids read-then-write race condition)
     if (session_id && result.extracted_data?.miss_text) {
       dbPromises.push(
-        (async () => {
-          try {
-            const { data: current } = await supabase
-              .from('reflection_sessions')
-              .select('misses')
-              .eq('id', session_id)
-              .maybeSingle();
-            const existingMisses = Array.isArray(current?.misses) ? current.misses : [];
-            const newMiss = { text: result.extracted_data.miss_text };
-            const alreadyThere = existingMisses.some(m => (typeof m === 'string' ? m : m?.text) === result.extracted_data.miss_text);
-            if (!alreadyThere) {
-              await supabase
-                .from('reflection_sessions')
-                .update({ misses: [...existingMisses, newMiss], updated_at: new Date().toISOString() })
-                .eq('id', session_id);
-            }
-          } catch (e) { console.error('Failed to persist miss to session:', e); }
-        })()
+        supabase.rpc('append_jsonb_array_item', {
+          p_table: 'reflection_sessions',
+          p_column: 'misses',
+          p_id: session_id,
+          p_item: { text: result.extracted_data.miss_text },
+          p_dedup_key: 'text',
+        }).catch((e) => console.error('Failed to persist miss to session:', e))
       );
     }
 
