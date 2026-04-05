@@ -608,15 +608,20 @@ function computePreSessionState(clientDate, { recentSessions = [], followUpQueue
   } catch (_e) { return {}; }
 }
 
-async function triggerInsightSynthesis(userId) {
+async function triggerInsightSynthesis(userId, authToken) {
   try {
     const baseUrl = process.env.VERCEL_URL
       ? `https://${process.env.VERCEL_URL}`
       : 'http://localhost:3000';
+    // Validate token format (no whitespace/newlines) before forwarding as a header value
+    const safeToken = authToken && /^[^\s]+$/.test(authToken) ? authToken : null;
     fetch(`${baseUrl}/api/synthesize-insights`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: userId }),
+      headers: {
+        'Content-Type': 'application/json',
+        // Forward the caller's JWT so synthesize-insights can verify identity server-side
+        ...(safeToken ? { Authorization: `Bearer ${safeToken}` } : {}),
+      },
     }).catch(() => {});
   } catch (_e) {}
 }
@@ -2211,7 +2216,9 @@ Return ONLY valid JSON: { "question": "...", "context": "brief context on why th
           } catch (_e) { /* fail silently */ }
         } catch (_e) {}
       })();
-      triggerInsightSynthesis(authenticatedUserId);
+      const authHeader = req.headers?.authorization || req.headers?.Authorization || '';
+      const authToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+      triggerInsightSynthesis(authenticatedUserId, authToken);
     }
 
     result.consecutive_excuses = consecutiveExcuses;
