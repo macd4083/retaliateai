@@ -1194,6 +1194,7 @@ function buildSessionContext({
   effectiveConsecutiveExcuses,
   suggestedNextStage,
   streak,
+  daysSinceLastSession,
 }) {
   // ── Derive internal values ─────────────────────────────────────────────
   const sessionExercisesRun = Array.isArray(sessionState.exercises_run) ? sessionState.exercises_run : [];
@@ -1318,6 +1319,7 @@ function buildSessionContext({
     stage_hint: suggestedNextStage,
     ready_to_close: sessionReadyToClose,
     streak,
+    days_since_last_session: daysSinceLastSession,
     pre_session_state: preSessionState || undefined,
     instructions: [
       // ── Pre-session state opener instructions (isInit only) ───────────
@@ -1531,7 +1533,18 @@ export default async function handler(req, res) {
       growth_areas: userProfile?.growth_areas || [],
       strengths: userProfile?.strengths || [],
       consecutive_excuse_sessions: userProfile?.consecutive_excuse_sessions || 0,
+      last_session_completed_at: userProfile?.last_session_completed_at || null,
     };
+
+    // ── 3b. Days since last session ───────────────────────────────────────
+    let daysSinceLastSession = null;
+    if (profile.last_session_completed_at && client_local_date) {
+      const [lastYear, lastMonth, lastDay] = profile.last_session_completed_at.split('-').map(Number);
+      const [todayYear, todayMonth, todayDay] = client_local_date.split('-').map(Number);
+      const lastMs = new Date(lastYear, lastMonth - 1, lastDay).getTime();
+      const todayMs = new Date(todayYear, todayMonth - 1, todayDay).getTime();
+      daysSinceLastSession = Math.round((todayMs - lastMs) / (1000 * 60 * 60 * 24));
+    }
 
     // ── 4. Consecutive excuses ────────────────────────────────────────────────
     let consecutiveExcuses = session_state.consecutive_excuses || 0;
@@ -1668,6 +1681,7 @@ export default async function handler(req, res) {
       effectiveConsecutiveExcuses,
       suggestedNextStage,
       streak: context.reflection_streak || context.streak || 0,
+      daysSinceLastSession,
     });
 
     // ── 9. Build messages ─────────────────────────────────────────────────
@@ -1869,6 +1883,13 @@ Return ONLY valid JSON: { "question": "..." }`,
           supabase.from('reflection_sessions')
             .update({ ...updates, updated_at: new Date().toISOString() })
             .eq('id', session_id).then(() => {}).catch(() => {})
+        );
+      }
+      if (result.is_session_complete && client_local_date) {
+        dbPromises.push(
+          supabase.from('user_profiles')
+            .update({ last_session_completed_at: today(client_local_date) })
+            .eq('id', user_id).then(() => {}).catch(() => {})
         );
       }
     }
