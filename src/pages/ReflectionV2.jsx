@@ -487,6 +487,17 @@ export default function ReflectionV2() {
       .map((m) => ({ role: m.role, content: m.content }));
   }
 
+  // ── Auth header helper ────────────────────────────────────────────────────
+
+  async function getAuthHeaders() {
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    return {
+      'Content-Type': 'application/json',
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+    };
+  }
+
   // ── Send message ──────────────────────────────────────────────────────────
 
   async function sendMessage(userText, overrideSessionId, overrideState) {
@@ -575,7 +586,7 @@ export default function ReflectionV2() {
       try {
         response = await fetch('/api/reflection-coach', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: await getAuthHeaders(),
           signal: controller.signal,
           body: JSON.stringify({
             user_id: user.id,
@@ -743,7 +754,7 @@ export default function ReflectionV2() {
         try {
           const statsRes = await fetch('/api/commitment-stats', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: await getAuthHeaders(),
             body: JSON.stringify({ user_id: user.id }),
           });
           if (statsRes.ok) {
@@ -799,7 +810,7 @@ export default function ReflectionV2() {
     try {
       const res = await fetch('/api/admin-reset', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await getAuthHeaders(),
         body: JSON.stringify({
           user_id: user.id,
           admin_secret: import.meta.env.VITE_ADMIN_SECRET,
@@ -847,7 +858,7 @@ export default function ReflectionV2() {
     try {
       const res = await fetch('/api/create-goal', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await getAuthHeaders(),
         body: JSON.stringify({ user_id: user.id, title, category: category || null }),
       });
       if (!res.ok) return;
