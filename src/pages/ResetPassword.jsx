@@ -50,36 +50,36 @@ export default function ResetPassword() {
 
   if (success) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-purple-50 px-4">
-        <div className="max-w-md w-full bg-white p-8 rounded-2xl shadow-lg border border-slate-200 text-center">
-          <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <CheckCircle className="w-8 h-8 text-green-600" />
+      <div className="min-h-screen flex items-center justify-center bg-zinc-950 px-4">
+        <div className="max-w-md w-full bg-zinc-900 p-8 rounded-2xl border border-zinc-800 text-center">
+          <div className="w-16 h-16 bg-green-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+            <CheckCircle className="w-8 h-8 text-green-400" />
           </div>
-          <h2 className="text-2xl font-bold text-slate-900 mb-2">Password Updated!</h2>
-          <p className="text-slate-600 mb-4">Redirecting to your journal...</p>
+          <h2 className="text-2xl font-bold text-white mb-2">Password Updated!</h2>
+          <p className="text-zinc-400 mb-4">Redirecting to your journal...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-purple-50 px-4">
-      <div className="max-w-md w-full bg-white p-8 rounded-2xl shadow-lg border border-slate-200">
+    <div className="min-h-screen flex items-center justify-center bg-zinc-950 px-4">
+      <div className="max-w-md w-full bg-zinc-900 p-8 rounded-2xl border border-zinc-800">
         <div className="text-center mb-8">
-          <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <Lock className="w-6 h-6 text-blue-600" />
+          <div className="w-12 h-12 bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+            <Lock className="w-6 h-6 text-red-500" />
           </div>
-          <h1 className="text-3xl font-bold text-slate-900 mb-2">
+          <h1 className="text-3xl font-bold text-white mb-2">
             Create New Password
           </h1>
-          <p className="text-slate-600">
+          <p className="text-zinc-400">
             Enter your new password below
           </p>
         </div>
         
         <form onSubmit={handleResetPassword} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">
+            <label className="block text-sm font-medium text-zinc-300 mb-2">
               New Password
             </label>
             <div className="relative">
@@ -87,7 +87,7 @@ export default function ResetPassword() {
                 type={showPassword ? 'text' : 'password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-4 py-2 pr-12 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-4 py-2 pr-12 bg-zinc-800 border border-zinc-700 text-white placeholder-zinc-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500"
                 placeholder="••••••••"
                 required
                 minLength={6}
@@ -95,7 +95,7 @@ export default function ResetPassword() {
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors"
                 tabIndex={-1}
               >
                 {showPassword ? (
@@ -108,15 +108,15 @@ export default function ResetPassword() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">
+            <label className="block text-sm font-medium text-zinc-300 mb-2">
               Confirm Password
             </label>
             <div className="relative">
               <input
                 type={showConfirmPassword ? 'text' : 'password'}
                 value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e. target.value)}
-                className="w-full px-4 py-2 pr-12 border border-slate-300 rounded-lg focus:outline-none focus: ring-2 focus:ring-blue-500"
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                className="w-full px-4 py-2 pr-12 bg-zinc-800 border border-zinc-700 text-white placeholder-zinc-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500"
                 placeholder="••••••••"
                 required
                 minLength={6}
@@ -124,7 +124,7 @@ export default function ResetPassword() {
               <button
                 type="button"
                 onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors"
                 tabIndex={-1}
               >
                 {showConfirmPassword ? (
@@ -139,8 +139,8 @@ export default function ResetPassword() {
           {message && (
             <div className={`p-3 rounded-lg text-sm ${
               messageType === 'success' 
-                ? 'bg-green-50 text-green-800 border border-green-200' 
-                : 'bg-red-50 text-red-800 border border-red-200'
+                ? 'bg-green-900/20 text-green-400 border border-green-800' 
+                : 'bg-red-900/20 text-red-400 border border-red-800'
             }`}>
               {message}
             </div>
@@ -149,7 +149,7 @@ export default function ResetPassword() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full px-4 py-3 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {loading ? 'Updating...' : 'Update Password'}
           </button>
