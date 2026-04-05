@@ -40,7 +40,7 @@ export default function Login() {
     } else {
       setMessage('Login successful!');
       setMessageType('success');
-      setTimeout(() => navigate('/Journal'), 1000);
+      setTimeout(() => navigate('/reflection'), 1000);
     }
     setLoading(false);
   };
@@ -336,7 +336,7 @@ function VerificationWaitingScreen({ signupEmail, signupPassword, onBack, naviga
           if (signInData?.session) {
             clearInterval(checkInterval);
             clearInterval(dotsInterval);
-            navigate('/Journal');
+            navigate('/reflection');
           }
         }
       } catch (err) {
@@ -378,7 +378,7 @@ function VerificationWaitingScreen({ signupEmail, signupPassword, onBack, naviga
       
       setOtpMessage('Email verified! Redirecting...');
       setOtpMessageType('success');
-      setTimeout(() => navigate('/Journal'), 1500);
+      setTimeout(() => navigate('/reflection'), 1500);
     }
   };
 
