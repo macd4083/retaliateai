@@ -1246,7 +1246,7 @@ function buildSessionContext({
   const identityMissing = !mergedChecklist.identity && messageCount >= 6;
   const sessionReadyToClose = tomorrowFilled && mergedChecklist.wins && (mergedChecklist.identity || messageCount >= 10);
   const forceClose = messageCount >= 14 && tomorrowFilled && mergedChecklist.wins;
-  const depthProbeNeeded = intentData?.depth_opportunity && !sessionExercisesRun.includes('depth_probe') && sessionState.current_stage === 'honest' && !mergedChecklist.honest;
+  const depthProbeNeeded = intentData?.depth_opportunity && !sessionExercisesRun.includes('depth_probe');
   const isMemoryMode = ['question', 'advice_request', 'memory_query'].includes(intentData?.intent);
   const goalMissingWhy = goalsNeedWhyBuilding.find(g => !Array.isArray(g.whys) || g.whys.length === 0) ?? null;
 
@@ -1391,7 +1391,7 @@ function buildSessionContext({
         ? `RUN: ${suggestedPractice}. first_time=${isFirstTimeExercise}. Fill ALL placeholders with user's actual words — never output [bracket placeholders]. Set exercise_run="${suggestedPractice}".`
         : null,
       depthProbeNeeded
-        ? `DEPTH OPPORTUNITY (honest stage only): The user is in the honest stage and gave a depth opportunity. Go deeper here. Ask WHY or surface the belief underneath. Use a depth_probe question naturally. Set exercise_run="depth_probe". Store any insight in extracted_data.depth_insight. Only probe for depth when current_stage === 'honest' and the honest checklist item is not yet complete. IMPORTANT: Do NOT frame this as goal-specific unless the user is directly referencing a goal — keep depth probes grounded in what the user just said.`
+        ? `DEPTH OPPORTUNITY: The user's message has depth potential. Go deeper here — ask WHY or surface the belief underneath what they just said. Use a depth_probe question naturally. Set exercise_run="depth_probe". Store any insight in extracted_data.depth_insight. IMPORTANT: Do NOT frame this as goal-specific unless the user is directly referencing a goal — keep depth probes grounded in what the user just said.`
         : null,
       sessionState.wins?.length > 0 && Array.isArray(sessionState.wins) && sessionState.current_stage !== 'wins'
         ? `CALLBACK: The user mentioned these wins earlier: ${sessionState.wins.map(w => typeof w === 'string' ? w : w?.text).filter(Boolean).join(', ')}. If relevant, reference these by name when asking about follow-through or identity. Never re-ask what you already know.`
