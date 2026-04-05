@@ -1530,14 +1530,15 @@ export default async function handler(req, res) {
       long_term_patterns: userProfile?.long_term_patterns || [],
       growth_areas: userProfile?.growth_areas || [],
       strengths: userProfile?.strengths || [],
+      consecutive_excuse_sessions: userProfile?.consecutive_excuse_sessions || 0,
     };
 
     // ── 4. Consecutive excuses ────────────────────────────────────────────────
     let consecutiveExcuses = session_state.consecutive_excuses || 0;
-    const crossSessionExcuses = userProfile?.consecutive_excuse_sessions || 0;
+    const crossSessionExcuses = profile?.consecutive_excuse_sessions || 0;
 
-    // Use whichever is higher — cross-session count persists across days
-    const effectiveConsecutiveExcuses = Math.max(consecutiveExcuses, crossSessionExcuses);
+    // Seed from cross-session count at session start; use in-session count once tracking begins
+    const effectiveConsecutiveExcuses = session_state.consecutive_excuses > 0 ? session_state.consecutive_excuses : crossSessionExcuses;
 
     if (intentData?.accountability_signal === 'excuse') consecutiveExcuses += 1;
     else if (intentData?.accountability_signal === 'ownership') consecutiveExcuses = 0;
