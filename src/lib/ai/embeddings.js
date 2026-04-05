@@ -7,7 +7,7 @@ export const embeddingHelpers = {
     const response = await fetch('/api/generate-embedding', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:  JSON.stringify({ content: text. trim() }),
+      body:  JSON.stringify({ text: text.trim() }),
     });
 
     if (!response.ok) {
