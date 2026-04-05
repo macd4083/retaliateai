@@ -959,7 +959,7 @@ export default function ReflectionV2() {
           <ProgressBar currentStage={isComplete ? 'complete' : sessionState.current_stage} stages={stages} />
         </div>
 
-        <AnimatePresence mode="sync">
+        <AnimatePresence mode="wait">
           {isInitializing ? (
             <motion.div
               key="loading"
@@ -977,10 +977,10 @@ export default function ReflectionV2() {
           ) : showHero ? (
             <motion.div
               key="hero"
-              initial={{ opacity: 0, y: 20 }}
+              initial={{ opacity: 0, y: -8 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
-              transition={{ duration: 0.4, ease: 'easeOut' }}
+              transition={{ duration: 0.35, ease: 'easeOut' }}
               className="flex-1 flex flex-col items-center justify-start pt-20 px-4 pb-8"
             >
               <div className="bg-zinc-800 border border-zinc-700 rounded-2xl px-8 py-5 max-w-2xl w-full">
