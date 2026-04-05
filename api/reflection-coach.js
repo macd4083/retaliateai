@@ -1184,8 +1184,6 @@ function buildSessionContext({
   preSessionState,
   yesterdayCommitment,
   relevantMemories,
-  dueFollowUp,
-  dueGrowthMarker,
   clientDate,
   sameDayCommitment,
   activeGoals,
@@ -1223,7 +1221,7 @@ function buildSessionContext({
     return line;
   }).join(' | ') || 'none';
 
-  return {
+  const contextData = {
     profile: {
       name: profile.display_name,
       identity: profile.identity_statement,
@@ -1311,11 +1309,11 @@ function buildSessionContext({
       emotion: intentData.emotional_state,
       depth_opportunity: intentData.depth_opportunity || false,
     },
-    follow_up_due: dueFollowUp ? { context: dueFollowUp.context, question: dueFollowUp.question } : null,
-    pending_follow_up: dueFollowUp
-      ? { id: dueFollowUp.id, context: dueFollowUp.context, question: dueFollowUp.question }
+    follow_up_due: followUpQueue ? { context: followUpQueue.context, question: followUpQueue.question } : null,
+    pending_follow_up: followUpQueue
+      ? { id: followUpQueue.id, context: followUpQueue.context, question: followUpQueue.question }
       : undefined,
-    growth_marker_due: dueGrowthMarker ? { theme: dueGrowthMarker.theme, msg: dueGrowthMarker.check_in_message } : null,
+    growth_marker_due: growthMarkers ? { theme: growthMarkers.theme, msg: growthMarkers.check_in_message } : null,
     exercise: { suggested: suggestedPractice, first_time: isFirstTimeExercise, explained: exercisesExplained },
     stage_hint: suggestedNextStage,
     ready_to_close: sessionReadyToClose,
@@ -1341,8 +1339,8 @@ function buildSessionContext({
       isMemoryMode
         ? `MEMORY MODE: The user asked a question or wants advice. PAUSE the stage workflow — do NOT advance stage or update checklist. Answer their question directly using relevant_memories and their profile data. Use their actual past words and patterns. Be specific, not generic. End your response with ONE question that naturally brings them back to the ${sessionState.current_stage || 'wins'} stage.`
         : null,
-      dueFollowUp ? 'PRIORITY: Surface follow_up_due question first.' : null,
-      dueGrowthMarker ? 'Weave in growth_marker_due check-in naturally.' : null,
+      followUpQueue ? 'PRIORITY: Surface follow_up_due question first.' : null,
+      growthMarkers ? 'Weave in growth_marker_due check-in naturally.' : null,
       intentData?.accountability_signal === 'excuse'
         ? `ANTI-EXCUSE: consecutive_excuses=${effectiveConsecutiveExcuses}. Use their specific words. Follow the protocol.`
         : null,
@@ -1439,6 +1437,8 @@ function buildSessionContext({
       'NEVER drill a topic already answered.',
     ].filter(Boolean),
   };
+
+  return { role: 'user', content: JSON.stringify(contextData) };
 }
 
 // ── Main handler ──────────────────────────────────────────────────────────────
@@ -1640,39 +1640,34 @@ export default async function handler(req, res) {
       return false;
     });
 
-    const contextBlock = {
-      role: 'user',
-      content: JSON.stringify(buildSessionContext({
-        profile,
-        goalsContext,
-        userInsights,
-        sessionState: session_state,
-        recentSessions,
-        reflectionPatterns,
-        commitmentStats,
-        followUpQueue,
-        growthMarkers,
-        suggestedPractice: suggestedExercise,
-        isFirstTimeExercise,
-        exercisesExplained,
-        intentData,
-        preSessionState,
-        yesterdayCommitment,
-        relevantMemories,
-        dueFollowUp,
-        dueGrowthMarker,
-        clientDate: client_local_date,
-        sameDayCommitment,
-        activeGoals,
-        quietGoals,
-        goalsNeedWhyBuilding,
-        messageCount,
-        consecutiveExcuses,
-        effectiveConsecutiveExcuses,
-        suggestedNextStage,
-        streak: context.reflection_streak || context.streak || 0,
-      })),
-    };
+    const contextBlock = buildSessionContext({
+      profile,
+      goalsContext,
+      userInsights,
+      sessionState: session_state,
+      recentSessions,
+      reflectionPatterns,
+      commitmentStats,
+      followUpQueue: dueFollowUp,
+      growthMarkers: dueGrowthMarker,
+      suggestedPractice: suggestedExercise,
+      isFirstTimeExercise,
+      exercisesExplained,
+      intentData,
+      preSessionState,
+      yesterdayCommitment,
+      relevantMemories,
+      clientDate: client_local_date,
+      sameDayCommitment,
+      activeGoals,
+      quietGoals,
+      goalsNeedWhyBuilding,
+      messageCount,
+      consecutiveExcuses,
+      effectiveConsecutiveExcuses,
+      suggestedNextStage,
+      streak: context.reflection_streak || context.streak || 0,
+    });
 
     // ── 9. Build messages ─────────────────────────────────────────────────
     const exerciseInstruction = suggestedExercise !== 'none' && EXERCISE_PROMPTS[suggestedExercise]
