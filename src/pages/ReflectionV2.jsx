@@ -186,7 +186,9 @@ function SummaryCard({ data, streak, followThroughStats }) {
   );
 }
 
-function ChatMessage({ message, onChipSelect, chipsDisabled, streak, followThroughStats }) {
+const FIRST_MESSAGE_TRANSITION = { type: 'spring', stiffness: 300, damping: 30 };
+
+function ChatMessage({ message, isFirstMessage, onChipSelect, chipsDisabled, streak, followThroughStats }) {
   const isUser = message.role === 'user';
   if (message.isTyping) return <TypingIndicator />;
   if (message.message_type === 'summary_card' && message.card_data) {
@@ -209,15 +211,23 @@ function ChatMessage({ message, onChipSelect, chipsDisabled, streak, followThrou
         </div>
       )}
       <div className="max-w-[75%]">
-        <div
+        <motion.div
+          layoutId={isFirstMessage ? 'first-message-bubble' : undefined}
           className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
             isUser
               ? 'bg-red-600 text-white rounded-tr-sm'
               : 'bg-zinc-800 border border-zinc-700 text-white rounded-tl-sm'
           }`}
+          transition={FIRST_MESSAGE_TRANSITION}
         >
-          {message.content}
-        </div>
+          {isFirstMessage ? (
+            <motion.span layoutId="first-message-text" transition={FIRST_MESSAGE_TRANSITION}>
+              {message.content}
+            </motion.span>
+          ) : (
+            message.content
+          )}
+        </motion.div>
         {!isUser && message.chips && message.chips.length > 0 && (
           <div className="flex flex-wrap gap-2 mt-2">
             {message.chips.map((chip) => (
@@ -959,7 +969,7 @@ export default function ReflectionV2() {
           <ProgressBar currentStage={isComplete ? 'complete' : sessionState.current_stage} stages={stages} />
         </div>
 
-        <AnimatePresence mode="wait">
+        <AnimatePresence mode="sync">
           {isInitializing ? (
             <motion.div
               key="loading"
@@ -977,17 +987,27 @@ export default function ReflectionV2() {
           ) : showHero ? (
             <motion.div
               key="hero"
-              initial={{ opacity: 0, y: -8 }}
-              animate={{ opacity: 1, y: 0 }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.35, ease: 'easeOut' }}
               className="flex-1 flex flex-col items-center justify-start pt-20 px-4 pb-8"
             >
-              <div className="bg-zinc-800 border border-zinc-700 rounded-2xl px-8 py-5 max-w-2xl w-full">
-                <p className="text-2xl font-semibold text-white text-center leading-snug">
+              <motion.div
+                layoutId="first-message-bubble"
+                initial={{ opacity: 0, scale: 0.97 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={FIRST_MESSAGE_TRANSITION}
+                className="bg-zinc-800 border border-zinc-700 rounded-2xl px-8 py-5 max-w-2xl w-full"
+              >
+                <motion.p
+                  layoutId="first-message-text"
+                  transition={FIRST_MESSAGE_TRANSITION}
+                  className="text-2xl font-semibold text-white text-center leading-snug"
+                >
                   {messages[0].content}
-                </p>
-              </div>
+                </motion.p>
+              </motion.div>
               {messages[0].chips && messages[0].chips.length > 0 && (
                 <div className="flex flex-wrap gap-2 mt-6 justify-center">
                   {messages[0].chips.map((chip) => (
@@ -1019,6 +1039,7 @@ export default function ReflectionV2() {
                 <ChatMessage
                   key={message.id}
                   message={message}
+                  isFirstMessage={index === 0 && message.role === 'assistant'}
                   onChipSelect={(chip) => handleChipSelect(chip, message.id)}
                   chipsDisabled={usedChipMessageIds.has(message.id) || isLoading}
                   streak={streak}
@@ -1126,9 +1147,10 @@ export default function ReflectionV2() {
               </div>
             ) : (
               <motion.div
-                animate={{ maxHeight: chatFocused ? '120px' : '44px' }}
-                transition={{ type: 'spring', stiffness: 280, damping: 28 }}
-                className="flex-1 overflow-hidden"
+                animate={{ maxHeight: showHero ? '56px' : '120px' }}
+                transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+                style={{ overflow: 'hidden' }}
+                className="flex-1"
               >
                 <textarea
                   ref={textareaRef}
@@ -1140,7 +1162,7 @@ export default function ReflectionV2() {
                   placeholder={textareaPlaceholder}
                   rows={1}
                   className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-500 resize-none focus:outline-none focus:border-zinc-500 transition-colors disabled:opacity-50"
-                  style={{ height: '44px', minHeight: '44px' }}
+                  style={{ minHeight: '44px', maxHeight: showHero ? '56px' : '120px' }}
                 />
               </motion.div>
             )}
