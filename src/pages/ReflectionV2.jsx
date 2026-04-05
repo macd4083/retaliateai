@@ -463,8 +463,10 @@ export default function ReflectionV2() {
           deduped.filter((m) => m.role === 'assistant' && m.chips).map((m) => m.id)
         );
         setUsedChipMessageIds(usedIds);
-        // Returning user — skip hero state
-        setChatFocused(true);
+        // Only skip hero if there are actual conversation messages beyond the opener
+        if (deduped.length > 1) {
+          setChatFocused(true);
+        }
       } else {
         if (!initSentRef.current) {
           initSentRef.current = true;
