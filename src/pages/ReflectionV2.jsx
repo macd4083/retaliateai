@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { motion, AnimatePresence, LayoutGroup } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Send, Moon, RefreshCw } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
@@ -186,9 +186,8 @@ function SummaryCard({ data, streak, followThroughStats }) {
   );
 }
 
-function ChatMessage({ message, onChipSelect, chipsDisabled, streak, followThroughStats, isFirstMessage }) {
+function ChatMessage({ message, onChipSelect, chipsDisabled, streak, followThroughStats }) {
   const isUser = message.role === 'user';
-  const isFirstAiBubble = isFirstMessage && !isUser;
   if (message.isTyping) return <TypingIndicator />;
   if (message.message_type === 'summary_card' && message.card_data) {
     return (
@@ -210,18 +209,15 @@ function ChatMessage({ message, onChipSelect, chipsDisabled, streak, followThrou
         </div>
       )}
       <div className="max-w-[75%]">
-        <motion.div
-          layoutId={isFirstAiBubble ? 'first-ai-bubble' : undefined}
-          layout={isFirstAiBubble ? true : undefined}
-          transition={isFirstAiBubble ? { layout: { duration: 0.5, ease: [0.25, 0.46, 0.45, 0.94] } } : undefined}
+        <div
           className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
             isUser
               ? 'bg-red-600 text-white rounded-tr-sm'
               : 'bg-zinc-800 border border-zinc-700 text-white rounded-tl-sm'
           }`}
         >
-          <motion.span layout="position">{message.content}</motion.span>
-        </motion.div>
+          {message.content}
+        </div>
         {!isUser && message.chips && message.chips.length > 0 && (
           <div className="flex flex-wrap gap-2 mt-2">
             {message.chips.map((chip) => (
@@ -958,7 +954,6 @@ export default function ReflectionV2() {
 
   return (
     <AppShellV2 title="Nightly Reflection">
-      <LayoutGroup>
       <div className="flex flex-col h-full">
         <div className="flex-shrink-0 border-b border-zinc-800 bg-zinc-950">
           <ProgressBar currentStage={isComplete ? 'complete' : sessionState.current_stage} stages={stages} />
@@ -982,25 +977,17 @@ export default function ReflectionV2() {
           ) : showHero ? (
             <motion.div
               key="hero"
-              initial={{ opacity: 0, y: 24 }}
+              initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -12 }}
-              transition={{ duration: 0.45, ease: 'easeOut' }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.4, ease: 'easeOut' }}
               className="flex-1 flex flex-col items-center justify-start pt-20 px-4 pb-8"
             >
-              <motion.div
-                layoutId="first-ai-bubble"
-                layout
-                transition={{ layout: { duration: 0.5, ease: [0.25, 0.46, 0.45, 0.94] } }}
-                className="bg-zinc-800 border border-zinc-700 rounded-2xl px-8 py-5 max-w-2xl w-full"
-              >
-                <motion.p
-                  layout="position"
-                  className="text-2xl font-semibold text-white text-center leading-snug"
-                >
+              <div className="bg-zinc-800 border border-zinc-700 rounded-2xl px-8 py-5 max-w-2xl w-full">
+                <p className="text-2xl font-semibold text-white text-center leading-snug">
                   {messages[0].content}
-                </motion.p>
-              </motion.div>
+                </p>
+              </div>
               {messages[0].chips && messages[0].chips.length > 0 && (
                 <div className="flex flex-wrap gap-2 mt-6 justify-center">
                   {messages[0].chips.map((chip) => (
@@ -1036,7 +1023,6 @@ export default function ReflectionV2() {
                   chipsDisabled={usedChipMessageIds.has(message.id) || isLoading}
                   streak={streak}
                   followThroughStats={followThroughStats}
-                  isFirstMessage={index === 0}
                 />
               ))}
               {initError && (
@@ -1139,18 +1125,24 @@ export default function ReflectionV2() {
                 />
               </div>
             ) : (
-              <textarea
-                ref={textareaRef}
-                value={inputValue}
-                onChange={handleTextareaChange}
-                onKeyDown={handleKeyDown}
-                onFocus={() => setChatFocused(true)}
-                disabled={isInitializing}
-                placeholder={textareaPlaceholder}
-                rows={1}
-                className="flex-1 bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-500 resize-none focus:outline-none focus:border-zinc-500 transition-colors disabled:opacity-50"
-                style={{ height: '44px', minHeight: '44px', maxHeight: '120px' }}
-              />
+              <motion.div
+                animate={{ maxHeight: chatFocused ? '120px' : '44px' }}
+                transition={{ type: 'spring', stiffness: 280, damping: 28 }}
+                className="flex-1 overflow-hidden"
+              >
+                <textarea
+                  ref={textareaRef}
+                  value={inputValue}
+                  onChange={handleTextareaChange}
+                  onKeyDown={handleKeyDown}
+                  onFocus={() => setChatFocused(true)}
+                  disabled={isInitializing}
+                  placeholder={textareaPlaceholder}
+                  rows={1}
+                  className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-500 resize-none focus:outline-none focus:border-zinc-500 transition-colors disabled:opacity-50"
+                  style={{ height: '44px', minHeight: '44px' }}
+                />
+              </motion.div>
             )}
             <button
               onClick={handleSend}
@@ -1168,7 +1160,6 @@ export default function ReflectionV2() {
           </div>
         </div>
       </div>
-      </LayoutGroup>
     </AppShellV2>
   );
 }
