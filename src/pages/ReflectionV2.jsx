@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Send, Moon, RefreshCw } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
@@ -288,6 +289,7 @@ export default function ReflectionV2() {
   const [activeGoals, setActiveGoals] = useState([]);
   const [showGoalChips, setShowGoalChips] = useState(false);
   const [selectedGoalChips, setSelectedGoalChips] = useState([]);
+  const [chatFocused, setChatFocused] = useState(false);
 
   const timeContext = getTimeContext();
 
@@ -446,6 +448,8 @@ export default function ReflectionV2() {
           deduped.filter((m) => m.role === 'assistant' && m.chips).map((m) => m.id)
         );
         setUsedChipMessageIds(usedIds);
+        // Returning user — skip hero state
+        setChatFocused(true);
       } else {
         if (!initSentRef.current) {
           initSentRef.current = true;
@@ -874,6 +878,7 @@ export default function ReflectionV2() {
 
   function handleChipSelect(chip, messageId) {
     if (isLoading) return;
+    setChatFocused(true);
     setUsedChipMessageIds((prev) => new Set([...prev, messageId]));
     sendMessage(chip.label);
   }
@@ -901,6 +906,7 @@ export default function ReflectionV2() {
     setSelectedGoalChips([]);
 
     sendMessage(fullMessage);
+    textareaRef.current?.focus();
   }
 
   function handleKeyDown(e) {
@@ -918,12 +924,18 @@ export default function ReflectionV2() {
   }
 
   useEffect(() => {
-    if (!isInitializing && textareaRef.current) {
+    if (!isInitializing && chatFocused && textareaRef.current) {
       textareaRef.current.focus();
     }
-  }, [isInitializing]);
+  }, [isInitializing, chatFocused]);
 
-  // ── Render ────────────────────────────��───────────────────────────────────
+  // ── Render ───────────────────────────
+  const showHero = !chatFocused && !isInitializing && messages.length === 1 && messages[0]?.role === 'assistant';
+  const textareaPlaceholder = showHero
+    ? 'Start typing...'
+    : isComplete
+    ? 'Anything else on your mind...'
+    : STAGE_PLACEHOLDERS[sessionState.current_stage] || 'Tell me more...';
 
   return (
     <AppShellV2 title="Nightly Reflection">
@@ -932,16 +944,60 @@ export default function ReflectionV2() {
           <ProgressBar currentStage={isComplete ? 'complete' : sessionState.current_stage} stages={stages} />
         </div>
 
-        <div className="flex-1 overflow-y-auto px-4 py-4">
+        <AnimatePresence mode="wait">
           {isInitializing ? (
-            <div className="flex items-center justify-center h-full">
+            <motion.div
+              key="loading"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="flex-1 flex items-center justify-center"
+            >
               <div className="flex flex-col items-center gap-3">
                 <div className="w-8 h-8 border-2 border-zinc-700 border-t-red-500 rounded-full animate-spin" />
                 <p className="text-zinc-500 text-sm">Loading your session...</p>
               </div>
-            </div>
+            </motion.div>
+          ) : showHero ? (
+            <motion.div
+              key="hero"
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -16 }}
+              transition={{ type: 'spring', stiffness: 280, damping: 28 }}
+              className="flex-1 flex flex-col items-center justify-center px-6 pb-8"
+            >
+              <p className="text-2xl font-semibold text-white text-center leading-snug">
+                {messages[0].content}
+              </p>
+              {messages[0].chips && messages[0].chips.length > 0 && (
+                <div className="flex flex-wrap gap-2 mt-6 justify-center">
+                  {messages[0].chips.map((chip) => (
+                    <button
+                      key={chip.value}
+                      onClick={() => handleChipSelect(chip, messages[0].id)}
+                      disabled={usedChipMessageIds.has(messages[0].id) || isLoading}
+                      className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+                        usedChipMessageIds.has(messages[0].id) || isLoading
+                          ? 'bg-zinc-800 border-zinc-700 text-zinc-600 cursor-not-allowed'
+                          : 'bg-zinc-800 border-zinc-600 text-zinc-200 hover:bg-red-900 hover:border-red-700 hover:text-white cursor-pointer'
+                      }`}
+                    >
+                      {chip.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </motion.div>
           ) : (
-            <>
+            <motion.div
+              key="chat"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.25 }}
+              className="flex-1 overflow-y-auto px-4 py-4"
+            >
               {messages.map((message) => (
                 <ChatMessage
                   key={message.id}
@@ -995,11 +1051,16 @@ export default function ReflectionV2() {
               )}
 
               <div ref={messagesEndRef} />
-            </>
+            </motion.div>
           )}
-        </div>
+        </AnimatePresence>
 
-        <div className="flex-shrink-0 border-t border-zinc-800 bg-zinc-950 px-4 py-3">
+        <motion.div
+          layout
+          animate={{ paddingBottom: showHero ? '72px' : '0px' }}
+          transition={{ type: 'spring', stiffness: 280, damping: 28 }}
+          className="flex-shrink-0 border-t border-zinc-800 bg-zinc-950 px-4 py-3"
+        >
           <div className="space-y-2">
             {isAdmin && (
               <div className="flex justify-end">
@@ -1043,7 +1104,8 @@ export default function ReflectionV2() {
                   value={inputValue}
                   onChange={handleTextareaChange}
                   onKeyDown={handleKeyDown}
-                  disabled={isLoading || isInitializing}
+                  onFocus={() => setChatFocused(true)}
+                  disabled={isInitializing}
                   placeholder="Anything else on your mind..."
                   rows={1}
                   className="w-full bg-transparent px-4 py-3 text-sm text-white placeholder-zinc-500 resize-none focus:outline-none"
@@ -1056,8 +1118,9 @@ export default function ReflectionV2() {
                 value={inputValue}
                 onChange={handleTextareaChange}
                 onKeyDown={handleKeyDown}
-                disabled={isLoading || isInitializing}
-                placeholder={isComplete ? 'Anything else on your mind...' : (STAGE_PLACEHOLDERS[sessionState.current_stage] || 'Tell me more...')}
+                onFocus={() => setChatFocused(true)}
+                disabled={isInitializing}
+                placeholder={textareaPlaceholder}
                 rows={1}
                 className="flex-1 bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-500 resize-none focus:outline-none focus:border-zinc-500 transition-colors disabled:opacity-50"
                 style={{ minHeight: '44px', maxHeight: '120px' }}
@@ -1077,7 +1140,7 @@ export default function ReflectionV2() {
             </button>
             </div>
           </div>
-        </div>
+        </motion.div>
       </div>
     </AppShellV2>
   );
