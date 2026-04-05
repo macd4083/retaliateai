@@ -14,6 +14,7 @@
 
 import OpenAI from 'openai';
 import { createClient } from '@supabase/supabase-js';
+import { getAuthenticatedUserId } from '../src/lib/auth.js';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
@@ -69,8 +70,14 @@ Return ONLY valid JSON:
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { user_id, force_refresh = false } = req.body || {};
-  if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+  let authenticatedUserId;
+  try {
+    authenticatedUserId = await getAuthenticatedUserId(req);
+  } catch (err) {
+    return res.status(401).json({ error: err.message });
+  }
+
+  const { force_refresh = false } = req.body || {};
 
   try {
     // ── 0. Cache check ────────────────────────────────────────────────────
@@ -78,7 +85,7 @@ export default async function handler(req, res) {
       const { data: recent } = await supabase
         .from('user_insights')
         .select('synthesized_at')
-        .eq('user_id', user_id)
+        .eq('user_id', authenticatedUserId)
         .eq('is_active', true)
         .order('synthesized_at', { ascending: false })
         .limit(1)
@@ -90,7 +97,7 @@ export default async function handler(req, res) {
           const { data: cached } = await supabase
             .from('user_insights')
             .select('*')
-            .eq('user_id', user_id)
+            .eq('user_id', authenticatedUserId)
             .eq('is_active', true)
             .order('confidence_score', { ascending: false })
             .limit(MAX_ACTIVE_INSIGHTS);
@@ -103,7 +110,7 @@ export default async function handler(req, res) {
     const { data: sessions } = await supabase
       .from('reflection_sessions')
       .select('date, summary, wins, misses, tomorrow_commitment, mood_end_of_day, blocker_tags, checklist')
-      .eq('user_id', user_id)
+      .eq('user_id', authenticatedUserId)
       .eq('is_complete', true)
       .order('date', { ascending: false })
       .limit(30);
@@ -116,7 +123,7 @@ export default async function handler(req, res) {
     const { data: depthMessages } = await supabase
       .from('reflection_messages')
       .select('extracted_data, created_at')
-      .eq('user_id', user_id)
+      .eq('user_id', authenticatedUserId)
       .not('extracted_data', 'is', null)
       .gte('created_at', new Date(Date.now() - 30 * 86400000).toISOString())
       .order('created_at', { ascending: false })
@@ -130,7 +137,7 @@ export default async function handler(req, res) {
     const { data: existingInsights } = await supabase
       .from('user_insights')
       .select('id, pattern_label, pattern_type, pattern_narrative, synthesized_at, confidence_score')
-      .eq('user_id', user_id)
+      .eq('user_id', authenticatedUserId)
       .eq('is_active', true)
       .order('synthesized_at', { ascending: false })
       .limit(MAX_ACTIVE_INSIGHTS);
@@ -139,7 +146,7 @@ export default async function handler(req, res) {
     const { data: profile } = await supabase
       .from('user_profiles')
       .select('identity_statement, big_goal, why, future_self, values, short_term_state, long_term_patterns, strengths, growth_areas')
-      .eq('id', user_id)
+      .eq('id', authenticatedUserId)
       .maybeSingle();
 
     // ── 5. Build GPT context ──────────────────────────────────────────────
@@ -206,7 +213,7 @@ export default async function handler(req, res) {
     // ── 7. Upsert insights ────────────────────────────────────────────────
     for (const insight of newInsights) {
       const row = {
-        user_id,
+        user_id: authenticatedUserId,
         pattern_label: insight.pattern_label,
         pattern_type: insight.pattern_type,
         pattern_narrative: insight.pattern_narrative,
@@ -226,7 +233,7 @@ export default async function handler(req, res) {
           .from('user_insights')
           .update(row)
           .eq('id', insight.existing_insight_id)
-          .eq('user_id', user_id)
+          .eq('user_id', authenticatedUserId)
           .select('id')
           .maybeSingle();
         if (updated?.id) upsertedIds.add(updated.id);
@@ -257,7 +264,7 @@ export default async function handler(req, res) {
     const { data: fresh } = await supabase
       .from('user_insights')
       .select('*')
-      .eq('user_id', user_id)
+      .eq('user_id', authenticatedUserId)
       .eq('is_active', true)
       .order('confidence_score', { ascending: false })
       .limit(MAX_ACTIVE_INSIGHTS);
