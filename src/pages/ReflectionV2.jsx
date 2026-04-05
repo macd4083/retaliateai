@@ -186,9 +186,7 @@ function SummaryCard({ data, streak, followThroughStats }) {
   );
 }
 
-const FIRST_MESSAGE_TRANSITION = { type: 'spring', stiffness: 300, damping: 30 };
-
-function ChatMessage({ message, onChipSelect, chipsDisabled, streak, followThroughStats, isFirstMessage }) {
+function ChatMessage({ message, onChipSelect, chipsDisabled, streak, followThroughStats }) {
   const isUser = message.role === 'user';
   if (message.isTyping) return <TypingIndicator />;
   if (message.message_type === 'summary_card' && message.card_data) {
@@ -211,26 +209,15 @@ function ChatMessage({ message, onChipSelect, chipsDisabled, streak, followThrou
         </div>
       )}
       <div className="max-w-[75%]">
-        <motion.div
-          layoutId={isFirstMessage ? 'first-message-bubble' : undefined}
+        <div
           className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
             isUser
               ? 'bg-red-600 text-white rounded-tr-sm'
               : 'bg-zinc-800 border border-zinc-700 text-white rounded-tl-sm'
           }`}
-          transition={FIRST_MESSAGE_TRANSITION}
         >
-          {isFirstMessage ? (
-            <motion.span
-              layoutId="first-message-text"
-              transition={FIRST_MESSAGE_TRANSITION}
-            >
-              {message.content}
-            </motion.span>
-          ) : (
-            message.content
-          )}
-        </motion.div>
+          {message.content}
+        </div>
         {!isUser && message.chips && message.chips.length > 0 && (
           <div className="flex flex-wrap gap-2 mt-2">
             {message.chips.map((chip) => (
@@ -957,6 +944,12 @@ export default function ReflectionV2() {
     }
   }, [isInitializing, chatFocused]);
 
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
+  }, []);
+
   // ── Render ───────────────────────────
   const showHero = !chatFocused && !isInitializing && messages.length === 1 && messages[0]?.role === 'assistant';
   const textareaPlaceholder = showHero
@@ -997,17 +990,17 @@ export default function ReflectionV2() {
               className="flex-1 flex flex-col items-center justify-start pt-20 px-4 pb-8"
             >
               <motion.div
-                layoutId="first-message-bubble"
-                className="bg-zinc-800 border border-zinc-700 rounded-2xl px-6 py-4 max-w-sm w-full"
-                transition={FIRST_MESSAGE_TRANSITION}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.4, ease: 'easeOut' }}
+                className="bg-zinc-800 border border-zinc-700 rounded-2xl px-8 py-5 max-w-2xl w-full"
               >
-                <motion.p
-                  layoutId="first-message-text"
+                <p
                   className="text-2xl font-semibold text-white text-center leading-snug"
-                  transition={FIRST_MESSAGE_TRANSITION}
                 >
                   {messages[0].content}
-                </motion.p>
+                </p>
               </motion.div>
               {messages[0].chips && messages[0].chips.length > 0 && (
                 <div className="flex flex-wrap gap-2 mt-6 justify-center">
@@ -1036,7 +1029,7 @@ export default function ReflectionV2() {
               transition={{ duration: 0.25 }}
               className="flex-1 overflow-y-auto px-4 py-4"
             >
-              {messages.map((message, index) => (
+              {messages.map((message) => (
                 <ChatMessage
                   key={message.id}
                   message={message}
@@ -1044,7 +1037,6 @@ export default function ReflectionV2() {
                   chipsDisabled={usedChipMessageIds.has(message.id) || isLoading}
                   streak={streak}
                   followThroughStats={followThroughStats}
-                  isFirstMessage={index === 0}
                 />
               ))}
               {initError && (
