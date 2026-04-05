@@ -186,7 +186,9 @@ function SummaryCard({ data, streak, followThroughStats }) {
   );
 }
 
-function ChatMessage({ message, onChipSelect, chipsDisabled, streak, followThroughStats }) {
+const FIRST_MESSAGE_TRANSITION = { type: 'spring', stiffness: 300, damping: 30 };
+
+function ChatMessage({ message, onChipSelect, chipsDisabled, streak, followThroughStats, isFirstMessage }) {
   const isUser = message.role === 'user';
   if (message.isTyping) return <TypingIndicator />;
   if (message.message_type === 'summary_card' && message.card_data) {
@@ -209,13 +211,26 @@ function ChatMessage({ message, onChipSelect, chipsDisabled, streak, followThrou
         </div>
       )}
       <div className="max-w-[75%]">
-        <div className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
-          isUser
-            ? 'bg-red-600 text-white rounded-tr-sm'
-            : 'bg-zinc-800 border border-zinc-700 text-white rounded-tl-sm'
-        }`}>
-          {message.content}
-        </div>
+        <motion.div
+          layoutId={isFirstMessage ? 'first-message-bubble' : undefined}
+          className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+            isUser
+              ? 'bg-red-600 text-white rounded-tr-sm'
+              : 'bg-zinc-800 border border-zinc-700 text-white rounded-tl-sm'
+          }`}
+          transition={FIRST_MESSAGE_TRANSITION}
+        >
+          {isFirstMessage ? (
+            <motion.span
+              layoutId="first-message-text"
+              transition={FIRST_MESSAGE_TRANSITION}
+            >
+              {message.content}
+            </motion.span>
+          ) : (
+            message.content
+          )}
+        </motion.div>
         {!isUser && message.chips && message.chips.length > 0 && (
           <div className="flex flex-wrap gap-2 mt-2">
             {message.chips.map((chip) => (
@@ -955,7 +970,7 @@ export default function ReflectionV2() {
           <ProgressBar currentStage={isComplete ? 'complete' : sessionState.current_stage} stages={stages} />
         </div>
 
-        <AnimatePresence mode="wait">
+        <AnimatePresence mode="sync">
           {isInitializing ? (
             <motion.div
               key="loading"
@@ -979,9 +994,19 @@ export default function ReflectionV2() {
               transition={{ type: 'spring', stiffness: 280, damping: 28 }}
               className="flex-1 flex flex-col items-center justify-start pt-20 px-6 pb-8"
             >
-              <p className="text-2xl font-semibold text-white text-center leading-snug">
-                {messages[0].content}
-              </p>
+              <motion.div
+                layoutId="first-message-bubble"
+                className="bg-zinc-800 border border-zinc-700 rounded-2xl px-6 py-4 max-w-sm w-full"
+                transition={FIRST_MESSAGE_TRANSITION}
+              >
+                <motion.p
+                  layoutId="first-message-text"
+                  className="text-2xl font-semibold text-white text-center leading-snug"
+                  transition={FIRST_MESSAGE_TRANSITION}
+                >
+                  {messages[0].content}
+                </motion.p>
+              </motion.div>
               {messages[0].chips && messages[0].chips.length > 0 && (
                 <div className="flex flex-wrap gap-2 mt-6 justify-center">
                   {messages[0].chips.map((chip) => (
@@ -1009,7 +1034,7 @@ export default function ReflectionV2() {
               transition={{ duration: 0.25 }}
               className="flex-1 overflow-y-auto px-4 py-4"
             >
-              {messages.map((message) => (
+              {messages.map((message, index) => (
                 <ChatMessage
                   key={message.id}
                   message={message}
@@ -1017,6 +1042,7 @@ export default function ReflectionV2() {
                   chipsDisabled={usedChipMessageIds.has(message.id) || isLoading}
                   streak={streak}
                   followThroughStats={followThroughStats}
+                  isFirstMessage={index === 0}
                 />
               ))}
               {initError && (
