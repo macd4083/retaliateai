@@ -990,11 +990,11 @@ export default function ReflectionV2() {
           ) : showHero ? (
             <motion.div
               key="hero"
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -16 }}
-              transition={{ type: 'spring', stiffness: 280, damping: 28 }}
-              className="flex-1 flex flex-col items-center justify-start pt-20 px-6 pb-8"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="flex-1 flex flex-col items-center justify-start pt-20 px-4 pb-8"
             >
               <motion.div
                 layoutId="first-message-bubble"
@@ -1094,12 +1094,7 @@ export default function ReflectionV2() {
           )}
         </AnimatePresence>
 
-        <motion.div
-          layout
-          animate={{ paddingBottom: showHero ? '72px' : '0px' }}
-          transition={{ type: 'spring', stiffness: 280, damping: 28 }}
-          className="flex-shrink-0 border-t border-zinc-800 bg-zinc-950 px-4 py-3"
-        >
+        <div className="flex-shrink-0 border-t border-zinc-800 bg-zinc-950 px-4 py-3">
           <div className="space-y-2">
             {isAdmin && (
               <div className="flex justify-end">
@@ -1179,7 +1174,7 @@ export default function ReflectionV2() {
             </button>
             </div>
           </div>
-        </motion.div>
+        </div>
       </div>
     </AppShellV2>
   );
