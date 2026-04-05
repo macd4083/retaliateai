@@ -2198,25 +2198,6 @@ Return ONLY valid JSON: { "question": "...", "context": "brief context on why th
             } catch (_e) { /* fail silently */ }
           }
 
-          // Evaluate yesterday's goal commitments now that this session is complete
-          try {
-            const yesterday = localDate(-1, client_local_date);
-            const { data: pendingLogs } = await supabase
-              .from('goal_commitment_log')
-              .select('id')
-              .eq('user_id', authenticatedUserId)
-              .eq('date', yesterday)
-              .is('kept', null);
-            if (pendingLogs && pendingLogs.length > 0) {
-              await supabase
-                .from('goal_commitment_log')
-                .update({ kept: true, evaluated_at: new Date().toISOString() })
-                .eq('user_id', authenticatedUserId)
-                .eq('date', yesterday)
-                .is('kept', null);
-            }
-          } catch (_e) { /* fail silently */ }
-
           // Mark commitments from 2+ days ago that are still null as missed
           try {
             const twoDaysAgo = localDate(-2, client_local_date);
