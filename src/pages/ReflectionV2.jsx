@@ -977,7 +977,7 @@ export default function ReflectionV2() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -16 }}
               transition={{ type: 'spring', stiffness: 280, damping: 28 }}
-              className="flex-1 flex flex-col items-center justify-center px-6 pb-8"
+              className="flex-1 flex flex-col items-center justify-start pt-20 px-6 pb-8"
             >
               <p className="text-2xl font-semibold text-white text-center leading-snug">
                 {messages[0].content}
