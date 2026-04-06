@@ -211,6 +211,9 @@ function ChatMessage({ message, isFirstMessage, onChipSelect, chipsDisabled, str
       )}
       <div className="max-w-[75%]">
         <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2, ease: 'easeOut' }}
           className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
             isUser
               ? 'bg-red-600 text-white rounded-tr-sm'
@@ -984,7 +987,10 @@ export default function ReflectionV2() {
               transition={{ duration: 0.35, ease: 'easeOut' }}
               className="flex-1 flex flex-col items-center justify-start pt-20 px-4 pb-8"
             >
-              <div
+              <motion.div
+                initial={{ opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.4, ease: 'easeOut', delay: 0.1 }}
                 className="bg-zinc-800 border border-zinc-700 rounded-2xl px-8 py-5 max-w-2xl w-full"
               >
                 <p
@@ -992,9 +998,14 @@ export default function ReflectionV2() {
                 >
                   {messages[0].content}
                 </p>
-              </div>
+              </motion.div>
               {messages[0].chips && messages[0].chips.length > 0 && (
-                <div className="flex flex-wrap gap-2 mt-6 justify-center">
+                <motion.div
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3, ease: 'easeOut', delay: 0.25 }}
+                  className="flex flex-wrap gap-2 mt-6 justify-center"
+                >
                   {messages[0].chips.map((chip) => (
                     <button
                       key={chip.value}
@@ -1009,7 +1020,7 @@ export default function ReflectionV2() {
                       {chip.label}
                     </button>
                   ))}
-                </div>
+                </motion.div>
               )}
             </motion.div>
           ) : (
