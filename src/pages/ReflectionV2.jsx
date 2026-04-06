@@ -186,7 +186,6 @@ function SummaryCard({ data, streak, followThroughStats }) {
   );
 }
 
-const FIRST_MESSAGE_TRANSITION = { type: 'spring', stiffness: 300, damping: 30 };
 
 function ChatMessage({ message, isFirstMessage, onChipSelect, chipsDisabled, streak, followThroughStats }) {
   const isUser = message.role === 'user';
@@ -212,21 +211,13 @@ function ChatMessage({ message, isFirstMessage, onChipSelect, chipsDisabled, str
       )}
       <div className="max-w-[75%]">
         <motion.div
-          layoutId={isFirstMessage ? 'first-message-bubble' : undefined}
           className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
             isUser
               ? 'bg-red-600 text-white rounded-tr-sm'
               : 'bg-zinc-800 border border-zinc-700 text-white rounded-tl-sm'
           }`}
-          transition={FIRST_MESSAGE_TRANSITION}
         >
-          {isFirstMessage ? (
-            <motion.span layoutId="first-message-text" transition={FIRST_MESSAGE_TRANSITION}>
-              {message.content}
-            </motion.span>
-          ) : (
-            message.content
-          )}
+          {message.content}
         </motion.div>
         {!isUser && message.chips && message.chips.length > 0 && (
           <div className="flex flex-wrap gap-2 mt-2">
@@ -993,21 +984,15 @@ export default function ReflectionV2() {
               transition={{ duration: 0.35, ease: 'easeOut' }}
               className="flex-1 flex flex-col items-center justify-start pt-20 px-4 pb-8"
             >
-              <motion.div
-                layoutId="first-message-bubble"
-                initial={{ opacity: 0, scale: 0.97 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={FIRST_MESSAGE_TRANSITION}
+              <div
                 className="bg-zinc-800 border border-zinc-700 rounded-2xl px-8 py-5 max-w-2xl w-full"
               >
-                <motion.p
-                  layoutId="first-message-text"
-                  transition={FIRST_MESSAGE_TRANSITION}
+                <p
                   className="text-2xl font-semibold text-white text-center leading-snug"
                 >
                   {messages[0].content}
-                </motion.p>
-              </motion.div>
+                </p>
+              </div>
               {messages[0].chips && messages[0].chips.length > 0 && (
                 <div className="flex flex-wrap gap-2 mt-6 justify-center">
                   {messages[0].chips.map((chip) => (
