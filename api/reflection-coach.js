@@ -337,6 +337,7 @@ RETURN JSON EXACTLY (no markdown, no extra keys):
   "commitment_checkin_done": false,
   "show_goal_chips": false,
   "follow_up_queued": false,
+  "follow_up_triggered": false,
   "is_session_complete": false
 }`;
 
@@ -1802,6 +1803,7 @@ export default async function handler(req, res) {
     result.exercise_run = result.exercise_run || 'none';
     result.checklist_updates = result.checklist_updates || { ...DEFAULT_CHECKLIST };
     result.follow_up_queued = result.follow_up_queued || false;
+    result.follow_up_triggered = result.follow_up_triggered === true;
     result.wins_asked_for_more = result.wins_asked_for_more === true;
     result.honest_depth = result.honest_depth === true;
     result.commitment_checkin_done = result.commitment_checkin_done === true;
@@ -1838,7 +1840,7 @@ export default async function handler(req, res) {
     if (result.exercise_run && result.exercise_run !== 'none' && isFirstTimeExercise) {
       dbPromises.push(markExerciseExplained(authenticatedUserId, result.exercise_run, exercisesExplained));
     }
-    if (dueFollowUp) {
+    if (dueFollowUp && result.follow_up_triggered === true) {
       dbPromises.push(markFollowUpTriggered(dueFollowUp.id));
     }
 
