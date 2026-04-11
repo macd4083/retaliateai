@@ -366,8 +366,11 @@ RETURN JSON EXACTLY (no markdown, no extra keys):
   "show_goal_chips": false,
   "follow_up_queued": false,
   "follow_up_triggered": false,
-  "is_session_complete": false
-}`;
+  "is_session_complete": false,
+  "directive_completed": null
+}
+
+Set "directive_completed" to the id of the directive you executed this message (from active_directive.id in context) when you have fully delivered the directive's intended coaching action in your response, or null if you did not act on it. Only mark one directive as completed per message.`;
 
 // ── Per-exercise coach instructions (injected only when that exercise is selected) ──
 
@@ -1257,6 +1260,388 @@ Return valid JSON only:
   } catch (_e) {}
 }
 
+// ── Session Directive Queue ───────────────────────────────────────────────────
+
+/**
+ * Builds a prioritized array of coaching directive objects based on current session state.
+ * Each directive maps to exactly one conditional instruction from the original instructions[] array.
+ * Returns only directives whose condition is currently true, not already completed, and not already queued.
+ */
+function buildDirectiveQueue({
+  preSessionState, isMemoryMode, followUpQueue, growthMarkers,
+  intentData, suggestedPractice, depthProbeNeeded, sessionState,
+  profile, reflectionPatterns, commitmentStats, yesterdayCommitment,
+  goalMissingWhy, messageCount, sessionReadyToClose, forceClose,
+  identityMissing, honestMissing, suggestedNextStage, sessionExercisesRun,
+  userInsights, recentSessions, effectiveConsecutiveExcuses,
+  currentDirectiveQueue, completedDirectives,
+}) {
+  const currentStage = sessionState.current_stage || 'wins';
+  const allDirectives = [];
+  const exercisesExplained = Array.isArray(profile?.exercises_explained) ? profile.exercises_explained : [];
+  const isFirstTimeExercise = suggestedPractice !== 'none' && !exercisesExplained.includes(suggestedPractice);
+
+  // ── cold_start_opener ──────────────────────────────────────────────────
+  if (preSessionState?.cold_start) {
+    allDirectives.push({
+      id: 'cold_start_opener',
+      instruction: `COLD START (${preSessionState.days_since_last_session ?? 'many'} days away): Do NOT open generically. Reference the gap directly and warmly. ${preSessionState.returning_user_context ? `Last session context: "${preSessionState.returning_user_context}".` : ''} Open with something specific that shows you remember them and have been thinking about where they left off.`,
+      priority: 1,
+      preferred_stage: 'wins',
+      fire_next_session: false,
+    });
+  }
+
+  // ── init_follow_up ─────────────────────────────────────────────────────
+  if (preSessionState?.follow_up_due && !preSessionState?.cold_start) {
+    allDirectives.push({
+      id: 'init_follow_up',
+      instruction: `INIT FOLLOW-UP: A specific question was queued from their last session. Open with it naturally rather than a generic greeting. Context: "${preSessionState.follow_up_due.context}". Question: "${preSessionState.follow_up_due.question}".`,
+      priority: 1,
+      preferred_stage: 'wins',
+      fire_next_session: false,
+    });
+  }
+
+  // ── init_growth_marker ─────────────────────────────────────────────────
+  if (preSessionState?.growth_marker_due && !preSessionState?.follow_up_due && !preSessionState?.cold_start) {
+    allDirectives.push({
+      id: 'init_growth_marker',
+      instruction: `INIT GROWTH MARKER: Before offering mood chips, briefly surface the growth theme "${preSessionState.growth_marker_due.theme}" as a natural opener — e.g. "I've been thinking about [theme] and wanted to check in on that tonight." Do not announce it as a scheduled check-in.`,
+      priority: 1,
+      preferred_stage: 'wins',
+      fire_next_session: false,
+    });
+  }
+
+  // ── practice_hint ──────────────────────────────────────────────────────
+  if (preSessionState?.suggested_practice && !preSessionState?.cold_start) {
+    allDirectives.push({
+      id: 'practice_hint',
+      instruction: `PRACTICE HINT: Tonight's recommended practice is "${preSessionState.suggested_practice}" (reason: ${preSessionState.suggested_practice_reason}). If momentum and tone align, guide the session toward this practice. Do not force it — wait for a natural opening.`,
+      priority: 2,
+      preferred_stage: 'any',
+      fire_next_session: false,
+    });
+  }
+
+  // ── returning_user_context ─────────────────────────────────────────────
+  if (preSessionState && !preSessionState.cold_start && preSessionState.returning_user_context && !preSessionState.follow_up_due && !preSessionState.growth_marker_due) {
+    allDirectives.push({
+      id: 'returning_user_context',
+      instruction: `RETURNING USER: Briefly acknowledge where they left off before offering mood chips. Context: "${preSessionState.returning_user_context}". One warm sentence — then move into the normal opener.`,
+      priority: 1,
+      preferred_stage: 'wins',
+      fire_next_session: false,
+    });
+  }
+
+  // ── memory_mode ────────────────────────────────────────────────────────
+  if (isMemoryMode) {
+    allDirectives.push({
+      id: 'memory_mode',
+      instruction: `MEMORY MODE: The user asked a question or wants advice. PAUSE the stage workflow — do NOT advance stage or update checklist. Answer their question directly using relevant_memories and their profile data. Use their actual past words and patterns. Be specific, not generic. End your response with ONE question that naturally brings them back to the ${currentStage} stage.`,
+      priority: 1,
+      preferred_stage: 'any',
+      fire_next_session: false,
+    });
+  }
+
+  // ── follow_up_surface ──────────────────────────────────────────────────
+  if (followUpQueue) {
+    allDirectives.push({
+      id: 'follow_up_surface',
+      instruction: 'PRIORITY: Surface follow_up_due question first.',
+      priority: 1,
+      preferred_stage: 'any',
+      fire_next_session: true,
+      followup_question: 'How did things go with what you were working through last time — has anything shifted since then?',
+    });
+  }
+
+  // ── growth_marker_weave ────────────────────────────────────────────────
+  if (growthMarkers) {
+    allDirectives.push({
+      id: 'growth_marker_weave',
+      instruction: 'Weave in growth_marker_due check-in naturally.',
+      priority: 2,
+      preferred_stage: 'honest',
+      fire_next_session: true,
+      followup_question: 'I wanted to check in on something — you were working through a theme last time. How has that been sitting with you?',
+    });
+  }
+
+  // ── anti_excuse ────────────────────────────────────────────────────────
+  if (intentData?.accountability_signal === 'excuse') {
+    allDirectives.push({
+      id: 'anti_excuse',
+      instruction: `ANTI-EXCUSE: consecutive_excuses=${effectiveConsecutiveExcuses}. Use their specific words. Follow the protocol.`,
+      priority: 1,
+      preferred_stage: 'any',
+      fire_next_session: false,
+    });
+  }
+
+  // ── run_exercise ───────────────────────────────────────────────────────
+  if (suggestedPractice !== 'none') {
+    allDirectives.push({
+      id: 'run_exercise',
+      instruction: `RUN: ${suggestedPractice}. first_time=${isFirstTimeExercise}. Fill ALL placeholders with user's actual words — never output [bracket placeholders]. Set exercise_run="${suggestedPractice}".`,
+      priority: 2,
+      preferred_stage: 'any',
+      fire_next_session: false,
+    });
+  }
+
+  // ── depth_probe ────────────────────────────────────────────────────────
+  if (depthProbeNeeded) {
+    allDirectives.push({
+      id: 'depth_probe',
+      instruction: `DEPTH OPPORTUNITY: The user's message has depth potential. Before asking the depth question, briefly signal the pivot in one phrase — e.g. "I want to go underneath that for a second" or "there's something worth understanding here" — then ask WHY or surface the belief underneath what they just said. The framing makes the question land with intention rather than feeling random. Use a depth_probe question naturally. Set exercise_run="depth_probe". Store any insight in extracted_data.depth_insight. IMPORTANT: Do NOT frame this as goal-specific unless the user is directly referencing a goal — keep depth probes grounded in what the user just said.`,
+      priority: 2,
+      preferred_stage: 'honest',
+      fire_next_session: true,
+      followup_question: 'I want to come back to what you were exploring last time — did anything new come up around that after we talked?',
+    });
+  }
+
+  // ── wins_callback ──────────────────────────────────────────────────────
+  if (Array.isArray(sessionState.wins) && sessionState.wins.length > 0 && currentStage !== 'wins') {
+    const winsText = sessionState.wins.map(w => typeof w === 'string' ? w : w?.text).filter(Boolean).join(', ');
+    allDirectives.push({
+      id: 'wins_callback',
+      instruction: `CALLBACK: The user mentioned these wins earlier: ${winsText}. If relevant, reference these by name when asking about follow-through or identity. Never re-ask what you already know.`,
+      priority: 3,
+      preferred_stage: 'honest',
+      fire_next_session: false,
+    });
+  }
+
+  // ── depth_callback ─────────────────────────────────────────────────────
+  if (sessionState.depth_insight && !sessionReadyToClose) {
+    allDirectives.push({
+      id: 'depth_callback',
+      instruction: `DEPTH CALLBACK: Earlier the user surfaced this insight: "${sessionState.depth_insight}". If a natural moment arises (especially in 'close' stage), reflect it back to them once — e.g. "You said earlier [insight]. What does that mean for how you show up tomorrow?" Do this once only, warmly. When you bring it back, briefly anchor why: e.g. "I want to come back to something you said earlier — because I think it's the most important thing from tonight" or "Before we close, this is the thing I don't want to lose." Then reflect it back.`,
+      priority: 2,
+      preferred_stage: 'close',
+      fire_next_session: false,
+    });
+  }
+
+  // ── reference_shared ──────────────────────────────────────────────────
+  {
+    const capturedWins = Array.isArray(sessionState.wins)
+      ? sessionState.wins.map(w => typeof w === 'string' ? w : w?.text).filter(Boolean)
+      : [];
+    const capturedMisses = Array.isArray(sessionState.misses)
+      ? sessionState.misses.map(m => typeof m === 'string' ? m : m?.text).filter(Boolean)
+      : [];
+    const capturedBlockers = Array.isArray(sessionState.blocker_tags) ? sessionState.blocker_tags : [];
+    if (capturedWins.length > 0 || capturedMisses.length > 0 || capturedBlockers.length > 0) {
+      allDirectives.push({
+        id: 'reference_shared',
+        instruction: `REFERENCE WHAT THEY SAID: The user has already shared: wins=[${capturedWins.join(', ')}], misses=[${capturedMisses.join(', ')}], blockers=[${capturedBlockers.join(', ')}]. Your next question MUST reference at least one of these specifically. Never ask a generic question when you have their real words.`,
+        priority: 1,
+        preferred_stage: 'any',
+        fire_next_session: false,
+      });
+    }
+  }
+
+  // ── why_missing ────────────────────────────────────────────────────────
+  if (goalMissingWhy && !sessionReadyToClose && !forceClose) {
+    allDirectives.push({
+      id: 'why_missing',
+      instruction: `WHY MISSING (HIGHEST PRIORITY): The goal "${goalMissingWhy.title}" (id: ${goalMissingWhy.id}) has never had a why captured. If any natural moment exists this session — especially during wins, honest, or when this goal comes up — ask what makes it actually matter. When you ask it, briefly frame why it matters: e.g. "I've never actually heard what makes ${goalMissingWhy.title} real for you — not the goal itself, but what's underneath it" or "The reason I'm asking is that the why is what keeps the goal alive when the motivation dips." One sentence of framing, then the question. Use their words and context, not generic language. When they answer, you MUST set extracted_data.goal_why_insight to their response, extracted_data.goal_why_action to "add", and extracted_data.goal_id_referenced to exactly "${goalMissingWhy.id}". Do not skip setting goal_id_referenced — without it the why is silently lost. Don't force it if the goal hasn't come up.`,
+      priority: 1,
+      preferred_stage: 'honest',
+      fire_next_session: true,
+      followup_question: `I wanted to ask — what makes ${goalMissingWhy.title} actually matter to you? Not the goal itself, but what's underneath it.`,
+    });
+  }
+
+  // ── honest_missing ─────────────────────────────────────────────────────
+  if (honestMissing) {
+    const patternHint = reflectionPatterns.length > 0
+      ? `Their recurring pattern is "${reflectionPatterns[0].label}" — if it came up today, help them name it. E.g. "Did ${reflectionPatterns[0].label.replace(/_/g, ' ')} show up anywhere today?" or "Was there a moment where you held back and you're not sure why?"`
+      : `E.g. "Where did you feel like you weren't fully showing up today?" or "Is there a moment from today that's still sitting with you?" or "What part of today are you least proud of — not what you'd fix, just what happened?"`;
+    allDirectives.push({
+      id: 'honest_missing',
+      instruction: `HONEST MISSING: Gently probe for a miss or honest moment with self-awareness questions. ${patternHint} Goal is self-awareness about TODAY, not action planning. Do NOT ask "what would you do differently" — that belongs in tomorrow. Weave it naturally. Once a miss is named, ask the one question that goes underneath it — what was actually happening underneath that surface behavior, not just what they did or didn't do. Do NOT set honest_depth: true until the user has genuinely answered the underneath layer. A surface answer is not enough. Evaluate qualitatively: is this a real answer about why it happened — the actual reason, the emotional truth, the internal conflict? If yes → set honest_depth: true. If no → ask the one question that goes there. When probing for the honest moment, you can briefly frame what this part of the session is for — e.g. "Before we talk about tomorrow, I want to make sure we've gone there — the part of today that's worth being honest about" or "This is the part most people skip, but it's usually the most useful." Keep it to one sentence — then ask.`,
+      priority: 2,
+      preferred_stage: 'honest',
+      fire_next_session: true,
+      followup_question: 'Before we close — was there a moment from last time that\'s still sitting with you, something you didn\'t fully land on?',
+    });
+  }
+
+  // ── commitment_checkin ─────────────────────────────────────────────────
+  if (currentStage === 'commitment_checkin' && !sessionState.commitment_checkin_done) {
+    const yc = sessionState.yesterday_commitment || yesterdayCommitment;
+    if (yc) {
+      allDirectives.push({
+        id: 'commitment_checkin',
+        instruction: `## STAGE: COMMITMENT CHECK-IN\nYou are here only when session.current_stage === 'commitment_checkin'.\n- Reference yesterday's exact commitment text: "${yc}"\n- Ask exactly ONE question about how it went. Use their words, not generic language.\n- Before asking, you can briefly frame why the check-in matters: e.g. "I want to start there — because what happened with yesterday's plan tells us a lot about what to focus on tonight" or "Starting here because following through on what we said matters more than what we plan next." One sentence max. Then ask.\n- If they kept it → acknowledge the follow-through warmly and absorb it into momentum. Set commitment_checkin_done: true and advance to honest stage.\n- If they missed it or it was partial → their answer IS the honest stage opener. Do not probe further here. Set commitment_checkin_done: true and advance to honest stage. The honest exploration begins from this point.\n- Never ask twice. One exchange only. Always set commitment_checkin_done: true after their response, regardless of outcome.`,
+        priority: 1,
+        preferred_stage: 'commitment_checkin',
+        fire_next_session: false,
+      });
+    }
+  }
+
+  // ── identity_missing ───────────────────────────────────────────────────
+  if (identityMissing && !sessionReadyToClose) {
+    allDirectives.push({
+      id: 'identity_missing',
+      instruction: `IDENTITY MISSING: Find a natural moment to ask what their actions say about who they're becoming. When you ask it, you can briefly frame why: e.g. "I always want to end here — because the actions matter less than what they say about who you are" or "This is the part I care most about." One short phrase, then ask: "What does [their action] say about who you're becoming?"`,
+      priority: 2,
+      preferred_stage: 'close',
+      fire_next_session: true,
+      followup_question: 'I want to end on something important — what does how you showed up last time say about who you\'re becoming?',
+    });
+  }
+
+  // ── commitment_quality ─────────────────────────────────────────────────
+  if (commitmentStats) {
+    const { rate7, trajectory: traj, total7 } = commitmentStats;
+    const commitmentStatsForInstruction = traj === 'declining' || (rate7 < 0.5 && total7 >= 5);
+    if (commitmentStatsForInstruction) {
+      const ratePercent = Math.round(rate7 * 100);
+      allDirectives.push({
+        id: 'commitment_quality',
+        instruction: `COMMITMENT QUALITY: Follow-through rate is ${ratePercent}% (${commitmentStats.kept7}/${total7} last 7 days), trajectory is ${traj}. When the user is forming their commitment, gently suggest they scale it back to something they can absolutely guarantee. Say something like: "Given where you're at, let's make this something you can 100% do — we can push the intensity later. What's one small thing you'll actually show up for?" Do NOT lecture. Say it once, warmly, then let them commit to what they want. When nudging for a more specific commitment, briefly frame why specificity matters: e.g. "The reason I'm pushing on this is that vague plans are easy to talk yourself out of" or "Specific commitments are what actually stick — when and how matters." One sentence, then the question.`,
+        priority: 2,
+        preferred_stage: 'tomorrow',
+        fire_next_session: false,
+      });
+    }
+  }
+
+  // ── strength_recognition ───────────────────────────────────────────────
+  if (recentSessions.length >= 3) {
+    const hasStrengths = Array.isArray(profile.strengths) && profile.strengths.length > 0;
+    const hasGrowthAreas = Array.isArray(profile.growth_areas) && profile.growth_areas.length > 0;
+    const strengthInsights = userInsights.filter(ins => ins.pattern_type === 'strength' && ins.strength_evidence);
+    if (hasStrengths || hasGrowthAreas || strengthInsights.length > 0) {
+      const strengthsText = hasStrengths
+        ? profile.strengths.map(s => {
+            if (typeof s === 'object' && s.label) return `"${s.label}": ${s.evidence || ''}`;
+            return String(s);
+          }).join(' | ')
+        : '';
+      const growthText = hasGrowthAreas
+        ? profile.growth_areas.map(g => {
+            if (typeof g === 'object' && g.label) return `"${g.label}": ${g.evidence || ''}`;
+            return String(g);
+          }).join(' | ')
+        : '';
+      const strengthInsightsText = strengthInsights.length > 0
+        ? strengthInsights.map(ins => `"${ins.pattern_label}": ${ins.strength_evidence}`).join(' | ')
+        : '';
+      allDirectives.push({
+        id: 'strength_recognition',
+        instruction: `STRENGTH RECOGNITION: When the user names a win or something that went well, do NOT just celebrate it. Connect it to what it means for them specifically — using their goals, their whys, and the evidence you have about their patterns. You have this data:${strengthInsightsText ? `\nStrength insights (most specific — prefer these): ${strengthInsightsText}` : ''}${strengthsText ? `\nTracked strengths: ${strengthsText}` : ''}${growthText ? `\nGrowth in progress: ${growthText}` : ''}\nWhen a win connects to a tracked strength or growth area — name the specific evidence first, then connect it to their goal or why. Prefer strength_insights evidence over profile strengths since it's more specific and recent. E.g. if they mention finishing something under pressure and you have evidence they've done this before, say: "You've done this [specific number] times now — [specific dates/events from evidence]. That's the thing that actually moves [their specific goal]." Pull from their actual whys array and goal context to explain why it matters. The explanation must come from their data, not from a coaching script. If a win doesn't connect to anything tracked, just acknowledge it briefly and move on — no forced meaning.`,
+        priority: 2,
+        preferred_stage: 'wins',
+        fire_next_session: false,
+      });
+    }
+  }
+
+  // ── pattern_awareness ──────────────────────────────────────────────────
+  if (reflectionPatterns.length > 0 && messageCount >= 2 && reflectionPatterns[0].occurrence_count >= 2) {
+    const topPattern = reflectionPatterns[0];
+    allDirectives.push({
+      id: 'pattern_awareness',
+      instruction: `PATTERN AWARENESS: The user's most recurring pattern is "${topPattern.label}" (${topPattern.occurrence_count}x). If they say or do something that looks like this pattern — even obliquely — ask a question that helps them SEE it, not name it for them. Never say "I notice you keep doing X" or "this sounds like your ${topPattern.label} pattern". Instead, ask something like: "What's making it hard to just ship it as-is?" or "You said you'd do this yesterday — what happened between then and now?" The goal is to surface the pattern through their own answer, not your observation. Use naturally. Once per session max. Do NOT interrupt a good moment to force it in. When you name it, briefly frame why noticing patterns matters: e.g. "I keep seeing this come up — and I think it's worth naming because patterns don't change until you see them" or "This is something I've noticed across a few sessions." One sentence, then surface the pattern.`,
+      priority: 2,
+      preferred_stage: 'honest',
+      fire_next_session: true,
+      followup_question: 'I\'ve been thinking about something that\'s shown up a few times — I want to check in on whether you\'re noticing it too.',
+    });
+  }
+
+  // ── recurring_miss ─────────────────────────────────────────────────────
+  if (recentSessions.length >= 2) {
+    const todayCommitment = sessionState.yesterday_commitment || yesterdayCommitment;
+    if (todayCommitment) {
+      const commitmentPrefix = todayCommitment.toLowerCase().slice(0, 20);
+      const missedStreak = recentSessions.filter(s =>
+        s.tomorrow_commitment &&
+        s.tomorrow_commitment.toLowerCase().includes(commitmentPrefix)
+      ).length;
+      if (missedStreak >= 2) {
+        allDirectives.push({
+          id: 'recurring_miss',
+          instruction: `RECURRING MISS: Name the pattern to the user transparently before pivoting — e.g. "I want to be honest with you — this is the ${missedStreak}th time we've talked about ${todayCommitment} and it hasn't happened. I'm not going to ask what's holding you back again." Then pivot. Do NOT re-ask "what's holding you back?" — they've already answered that. Instead, name the pattern directly and warmly: "You've said you'd do this ${missedStreak} days in a row. Something keeps getting in the way — what's actually going on?" This is a pattern interrupt. Be direct but warm. Do NOT soften it into another generic depth probe.`,
+          priority: 1,
+          preferred_stage: 'commitment_checkin',
+          fire_next_session: false,
+        });
+      }
+    }
+  }
+
+  // ── stage_hint ─────────────────────────────────────────────────────────
+  if (suggestedNextStage && !isMemoryMode) {
+    allDirectives.push({
+      id: 'stage_hint',
+      instruction: `STAGE HINT: Ready to move to "${suggestedNextStage}". Transition naturally if conversation supports it — use a soft bridging phrase that signals the shift without announcing it. E.g. for wins→honest: "Okay — I want to shift for a second." For honest→tomorrow: "Alright, I've got a good picture of today. Let's talk about tomorrow." For tomorrow→close: "Good — before I let you go..." For close→complete: "That's what I needed. Tonight you..." Never announce the stage name. Set stage_advance:true, new_stage:"${suggestedNextStage}".`,
+      priority: 2,
+      preferred_stage: 'any',
+      fire_next_session: false,
+    });
+  }
+
+  // ── Filter: remove already-completed and already-queued directives ─────
+  const filtered = allDirectives.filter(d => {
+    if (completedDirectives.includes(d.id)) return false;
+    if (currentDirectiveQueue.some(q => q.id === d.id)) return false;
+    return true;
+  });
+
+  // ── Sort: priority ascending, then stage match ────────────────────────
+  filtered.sort((a, b) => {
+    if (a.priority !== b.priority) return a.priority - b.priority;
+    const aMatch = a.preferred_stage === currentStage || a.preferred_stage === 'any' ? 0 : 1;
+    const bMatch = b.preferred_stage === currentStage || b.preferred_stage === 'any' ? 0 : 1;
+    return aMatch - bMatch;
+  });
+
+  return filtered;
+}
+
+/**
+ * Picks the next directive to dispatch this message from the combined directive queue.
+ * Prefers highest-priority, stage-matching directives.
+ */
+function dispatchNextDirective(directiveQueue, currentStage) {
+  if (!directiveQueue || directiveQueue.length === 0) return null;
+
+  // First: find highest-priority directive that matches current stage
+  const stageMatch = directiveQueue.find(
+    d => d.priority === 1 && (d.preferred_stage === currentStage || d.preferred_stage === 'any')
+  );
+  if (stageMatch) return stageMatch;
+
+  // Second: any priority-1 directive regardless of stage
+  const anyP1 = directiveQueue.find(d => d.priority === 1);
+  if (anyP1) return anyP1;
+
+  // Third: priority-2 directive that matches current stage
+  const p2StageMatch = directiveQueue.find(
+    d => d.priority === 2 && (d.preferred_stage === currentStage || d.preferred_stage === 'any')
+  );
+  if (p2StageMatch) return p2StageMatch;
+
+  // Fourth: any priority-2
+  const anyP2 = directiveQueue.find(d => d.priority === 2);
+  if (anyP2) return anyP2;
+
+  // Fifth: priority-3 (opportunistic)
+  return directiveQueue[0] || null;
+}
+
 // ── Session context assembly ──────────────────────────────────────────────────
 
 /**
@@ -1292,6 +1677,9 @@ function buildSessionContext({
   suggestedNextStage,
   streak,
   daysSinceLastSession,
+  activeDirective,
+  directiveQueue,
+  completedDirectives,
 }) {
   // ── Derive internal values ─────────────────────────────────────────────
   const sessionExercisesRun = Array.isArray(sessionState.exercises_run) ? sessionState.exercises_run : [];
@@ -1429,145 +1817,23 @@ function buildSessionContext({
     days_since_last_session: daysSinceLastSession,
     pre_session_state: preSessionState || undefined,
     instructions: [
-      // ── Pre-session state opener instructions (isInit only) ───────────
-      preSessionState?.cold_start
-        ? `COLD START (${preSessionState.days_since_last_session ?? 'many'} days away): Do NOT open generically. Reference the gap directly and warmly. ${preSessionState.returning_user_context ? `Last session context: "${preSessionState.returning_user_context}".` : ''} Open with something specific that shows you remember them and have been thinking about where they left off.`
-        : null,
-      preSessionState?.follow_up_due && !preSessionState?.cold_start
-        ? `INIT FOLLOW-UP: A specific question was queued from their last session. Open with it naturally rather than a generic greeting. Context: "${preSessionState.follow_up_due.context}". Question: "${preSessionState.follow_up_due.question}".`
-        : null,
-      preSessionState?.growth_marker_due && !preSessionState?.follow_up_due && !preSessionState?.cold_start
-        ? `INIT GROWTH MARKER: Before offering mood chips, briefly surface the growth theme "${preSessionState.growth_marker_due.theme}" as a natural opener — e.g. "I've been thinking about [theme] and wanted to check in on that tonight." Do not announce it as a scheduled check-in.`
-        : null,
-      preSessionState?.suggested_practice && !preSessionState?.cold_start
-        ? `PRACTICE HINT: Tonight's recommended practice is "${preSessionState.suggested_practice}" (reason: ${preSessionState.suggested_practice_reason}). If momentum and tone align, guide the session toward this practice. Do not force it — wait for a natural opening.`
-        : null,
-      preSessionState && !preSessionState.cold_start && preSessionState.returning_user_context && !preSessionState.follow_up_due && !preSessionState.growth_marker_due
-        ? `RETURNING USER: Briefly acknowledge where they left off before offering mood chips. Context: "${preSessionState.returning_user_context}". One warm sentence — then move into the normal opener.`
-        : null,
-      isMemoryMode
-        ? `MEMORY MODE: The user asked a question or wants advice. PAUSE the stage workflow — do NOT advance stage or update checklist. Answer their question directly using relevant_memories and their profile data. Use their actual past words and patterns. Be specific, not generic. End your response with ONE question that naturally brings them back to the ${sessionState.current_stage || 'wins'} stage.`
-        : null,
-      followUpQueue ? 'PRIORITY: Surface follow_up_due question first.' : null,
-      growthMarkers ? 'Weave in growth_marker_due check-in naturally.' : null,
-      intentData?.accountability_signal === 'excuse'
-        ? `ANTI-EXCUSE: consecutive_excuses=${effectiveConsecutiveExcuses}. Use their specific words. Follow the protocol.`
-        : null,
-      suggestedPractice !== 'none'
-        ? `RUN: ${suggestedPractice}. first_time=${isFirstTimeExercise}. Fill ALL placeholders with user's actual words — never output [bracket placeholders]. Set exercise_run="${suggestedPractice}".`
-        : null,
-      depthProbeNeeded
-        ? `DEPTH OPPORTUNITY: The user's message has depth potential. Before asking the depth question, briefly signal the pivot in one phrase — e.g. "I want to go underneath that for a second" or "there's something worth understanding here" — then ask WHY or surface the belief underneath what they just said. The framing makes the question land with intention rather than feeling random. Use a depth_probe question naturally. Set exercise_run="depth_probe". Store any insight in extracted_data.depth_insight. IMPORTANT: Do NOT frame this as goal-specific unless the user is directly referencing a goal — keep depth probes grounded in what the user just said.`
-        : null,
-      sessionState.wins?.length > 0 && Array.isArray(sessionState.wins) && sessionState.current_stage !== 'wins'
-        ? `CALLBACK: The user mentioned these wins earlier: ${sessionState.wins.map(w => typeof w === 'string' ? w : w?.text).filter(Boolean).join(', ')}. If relevant, reference these by name when asking about follow-through or identity. Never re-ask what you already know.`
-        : null,
-      sessionState.depth_insight && !sessionReadyToClose
-        ? `DEPTH CALLBACK: Earlier the user surfaced this insight: "${sessionState.depth_insight}". If a natural moment arises (especially in 'close' stage), reflect it back to them once — e.g. "You said earlier [insight]. What does that mean for how you show up tomorrow?" Do this once only, warmly. When you bring it back, briefly anchor why: e.g. "I want to come back to something you said earlier — because I think it's the most important thing from tonight" or "Before we close, this is the thing I don't want to lose." Then reflect it back.`
-        : null,
-      (() => {
-        const capturedWins = Array.isArray(sessionState.wins)
-          ? sessionState.wins.map(w => typeof w === 'string' ? w : w?.text).filter(Boolean)
-          : [];
-        const capturedMisses = Array.isArray(sessionState.misses)
-          ? sessionState.misses.map(m => typeof m === 'string' ? m : m?.text).filter(Boolean)
-          : [];
-        const capturedBlockers = Array.isArray(sessionState.blocker_tags) ? sessionState.blocker_tags : [];
-        if (capturedWins.length === 0 && capturedMisses.length === 0 && capturedBlockers.length === 0) return null;
-        return `REFERENCE WHAT THEY SAID: The user has already shared: wins=[${capturedWins.join(', ')}], misses=[${capturedMisses.join(', ')}], blockers=[${capturedBlockers.join(', ')}]. Your next question MUST reference at least one of these specifically. Never ask a generic question when you have their real words.`;
-      })(),
-      goalMissingWhy && !sessionReadyToClose && !forceClose
-        ? `WHY MISSING (HIGHEST PRIORITY): The goal "${goalMissingWhy.title}" (id: ${goalMissingWhy.id}) has never had a why captured. If any natural moment exists this session — especially during wins, honest, or when this goal comes up — ask what makes it actually matter. When you ask it, briefly frame why it matters: e.g. "I've never actually heard what makes ${goalMissingWhy.title} real for you — not the goal itself, but what's underneath it" or "The reason I'm asking is that the why is what keeps the goal alive when the motivation dips." One sentence of framing, then the question. Use their words and context, not generic language. When they answer, you MUST set extracted_data.goal_why_insight to their response, extracted_data.goal_why_action to "add", and extracted_data.goal_id_referenced to exactly "${goalMissingWhy.id}". Do not skip setting goal_id_referenced — without it the why is silently lost. Don't force it if the goal hasn't come up.`
-        : null,
-      honestMissing
-        ? `HONEST MISSING: Gently probe for a miss or honest moment with self-awareness questions. ${
-            reflectionPatterns.length > 0
-              ? `Their recurring pattern is "${reflectionPatterns[0].label}" — if it came up today, help them name it. E.g. "Did ${reflectionPatterns[0].label.replace(/_/g, ' ')} show up anywhere today?" or "Was there a moment where you held back and you're not sure why?"`
-              : `E.g. "Where did you feel like you weren't fully showing up today?" or "Is there a moment from today that's still sitting with you?" or "What part of today are you least proud of — not what you'd fix, just what happened?"`
-          } Goal is self-awareness about TODAY, not action planning. Do NOT ask "what would you do differently" — that belongs in tomorrow. Weave it naturally. Once a miss is named, ask the one question that goes underneath it — what was actually happening underneath that surface behavior, not just what they did or didn't do. Do NOT set honest_depth: true until the user has genuinely answered the underneath layer. A surface answer is not enough. Evaluate qualitatively: is this a real answer about why it happened — the actual reason, the emotional truth, the internal conflict? If yes → set honest_depth: true. If no → ask the one question that goes there. When probing for the honest moment, you can briefly frame what this part of the session is for — e.g. "Before we talk about tomorrow, I want to make sure we've gone there — the part of today that's worth being honest about" or "This is the part most people skip, but it's usually the most useful." Keep it to one sentence — then ask.`
-        : null,
-      (() => {
-        if (sessionState.current_stage !== 'commitment_checkin') return null;
-        if (sessionState.commitment_checkin_done) return null;
-        const yc = sessionState.yesterday_commitment || yesterdayCommitment;
-        if (!yc) return null;
-        return `## STAGE: COMMITMENT CHECK-IN\nYou are here only when session.current_stage === 'commitment_checkin'.\n- Reference yesterday's exact commitment text: "${yc}"\n- Ask exactly ONE question about how it went. Use their words, not generic language.\n- Before asking, you can briefly frame why the check-in matters: e.g. "I want to start there — because what happened with yesterday's plan tells us a lot about what to focus on tonight" or "Starting here because following through on what we said matters more than what we plan next." One sentence max. Then ask.\n- If they kept it → acknowledge the follow-through warmly and absorb it into momentum. Set commitment_checkin_done: true and advance to honest stage.\n- If they missed it or it was partial → their answer IS the honest stage opener. Do not probe further here. Set commitment_checkin_done: true and advance to honest stage. The honest exploration begins from this point.\n- Never ask twice. One exchange only. Always set commitment_checkin_done: true after their response, regardless of outcome.`;
-      })(),
-      identityMissing && !sessionReadyToClose
-        ? `IDENTITY MISSING: Find a natural moment to ask what their actions say about who they're becoming. When you ask it, you can briefly frame why: e.g. "I always want to end here — because the actions matter less than what they say about who you are" or "This is the part I care most about." One short phrase, then ask: "What does [their action] say about who you're becoming?"`
-        : null,
-      (() => {
-        if (!commitmentStats) return null;
-        const { rate7, trajectory: traj, total7 } = commitmentStats;
-        const commitmentStatsForInstruction = traj === 'declining' || (rate7 < 0.5 && total7 >= 5);
-        if (!commitmentStatsForInstruction) return null;
-        const ratePercent = Math.round(rate7 * 100);
-        return `COMMITMENT QUALITY: Follow-through rate is ${ratePercent}% (${commitmentStats.kept7}/${total7} last 7 days), trajectory is ${traj}. When the user is forming their commitment, gently suggest they scale it back to something they can absolutely guarantee. Say something like: "Given where you're at, let's make this something you can 100% do — we can push the intensity later. What's one small thing you'll actually show up for?" Do NOT lecture. Say it once, warmly, then let them commit to what they want. When nudging for a more specific commitment, briefly frame why specificity matters: e.g. "The reason I'm pushing on this is that vague plans are easy to talk yourself out of" or "Specific commitments are what actually stick — when and how matters." One sentence, then the question.`;
-      })(),
-      (() => {
-        if (recentSessions.length < 3) return null;
-        const hasStrengths = Array.isArray(profile.strengths) && profile.strengths.length > 0;
-        const hasGrowthAreas = Array.isArray(profile.growth_areas) && profile.growth_areas.length > 0;
-        const strengthInsights = userInsights.filter(ins => ins.pattern_type === 'strength' && ins.strength_evidence);
-        if (!hasStrengths && !hasGrowthAreas && strengthInsights.length === 0) return null;
-
-        const strengthsText = hasStrengths
-          ? profile.strengths.map(s => {
-              if (typeof s === 'object' && s.label) {
-                return `"${s.label}": ${s.evidence || ''}`;
-              }
-              return String(s);
-            }).join(' | ')
-          : '';
-        const growthText = hasGrowthAreas
-          ? profile.growth_areas.map(g => {
-              if (typeof g === 'object' && g.label) {
-                return `"${g.label}": ${g.evidence || ''}`;
-              }
-              return String(g);
-            }).join(' | ')
-          : '';
-        const strengthInsightsText = strengthInsights.length > 0
-          ? strengthInsights.map(ins => `"${ins.pattern_label}": ${ins.strength_evidence}`).join(' | ')
-          : '';
-
-        return `STRENGTH RECOGNITION: When the user names a win or something that went well, do NOT just celebrate it. Connect it to what it means for them specifically — using their goals, their whys, and the evidence you have about their patterns. You have this data:${strengthInsightsText ? `\nStrength insights (most specific — prefer these): ${strengthInsightsText}` : ''}${strengthsText ? `\nTracked strengths: ${strengthsText}` : ''}${growthText ? `\nGrowth in progress: ${growthText}` : ''}\nWhen a win connects to a tracked strength or growth area — name the specific evidence first, then connect it to their goal or why. Prefer strength_insights evidence over profile strengths since it's more specific and recent. E.g. if they mention finishing something under pressure and you have evidence they've done this before, say: "You've done this [specific number] times now — [specific dates/events from evidence]. That's the thing that actually moves [their specific goal]." Pull from their actual whys array and goal context to explain why it matters. The explanation must come from their data, not from a coaching script. If a win doesn't connect to anything tracked, just acknowledge it briefly and move on — no forced meaning.`;
-      })(),
-      (() => {
-        if (reflectionPatterns.length === 0 || messageCount < 2) return null;
-        const topPattern = reflectionPatterns[0];
-        if (topPattern.occurrence_count < 2) return null;
-        return `PATTERN AWARENESS: The user's most recurring pattern is "${topPattern.label}" (${topPattern.occurrence_count}x). If they say or do something that looks like this pattern — even obliquely — ask a question that helps them SEE it, not name it for them. Never say "I notice you keep doing X" or "this sounds like your ${topPattern.label} pattern". Instead, ask something like: "What's making it hard to just ship it as-is?" or "You said you'd do this yesterday — what happened between then and now?" The goal is to surface the pattern through their own answer, not your observation. Use naturally. Once per session max. Do NOT interrupt a good moment to force it in. When you name it, briefly frame why noticing patterns matters: e.g. "I keep seeing this come up — and I think it's worth naming because patterns don't change until you see them" or "This is something I've noticed across a few sessions." One sentence, then surface the pattern.`;
-      })(),
-      (() => {
-        if (recentSessions.length < 2) return null;
-        const todayCommitment = sessionState.yesterday_commitment || yesterdayCommitment;
-        if (!todayCommitment) return null;
-        const commitmentPrefix = todayCommitment.toLowerCase().slice(0, 20);
-        const missedStreak = recentSessions.filter(s =>
-          s.tomorrow_commitment &&
-          s.tomorrow_commitment.toLowerCase().includes(commitmentPrefix)
-        ).length;
-        if (missedStreak >= 2) {
-          return `RECURRING MISS: Name the pattern to the user transparently before pivoting — e.g. "I want to be honest with you — this is the ${missedStreak}th time we've talked about ${todayCommitment} and it hasn't happened. I'm not going to ask what's holding you back again." Then pivot. Do NOT re-ask "what's holding you back?" — they've already answered that. Instead, name the pattern directly and warmly: "You've said you'd do this ${missedStreak} days in a row. Something keeps getting in the way — what's actually going on?" This is a pattern interrupt. Be direct but warm. Do NOT soften it into another generic depth probe.`;
-        }
-        return null;
-      })(),
-      sessionExercisesRun.length > 0
-        ? `ALREADY RUN: ${sessionExercisesRun.join(', ')}. Do NOT repeat.`
-        : null,
-      suggestedNextStage && !isMemoryMode
-        ? `STAGE HINT: Ready to move to "${suggestedNextStage}". Transition naturally if conversation supports it — use a soft bridging phrase that signals the shift without announcing it. E.g. for wins→honest: "Okay — I want to shift for a second." For honest→tomorrow: "Alright, I've got a good picture of today. Let's talk about tomorrow." For tomorrow→close: "Good — before I let you go..." For close→complete: "That's what I needed. Tonight you..." Never announce the stage name. Set stage_advance:true, new_stage:"${suggestedNextStage}".`
-        : null,
+      // ── Active directive — one queued coaching action dispatched this message ─
+      activeDirective ? activeDirective.instruction : null,
+      // ── Guard rails — always permanent context ────────────────────────────
+      sessionExercisesRun.length > 0 ? `ALREADY RUN: ${sessionExercisesRun.join(', ')}. Do NOT repeat.` : null,
       forceClose
         ? 'FORCE CLOSE: Session has gone long. Wins + plan covered. Wrap up NOW with a warm identity statement. Set is_session_complete:true. No more questions.'
         : sessionReadyToClose
           ? `READY TO CLOSE: wins + plan covered. If tone is resolved, wrap warmly. End with an identity statement. Set is_session_complete:true. Do NOT keep drilling.`
           : null,
+      // ── Base rules — always ───────────────────────────────────────────────
       'Use their actual words — never be generic.',
       '2-3 sentences max.',
       'NEVER drill a topic already answered.',
     ].filter(Boolean),
+    active_directive: activeDirective ? { id: activeDirective.id, priority: activeDirective.priority } : null,
+    directive_queue_size: Array.isArray(directiveQueue) ? directiveQueue.length : 0,
+    completed_directives: Array.isArray(completedDirectives) ? completedDirectives : [],
   };
 
   return { role: 'user', content: JSON.stringify(contextData) };
@@ -1791,6 +2057,60 @@ export default async function handler(req, res) {
       return false;
     });
 
+    // ── Directive Queue ───────────────────────────────────────────────────
+    const currentDirectiveQueue = Array.isArray(session_state.directive_queue) ? session_state.directive_queue : [];
+    const completedDirectives = Array.isArray(session_state.completed_directives) ? session_state.completed_directives : [];
+
+    // Derive values needed for directive conditions
+    const mergedChecklist = { ...(session_state.checklist || {}), ...(intentData?.checklist_content || {}) };
+    const tomorrowFilled = !!session_state.tomorrow_commitment;
+    const hasMissInSession = Array.isArray(session_state.misses) && session_state.misses.length > 0;
+    const honestMissing = !mergedChecklist.honest && !hasMissInSession && messageCount >= 4;
+    const identityMissing = !mergedChecklist.identity && messageCount >= 6;
+    const sessionReadyToClose = tomorrowFilled && mergedChecklist.wins && (mergedChecklist.identity || messageCount >= 10);
+    const forceClose = messageCount >= 14 && tomorrowFilled && mergedChecklist.wins;
+    const depthProbeNeeded = !!(intentData?.depth_opportunity && !sessionExercisesRun.includes('depth_probe'));
+    const goalMissingWhy = goalsNeedWhyBuilding.find(g => !Array.isArray(g.whys) || g.whys.length === 0) ?? null;
+
+    const newDirectives = buildDirectiveQueue({
+      preSessionState,
+      isMemoryMode,
+      followUpQueue: dueFollowUp,
+      growthMarkers: dueGrowthMarker,
+      intentData,
+      suggestedPractice: suggestedExercise,
+      depthProbeNeeded,
+      sessionState: session_state,
+      profile,
+      reflectionPatterns,
+      commitmentStats,
+      yesterdayCommitment,
+      goalMissingWhy,
+      messageCount,
+      sessionReadyToClose,
+      forceClose,
+      identityMissing,
+      honestMissing,
+      suggestedNextStage,
+      sessionExercisesRun,
+      userInsights,
+      recentSessions,
+      effectiveConsecutiveExcuses,
+      currentDirectiveQueue,
+      completedDirectives,
+    });
+
+    // Combined queue: existing pending + newly generated (no duplicates)
+    const currentQueueIds = new Set(currentDirectiveQueue.map(d => d.id));
+    const combinedDirectiveQueue = [
+      ...currentDirectiveQueue,
+      ...newDirectives.filter(d => !currentQueueIds.has(d.id)),
+    ];
+
+    const currentStage = session_state.current_stage || 'wins';
+    // isInit messages skip directive dispatch — init has its own fixed opener logic
+    const activeDirective = isInit ? null : dispatchNextDirective(combinedDirectiveQueue, currentStage);
+
     const contextBlock = buildSessionContext({
       profile,
       goalsContext,
@@ -1819,6 +2139,9 @@ export default async function handler(req, res) {
       suggestedNextStage,
       streak: context.reflection_streak || context.streak || 0,
       daysSinceLastSession,
+      activeDirective,
+      directiveQueue: combinedDirectiveQueue,
+      completedDirectives,
     });
 
     // ── 9. Build messages ─────────────────────────────────────────────────
@@ -1915,6 +2238,30 @@ export default async function handler(req, res) {
         if (intentData.checklist_content[key]) result.checklist_updates[key] = true;
       });
     }
+
+    // ── Update directive tracking ─────────────────────────────────────────
+    const firedDirectiveId = typeof result.directive_completed === 'string' ? result.directive_completed : null;
+    let updatedDirectiveQueue = [...currentDirectiveQueue];
+    let updatedCompletedDirectives = [...completedDirectives];
+
+    if (firedDirectiveId) {
+      updatedDirectiveQueue = updatedDirectiveQueue.filter(d => d.id !== firedDirectiveId);
+      if (!updatedCompletedDirectives.includes(firedDirectiveId)) {
+        updatedCompletedDirectives.push(firedDirectiveId);
+      }
+    }
+
+    // Add newly generated directives to persistent queue (those not already queued or completed)
+    const updatedQueueIds = new Set(updatedDirectiveQueue.map(d => d.id));
+    for (const directive of newDirectives) {
+      if (!updatedQueueIds.has(directive.id) && !updatedCompletedDirectives.includes(directive.id)) {
+        updatedDirectiveQueue.push(directive);
+        updatedQueueIds.add(directive.id);
+      }
+    }
+
+    result.directive_queue = updatedDirectiveQueue;
+    result.completed_directives = updatedCompletedDirectives;
 
     // ── 11. Post-response DB writes ───────────────────────────────────────
     const dbPromises = [];
@@ -2287,6 +2634,19 @@ Return ONLY valid JSON: { "question": "...", "context": "brief context on why th
               }
             } catch (_e) { /* fail silently */ }
           }
+
+          // Flush unresolved directives that should carry to next session
+          try {
+            const pendingCarryOver = updatedDirectiveQueue.filter(d => d.fire_next_session === true);
+            for (const directive of pendingCarryOver) {
+              await queueFollowUp(authenticatedUserId, session_id, {
+                context: `directive_deferred: ${directive.id}`,
+                question: directive.followup_question || `Following up on something we didn't get to last session — ${directive.id.replace(/_/g, ' ')}.`,
+                check_back_after: daysFromNow(1, client_local_date),
+                trigger_condition: null,
+              }, client_local_date).catch(() => {});
+            }
+          } catch (_e) { /* fail silently */ }
 
           // Mark commitments from 2+ days ago that are still null as missed
           try {
