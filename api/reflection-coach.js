@@ -593,7 +593,7 @@ async function loadUserInsights(userId) {
   try {
     const { data } = await supabase
       .from('user_insights')
-      .select('id, pattern_label, pattern_type, pattern_narrative, trigger_context, user_quote, foothold, unlocked_practices, confidence_score')
+      .select('id, pattern_label, pattern_type, pattern_narrative, trigger_context, user_quote, foothold, unlocked_practices, confidence_score, strength_evidence')
       .eq('user_id', userId)
       .eq('is_active', true)
       .order('confidence_score', { ascending: false })
@@ -1095,8 +1095,12 @@ Return ONLY valid JSON matching exactly:
 Given the session summary and current user profile, extract:
 1. short_term_state: 1-2 sentences on how they're doing right now. Human language, not clinical. E.g. "He's been grinding on his app and working on his morning routine."
 2. long_term_patterns: recurring themes/behaviors emerging (max 5 strings)
-3. growth_areas: areas actively being worked on (max 4 strings)
-4. strengths: positive traits consistently shown (max 4 strings)
+3. growth_areas: areas actively being worked on. Max 4 objects. Each object:
+   { "label": "2-4 word name", "evidence": "One specific sentence: what they did, when, how it's shifting. Use dates if available. Their actual situation, not generic language.", "started": "YYYY-MM-DD or null" }
+   Example: { "label": "Morning consistency", "evidence": "Went from skipping mornings entirely to 4/7 days in the last three weeks — the trend started after they committed to protecting pre-work hours.", "started": "2024-03-10" }
+4. strengths: positive traits demonstrated with evidence. Max 4 objects. Each object:
+   { "label": "2-4 word name", "evidence": "One specific sentence citing what they actually did — dates, events, their words where possible. Name the mechanism: what does this strength look like in action for them specifically.", "first_seen": "YYYY-MM-DD or null", "occurrence_count": number }
+   Example: { "label": "Executes under pressure", "evidence": "Shipped the auth feature the same week they said they were exhausted and two days behind — this has shown up three times in the last month.", "first_seen": "2024-03-18", "occurrence_count": 3 }
 5. values: core values surfaced in their language and choices (max 5 strings)
 6. identity_statement_update: If the current value is null, derive one from this session. If non-null, update only if the session surfaces meaningfully new detail — otherwise null.
 7. big_goal_update: If the current value is null, derive one from this session. If non-null, update only if the goal evolved or became clearer — otherwise null.
@@ -1118,8 +1122,8 @@ Return valid JSON only:
 {
   "short_term_state": "...",
   "long_term_patterns": ["..."],
-  "growth_areas": ["..."],
-  "strengths": ["..."],
+  "growth_areas": [{"label": "...", "evidence": "...", "started": "..."}],
+  "strengths": [{"label": "...", "evidence": "...", "first_seen": "...", "occurrence_count": 0}],
   "values": ["..."],
   "identity_statement_update": "..." | null,
   "big_goal_update": "..." | null,
@@ -1161,7 +1165,7 @@ Return valid JSON only:
       ],
       response_format: { type: 'json_object' },
       temperature: 0.4,
-      max_tokens: 700,
+      max_tokens: 1000,
     });
 
     const evolution = JSON.parse(completion.choices[0].message.content);
@@ -1360,6 +1364,16 @@ function buildSessionContext({
           confidence: ins.confidence_score,
         }))
       : undefined,
+    strength_insights: (() => {
+      const si = userInsights.filter(ins => ins.pattern_type === 'strength' && ins.strength_evidence)
+        .map(ins => ({
+          label: ins.pattern_label,
+          evidence: ins.strength_evidence,
+          narrative: ins.pattern_narrative,
+          user_quote: ins.user_quote,
+        }));
+      return si.length > 0 ? si : undefined;
+    })(),
     // Fall back to raw pattern labels only when no rich insights exist yet
     patterns: reflectionPatterns.length > 0 && userInsights.length === 0
       ? reflectionPatterns.map((p) => `${p.label}(${p.occurrence_count}x)`).join('; ')
@@ -1492,9 +1506,32 @@ function buildSessionContext({
       })(),
       (() => {
         if (recentSessions.length < 3) return null;
-        const hasWins = recentSessions.some((s) => Array.isArray(s.wins) ? s.wins.length > 0 : !!s.summary);
-        if (!hasWins) return null;
-        return `PROGRESS AWARENESS: You have ${recentSessions.length} recent sessions of data. Don't just ask a question — make an OBSERVATION first. Look at what's been showing up across sessions (wins, themes, commitments, mood) and name something specific you've noticed: e.g. "I've noticed you keep showing up for [X] even when things are hard — that's not nothing" or "Something I've been tracking: [specific pattern]." Then if it's natural, ask the one question that helps them see their own growth. The observation lands harder than the question. Only do this once per session, and only if it genuinely fits the conversation. Never fabricate history.`;
+        const hasStrengths = Array.isArray(profile.strengths) && profile.strengths.length > 0;
+        const hasGrowthAreas = Array.isArray(profile.growth_areas) && profile.growth_areas.length > 0;
+        const strengthInsights = userInsights.filter(ins => ins.pattern_type === 'strength' && ins.strength_evidence);
+        if (!hasStrengths && !hasGrowthAreas && strengthInsights.length === 0) return null;
+
+        const strengthsText = hasStrengths
+          ? profile.strengths.map(s => {
+              if (typeof s === 'object' && s.label) {
+                return `"${s.label}": ${s.evidence || ''}`;
+              }
+              return String(s);
+            }).join(' | ')
+          : '';
+        const growthText = hasGrowthAreas
+          ? profile.growth_areas.map(g => {
+              if (typeof g === 'object' && g.label) {
+                return `"${g.label}": ${g.evidence || ''}`;
+              }
+              return String(g);
+            }).join(' | ')
+          : '';
+        const strengthInsightsText = strengthInsights.length > 0
+          ? strengthInsights.map(ins => `"${ins.pattern_label}": ${ins.strength_evidence}`).join(' | ')
+          : '';
+
+        return `STRENGTH RECOGNITION: When the user names a win or something that went well, do NOT just celebrate it. Connect it to what it means for them specifically — using their goals, their whys, and the evidence you have about their patterns. You have this data:${strengthInsightsText ? `\nStrength insights (most specific — prefer these): ${strengthInsightsText}` : ''}${strengthsText ? `\nTracked strengths: ${strengthsText}` : ''}${growthText ? `\nGrowth in progress: ${growthText}` : ''}\nWhen a win connects to a tracked strength or growth area — name the specific evidence first, then connect it to their goal or why. Prefer strength_insights evidence over profile strengths since it's more specific and recent. E.g. if they mention finishing something under pressure and you have evidence they've done this before, say: "You've done this [specific number] times now — [specific dates/events from evidence]. That's the thing that actually moves [their specific goal]." Pull from their actual whys array and goal context to explain why it matters. The explanation must come from their data, not from a coaching script. If a win doesn't connect to anything tracked, just acknowledge it briefly and move on — no forced meaning.`;
       })(),
       (() => {
         if (reflectionPatterns.length === 0 || messageCount < 2) return null;
