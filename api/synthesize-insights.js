@@ -10,6 +10,11 @@
  * Called:
  *   - After every completed session (fire-and-forget from reflection-coach.js)
  *   - On InsightsV2 load if newest synthesized_at > 3 days old
+ *
+ * Required migrations:
+ * -- ALTER TABLE user_insights ADD COLUMN IF NOT EXISTS strength_evidence text;
+ * -- ALTER TABLE user_profiles ALTER COLUMN strengths TYPE jsonb[] USING strengths::jsonb[];
+ * -- ALTER TABLE user_profiles ALTER COLUMN growth_areas TYPE jsonb[] USING growth_areas::jsonb[];
  */
 
 import OpenAI from 'openai';
@@ -42,6 +47,7 @@ For each insight produce:
 - unlocked_practices: Applicable exercise IDs from: ["ownership_reframe","gratitude_anchor","why_reconnect","evidence_audit","implementation_intention","values_clarification","future_self_bridge","triage_one_thing","identity_reinforcement","depth_probe"]
 - confidence_score: 0.0–1.0 based on session count, recency, and whether user acknowledged it
 - existing_insight_id: UUID of existing insight this updates, or null
+- strength_evidence: (strength-type insights only) One ready-to-use sentence the coaching AI can reference verbatim — specific dates, events, the user's actual words. Names what the strength looks like in action for this person. null for blocker and identity_theme types.
 
 RULES:
 - Max 7 insights. Fewer is fine if not enough evidence.
@@ -62,7 +68,8 @@ Return ONLY valid JSON:
       "user_quote": "... or null",
       "foothold": "... or null",
       "unlocked_practices": ["..."],
-      "confidence_score": 0.0
+      "confidence_score": 0.0,
+      "strength_evidence": "... or null"
     }
   ]
 }`;
@@ -196,7 +203,7 @@ export default async function handler(req, res) {
       ],
       response_format: { type: 'json_object' },
       temperature: 0.5,
-      max_tokens: 3000,
+      max_tokens: 3500,
     });
 
     const result = JSON.parse(completion.choices[0].message.content);
@@ -226,6 +233,7 @@ export default async function handler(req, res) {
         synthesized_at: todayDate,
         last_updated_at: now,
         is_active: true,
+        strength_evidence: insight.strength_evidence || null,
       };
 
       if (insight.existing_insight_id) {
