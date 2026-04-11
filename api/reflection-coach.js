@@ -815,15 +815,38 @@ function computeGoalMotivationSignal(goalStats, goal) {
 // ── Goal commitment evaluation (fire-and-forget at session start) ─────────────
 
 async function runGoalCommitmentEvaluation(userId, clientDate) {
+  // Runs inline — no HTTP round-trip. Fire-and-forget: never awaited.
   try {
-    const baseUrl = process.env.VERCEL_URL
-      ? `https://${process.env.VERCEL_URL}`
-      : 'http://localhost:3000';
-    await fetch(`${baseUrl}/api/evaluate-goal-commitments`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: userId, session_date: clientDate }),
-    });
+    const yesterday = localDate(-1, clientDate);
+    const twoDaysAgo = localDate(-2, clientDate);
+    const now = new Date().toISOString();
+
+    // Check if a completed session exists for clientDate (today)
+    const { data: completedSession } = await supabase
+      .from('reflection_sessions')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('date', clientDate)
+      .eq('is_complete', true)
+      .maybeSingle();
+
+    // Mark yesterday's pending commitments as kept if today's session is already complete
+    if (completedSession) {
+      await supabase
+        .from('goal_commitment_log')
+        .update({ kept: true, evaluated_at: now })
+        .eq('user_id', userId)
+        .eq('date', yesterday)
+        .is('kept', null);
+    }
+
+    // Mark commitments from 2+ days ago that are still null as missed
+    await supabase
+      .from('goal_commitment_log')
+      .update({ kept: false, evaluated_at: now })
+      .eq('user_id', userId)
+      .lt('date', twoDaysAgo)
+      .is('kept', null);
   } catch (_e) {
     // fire-and-forget — evaluation failure must never block the session
   }
@@ -1530,7 +1553,7 @@ export default async function handler(req, res) {
 
     // ── 1b. Evaluate goal commitments before loading stats ────────────────
     if (client_local_date) {
-      await runGoalCommitmentEvaluation(authenticatedUserId, client_local_date);
+      runGoalCommitmentEvaluation(authenticatedUserId, client_local_date);
     }
 
     // ── 2. Load context in parallel ───────────────────────────────────────
