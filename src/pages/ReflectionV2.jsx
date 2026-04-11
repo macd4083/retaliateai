@@ -286,6 +286,8 @@ export default function ReflectionV2() {
     honest_depth: false,
     yesterday_commitment: null,
     commitment_checkin_done: false,
+    directive_queue: [],
+    completed_directives: [],
   });
   const [summaryCardData, setSummaryCardData] = useState({});
   const [followThroughStats, setFollowThroughStats] = useState(null);
@@ -398,6 +400,8 @@ export default function ReflectionV2() {
         honest_depth: false,
         yesterday_commitment: session.yesterday_commitment || fetchedYesterdayCommitment || null,
         commitment_checkin_done: session.commitment_checkin_done === true,
+        directive_queue: Array.isArray(session.directive_queue) ? session.directive_queue : [],
+        completed_directives: Array.isArray(session.completed_directives) ? session.completed_directives : [],
       };
       setSessionState(restoredState);
 
@@ -715,6 +719,8 @@ export default function ReflectionV2() {
         if (data.extracted_data?.yesterday_commitment && !newState.yesterday_commitment) {
           newState.yesterday_commitment = data.extracted_data.yesterday_commitment;
         }
+        newState.directive_queue = data.directive_queue || [];
+        newState.completed_directives = data.completed_directives || [];
         setSessionState(newState);
 
         const dbUpdates = {};
