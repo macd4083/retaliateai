@@ -20,3 +20,4 @@ Run files in filename order (alphabetical / chronological).
 11. `20260405_goal_commitment_log.sql` — Creates goal_commitment_log table for tracking per-commitment kept/missed outcomes (feeds motivation_signal)
 12. `20260405_last_session_completed_at.sql` — Adds last_session_completed_at column to user_profiles
 13. `20260405_verification_events.sql` — Creates verification_events table for cross-device email verification flow
+14. `20260411_user_progress_events.sql` — Creates user_progress_events table for recording real threshold crossings; adds last_motivation_signal to goals
