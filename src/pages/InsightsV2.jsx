@@ -42,7 +42,7 @@ export default function InsightsV2() {
 
   const [livingProfile, setLivingProfile]       = useState(null);
   const [allCommitments, setAllCommitments]       = useState([]);
-  const [visibleCount, setVisibleCount]           = useState(7);
+  const [visibleCount, setVisibleCount]           = useState(5);
   const [selectedWeekIndex, setSelectedWeekIndex] = useState(null);
   const [wins, setWins]                           = useState([]);
   const [patterns, setPatterns]                   = useState([]);
@@ -306,8 +306,11 @@ export default function InsightsV2() {
 
           {/* ── ZONE 1: Momentum ──────────────────────────────────────────── */}
 
+          {/* Responsive row: stacks on mobile, side-by-side on md+ */}
+          <div className="flex flex-col md:flex-row md:gap-6 md:items-start gap-6">
+
           {/* Section 1: Consistency Tracker */}
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
+          <div className="md:flex-1 bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
             <p className="text-white font-semibold text-lg mb-4">Consistency Tracker</p>
 
             {weeklyData.length > 0 ? (() => {
@@ -406,86 +409,39 @@ export default function InsightsV2() {
                     })}
                   </svg>
 
-                  {/* Half-circle gauge + commitment list side by side */}
-                  <div className="flex gap-4 items-start mt-2">
-                    {/* Gauge */}
-                    <div className="flex-shrink-0">
-                      <svg width="200" height="120" viewBox="0 0 200 120">
-                        {/* Track */}
-                        <circle cx={cx} cy={cy} r={r}
-                          fill="none" stroke="#27272a" strokeWidth={16}
-                          strokeDasharray={`${halfCirc} ${fullCirc}`}
-                          strokeDashoffset={0}
-                          strokeLinecap="round"
-                          transform={`rotate(180 ${cx} ${cy})`}
-                        />
-                        {/* Fill */}
-                        <circle cx={cx} cy={cy} r={r}
-                          fill="none" stroke={fillColor} strokeWidth={16}
-                          strokeDasharray={`${fillLen} ${fullCirc}`}
-                          strokeDashoffset={0}
-                          strokeLinecap="round"
-                          transform={`rotate(180 ${cx} ${cy})`}
-                        />
-                        {/* Centre label */}
-                        <text x={cx} y={cy - 14} textAnchor="middle"
-                          fill="white" fontSize={26} fontWeight="bold" fontFamily="sans-serif">
-                          {gKept}
-                        </text>
-                        <text x={cx} y={cy + 6} textAnchor="middle"
-                          fill="#71717a" fontSize={11} fontFamily="sans-serif">
-                          of 7
-                        </text>
-                        <text x={cx} y={cy + 22} textAnchor="middle"
-                          fill="#52525b" fontSize={9} fontFamily="sans-serif">
-                          this week
-                        </text>
-                      </svg>
-                    </div>
-
-                    {/* Commitment list for selected week */}
-                    <div className="flex-1 min-w-0 space-y-2">
-                      {displayedCommitments.length === 0 ? (
-                        <p className="text-zinc-500 text-sm">
-                          {isCurrentWeekSelected
-                            ? 'No commitments yet. Start a reflection tonight.'
-                            : 'No commitments this week.'}
-                        </p>
-                      ) : (
-                        displayedCommitments.map((c, i) => (
-                          <div
-                            key={i}
-                            className="bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5"
-                          >
-                            <div className="flex items-start gap-2">
-                              <span className="flex-shrink-0 mt-0.5">
-                                {c.status === 'kept'    ? '✅' :
-                                 c.status === 'missed'  ? '❌' : '⏳'}
-                              </span>
-                              <div className="min-w-0 flex-1">
-                                <p className="text-zinc-200 text-sm leading-snug">{c.commitment}</p>
-                                <p className="text-zinc-500 text-xs mt-0.5">
-                                  {formatDate(c.date)} ·{' '}
-                                  {c.status === 'kept'   ? 'Kept' :
-                                   c.status === 'missed' ? 'Missed' :
-                                   'Pending — check back tomorrow'}
-                                </p>
-                              </div>
-                            </div>
-                          </div>
-                        ))
-                      )}
-
-                      {/* Load more — only for current week when there's more */}
-                      {showLoadMore && (
-                        <button
-                          onClick={() => setVisibleCount((c) => c + 7)}
-                          className="mt-1 text-zinc-400 text-sm flex items-center gap-1 hover:text-white transition-colors"
-                        >
-                          Show more <ChevronDown size={14} />
-                        </button>
-                      )}
-                    </div>
+                  {/* Half-circle gauge */}
+                  <div className="flex justify-center mt-2">
+                    <svg width="200" height="120" viewBox="0 0 200 120">
+                      {/* Track */}
+                      <circle cx={cx} cy={cy} r={r}
+                        fill="none" stroke="#27272a" strokeWidth={16}
+                        strokeDasharray={`${halfCirc} ${fullCirc}`}
+                        strokeDashoffset={0}
+                        strokeLinecap="round"
+                        transform={`rotate(180 ${cx} ${cy})`}
+                      />
+                      {/* Fill */}
+                      <circle cx={cx} cy={cy} r={r}
+                        fill="none" stroke={fillColor} strokeWidth={16}
+                        strokeDasharray={`${fillLen} ${fullCirc}`}
+                        strokeDashoffset={0}
+                        strokeLinecap="round"
+                        transform={`rotate(180 ${cx} ${cy})`}
+                      />
+                      {/* Centre label */}
+                      <text x={cx} y={cy - 14} textAnchor="middle"
+                        fill="white" fontSize={26} fontWeight="bold" fontFamily="sans-serif">
+                        {gKept}
+                      </text>
+                      <text x={cx} y={cy + 6} textAnchor="middle"
+                        fill="#71717a" fontSize={11} fontFamily="sans-serif">
+                        of 7
+                      </text>
+                      <text x={cx} y={cy + 22} textAnchor="middle"
+                        fill="#52525b" fontSize={9} fontFamily="sans-serif">
+                        this week
+                      </text>
+                    </svg>
                   </div>
 
                   {/* Trajectory line */}
@@ -503,6 +459,50 @@ export default function InsightsV2() {
               </p>
             )}
           </div>
+
+          {/* Right: Commitment list */}
+          <div className="md:w-72 md:flex-shrink-0">
+            <h2 className="text-white font-semibold text-base mb-3">Commitments</h2>
+            <div className="space-y-2">
+              {displayedCommitments.length === 0 ? (
+                <p className="text-zinc-500 text-sm">
+                  {isCurrentWeekSelected
+                    ? 'No commitments yet. Start a reflection tonight.'
+                    : 'No commitments this week.'}
+                </p>
+              ) : (
+                displayedCommitments.map((c, i) => (
+                  <div key={i} className="bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2.5">
+                    <div className="flex items-start gap-2">
+                      <span className="flex-shrink-0 mt-0.5">
+                        {c.status === 'kept'   ? '✅' :
+                         c.status === 'missed' ? '❌' : '⏳'}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-zinc-200 text-sm leading-snug">{c.commitment}</p>
+                        <p className="text-zinc-500 text-xs mt-0.5">
+                          {formatDate(c.date)} ·{' '}
+                          {c.status === 'kept'   ? 'Kept' :
+                           c.status === 'missed' ? 'Missed' :
+                           'Pending — check back tomorrow'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+              {showLoadMore && (
+                <button
+                  onClick={() => setVisibleCount((c) => c + 5)}
+                  className="mt-1 text-zinc-400 text-sm flex items-center gap-1 hover:text-white transition-colors"
+                >
+                  Show more <ChevronDown size={14} />
+                </button>
+              )}
+            </div>
+          </div>
+
+          </div>{/* end responsive Zone 1 row */}
 
           {/* Section 2: Streak */}
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 flex items-center gap-4">
