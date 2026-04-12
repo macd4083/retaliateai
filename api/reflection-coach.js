@@ -158,6 +158,35 @@ When you ask a deeper question, pivot the conversation, or surface something mea
 - Tone: casual, curious, warm. NOT clinical, NOT preachy, NOT therapy-speak.
 - NEVER say "I'm asking this question because..." — show the intent, don't narrate it.
 
+EVIDENCE FOR EXPLAINING QUESTIONS:
+When you signal intent before a question (per TRANSPARENT COACHING above), draw from specific data already in your context — never signal generically.
+
+Available evidence fields you MUST reference when they exist:
+- user_insights[n].trigger: the situation/state that activates this pattern — use this to explain WHY you're going there
+- user_insights[n].user_quote: their exact words from a prior session — quote it directly (e.g. "you said once: [quote]")
+- user_insights[n].foothold: evidence something is already shifting — name it as proof
+- reflection_patterns[n].occurrence_count + first_seen_date/last_seen_date: how many times, since when
+- recent_sessions: specific dates and what happened — reference them by date, not vaguely
+- goals[n].whys: what they said this goal was about before — reference the actual text
+- goals[n].depth_insights: realizations they had about this goal — reference by date if available
+
+Rules:
+- When you reference a pattern or insight, include AT LEAST ONE of: a specific count, a date, or their actual words (user_quote).
+- NEVER say "this keeps coming up" — say "this has come up [occurrence_count] times since [first_seen_date]"
+- NEVER say "you've mentioned this before" — say "you said once: [user_quote]"
+- NEVER say "I noticed something" without immediately naming the specific thing from context
+- If none of the above evidence fields are populated for a topic, skip the framing entirely and just ask the question.
+- The framing is one sentence. Then the question. That's it.
+
+PROGRESS EVENTS — REAL THRESHOLD CROSSINGS:
+When progress_events are present in your context, these are recorded transitions — not computed stats, but real threshold crossings that were stored when they happened.
+When a progress event is relevant to what the user just said, NAME IT specifically before connecting to it.
+- "Your follow-through on [goal] just crossed into strong territory — that's the first time."
+- "That blocker hasn't shown up in two weeks. Something actually changed."
+- "The first time you got a real insight about [goal] was [date]. What you're saying now connects to it."
+Use the display_text from the event as a starting point — make it conversational, not a readout.
+After referencing a progress event, set progress_event_surfaced: "<event_id>" in your response JSON so it can be marked as surfaced.
+
 SELF-REFLECTION PRIORITY:
 This is crucial. The goal is not just action — it's self-awareness. At least once per session, go deeper:
 - Ask WHY, not just WHAT. "Why do you think that is?" beats "What will you do?"
@@ -367,7 +396,8 @@ RETURN JSON EXACTLY (no markdown, no extra keys):
   "follow_up_queued": false,
   "follow_up_triggered": false,
   "is_session_complete": false,
-  "directive_completed": null
+  "directive_completed": null,
+  "progress_event_surfaced": null
 }
 
 Set "directive_completed" to the id of the directive you executed this message (from active_directive.id in context) when you have fully delivered the directive's intended coaching action in your response, or null if you did not act on it. Only mark one directive as completed per message.`;
@@ -583,7 +613,7 @@ async function loadReflectionPatterns(userId, clientDate) {
   try {
     const { data } = await supabase
       .from('reflection_patterns')
-      .select('label, occurrence_count, pattern_type')
+      .select('label, occurrence_count, pattern_type, last_seen_date, first_seen_date')
       .eq('user_id', userId)
       .gte('last_seen_date', localDate(-30, clientDate))
       .order('occurrence_count', { ascending: false })
@@ -930,6 +960,41 @@ async function queueFollowUp(userId, sessionId, { context, question, check_back_
 async function markFollowUpTriggered(followUpId) {
   try {
     await supabase.from('follow_up_queue').update({ triggered: true }).eq('id', followUpId);
+  } catch (_e) {}
+}
+
+// ── Progress event helpers ────────────────────────────────────────────────────
+
+async function writeProgressEvent(userId, sessionId, eventType, payload) {
+  try {
+    await supabase.from('user_progress_events').insert({
+      user_id: userId,
+      session_id: sessionId || null,
+      event_type: eventType,
+      payload,
+    });
+  } catch (_e) {}
+}
+
+async function loadProgressEvents(userId) {
+  try {
+    const { data } = await supabase
+      .from('user_progress_events')
+      .select('id, event_type, payload, created_at')
+      .eq('user_id', userId)
+      .is('surfaced_at', null)
+      .order('created_at', { ascending: false })
+      .limit(5);
+    return data || [];
+  } catch (_e) { return []; }
+}
+
+async function markProgressEventSurfaced(eventId) {
+  try {
+    await supabase
+      .from('user_progress_events')
+      .update({ surfaced_at: new Date().toISOString() })
+      .eq('id', eventId);
   } catch (_e) {}
 }
 
@@ -1680,6 +1745,7 @@ function buildSessionContext({
   activeDirective,
   directiveQueue,
   completedDirectives,
+  progressEvents,   // <-- progress event threshold crossings
 }) {
   // ── Derive internal values ─────────────────────────────────────────────
   const sessionExercisesRun = Array.isArray(sessionState.exercises_run) ? sessionState.exercises_run : [];
@@ -1777,6 +1843,14 @@ function buildSessionContext({
           kept: commitmentStats.kept7,
           total: commitmentStats.total7,
         }
+      : undefined,
+    progress_events: Array.isArray(progressEvents) && progressEvents.length > 0
+      ? progressEvents.map((e) => ({
+          id: e.id,
+          type: e.event_type,
+          display_text: e.payload?.display_text,
+          created_at: e.created_at,
+        }))
       : undefined,
     session: {
       stage: sessionState.current_stage || 'wins',
@@ -1890,7 +1964,7 @@ export default async function handler(req, res) {
     // ── 2. Load context in parallel ───────────────────────────────────────
     const currentSignals = [intentData?.intent, intentData?.emotional_state, intentData?.accountability_signal].filter(Boolean);
 
-    const [followUpQueue, growthMarkers, reflectionPatterns, recentSessions, yesterdayCommitment, userProfile, activeGoalsRaw, commitmentStats, todayEarlyCommitment, goalCommitmentStats, userInsights] =
+    const [followUpQueue, growthMarkers, reflectionPatterns, recentSessions, yesterdayCommitment, userProfile, activeGoalsRaw, commitmentStats, todayEarlyCommitment, goalCommitmentStats, userInsights, progressEvents] =
       await Promise.all([
         loadFollowUpQueue(authenticatedUserId, currentSignals, client_local_date),
         loadGrowthMarkers(authenticatedUserId, client_local_date),
@@ -1903,6 +1977,7 @@ export default async function handler(req, res) {
         loadTodayEarlyCommitment(authenticatedUserId, client_local_date),
         loadGoalCommitmentStats(authenticatedUserId, client_local_date),
         loadUserInsights(authenticatedUserId),
+        loadProgressEvents(authenticatedUserId),
       ]);
 
     // Attach motivation signal to each goal
@@ -1912,8 +1987,48 @@ export default async function handler(req, res) {
         ...g,
         motivation_signal: computeGoalMotivationSignal(gStats, g),
         commitment_stats: gStats || null,
+        _goalStats: gStats,
       };
     });
+
+    // ── Tag prior-state flags for progress event dedup ───────────────────────
+    // Tag user insights: _had_foothold_previously = true if a foothold_unlocked event
+    // already exists for this insight id (prevents duplicate event writes).
+    if (Array.isArray(userInsights)) {
+      for (const insight of userInsights) {
+        if (insight.foothold) {
+          const { data: existingEvent } = await supabase
+            .from('user_progress_events')
+            .select('id')
+            .eq('user_id', authenticatedUserId)
+            .eq('event_type', 'foothold_unlocked')
+            .contains('payload', { insight_id: insight.id })
+            .maybeSingle();
+          insight._had_foothold_previously = !!existingEvent;
+        } else {
+          insight._had_foothold_previously = true; // no foothold = nothing to fire
+        }
+      }
+    }
+
+    // Tag goals: _had_depth_insight_previously = true if a first_depth_insight event
+    // already exists for this goal id (prevents duplicate event writes).
+    if (Array.isArray(activeGoals)) {
+      for (const goal of activeGoals) {
+        if (goal.id) {
+          const { data: existingDepthEvent } = await supabase
+            .from('user_progress_events')
+            .select('id')
+            .eq('user_id', authenticatedUserId)
+            .eq('event_type', 'first_depth_insight')
+            .contains('payload', { goal_id: goal.id })
+            .maybeSingle();
+          goal._had_depth_insight_previously = !!existingDepthEvent;
+        } else {
+          goal._had_depth_insight_previously = true;
+        }
+      }
+    }
 
     // ── 2b. Pre-session state (init only, zero extra DB queries) ─────────
     const preSessionState = isInit
@@ -2142,6 +2257,7 @@ export default async function handler(req, res) {
       activeDirective,
       directiveQueue: combinedDirectiveQueue,
       completedDirectives,
+      progressEvents,
     });
 
     // ── 9. Build messages ─────────────────────────────────────────────────
@@ -2219,6 +2335,11 @@ export default async function handler(req, res) {
     result.honest_depth = result.honest_depth === true;
     result.commitment_checkin_done = result.commitment_checkin_done === true;
     result.show_goal_chips = result.show_goal_chips === true;
+
+    // Mark a progress event as surfaced if the AI referenced it
+    if (result.progress_event_surfaced && typeof result.progress_event_surfaced === 'string') {
+      markProgressEventSurfaced(result.progress_event_surfaced); // fire-and-forget
+    }
 
     // Safety guard — prevent hallucinated stage values from GPT
     const VALID_STAGES = ['wins', 'commitment_checkin', 'honest', 'tomorrow', 'close', 'complete'];
@@ -2460,6 +2581,153 @@ Only link when genuinely relevant. Do not force links. Multiple items can have t
           p_dedup_key: 'text',
         }).catch((e) => console.error('Failed to persist miss to session:', e))
       );
+    }
+
+    // ── Progress event writes (fire-and-forget) ────────────────────────────────
+
+    // Event 1: motivation_signal_change per goal
+    if (activeGoals?.length) {
+      dbPromises.push(
+        (async () => {
+          for (const goal of activeGoals) {
+            if (!goal.id || !goal._goalStats) continue;
+            const newSignal = computeGoalMotivationSignal(goal._goalStats, goal);
+            const prevSignal = goal.last_motivation_signal;
+            if (prevSignal && prevSignal !== newSignal && newSignal !== 'unknown') {
+              // Persist new signal for next-session comparison
+              supabase.from('goals')
+                .update({ last_motivation_signal: newSignal })
+                .eq('id', goal.id)
+                .then(() => {}).catch(() => {});
+
+              let displayText = null;
+              if (newSignal === 'strong') {
+                displayText = `Your follow-through on "${goal.title}" just hit strong territory — a real shift from ${prevSignal}.`;
+              } else if (newSignal === 'medium' && prevSignal === 'low') {
+                displayText = `Your commitment follow-through on "${goal.title}" crossed 40%. Something is changing.`;
+              } else if (newSignal === 'low' && (prevSignal === 'medium' || prevSignal === 'strong')) {
+                displayText = `Follow-through on "${goal.title}" has slipped below 40%. Worth paying attention to.`;
+              } else if (newSignal === 'struggling') {
+                displayText = `"${goal.title}" hasn't come up in a while and follow-through is declining. Worth naming.`;
+              }
+              if (displayText) {
+                await writeProgressEvent(authenticatedUserId, session_id, 'motivation_signal_change', {
+                  goal_id: goal.id,
+                  goal_title: goal.title,
+                  from: prevSignal,
+                  to: newSignal,
+                  display_text: displayText,
+                });
+              }
+            } else if (!prevSignal && newSignal !== 'unknown') {
+              // First time signal computed — store it silently, no event
+              supabase.from('goals')
+                .update({ last_motivation_signal: newSignal })
+                .eq('id', goal.id)
+                .then(() => {}).catch(() => {});
+            }
+          }
+        })()
+      );
+    }
+
+    // Event 2: followthrough_milestone crossing
+    if (commitmentStats) {
+      const { rate7, trajectory: ct } = commitmentStats;
+      dbPromises.push(
+        (async () => {
+          const { data: existingMilestone } = await supabase
+            .from('user_progress_events')
+            .select('id')
+            .eq('user_id', authenticatedUserId)
+            .eq('event_type', 'followthrough_milestone')
+            .gte('created_at', new Date(Date.now() - 30 * 86400000).toISOString())
+            .limit(1)
+            .maybeSingle();
+
+          if (!existingMilestone) {
+            if (rate7 >= MOTIVATION_STRONG_THRESHOLD && ct !== 'declining') {
+              await writeProgressEvent(authenticatedUserId, session_id, 'followthrough_milestone', {
+                rate: rate7,
+                tier: 'strong',
+                display_text: `Your overall commitment follow-through just hit ${Math.round(rate7 * 100)}% — your strongest stretch yet.`,
+              });
+            } else if (rate7 >= MOTIVATION_MEDIUM_THRESHOLD && ct === 'improving') {
+              await writeProgressEvent(authenticatedUserId, session_id, 'followthrough_milestone', {
+                rate: rate7,
+                tier: 'medium',
+                display_text: `Your follow-through rate just crossed 40% and is trending up. That's a real shift.`,
+              });
+            }
+          }
+        })()
+      );
+    }
+
+    // Event 3: foothold_unlocked (user_insight with foothold not yet recorded as an event)
+    if (Array.isArray(userInsights)) {
+      for (const insight of userInsights) {
+        if (insight.foothold && !insight._had_foothold_previously) {
+          dbPromises.push(
+            writeProgressEvent(authenticatedUserId, session_id, 'foothold_unlocked', {
+              insight_id: insight.id,
+              pattern_label: insight.pattern_label,
+              foothold: insight.foothold,
+              display_text: `Something is shifting with "${insight.pattern_label}": ${insight.foothold}`,
+            })
+          );
+        }
+      }
+    }
+
+    // Event 4: first_depth_insight on a goal
+    if (Array.isArray(activeGoals)) {
+      dbPromises.push(
+        (async () => {
+          for (const goal of activeGoals) {
+            if (!goal.id || goal._had_depth_insight_previously) continue;
+            const depthInsights = Array.isArray(goal.depth_insights) ? goal.depth_insights : [];
+            if (depthInsights.length === 1) {
+              await writeProgressEvent(authenticatedUserId, session_id, 'first_depth_insight', {
+                goal_id: goal.id,
+                goal_title: goal.title,
+                insight: depthInsights[0].insight,
+                date: depthInsights[0].date,
+                display_text: `You had your first real insight about "${goal.title}" on ${depthInsights[0].date}: "${(depthInsights[0].insight || '').slice(0, 80)}..."`,
+              });
+            }
+          }
+        })()
+      );
+    }
+
+    // Event 5: blocker_fading (pattern not seen in 14+ days, occurred 3+ times)
+    if (Array.isArray(reflectionPatterns) && client_local_date) {
+      const fourteenDaysAgo = localDate(-14, client_local_date);
+      const fadingBlockers = reflectionPatterns.filter(
+        (p) => p.pattern_type === 'blocker' && p.last_seen_date < fourteenDaysAgo && p.occurrence_count >= 3
+      );
+      for (const blocker of fadingBlockers) {
+        dbPromises.push(
+          (async () => {
+            const { data: existingFade } = await supabase
+              .from('user_progress_events')
+              .select('id')
+              .eq('user_id', authenticatedUserId)
+              .eq('event_type', 'blocker_fading')
+              .contains('payload', { label: blocker.label })
+              .maybeSingle();
+            if (!existingFade) {
+              await writeProgressEvent(authenticatedUserId, session_id, 'blocker_fading', {
+                label: blocker.label,
+                last_seen_date: blocker.last_seen_date,
+                occurrence_count: blocker.occurrence_count,
+                display_text: `"${blocker.label}" showed up ${blocker.occurrence_count} times but hasn't appeared since ${blocker.last_seen_date}. That pattern may be fading.`,
+              });
+            }
+          })()
+        );
+      }
     }
 
     Promise.all(dbPromises).catch(() => {});

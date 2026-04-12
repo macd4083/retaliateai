@@ -50,6 +50,7 @@ export default function InsightsV2() {
   const [newGoalTitle, setNewGoalTitle]           = useState('');
   const [newGoalCategory, setNewGoalCategory]     = useState('');
   const [savingGoal, setSavingGoal]               = useState(false);
+  const [progressEvents, setProgressEvents]       = useState([]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -67,6 +68,7 @@ export default function InsightsV2() {
         loadCommitmentStats(),
         loadNarratives(),
         loadActiveGoals(),
+        loadProgressEvents(),
       ]);
     } finally {
       setLoading(false);
@@ -228,6 +230,18 @@ export default function InsightsV2() {
         const data = await res.json();
         setNarratives(data.narratives || []);
       }
+    } catch (_e) {}
+  }
+
+  async function loadProgressEvents() {
+    try {
+      const { data } = await supabase
+        .from('user_progress_events')
+        .select('id, event_type, payload, created_at')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(7);
+      setProgressEvents(data || []);
     } catch (_e) {}
   }
 
@@ -491,6 +505,30 @@ export default function InsightsV2() {
               <p className="text-zinc-500 text-sm">Keep showing up.</p>
             </div>
           </div>
+
+          {/* ── Section 2.5: What's Shifting ─────────────────────────── */}
+          {progressEvents.length > 0 && (
+            <section>
+              <h2 className="text-white font-semibold text-base mb-3">What's Shifting</h2>
+              <div className="space-y-2">
+                {progressEvents.map((e) => (
+                  <div
+                    key={e.id}
+                    className="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3"
+                  >
+                    <p className="text-zinc-300 text-sm leading-relaxed">
+                      {e.payload?.display_text}
+                    </p>
+                    <p className="text-zinc-500 text-xs mt-1">
+                      {new Date(e.created_at).toLocaleDateString('en-US', {
+                        month: 'short', day: 'numeric',
+                      })}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
 
           {/* ── Section 3: Who You're Becoming ────────────────────────── */}
           {livingProfile?.identity_statement && (

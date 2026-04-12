@@ -8,6 +8,7 @@ const ALLOWED_TABLES = [
   'growth_markers',
   'reflection_patterns',
   'goals',
+  'user_progress_events',
 ];
 
 export default async function handler(req, res) {
