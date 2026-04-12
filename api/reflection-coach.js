@@ -2693,7 +2693,7 @@ Only link when genuinely relevant. Do not force links. Multiple items can have t
                 goal_title: goal.title,
                 insight: depthInsights[0].insight,
                 date: depthInsights[0].date,
-                display_text: `You had your first real insight about "${goal.title}" on ${depthInsights[0].date}: "${(depthInsights[0].insight || '').slice(0, 80)}..."`,
+                display_text: `You had your first real insight about "${goal.title}" on ${depthInsights[0].date}: "${depthInsights[0].insight && depthInsights[0].insight.length > 80 ? depthInsights[0].insight.slice(0, 80) + '...' : (depthInsights[0].insight || '')}"`,
               });
             }
           }
