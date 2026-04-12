@@ -32,6 +32,11 @@ function getMondayOf(dateStr) {
 
 // ─── Main Component ────────────────────────────────────��──────────────────────
 
+// Returns true if an array has at least one object item with an evidence field
+function hasEvidenceItems(items) {
+  return Array.isArray(items) && items.some((item) => typeof item === 'object' && item?.evidence);
+}
+
 export default function InsightsV2() {
   const { user } = useAuth();
 
@@ -512,8 +517,20 @@ export default function InsightsV2() {
 
           {/* Section 3: Recent Progress (wins + progress events combined) */}
           {(() => {
-            const winItems = wins.map((w) => ({ type: 'win', text: w.text, date: w.date, id: `win-${w.date}-${w.text}` }));
-            const eventItems = progressEvents.map((e) => ({ type: e.event_type, text: e.payload?.display_text, date: e.created_at, id: e.id, signal: e.payload?.new_signal }));
+            const winItems = wins.map((w) => ({
+              type: 'win',
+              text: w.text,
+              date: w.date,
+              id: `win-${w.date}-${w.text}`,
+              signal: null,
+            }));
+            const eventItems = progressEvents.map((e) => ({
+              type: e.event_type,
+              text: e.payload?.display_text,
+              date: e.created_at,
+              id: e.id,
+              signal: e.payload?.new_signal,
+            }));
             const combined = [...winItems, ...eventItems]
               .filter((item) => item.text)
               .sort((a, b) => new Date(b.date) - new Date(a.date))
@@ -729,7 +746,7 @@ export default function InsightsV2() {
               </p>
 
               {/* Inline strengths */}
-              {Array.isArray(livingProfile.strengths) && livingProfile.strengths.some((s) => (typeof s === 'object' ? s.evidence : false)) && (
+              {hasEvidenceItems(livingProfile.strengths) && (
                 <div className="mt-3 pt-3 border-t border-red-900/30 space-y-1">
                   <p className="text-zinc-600 text-xs uppercase tracking-widest mb-1">Strengths</p>
                   {livingProfile.strengths.filter((s) => typeof s === 'object' && s.evidence).slice(0, 2).map((s, i) => {
@@ -744,7 +761,7 @@ export default function InsightsV2() {
               )}
 
               {/* Inline growth areas */}
-              {Array.isArray(livingProfile.growth_areas) && livingProfile.growth_areas.some((g) => (typeof g === 'object' ? g.evidence : false)) && (
+              {hasEvidenceItems(livingProfile.growth_areas) && (
                 <div className="mt-3 pt-3 border-t border-red-900/30 space-y-1">
                   <p className="text-zinc-600 text-xs uppercase tracking-widest mb-1">Growing In</p>
                   {livingProfile.growth_areas.filter((g) => typeof g === 'object' && g.evidence).slice(0, 2).map((g, i) => {
@@ -810,7 +827,10 @@ export default function InsightsV2() {
               /* Fallback to raw pattern counts if narratives haven't loaded yet */
               <div className="space-y-3">
                 {patterns.map((p, i) => {
-                  const labelText = typeof p.label === 'string' ? p.label : (p.label?.label ?? String(p.label ?? ''));
+                  const labelText = typeof p.label === 'string'
+                    ? p.label
+                    // Guard: p.label may itself be an object {label, evidence, ...} from a malformed pattern row
+                    : (p.label?.label ?? String(p.label ?? ''));
                   const patternType = typeof p.pattern_type === 'string' ? p.pattern_type : String(p.pattern_type ?? '');
                   return (
                     <div
