@@ -25,9 +25,11 @@ export default function GoalSuggestion({ suggestion, onAccept, onDismiss }) {
             {suggestion.description}
           </p>
           
-          <p className="text-xs text-purple-700 italic">
-            Why this matters:  {suggestion.why_it_matters}
-          </p>
+          {(suggestion.whys?.[0]?.text) && (
+            <p className="text-xs text-purple-700 italic">
+              Why this matters: {suggestion.whys[0].text}
+            </p>
+          )}
           
           <div className="flex gap-2 mt-4">
             <button

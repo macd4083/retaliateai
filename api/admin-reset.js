@@ -40,7 +40,6 @@ export default async function handler(req, res) {
       await supabase.from('reflection_sessions').delete().eq('user_id', user_id);
       await supabase.from('follow_up_queue').delete().eq('user_id', user_id);
       await supabase.from('growth_markers').delete().eq('user_id', user_id);
-      await supabase.from('reflection_patterns').delete().eq('user_id', user_id);
 
       return res.status(200).json({ ok: true, deleted_all: true, user_id });
     }

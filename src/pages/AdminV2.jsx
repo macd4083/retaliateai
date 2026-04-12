@@ -13,7 +13,6 @@ const DATA_TABS = [
   { id: 'user_profiles', label: 'User Profile' },
   { id: 'follow_up_queue', label: 'Follow-Up Queue' },
   { id: 'growth_markers', label: 'Growth Markers' },
-  { id: 'reflection_patterns', label: 'Reflection Patterns' },
   { id: 'goals', label: 'Goals' },
 ];
 

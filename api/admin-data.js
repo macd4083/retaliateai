@@ -6,7 +6,6 @@ const ALLOWED_TABLES = [
   'user_profiles',
   'follow_up_queue',
   'growth_markers',
-  'reflection_patterns',
   'goals',
   'user_progress_events',
 ];

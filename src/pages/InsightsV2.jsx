@@ -45,7 +45,6 @@ export default function InsightsV2() {
   const [visibleCount, setVisibleCount]           = useState(5);
   const [selectedWeekIndex, setSelectedWeekIndex] = useState(null);
   const [wins, setWins]                           = useState([]);
-  const [patterns, setPatterns]                   = useState([]);
   const [narratives, setNarratives]               = useState([]);
   const [streak, setStreak]                       = useState(0);
   const [commitmentStats, setCommitmentStats]     = useState(null);
@@ -68,7 +67,6 @@ export default function InsightsV2() {
       await Promise.all([
         loadProfile(),
         loadSessions(),
-        loadPatterns(),
         loadStreak(),
         loadCommitmentStats(),
         loadNarratives(),
@@ -83,7 +81,7 @@ export default function InsightsV2() {
   async function loadActiveGoals() {
     const { data } = await supabase
       .from('goals')
-      .select('id, title, why_it_matters, category, whys, status, created_at, vision_snapshot, last_mentioned_at, last_motivation_signal')
+      .select('id, title, category, whys, status, created_at, vision_snapshot, last_mentioned_at, last_motivation_signal')
       .eq('user_id', user.id)
       .eq('status', 'active')
       .order('created_at', { ascending: true })
@@ -100,7 +98,6 @@ export default function InsightsV2() {
         title: newGoalTitle.trim(),
         category: newGoalCategory || null,
         status: 'active',
-        why_it_matters: null,
         whys: [],
       });
       if (error) {
@@ -192,17 +189,6 @@ export default function InsightsV2() {
       }
     }
     setWins(allWins.slice(0, 20));
-  }
-
-  async function loadPatterns() {
-    const { data } = await supabase
-      .from('reflection_patterns')
-      .select('label, occurrence_count, pattern_type')
-      .eq('user_id', user.id)
-      .gte('occurrence_count', 2)
-      .order('occurrence_count', { ascending: false })
-      .limit(6);
-    setPatterns(data || []);
   }
 
   async function loadStreak() {
@@ -728,7 +714,7 @@ export default function InsightsV2() {
                 {activeGoals.map((goal, i) => {
                   const whysList = Array.isArray(goal.whys) && goal.whys.length > 0
                     ? [...goal.whys].reverse()
-                    : (goal.why_it_matters ? [{ text: goal.why_it_matters, added_at: null, source: 'original' }] : []);
+                    : [];
 
                   const signal = goal.last_motivation_signal;
                   const signalBadge = (() => {
@@ -888,40 +874,6 @@ export default function InsightsV2() {
                           {n.occurrences} time{n.occurrences !== 1 ? 's' : ''} in your reflections
                         </p>
                       )}
-                    </div>
-                  );
-                })}
-              </div>
-            ) : patterns.length > 0 ? (
-              /* Fallback to raw pattern counts if narratives haven't loaded yet */
-              <div className="space-y-3">
-                {patterns.map((p, i) => {
-                  const labelText = typeof p.label === 'string'
-                    ? p.label
-                    // Guard: p.label may itself be an object {label, evidence, ...} from a malformed pattern row
-                    : (p.label?.label ?? String(p.label ?? ''));
-                  const patternType = typeof p.pattern_type === 'string' ? p.pattern_type : String(p.pattern_type ?? '');
-                  return (
-                    <div
-                      key={i}
-                      className={`bg-zinc-900 border border-zinc-800 border-l-4 ${
-                        patternType === 'blocker' ? 'border-l-red-600' :
-                        patternType === 'strength' ? 'border-l-green-600' :
-                        'border-l-zinc-500'
-                      } rounded-2xl p-4`}
-                    >
-                      <p className="text-zinc-500 text-xs uppercase tracking-widest mb-2">
-                        {patternType === 'blocker'  ? 'Something we keep seeing' :
-                         patternType === 'strength' ? 'A strength emerging' : 'A pattern'}
-                      </p>
-                      <p className="text-zinc-300 text-sm leading-relaxed">
-                        <strong className="text-white">{labelText}</strong> — {p.occurrence_count} time{p.occurrence_count !== 1 ? 's' : ''} in your reflections.
-                      </p>
-                      <p className="text-zinc-400 text-sm mt-1">
-                        {patternType === 'blocker'
-                          ? `This has shown up ${p.occurrence_count} times in your reflections. Keep reflecting to get a full breakdown.`
-                          : `You've shown this ${p.occurrence_count} times. Keep going to unlock a full narrative.`}
-                      </p>
                     </div>
                   );
                 })}

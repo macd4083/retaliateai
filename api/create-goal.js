@@ -27,7 +27,8 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'user_id and title are required' });
     }
 
-    // Seed whys array from why_it_matters if provided
+    // Seed whys array from why_it_matters if provided (why_it_matters accepted for
+    // backwards-compat with existing callers but is not stored as a separate column)
     const now = new Date().toISOString();
     const initialWhys = why_it_matters
       ? [{ text: why_it_matters, added_at: now, source: 'user_journal' }]
@@ -40,7 +41,6 @@ export default async function handler(req, res) {
         user_id: authenticatedUserId,
         title: title,
         description: description || null,
-        why_it_matters: why_it_matters || null,
         whys: initialWhys,
         category: category || null,
         status: 'active',
