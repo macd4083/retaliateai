@@ -27,17 +27,17 @@ export const PERSONAS = {
       goals: [
         {
           title: 'Get Stackline to 20 paying customers by end of Q2',
-          why_it_matters: 'I want to prove I can build something real and stop talking about it',
+          whys: [{ text: 'I want to prove I can build something real and stop talking about it', added_at: null, source: 'original', motivation_signal: null }],
           category: 'work',
         },
         {
           title: 'Restart a consistent gym habit — 3x per week',
-          why_it_matters: "I feel better when I move and I've let it slip for too long",
+          whys: [{ text: "I feel better when I move and I've let it slip for too long", added_at: null, source: 'original', motivation_signal: null }],
           category: 'fitness',
         },
         {
           title: 'Stop ghosting my friends — reach out to at least one person each week',
-          why_it_matters: "I've been so heads-down on Stackline that I'm losing touch with people who matter",
+          whys: [{ text: "I've been so heads-down on Stackline that I'm losing touch with people who matter", added_at: null, source: 'original', motivation_signal: null }],
           category: 'relationships',
         },
       ],
@@ -135,17 +135,17 @@ export const PERSONAS = {
       goals: [
         {
           title: 'Get Fieldr to 50 beta users and quit the day job by December',
-          why_it_matters: "I've been saying I'll do this for 3 years — I need to know I can actually finish something",
+          whys: [{ text: "I've been saying I'll do this for 3 years — I need to know I can actually finish something", added_at: null, source: 'original', motivation_signal: null }],
           category: 'side project',
         },
         {
           title: 'Stop overworking on weekends — protect at least one full day off per week',
-          why_it_matters: "Chris is right that I'm burning out — I don't want to lose the relationship over this",
+          whys: [{ text: "Chris is right that I'm burning out — I don't want to lose the relationship over this", added_at: null, source: 'original', motivation_signal: null }],
           category: 'health',
         },
         {
           title: 'Ship the onboarding email sequence for Fieldr',
-          why_it_matters: 'Beta users are dropping off and I know better onboarding would help — I just keep avoiding it',
+          whys: [{ text: 'Beta users are dropping off and I know better onboarding would help — I just keep avoiding it', added_at: null, source: 'original', motivation_signal: null }],
           category: 'work',
         },
       ],
@@ -243,17 +243,17 @@ export const PERSONAS = {
       goals: [
         {
           title: 'Land 3 retainer clients for Greyspace Studio and hit $6k/month by June',
-          why_it_matters: "I'm tired of working for people who don't care about craft — I want to do it on my own terms",
+          whys: [{ text: "I'm tired of working for people who don't care about craft — I want to do it on my own terms", added_at: null, source: 'original', motivation_signal: null }],
           category: 'business',
         },
         {
           title: 'Send proposals within 48 hours of discovery calls — stop overthinking them',
-          why_it_matters: "Lena is right — I lose clients by hesitating. Done is better than perfect.",
+          whys: [{ text: "Lena is right — I lose clients by hesitating. Done is better than perfect.", added_at: null, source: 'original', motivation_signal: null }],
           category: 'creative work',
         },
         {
           title: 'Do a personal creative project for myself every month — not for clients',
-          why_it_matters: 'I got into design because I loved making things — I need to remember that outside of client work',
+          whys: [{ text: 'I got into design because I loved making things — I need to remember that outside of client work', added_at: null, source: 'original', motivation_signal: null }],
           category: 'personal growth',
         },
       ],

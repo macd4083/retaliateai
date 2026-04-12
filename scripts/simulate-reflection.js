@@ -707,9 +707,7 @@ async function seedUserProfile(supabase, userId, persona) {
     const goalRows = persona.profile.goals.map((g) => ({
       user_id: userId,
       title: g.title,
-      whys: g.why_it_matters
-        ? [{ text: g.why_it_matters, added_at: now, source: 'onboarding', motivation_signal: null }]
-        : [],
+      whys: g.whys ?? [],
       category: g.category || null,
       status: 'active',
     }));
