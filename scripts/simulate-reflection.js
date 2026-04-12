@@ -274,7 +274,7 @@ async function validateBackend(supabase, userId, simulatedDate, prevGoalWhysCoun
         last_seen_date: ins.last_seen_date,
       }));
       const insightStr = insights
-        .map((ins) => `${ins.pattern_label}(${ins.sessions_synthesized_from ?? '?'}x)`)
+        .map((ins) => `${ins.pattern_label}(${ins.sessions_synthesized_from || 0}x)`)
         .join(', ');
       console.log(`    🔁  Insights: ${insightStr}`);
 
