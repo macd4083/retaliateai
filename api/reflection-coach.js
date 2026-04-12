@@ -1992,29 +1992,28 @@ export default async function handler(req, res) {
     });
 
     // ── Tag prior-state flags for progress event dedup ───────────────────────
-    // Tag user insights: _had_foothold_previously = true if a foothold_unlocked event
-    // already exists for this insight id (prevents duplicate event writes).
-    if (Array.isArray(userInsights)) {
-      for (const insight of userInsights) {
+    // Run both tagging passes concurrently to avoid up to N sequential DB
+    // roundtrips (one per insight + one per goal) blocking the response path.
+    await Promise.all([
+      // Tag user insights: _had_foothold_previously = true if a foothold_unlocked
+      // event already exists for this insight id (prevents duplicate event writes).
+      ...(Array.isArray(userInsights) ? userInsights.map(async (insight) => {
         if (insight.foothold) {
-          const { data: existingEvent } = await supabase
+          const { data: existingFootholdEvent } = await supabase
             .from('user_progress_events')
             .select('id')
             .eq('user_id', authenticatedUserId)
             .eq('event_type', 'foothold_unlocked')
             .contains('payload', { insight_id: insight.id })
             .maybeSingle();
-          insight._had_foothold_previously = !!existingEvent;
+          insight._had_foothold_previously = !!existingFootholdEvent;
         } else {
           insight._had_foothold_previously = true; // no foothold = nothing to fire
         }
-      }
-    }
-
-    // Tag goals: _had_depth_insight_previously = true if a first_depth_insight event
-    // already exists for this goal id (prevents duplicate event writes).
-    if (Array.isArray(activeGoals)) {
-      for (const goal of activeGoals) {
+      }) : []),
+      // Tag goals: _had_depth_insight_previously = true if a first_depth_insight
+      // event already exists for this goal id (prevents duplicate event writes).
+      ...(Array.isArray(activeGoals) ? activeGoals.map(async (goal) => {
         if (goal.id) {
           const { data: existingDepthEvent } = await supabase
             .from('user_progress_events')
@@ -2027,8 +2026,8 @@ export default async function handler(req, res) {
         } else {
           goal._had_depth_insight_previously = true;
         }
-      }
-    }
+      }) : []),
+    ]);
 
     // ── 2b. Pre-session state (init only, zero extra DB queries) ─────────
     const preSessionState = isInit
