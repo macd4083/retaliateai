@@ -244,9 +244,9 @@ export default function InsightsV2() {
         .from('user_progress_events')
         .select('id, event_type, payload, created_at')
         .eq('user_id', user.id)
-        .is('surfaced_at', null)
+        // No surfaced_at filter — show all recent events regardless of surfacing status
         .order('created_at', { ascending: false })
-        .limit(10);
+        .limit(7);
       setProgressEvents(data || []);
     } catch (_e) {}
   }
@@ -588,6 +588,75 @@ export default function InsightsV2() {
                     Your wins and progress milestones will appear here after a few sessions.
                   </p>
                 )}
+              </section>
+            );
+          })()}
+
+          {/* Section 3b: What's Shifting (progress event threshold crossings) */}
+          {progressEvents.length > 0 && (() => {
+            const getEventIcon = (type, payload) => {
+              if (type === 'followthrough_milestone') return '🔥';
+              if (type === 'motivation_signal_change') {
+                const to = payload?.to;
+                return (to === 'strong' || to === 'medium') ? '📈' : '📉';
+              }
+              if (type === 'blocker_fading') return '💡';
+              if (type === 'foothold_unlocked') return '🔓';
+              if (type === 'first_depth_insight') return '🧠';
+              return '📌';
+            };
+
+            const getEventBorder = (type, payload) => {
+              if (type === 'followthrough_milestone') return 'border-l-red-600';
+              if (type === 'motivation_signal_change') {
+                const to = payload?.to;
+                if (to === 'strong') return 'border-l-green-600';
+                if (to === 'low' || to === 'struggling') return 'border-l-orange-500';
+                return 'border-l-zinc-500';
+              }
+              if (type === 'blocker_fading') return 'border-l-yellow-500';
+              if (type === 'foothold_unlocked') return 'border-l-blue-500';
+              if (type === 'first_depth_insight') return 'border-l-purple-500';
+              return 'border-l-zinc-500';
+            };
+
+            const getEventLabel = (type) => {
+              if (type === 'followthrough_milestone') return 'Commitment milestone';
+              if (type === 'motivation_signal_change') return 'Momentum shift';
+              if (type === 'blocker_fading') return 'Pattern fading';
+              if (type === 'foothold_unlocked') return "Something's changing";
+              if (type === 'first_depth_insight') return 'First real insight';
+              return 'Progress marker';
+            };
+
+            const formatEvtDate = (dateStr) => {
+              if (!dateStr) return '';
+              const d = new Date(dateStr);
+              return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            };
+
+            return (
+              <section>
+                <h2 className="text-white font-semibold text-base mb-3">What's Shifting</h2>
+                <div className="space-y-2">
+                  {progressEvents.map((e) => {
+                    const displayText = e.payload?.display_text;
+                    if (!displayText) return null;
+                    return (
+                      <div
+                        key={e.id}
+                        className={`bg-zinc-900 border border-zinc-800 border-l-4 ${getEventBorder(e.event_type, e.payload)} rounded-2xl px-4 py-3 flex items-start gap-3`}
+                      >
+                        <span className="text-sm flex-shrink-0 mt-0.5">{getEventIcon(e.event_type, e.payload)}</span>
+                        <div className="min-w-0">
+                          <p className="text-zinc-500 text-xs uppercase tracking-widest mb-1">{getEventLabel(e.event_type)}</p>
+                          <p className="text-zinc-200 text-sm leading-relaxed">{displayText}</p>
+                          <p className="text-zinc-500 text-xs mt-0.5">{formatEvtDate(e.created_at)}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </section>
             );
           })()}
