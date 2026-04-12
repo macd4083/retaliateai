@@ -78,7 +78,7 @@ export default function InsightsV2() {
   async function loadActiveGoals() {
     const { data } = await supabase
       .from('goals')
-      .select('id, title, why_it_matters, category, whys, status, created_at, vision_snapshot, last_mentioned_at')
+      .select('id, title, why_it_matters, category, whys, status, created_at, vision_snapshot, last_mentioned_at, last_motivation_signal')
       .eq('user_id', user.id)
       .eq('status', 'active')
       .order('created_at', { ascending: true })
@@ -239,8 +239,9 @@ export default function InsightsV2() {
         .from('user_progress_events')
         .select('id, event_type, payload, created_at')
         .eq('user_id', user.id)
+        .is('surfaced_at', null)
         .order('created_at', { ascending: false })
-        .limit(7);
+        .limit(10);
       setProgressEvents(data || []);
     } catch (_e) {}
   }
@@ -260,7 +261,6 @@ export default function InsightsV2() {
   const ft       = commitmentStats?.followThrough7;
   const ftPrior  = commitmentStats?.followThroughPrior7;
   const trajectory = commitmentStats?.trajectory;
-  const { recoveryDays = 0, recoveriesCount = 0 } = commitmentStats || {};
   const weeklyData = commitmentStats?.weeklyData || [];
 
   // Selected week defaults to the most recent (last index)
@@ -297,9 +297,11 @@ export default function InsightsV2() {
   return (
     <AppShellV2 title="Insights">
       <div className="h-full overflow-y-auto">
-        <div className="max-w-md mx-auto px-4 py-6 space-y-8">
+        <div className="max-w-2xl mx-auto px-4 md:px-6 py-6 space-y-6">
 
-          {/* ── Section 1: Consistency Tracker ────────────────────────── */}
+          {/* ── ZONE 1: Momentum ──────────────────────────────────────────── */}
+
+          {/* Section 1: Consistency Tracker */}
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
             <p className="text-white font-semibold text-lg mb-4">Consistency Tracker</p>
 
@@ -497,7 +499,7 @@ export default function InsightsV2() {
             )}
           </div>
 
-          {/* ── Section 2: Streak ─────────────────────────────────────── */}
+          {/* Section 2: Streak */}
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 flex items-center gap-4">
             <span className="text-3xl">🔥</span>
             <div>
@@ -506,67 +508,74 @@ export default function InsightsV2() {
             </div>
           </div>
 
-          {/* ── Section 2.5: What's Shifting ─────────────────────────── */}
-          {progressEvents.length > 0 && (
-            <section>
-              <h2 className="text-white font-semibold text-base mb-3">What's Shifting</h2>
-              <div className="space-y-2">
-                {progressEvents.map((e) => (
-                  <div
-                    key={e.id}
-                    className="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3"
-                  >
-                    <p className="text-zinc-300 text-sm leading-relaxed">
-                      {e.payload?.display_text}
-                    </p>
-                    <p className="text-zinc-500 text-xs mt-1">
-                      {new Date(e.created_at).toLocaleDateString('en-US', {
-                        month: 'short', day: 'numeric',
-                      })}
-                    </p>
+          {/* ── ZONE 2: Progress & Identity ───────────────────────────────── */}
+
+          {/* Section 3: Recent Progress (wins + progress events combined) */}
+          {(() => {
+            const winItems = wins.map((w) => ({ type: 'win', text: w.text, date: w.date, id: `win-${w.date}-${w.text}` }));
+            const eventItems = progressEvents.map((e) => ({ type: e.event_type, text: e.payload?.display_text, date: e.created_at, id: e.id, signal: e.payload?.new_signal }));
+            const combined = [...winItems, ...eventItems]
+              .filter((item) => item.text)
+              .sort((a, b) => new Date(b.date) - new Date(a.date))
+              .slice(0, 8);
+
+            const getBorderColor = (type, signal) => {
+              if (type === 'win') return 'border-l-green-600';
+              if (type === 'followthrough_milestone') return 'border-l-red-600';
+              if (type === 'motivation_signal_change') {
+                if (signal === 'strong') return 'border-l-green-600';
+                if (signal === 'low') return 'border-l-orange-500';
+                if (signal === 'struggling') return 'border-l-red-600';
+                return 'border-l-zinc-500';
+              }
+              return 'border-l-zinc-500';
+            };
+
+            const getIcon = (type, signal) => {
+              if (type === 'win') return '✅';
+              if (type === 'followthrough_milestone') return '🔥';
+              if (type === 'motivation_signal_change') {
+                return (signal === 'strong' || signal === 'medium') ? '📈' : '📉';
+              }
+              if (type === 'blocker_fading') return '💡';
+              if (type === 'foothold_unlocked') return '🔓';
+              return '📌';
+            };
+
+            const formatEventDate = (dateStr) => {
+              if (!dateStr) return '';
+              const d = new Date(dateStr);
+              return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            };
+
+            return (
+              <section>
+                <h2 className="text-white font-semibold text-base mb-3">Recent Progress</h2>
+                {combined.length > 0 ? (
+                  <div className="space-y-2">
+                    {combined.map((item) => (
+                      <div
+                        key={item.id}
+                        className={`bg-zinc-900 border border-zinc-800 border-l-4 ${getBorderColor(item.type, item.signal)} rounded-2xl px-4 py-3 flex items-start gap-3`}
+                      >
+                        <span className="text-sm flex-shrink-0 mt-0.5">{getIcon(item.type, item.signal)}</span>
+                        <div className="min-w-0">
+                          <p className="text-zinc-200 text-sm leading-relaxed">{item.text}</p>
+                          <p className="text-zinc-500 text-xs mt-0.5">{formatEventDate(item.date)}</p>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            </section>
-          )}
+                ) : (
+                  <p className="text-zinc-500 text-sm bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+                    Your wins and progress milestones will appear here after a few sessions.
+                  </p>
+                )}
+              </section>
+            );
+          })()}
 
-          {/* ── Section 3: Who You're Becoming ────────────────────────── */}
-          {livingProfile?.identity_statement && (
-            <div className="bg-gradient-to-br from-red-950/40 to-zinc-900 border border-red-900/50 rounded-2xl p-5">
-              <p className="text-zinc-500 text-xs uppercase tracking-widest mb-2">Who You're Becoming</p>
-              <p className="text-white text-base font-medium leading-relaxed">
-                "{livingProfile.identity_statement}"
-              </p>
-              {livingProfile.profile_updated_at && (
-                <p className="text-zinc-600 text-xs mt-3">
-                  Last updated{' '}
-                  {new Date(livingProfile.profile_updated_at).toLocaleDateString('en-US', {
-                    month: 'short', day: 'numeric',
-                  })}
-                </p>
-              )}
-            </div>
-          )}
-
-          {/* ── Section 4: Bounce Back ────────────────────────────────── */}
-          {recoveriesCount > 0 && (
-            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
-              <p className="text-white font-semibold text-base mb-1">Bounce Back</p>
-              <p className="text-zinc-500 text-xs mb-3">
-                Missing isn't failing. Coming back is the skill.
-              </p>
-              <p className="text-zinc-300 text-sm">
-                You've bounced back {recoveriesCount} time{recoveriesCount !== 1 ? 's' : ''} this month.
-              </p>
-              <p className="text-zinc-400 text-sm mt-1">
-                {recoveryDays <= 1
-                  ? 'And you never missed more than a day.'
-                  : `Your longest gap was ${recoveryDays} day${recoveryDays !== 1 ? 's' : ''} — and you came back.`}
-              </p>
-            </div>
-          )}
-
-          {/* ── Section 4.5: Your Goals ───────────────────────────────── */}
+          {/* Section 4: Your Goals */}
           <section>
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-white font-semibold text-base">Your Goals</h2>
@@ -631,10 +640,18 @@ export default function InsightsV2() {
             {activeGoals.length > 0 && (
               <div className="space-y-3">
                 {activeGoals.map((goal, i) => {
-                  // Build whys list: use whys array if populated, fall back to why_it_matters
                   const whysList = Array.isArray(goal.whys) && goal.whys.length > 0
-                    ? [...goal.whys].reverse() // newest first
+                    ? [...goal.whys].reverse()
                     : (goal.why_it_matters ? [{ text: goal.why_it_matters, added_at: null, source: 'original' }] : []);
+
+                  const signal = goal.last_motivation_signal;
+                  const signalBadge = (() => {
+                    if (signal === 'strong')     return { dot: 'bg-green-500',  text: 'Strong momentum' };
+                    if (signal === 'medium')     return { dot: 'bg-yellow-400', text: 'Building' };
+                    if (signal === 'low')        return { dot: 'bg-orange-500', text: 'Needs attention' };
+                    if (signal === 'struggling') return { dot: 'bg-red-500',    text: 'Struggling' };
+                    return null;
+                  })();
 
                   return (
                     <div
@@ -646,11 +663,19 @@ export default function InsightsV2() {
                         <div className="flex-1 min-w-0">
                           <div className="flex items-start justify-between gap-2">
                             <p className="text-white font-medium text-sm leading-snug">{goal.title}</p>
-                            {goal.category && (
-                              <span className="flex-shrink-0 px-2 py-0.5 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-400 text-xs">
-                                {goal.category.replace('_', ' ')}
-                              </span>
-                            )}
+                            <div className="flex items-center gap-1.5 flex-shrink-0">
+                              {signalBadge && (
+                                <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-zinc-800 border border-zinc-700 text-xs text-zinc-400">
+                                  <span className={`w-1.5 h-1.5 rounded-full ${signalBadge.dot}`} />
+                                  {signalBadge.text}
+                                </span>
+                              )}
+                              {goal.category && (
+                                <span className="px-2 py-0.5 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-400 text-xs">
+                                  {goal.category.replace('_', ' ')}
+                                </span>
+                              )}
+                            </div>
                           </div>
 
                           {/* Whys list */}
@@ -695,19 +720,58 @@ export default function InsightsV2() {
             )}
           </section>
 
-          {/* ── Section 5: Right Now ──────────────────────────────────── */}
-          {livingProfile?.short_term_state && (
-            <section>
-              <h2 className="text-white font-semibold text-base mb-3">Right Now</h2>
-              <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
-                <p className="text-zinc-300 text-sm leading-relaxed">
-                  {livingProfile.short_term_state}
+          {/* Section 5: Who You're Becoming (with inline strengths + growth areas) */}
+          {livingProfile?.identity_statement && (
+            <div className="bg-gradient-to-br from-red-950/40 to-zinc-900 border border-red-900/50 rounded-2xl p-5">
+              <p className="text-zinc-500 text-xs uppercase tracking-widest mb-2">Who You're Becoming</p>
+              <p className="text-white text-base font-medium leading-relaxed">
+                "{livingProfile.identity_statement}"
+              </p>
+
+              {/* Inline strengths */}
+              {Array.isArray(livingProfile.strengths) && livingProfile.strengths.some((s) => (typeof s === 'object' ? s.evidence : false)) && (
+                <div className="mt-3 pt-3 border-t border-red-900/30 space-y-1">
+                  <p className="text-zinc-600 text-xs uppercase tracking-widest mb-1">Strengths</p>
+                  {livingProfile.strengths.filter((s) => typeof s === 'object' && s.evidence).slice(0, 2).map((s, i) => {
+                    const label = typeof s === 'object' ? s.label : s;
+                    return (
+                      <p key={i} className="text-zinc-400 text-xs leading-relaxed">
+                        — <span className="text-zinc-300">{label}</span>: {s.evidence}
+                      </p>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Inline growth areas */}
+              {Array.isArray(livingProfile.growth_areas) && livingProfile.growth_areas.some((g) => (typeof g === 'object' ? g.evidence : false)) && (
+                <div className="mt-3 pt-3 border-t border-red-900/30 space-y-1">
+                  <p className="text-zinc-600 text-xs uppercase tracking-widest mb-1">Growing In</p>
+                  {livingProfile.growth_areas.filter((g) => typeof g === 'object' && g.evidence).slice(0, 2).map((g, i) => {
+                    const label = typeof g === 'object' ? g.label : g;
+                    return (
+                      <p key={i} className="text-zinc-400 text-xs leading-relaxed">
+                        — <span className="text-zinc-300">{label}</span>: {g.evidence}
+                      </p>
+                    );
+                  })}
+                </div>
+              )}
+
+              {livingProfile.profile_updated_at && (
+                <p className="text-zinc-600 text-xs mt-3">
+                  Last updated{' '}
+                  {new Date(livingProfile.profile_updated_at).toLocaleDateString('en-US', {
+                    month: 'short', day: 'numeric',
+                  })}
                 </p>
-              </div>
-            </section>
+              )}
+            </div>
           )}
 
-          {/* ── Section 6: What We've Noticed (AI narrative cards) ───── */}
+          {/* ── ZONE 3: Patterns ──────────────────────────────────────────── */}
+
+          {/* Section 6: What We've Noticed */}
           <section>
             <h2 className="text-white font-semibold text-base mb-3">What We've Noticed</h2>
             {narratives.length > 0 ? (
@@ -745,117 +809,40 @@ export default function InsightsV2() {
             ) : patterns.length > 0 ? (
               /* Fallback to raw pattern counts if narratives haven't loaded yet */
               <div className="space-y-3">
-                {patterns.map((p, i) => (
-                  <div
-                    key={i}
-                    className={`bg-zinc-900 border border-zinc-800 border-l-4 ${
-                      p.pattern_type === 'blocker' ? 'border-l-red-600' :
-                      p.pattern_type === 'strength' ? 'border-l-green-600' :
-                      'border-l-zinc-500'
-                    } rounded-2xl p-4`}
-                  >
-                    <p className="text-zinc-500 text-xs uppercase tracking-widest mb-2">
-                      {p.pattern_type === 'blocker'  ? 'Something we keep seeing' :
-                       p.pattern_type === 'strength' ? 'A strength emerging' : 'A pattern'}
-                    </p>
-                    <p className="text-zinc-300 text-sm leading-relaxed">
-                      <strong className="text-white">{p.label}</strong> — {p.occurrence_count} time{p.occurrence_count !== 1 ? 's' : ''} in your reflections.
-                    </p>
-                    <p className="text-zinc-400 text-sm mt-1">
-                      {p.pattern_type === 'blocker'
-                        ? `This has shown up ${p.occurrence_count} times in your reflections. Keep reflecting to get a full breakdown.`
-                        : `You've shown this ${p.occurrence_count} times. Keep going to unlock a full narrative.`}
-                    </p>
-                  </div>
-                ))}
+                {patterns.map((p, i) => {
+                  const labelText = typeof p.label === 'string' ? p.label : (p.label?.label ?? String(p.label ?? ''));
+                  const patternType = typeof p.pattern_type === 'string' ? p.pattern_type : String(p.pattern_type ?? '');
+                  return (
+                    <div
+                      key={i}
+                      className={`bg-zinc-900 border border-zinc-800 border-l-4 ${
+                        patternType === 'blocker' ? 'border-l-red-600' :
+                        patternType === 'strength' ? 'border-l-green-600' :
+                        'border-l-zinc-500'
+                      } rounded-2xl p-4`}
+                    >
+                      <p className="text-zinc-500 text-xs uppercase tracking-widest mb-2">
+                        {patternType === 'blocker'  ? 'Something we keep seeing' :
+                         patternType === 'strength' ? 'A strength emerging' : 'A pattern'}
+                      </p>
+                      <p className="text-zinc-300 text-sm leading-relaxed">
+                        <strong className="text-white">{labelText}</strong> — {p.occurrence_count} time{p.occurrence_count !== 1 ? 's' : ''} in your reflections.
+                      </p>
+                      <p className="text-zinc-400 text-sm mt-1">
+                        {patternType === 'blocker'
+                          ? `This has shown up ${p.occurrence_count} times in your reflections. Keep reflecting to get a full breakdown.`
+                          : `You've shown this ${p.occurrence_count} times. Keep going to unlock a full narrative.`}
+                      </p>
+                    </div>
+                  );
+                })}
               </div>
             ) : (
               <p className="text-zinc-500 text-sm bg-zinc-900 border border-zinc-800 rounded-xl p-4">
-                Patterns emerge after 3–5 reflections. The more specific you are in your sessions, the faster we can surface what's really going on.
+                Your coach is still learning your patterns. The more specific you are in your sessions, the faster these appear.
               </p>
             )}
           </section>
-
-          {/* ── Section 7: Growing In ─────────────────────────────────── */}
-          {livingProfile?.growth_areas && livingProfile.growth_areas.length > 0 && (
-            <section>
-              <h2 className="text-white font-semibold text-base mb-3">Growing In</h2>
-              <div className="space-y-2">
-                {livingProfile.growth_areas.map((area, i) => (
-                  <div key={i} className="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 flex items-center gap-3">
-                    <span className="text-red-500 text-sm">↑</span>
-                    <p className="text-zinc-200 text-sm">{area}</p>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
-
-          {/* ── Section 8: Your Strengths ─────────────────────────────── */}
-          {livingProfile?.strengths && livingProfile.strengths.length > 0 && (
-            <section>
-              <h2 className="text-white font-semibold text-base mb-3">Your Strengths 💪</h2>
-              <div className="space-y-2">
-                {livingProfile.strengths.map((s, i) => (
-                  <div key={i} className="bg-zinc-900 border border-green-900/40 rounded-xl px-4 py-3">
-                    <p className="text-zinc-200 text-sm">
-                      <strong className="text-white">{s}</strong> shows up consistently in how you work.
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
-
-          {/* ── Section 9: Your Values ────────────────────────────────── */}
-          {livingProfile?.values && livingProfile.values.length > 0 && (
-            <section>
-              <h2 className="text-white font-semibold text-base mb-3">Your Values</h2>
-              <div className="flex flex-wrap gap-2">
-                {livingProfile.values.map((v, i) => (
-                  <span
-                    key={i}
-                    className="px-3 py-1.5 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-300 text-sm"
-                  >
-                    {v}
-                  </span>
-                ))}
-              </div>
-            </section>
-          )}
-
-          {/* ── Section 10: Recent Wins ───────���───────────────────────── */}
-          {wins.length > 0 && (
-            <section>
-              <h2 className="text-white font-semibold text-base mb-3">Recent Wins</h2>
-              <div className="space-y-2">
-                {wins.map((w, i) => (
-                  <div key={i} className="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 flex items-start gap-3">
-                    <span className="text-green-400 text-sm mt-0.5">✅</span>
-                    <div className="min-w-0">
-                      <p className="text-zinc-200 text-sm">{w.text}</p>
-                      <p className="text-zinc-500 text-xs mt-0.5">{formatDate(w.date)}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
-
-          {/* ── Section 11: Long-Term Patterns ───────────────────────── */}
-          {livingProfile?.long_term_patterns && livingProfile.long_term_patterns.length > 0 && (
-            <section>
-              <h2 className="text-white font-semibold text-base mb-3">Long-Term Patterns</h2>
-              <div className="space-y-2">
-                {livingProfile.long_term_patterns.map((p, i) => (
-                  <div key={i} className="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 flex items-start gap-3">
-                    <span className="text-zinc-500 text-sm mt-0.5">→</span>
-                    <p className="text-zinc-300 text-sm">{p}</p>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
 
           {/* Bottom padding */}
           <div className="h-6" />
