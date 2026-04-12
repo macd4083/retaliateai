@@ -232,11 +232,13 @@ export default async function handler(req, res) {
         sessions_synthesized_from: sessions.length,
         synthesized_at: todayDate,
         last_updated_at: now,
+        last_seen_date: todayDate,
         is_active: true,
         strength_evidence: insight.strength_evidence || null,
       };
 
       if (insight.existing_insight_id) {
+        // Update existing: preserve first_seen_date (set last_seen_date to today)
         const { data: updated } = await supabase
           .from('user_insights')
           .update(row)
@@ -246,9 +248,10 @@ export default async function handler(req, res) {
           .maybeSingle();
         if (updated?.id) upsertedIds.add(updated.id);
       } else {
+        // New insight: set both first_seen_date and last_seen_date to today
         const { data: inserted } = await supabase
           .from('user_insights')
-          .insert(row)
+          .insert({ ...row, first_seen_date: todayDate })
           .select('id')
           .maybeSingle();
         if (inserted?.id) upsertedIds.add(inserted.id);

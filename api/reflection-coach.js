@@ -6,7 +6,7 @@
  * Pipeline per request:
  *   1. Receive body (user_id, session_id, session_state, history, user_message, context)
  *   2. Classify intent internally
- *   3. Load context in parallel: follow_up_queue, growth_markers, reflection_patterns,
+ *   3. Load context in parallel: follow_up_queue, growth_markers,
  *      last-7-session summaries, yesterday commitment, user profile, active goals
  *   4. Decide if a queued follow-up should surface before the main response
  *   5. Build the GPT-4o prompt with all context + coaching instructions
@@ -165,7 +165,7 @@ Available evidence fields you MUST reference when they exist:
 - user_insights[n].trigger: the situation/state that activates this pattern — use this to explain WHY you're going there
 - user_insights[n].user_quote: their exact words from a prior session — quote it directly (e.g. "you said once: [quote]")
 - user_insights[n].foothold: evidence something is already shifting — name it as proof
-- reflection_patterns[n].occurrence_count + first_seen_date/last_seen_date: how many times, since when
+- user_insights[n].first_seen_date + last_seen_date: when this pattern was first observed and when it was last seen — use for "this has been happening since [month]" framing
 - recent_sessions: specific dates and what happened — reference them by date, not vaguely
 - goals[n].whys: what they said this goal was about before — reference the actual text
 - goals[n].depth_insights: realizations they had about this goal — reference by date if available
@@ -609,24 +609,11 @@ async function loadGrowthMarkers(userId, clientDate) {
   } catch (_e) { return []; }
 }
 
-async function loadReflectionPatterns(userId, clientDate) {
-  try {
-    const { data } = await supabase
-      .from('reflection_patterns')
-      .select('label, occurrence_count, pattern_type, last_seen_date, first_seen_date')
-      .eq('user_id', userId)
-      .gte('last_seen_date', localDate(-30, clientDate))
-      .order('occurrence_count', { ascending: false })
-      .limit(5);
-    return data || [];
-  } catch (_e) { return []; }
-}
-
 async function loadUserInsights(userId) {
   try {
     const { data } = await supabase
       .from('user_insights')
-      .select('id, pattern_label, pattern_type, pattern_narrative, trigger_context, user_quote, foothold, unlocked_practices, confidence_score, strength_evidence')
+      .select('id, pattern_label, pattern_type, pattern_narrative, trigger_context, user_quote, foothold, unlocked_practices, confidence_score, strength_evidence, first_seen_date, last_seen_date')
       .eq('user_id', userId)
       .eq('is_active', true)
       .order('confidence_score', { ascending: false })
@@ -768,7 +755,7 @@ async function loadActiveGoals(userId) {
   try {
     const { data } = await supabase
       .from('goals')
-      .select('id, title, why_it_matters, category, whys, vision_snapshot, depth_insights, last_mentioned_at, suggested_next_action')
+      .select('id, title, category, whys, vision_snapshot, depth_insights, last_mentioned_at, suggested_next_action')
       .eq('user_id', userId)
       .eq('status', 'active')
       .limit(6);
@@ -1023,28 +1010,6 @@ async function upsertGrowthMarker(userId, theme, { exercise_run, check_in_messag
   } catch (_e) {}
 }
 
-async function upsertBlockerPatterns(userId, blockerTags, clientDate) {
-  if (!blockerTags || blockerTags.length === 0) return;
-  const todayStr = today(clientDate);
-  for (const tag of blockerTags) {
-    try {
-      const { data: existing } = await supabase
-        .from('reflection_patterns').select('id, occurrence_count')
-        .eq('user_id', userId).eq('pattern_type', 'blocker').eq('label', tag).maybeSingle();
-      if (existing) {
-        await supabase.from('reflection_patterns')
-          .update({ occurrence_count: existing.occurrence_count + 1, last_seen_date: todayStr, updated_at: new Date().toISOString() })
-          .eq('id', existing.id);
-      } else {
-        await supabase.from('reflection_patterns').insert({
-          user_id: userId, pattern_type: 'blocker', label: tag,
-          occurrence_count: 1, last_seen_date: todayStr, first_seen_date: todayStr,
-        });
-      }
-    } catch (_e) {}
-  }
-}
-
 // ── Vector search + profile evolution helpers ─────────────────────────────────
 
 async function generateEmbedding(text) {
@@ -1274,15 +1239,12 @@ Return valid JSON only:
         if (gu.why_insight) {
           supabase
             .from('goals')
-            .select('whys, why_it_matters')
+            .select('whys')
             .eq('id', gu.goal_id)
             .eq('user_id', userId)
             .maybeSingle()
             .then(({ data }) => {
               let currentWhys = Array.isArray(data?.whys) ? [...data.whys] : [];
-              if (currentWhys.length === 0 && data?.why_it_matters) {
-                currentWhys = [{ text: data.why_it_matters, added_at: null, source: 'original' }];
-              }
               const newWhy = {
                 text: gu.why_insight,
                 added_at: gu.last_mentioned_date || new Date().toISOString().split('T')[0],
@@ -1335,7 +1297,7 @@ Return valid JSON only:
 function buildDirectiveQueue({
   preSessionState, isMemoryMode, followUpQueue, growthMarkers,
   intentData, suggestedPractice, depthProbeNeeded, sessionState,
-  profile, reflectionPatterns, commitmentStats, yesterdayCommitment,
+  profile, commitmentStats, yesterdayCommitment,
   goalMissingWhy, messageCount, sessionReadyToClose, forceClose,
   identityMissing, honestMissing, suggestedNextStage, sessionExercisesRun,
   userInsights, recentSessions, effectiveConsecutiveExcuses,
@@ -1527,8 +1489,8 @@ function buildDirectiveQueue({
 
   // ── honest_missing ─────────────────────────────────────────────────────
   if (honestMissing) {
-    const patternHint = reflectionPatterns.length > 0
-      ? `Their recurring pattern is "${reflectionPatterns[0].label}" — if it came up today, help them name it. E.g. "Did ${reflectionPatterns[0].label.replace(/_/g, ' ')} show up anywhere today?" or "Was there a moment where you held back and you're not sure why?"`
+    const patternHint = userInsights.length > 0
+      ? `Their recurring pattern is "${userInsights[0].pattern_label}" — if it came up today, help them name it. E.g. "Did ${userInsights[0].pattern_label.replace(/_/g, ' ')} show up anywhere today?" or "Was there a moment where you held back and you're not sure why?"`
       : `E.g. "Where did you feel like you weren't fully showing up today?" or "Is there a moment from today that's still sitting with you?" or "What part of today are you least proud of — not what you'd fix, just what happened?"`;
     allDirectives.push({
       id: 'honest_missing',
@@ -1614,11 +1576,11 @@ function buildDirectiveQueue({
   }
 
   // ── pattern_awareness ──────────────────────────────────────────────────
-  if (reflectionPatterns.length > 0 && messageCount >= 2 && reflectionPatterns[0].occurrence_count >= 2) {
-    const topPattern = reflectionPatterns[0];
+  if (userInsights.length > 0 && messageCount >= 2 && (userInsights[0].sessions_synthesized_from || 0) >= 2) {
+    const topInsight = userInsights[0];
     allDirectives.push({
       id: 'pattern_awareness',
-      instruction: `PATTERN AWARENESS: The user's most recurring pattern is "${topPattern.label}" (${topPattern.occurrence_count}x). If they say or do something that looks like this pattern — even obliquely — ask a question that helps them SEE it, not name it for them. Never say "I notice you keep doing X" or "this sounds like your ${topPattern.label} pattern". Instead, ask something like: "What's making it hard to just ship it as-is?" or "You said you'd do this yesterday — what happened between then and now?" The goal is to surface the pattern through their own answer, not your observation. Use naturally. Once per session max. Do NOT interrupt a good moment to force it in. When you name it, briefly frame why noticing patterns matters: e.g. "I keep seeing this come up — and I think it's worth naming because patterns don't change until you see them" or "This is something I've noticed across a few sessions." One sentence, then surface the pattern.`,
+      instruction: `PATTERN AWARENESS: The user's most recurring pattern is "${topInsight.pattern_label}" (${topInsight.sessions_synthesized_from || 0}x). If they say or do something that looks like this pattern — even obliquely — ask a question that helps them SEE it, not name it for them. Never say "I notice you keep doing X" or "this sounds like your ${topInsight.pattern_label} pattern". Instead, ask something like: "What's making it hard to just ship it as-is?" or "You said you'd do this yesterday — what happened between then and now?" The goal is to surface the pattern through their own answer, not your observation. Use naturally. Once per session max. Do NOT interrupt a good moment to force it in. When you name it, briefly frame why noticing patterns matters: e.g. "I keep seeing this come up — and I think it's worth naming because patterns don't change until you see them" or "This is something I've noticed across a few sessions." One sentence, then surface the pattern.`,
       priority: 2,
       preferred_stage: 'honest',
       fire_next_session: true,
@@ -1720,7 +1682,6 @@ function buildSessionContext({
   userInsights,
   sessionState,
   recentSessions,
-  reflectionPatterns,
   commitmentStats,
   followUpQueue,
   growthMarkers,
@@ -1816,6 +1777,8 @@ function buildSessionContext({
           foothold: ins.foothold,
           practices: ins.unlocked_practices,
           confidence: ins.confidence_score,
+          first_seen_date: ins.first_seen_date || null,
+          last_seen_date: ins.last_seen_date || null,
         }))
       : undefined,
     strength_insights: (() => {
@@ -1828,10 +1791,6 @@ function buildSessionContext({
         }));
       return si.length > 0 ? si : undefined;
     })(),
-    // Fall back to raw pattern labels only when no rich insights exist yet
-    patterns: reflectionPatterns.length > 0 && userInsights.length === 0
-      ? reflectionPatterns.map((p) => `${p.label}(${p.occurrence_count}x)`).join('; ')
-      : undefined,
     recent_sessions: recentSessionsText,
     relevant_memories: relevantMemories.length > 0
       ? relevantMemories.map((m) => ({ date: m.date, summary: m.summary, similarity: m.similarity }))
@@ -1964,11 +1923,10 @@ export default async function handler(req, res) {
     // ── 2. Load context in parallel ───────────────────────────────────────
     const currentSignals = [intentData?.intent, intentData?.emotional_state, intentData?.accountability_signal].filter(Boolean);
 
-    const [followUpQueue, growthMarkers, reflectionPatterns, recentSessions, yesterdayCommitment, userProfile, activeGoalsRaw, commitmentStats, todayEarlyCommitment, goalCommitmentStats, userInsights, progressEvents] =
+    const [followUpQueue, growthMarkers, recentSessions, yesterdayCommitment, userProfile, activeGoalsRaw, commitmentStats, todayEarlyCommitment, goalCommitmentStats, userInsights, progressEvents] =
       await Promise.all([
         loadFollowUpQueue(authenticatedUserId, currentSignals, client_local_date),
         loadGrowthMarkers(authenticatedUserId, client_local_date),
-        loadReflectionPatterns(authenticatedUserId, client_local_date),
         loadRecentSessionsSummary(authenticatedUserId),
         loadYesterdayCommitment(authenticatedUserId, client_local_date),
         loadUserProfile(authenticatedUserId),
@@ -2134,9 +2092,7 @@ export default async function handler(req, res) {
             id: g.id,
             area: g.category,
             title: g.title,
-            whys: Array.isArray(g.whys) && g.whys.length > 0
-              ? g.whys
-              : (g.why_it_matters ? [{ text: g.why_it_matters, source: 'original' }] : []),
+            whys: Array.isArray(g.whys) ? g.whys : [],
             vision_snapshot: g.vision_snapshot || null,
             depth_insights: g.depth_insights?.length > 0 ? g.depth_insights : null,
             suggested_next_action: g.suggested_next_action || null,
@@ -2196,7 +2152,6 @@ export default async function handler(req, res) {
       depthProbeNeeded,
       sessionState: session_state,
       profile,
-      reflectionPatterns,
       commitmentStats,
       yesterdayCommitment,
       goalMissingWhy,
@@ -2231,7 +2186,6 @@ export default async function handler(req, res) {
       userInsights,
       sessionState: session_state,
       recentSessions,
-      reflectionPatterns,
       commitmentStats,
       followUpQueue: dueFollowUp,
       growthMarkers: dueGrowthMarker,
@@ -2552,10 +2506,6 @@ Only link when genuinely relevant. Do not force links. Multiple items can have t
       })();
     }
 
-    if (result.extracted_data?.blocker_tags?.length) {
-      dbPromises.push(upsertBlockerPatterns(authenticatedUserId, result.extracted_data.blocker_tags, client_local_date));
-    }
-
     // Write wins to session row atomically (avoids read-then-write race condition)
     if (session_id && result.extracted_data?.win_text) {
       dbPromises.push(
@@ -2700,11 +2650,11 @@ Only link when genuinely relevant. Do not force links. Multiple items can have t
       );
     }
 
-    // Event 5: blocker_fading (pattern not seen in 14+ days, occurred 3+ times)
-    if (Array.isArray(reflectionPatterns) && client_local_date) {
+    // Event 5: blocker_fading (blocker insight not seen in 14+ days)
+    if (Array.isArray(userInsights) && client_local_date) {
       const fourteenDaysAgo = localDate(-14, client_local_date);
-      const fadingBlockers = reflectionPatterns.filter(
-        (p) => p.pattern_type === 'blocker' && p.last_seen_date < fourteenDaysAgo && p.occurrence_count >= 3
+      const fadingBlockers = userInsights.filter(
+        (ins) => ins.pattern_type === 'blocker' && ins.last_seen_date && ins.last_seen_date < fourteenDaysAgo && (ins.sessions_synthesized_from || 0) >= 3
       );
       for (const blocker of fadingBlockers) {
         dbPromises.push(
@@ -2714,14 +2664,14 @@ Only link when genuinely relevant. Do not force links. Multiple items can have t
               .select('id')
               .eq('user_id', authenticatedUserId)
               .eq('event_type', 'blocker_fading')
-              .contains('payload', { label: blocker.label })
+              .contains('payload', { label: blocker.pattern_label })
               .maybeSingle();
             if (!existingFade) {
               await writeProgressEvent(authenticatedUserId, session_id, 'blocker_fading', {
-                label: blocker.label,
+                label: blocker.pattern_label,
                 last_seen_date: blocker.last_seen_date,
-                occurrence_count: blocker.occurrence_count,
-                display_text: `"${blocker.label}" showed up ${blocker.occurrence_count} times but hasn't appeared since ${blocker.last_seen_date}. That pattern may be fading.`,
+                occurrence_count: blocker.sessions_synthesized_from,
+                display_text: `"${blocker.pattern_label}" showed up ${blocker.sessions_synthesized_from} times but hasn't appeared since ${blocker.last_seen_date}. That pattern may be fading.`,
               });
             }
           })()
@@ -2751,17 +2701,12 @@ Only link when genuinely relevant. Do not force links. Multiple items can have t
         try {
           const { data: goalData } = await supabase
             .from('goals')
-            .select('whys, why_it_matters')
+            .select('whys')
             .eq('id', goalId)
             .eq('user_id', authenticatedUserId)
             .single();
 
           let currentWhys = Array.isArray(goalData?.whys) ? [...goalData.whys] : [];
-
-          // Seed from original why if empty
-          if (currentWhys.length === 0 && goalData?.why_it_matters) {
-            currentWhys = [{ text: goalData.why_it_matters, added_at: null, source: 'original' }];
-          }
 
           if (action === 'replace' && typeof replaceIndex === 'number' && currentWhys[replaceIndex]) {
             currentWhys[replaceIndex] = newWhy;

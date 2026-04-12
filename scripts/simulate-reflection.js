@@ -212,7 +212,7 @@ async function assertWhysContext(supabase, userId) {
 
 // ── Validate backend state after a session completes ─────────────────────────
 /**
- * Calls commitment-stats, queries reflection_patterns, and optionally calls
+ * Calls commitment-stats, queries user_insights, and optionally calls
  * generate-pattern-narrative to verify real data landed correctly.
  * Also calls generate-embedding, classify-intent, extract-goal-commitments,
  * goal-commitment-stats, and evaluate-goal-commitments when context is provided.
@@ -255,54 +255,54 @@ async function validateBackend(supabase, userId, simulatedDate, prevGoalWhysCoun
     console.warn(`    ⚠️  commitment-stats failed: ${err.message}`);
   }
 
-  // 2. Accumulated reflection patterns
+  // 2. Accumulated user_insights (replaces reflection_patterns)
   try {
-    const { data: patterns } = await supabase
-      .from('reflection_patterns')
-      .select('label, occurrence_count, pattern_type')
+    const { data: insights } = await supabase
+      .from('user_insights')
+      .select('pattern_label, pattern_type, sessions_synthesized_from, first_seen_date, last_seen_date')
       .eq('user_id', userId)
-      .order('occurrence_count', { ascending: false })
+      .eq('is_active', true)
+      .order('confidence_score', { ascending: false })
       .limit(10);
 
-    if (patterns && patterns.length > 0) {
-      backendState.patterns_accumulated = patterns.map((p) => ({
-        label: p.label,
-        occurrences: p.occurrence_count,
-        type: p.pattern_type,
+    if (insights && insights.length > 0) {
+      backendState.patterns_accumulated = insights.map((ins) => ({
+        label: ins.pattern_label,
+        occurrences: ins.sessions_synthesized_from,
+        type: ins.pattern_type,
+        first_seen_date: ins.first_seen_date,
+        last_seen_date: ins.last_seen_date,
       }));
-      const patternStr = patterns
-        .map((p) => `${p.label}(${p.occurrence_count})`)
+      const insightStr = insights
+        .map((ins) => `${ins.pattern_label}(${ins.sessions_synthesized_from || 0}x)`)
         .join(', ');
-      console.log(`    🔁  Patterns: ${patternStr}`);
+      console.log(`    🔁  Insights: ${insightStr}`);
 
-      // 3. Generate narrative if enough signal exists
-      const qualifyingPatterns = patterns.filter((p) => p.occurrence_count >= 2);
-      if (qualifyingPatterns.length >= 2) {
-        try {
-          const narrativeResult = await callHandler(generatePatternNarrativeHandler, { user_id: userId });
-          if (narrativeResult.narratives && narrativeResult.narratives.length > 0) {
-            const first = narrativeResult.narratives[0];
-            const preview = first.narrative ?? '';
-            backendState.narrative_sample = preview || null;
-            const display = preview.length > 120 ? `${preview.slice(0, 120)}...` : preview;
-            console.log(`    💬  Narrative (${first.label}): "${display}"`);
-          }
-        } catch (err) {
-          console.warn(`    ⚠️  generate-pattern-narrative failed: ${err.message}`);
+      // 3. Generate narrative if insights exist
+      try {
+        const narrativeResult = await callHandler(generatePatternNarrativeHandler, { user_id: userId });
+        if (narrativeResult.narratives && narrativeResult.narratives.length > 0) {
+          const first = narrativeResult.narratives[0];
+          const preview = first.narrative ?? '';
+          backendState.narrative_sample = preview || null;
+          const display = preview.length > 120 ? `${preview.slice(0, 120)}...` : preview;
+          console.log(`    💬  Narrative (${first.label}): "${display}"`);
         }
+      } catch (err) {
+        console.warn(`    ⚠️  generate-pattern-narrative failed: ${err.message}`);
       }
     } else {
-      console.log(`    🔁  Patterns: none accumulated yet`);
+      console.log(`    🔁  Insights: none synthesized yet`);
     }
   } catch (err) {
-    console.warn(`    ⚠️  reflection_patterns query failed: ${err.message}`);
+    console.warn(`    ⚠️  user_insights query failed: ${err.message}`);
   }
 
   // 3. Goals snapshot — read whys[], detect evolution vs previous session
   try {
     const { data: goals } = await supabase
       .from('goals')
-      .select('id, title, category, why_it_matters, whys, last_mentioned_at')
+      .select('id, title, category, whys, last_mentioned_at')
       .eq('user_id', userId)
       .eq('status', 'active');
 
@@ -314,7 +314,6 @@ async function validateBackend(supabase, userId, simulatedDate, prevGoalWhysCoun
           goal_id: g.id,
           title: g.title,
           category: g.category,
-          why_it_matters: g.why_it_matters,
           whys: whysArr,
           whys_count: whysArr.length,
           latest_why: latestWhy?.text ?? null,
@@ -328,7 +327,7 @@ async function validateBackend(supabase, userId, simulatedDate, prevGoalWhysCoun
         const whysArr = Array.isArray(g.whys) ? g.whys : [];
         const latestWhy = whysArr.length > 0
           ? whysArr[whysArr.length - 1].text
-          : (g.why_it_matters || null);
+          : null;
         const whyDisplay = latestWhy
           ? `"${latestWhy.length > 80 ? `${latestWhy.slice(0, 80)}...` : latestWhy}"`
           : 'not set';
@@ -495,13 +494,12 @@ async function fetchProfileSnapshot(supabase, userId) {
   try {
     const { data: goalsData } = await supabase
       .from('goals')
-      .select('title, category, why_it_matters, whys, last_mentioned_at')
+      .select('title, category, whys, last_mentioned_at')
       .eq('user_id', userId)
       .eq('status', 'active');
     goals = (goalsData ?? []).map((g) => ({
       title: g.title,
       category: g.category,
-      why_it_matters: g.why_it_matters,
       whys: Array.isArray(g.whys) ? g.whys : [],
       last_mentioned_at: g.last_mentioned_at,
     }));
@@ -626,21 +624,6 @@ async function cleanUserData(supabase, userId) {
     }
   }
 
-  // Delete reflection_patterns
-  {
-    const { data: deletedPatterns, error: patErr } = await supabase
-      .from('reflection_patterns')
-      .delete()
-      .eq('user_id', userId)
-      .select('id');
-    if (!patErr) {
-      const count = (deletedPatterns ?? []).length;
-      rowsDeleted += count;
-      tablesCleared.push({ table: 'reflection_patterns', rows: count });
-      console.log(`    🗑️  Cleared reflection_patterns (${count} rows)`);
-    }
-  }
-
   // Delete follow_up_queue
   {
     const { data: deletedQueue, error: queueErr } = await supabase
@@ -720,13 +703,15 @@ async function seedUserProfile(supabase, userId, persona) {
 
   // Insert goals from persona definition
   if (persona.profile?.goals && persona.profile.goals.length > 0) {
+    const now = new Date().toISOString();
     const goalRows = persona.profile.goals.map((g) => ({
       user_id: userId,
       title: g.title,
-      why_it_matters: g.why_it_matters || null,
+      whys: g.why_it_matters
+        ? [{ text: g.why_it_matters, added_at: now, source: 'onboarding', motivation_signal: null }]
+        : [],
       category: g.category || null,
       status: 'active',
-      whys: [],
     }));
     const { error: goalsErr } = await supabase.from('goals').insert(goalRows);
     if (goalsErr) {
@@ -765,7 +750,7 @@ function initCoverageAssertions() {
     make('followthrough7_nonnull_after_day2', 'followThrough7 is non-null after day 2'),
     make('trajectory_valid',                  'trajectory is one of: improving, declining, flat, or null'),
     make('trajectory_nonnull_after_14',       'trajectory is non-null after 14+ day run'),
-    make('patterns_after_5_sessions',         'At least 1 reflection_patterns row exists after 5+ sessions'),
+    make('patterns_after_5_sessions',         'At least 1 user_insights row is active after 5+ sessions'),
     make('patterns_2plus_after_10',           '2+ patterns with occurrence_count >= 2 after 10+ sessions'),
     make('narrative_after_10',                'generate-pattern-narrative returns ≥1 narrative after 10+ sessions'),
     make('embedding_returns_vector',          'generate-embedding returns vector with length > 100'),
@@ -777,8 +762,8 @@ function initCoverageAssertions() {
     make('follow_up_queue_future_date',       'follow_up_queue rows have a future due_date relative to session date'),
     make('growth_marker_after_14',            'At least 1 growth_markers row exists after 14+ days'),
     make('classify_intent_valid',             'classify-intent returns a valid non-empty intent string'),
-    make('week1_patterns_bounded',            'Week 1 (days 1–7): reflection_patterns has 0–2 entries'),
-    make('week2_pattern_repetition',          'Week 2 (days 8–14): ≥1 pattern with occurrence_count >= 2'),
+    make('week1_patterns_bounded',            'Week 1 (days 1–7): user_insights has 0–2 active entries'),
+    make('week2_pattern_repetition',          'Week 2 (days 8–14): ≥1 insight with sessions_synthesized_from >= 2'),
     make('week2_short_term_state',            'Week 2 (days 8–14): short_term_state is populated'),
     make('week3_why_reference',               'Week 3 (days 15–21): coach references specific whys in ≥1 session'),
     make('day7_why_reconnect_fired',          'why_reconnect exercise fired at least once in the first 7 days'),
@@ -1766,8 +1751,8 @@ async function runFullCoverageTest({ personaKey, startDate, clean }) {
         passAssertion(assertions, 'goal_whys_evolution', day, `${goalsWithWhys[0].whys_count} why(s) on "${goalsWithWhys[0].title}"`);
       }
 
-      // Check a goal has the required fields (title, why_it_matters, status=active)
-      const validGoal = backendState.goals_snapshot.find((g) => g.title && g.why_it_matters);
+      // Check a goal has the required fields (title, whys, status=active)
+      const validGoal = backendState.goals_snapshot.find((g) => g.title && g.whys_count > 0);
       if (validGoal) passAssertion(assertions, 'goal_created_with_fields', day);
     }
 

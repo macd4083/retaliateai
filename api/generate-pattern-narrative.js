@@ -10,8 +10,7 @@
  *
  * Phase 2.3: Reads from `user_insights` (is_active = true) as the primary source.
  * Delegates regeneration to `api/synthesize-insights` when the cache is stale
- * (older than 3 days or session count has grown). Falls back to raw
- * `reflection_patterns` labels for users who have no synthesized insights yet.
+ * (older than 3 days or session count has grown).
  */
 
 import { createClient } from '@supabase/supabase-js';
@@ -79,16 +78,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // ── 2. Load reflection_patterns as additive fallback data ─────────────
-    const { data: patterns } = await supabase
-      .from('reflection_patterns')
-      .select('label, occurrence_count, pattern_type')
-      .eq('user_id', user_id)
-      .gte('occurrence_count', 2)
-      .order('occurrence_count', { ascending: false })
-      .limit(6);
-
-    // ── 3. Delegate synthesis to synthesize-insights endpoint ─────────────
+    // ── 2. Delegate synthesis to synthesize-insights endpoint ─────────────
     try {
       const baseUrl = process.env.VERCEL_URL
         ? `https://${process.env.VERCEL_URL}`
@@ -111,24 +101,11 @@ export default async function handler(req, res) {
       // synthesis call failed — fall through to return what we have
     }
 
-    // ── 4. Fallback: return stale insights rather than nothing ────────────
+    // ── 3. Fallback: return stale insights rather than nothing ────────────
     if (activeInsights && activeInsights.length > 0) {
       return res.status(200).json({
         narratives: activeInsights.map(insightToNarrative),
         cached: true,
-      });
-    }
-
-    // ── 5. Fallback: raw reflection_patterns labels (additive, pre-synthesis)
-    if (patterns && patterns.length > 0) {
-      return res.status(200).json({
-        narratives: patterns.map((p) => ({
-          label: p.label,
-          type: p.pattern_type || 'pattern',
-          occurrences: p.occurrence_count,
-          narrative: '',
-          watch_for: null,
-        })),
       });
     }
 

@@ -96,17 +96,12 @@ export const goalsHelpers = {
     try {
       const { data: goalData } = await supabase
         .from('goals')
-        .select('whys, why_it_matters')
+        .select('whys')
         .eq('id', goalId)
         .eq('user_id', userId)
         .single();
 
       let currentWhys = Array.isArray(goalData?.whys) ? [...goalData.whys] : [];
-
-      // Seed from original why if empty
-      if (currentWhys.length === 0 && goalData?.why_it_matters) {
-        currentWhys = [{ text: goalData.why_it_matters, added_at: null, source: 'original' }];
-      }
 
       if (action === 'replace' && typeof replaceIndex === 'number' && currentWhys[replaceIndex]) {
         currentWhys[replaceIndex] = newWhy;

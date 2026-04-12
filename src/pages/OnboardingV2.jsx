@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { ArrowRight, ArrowLeft, Check } from 'lucide-react';
 import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase/client';
-import { localDateStr } from '../lib/dateUtils';
 
 const DEFAULT_LIFE_AREA_OPTIONS = [
   { emoji: '💼', label: 'Career & Business' },
@@ -205,37 +204,6 @@ export default function OnboardingV2({ onOnboardingComplete } = {}) {
     setSaving(true);
     try {
       await saveProfile({ blockers: allBlockers, onboarding_step: 5 });
-
-      // Upsert each blocker into reflection_patterns
-      const today = localDateStr();
-      for (const blocker of allBlockers) {
-        try {
-          const { data: existing } = await supabase
-            .from('reflection_patterns')
-            .select('id, occurrence_count')
-            .eq('user_id', user.id)
-            .eq('pattern_type', 'blocker')
-            .eq('label', blocker)
-            .maybeSingle();
-
-          if (existing) {
-            await supabase
-              .from('reflection_patterns')
-              .update({ occurrence_count: existing.occurrence_count + 1, last_seen_date: today })
-              .eq('id', existing.id);
-          } else {
-            await supabase.from('reflection_patterns').insert({
-              user_id: user.id,
-              pattern_type: 'blocker',
-              label: blocker,
-              occurrence_count: 1,
-              first_seen_date: today,
-              last_seen_date: today,
-            });
-          }
-        } catch (_e) {}
-      }
-
       setStep(5);
     } catch (_e) {
       alert('Failed to save. Please try again.');
@@ -275,6 +243,7 @@ export default function OnboardingV2({ onOnboardingComplete } = {}) {
   };
 
   const handleAreaGoalsComplete = async (goals) => {
+    const now = new Date().toISOString();
     setSaving(true);
     try {
       for (const [area, goal] of Object.entries(goals)) {
@@ -282,7 +251,9 @@ export default function OnboardingV2({ onOnboardingComplete } = {}) {
           await supabase.from('goals').insert({
             user_id: user.id,
             title: goal.title,
-            why_it_matters: goal.why || null,
+            whys: goal.why
+              ? [{ text: goal.why, added_at: now, source: 'onboarding', motivation_signal: null }]
+              : [],
             category: area,
             status: 'active',
           });
