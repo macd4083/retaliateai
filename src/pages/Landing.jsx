@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
-import { Sparkles, Heart, Target, TrendingUp, ArrowRight, CheckCircle, Zap, Award, Users, Brain, Shield } from 'lucide-react';
+import { Sparkles, Heart, Target, TrendingUp, ArrowRight, CheckCircle, Brain, Shield } from 'lucide-react';
 
 export default function Landing() {
   const navigate = useNavigate();
@@ -29,7 +29,8 @@ export default function Landing() {
       {/* Content */}
       <div className="relative z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          {/* Header */}
+
+          {/* ── 1. HEADER ── */}
           <header className="pt-8 pb-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -42,33 +43,40 @@ export default function Landing() {
                   Retaliate AI
                 </span>
               </div>
-              <button
-                onClick={() => navigate('/login')}
-                className="px-6 py-2 text-red-500 hover:text-red-400 font-semibold transition-colors border border-red-900 hover:border-red-700 rounded"
-              >
-                Sign In
-              </button>
+              <div className="flex items-center gap-4">
+                <span className="hidden sm:inline-block px-4 py-1.5 bg-red-950/60 text-red-400 border border-red-800 rounded-full text-xs font-semibold tracking-wide">
+                  🎁 Free 7-Day Trial — No Card Required
+                </span>
+                <button
+                  onClick={() => navigate('/login')}
+                  className="px-6 py-2 text-red-500 hover:text-red-400 font-semibold transition-colors border border-red-900 hover:border-red-700 rounded"
+                >
+                  Sign In
+                </button>
+              </div>
             </div>
           </header>
 
-          {/* Hero */}
+          {/* ── 2. HERO ── */}
           <div className="pt-20 pb-32 text-center">
             <div className="inline-block mb-6">
               <span className="px-6 py-2 bg-red-950/50 text-red-500 border border-red-900 rounded-full text-sm font-bold uppercase tracking-wider">
-                AI-Powered Self-Improvement
+                Free Week Trial — No Credit Card
               </span>
             </div>
 
             <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold text-white mb-6 leading-[1.1] tracking-tight">
-              Stop Just Writing.
+              You know what you want.
               <br />
               <span className="text-red-600">
-                Start Retaliating.
+                You just keep not doing it.
               </span>
             </h1>
 
             <p className="text-xl md:text-2xl text-gray-400 mb-12 max-w-3xl mx-auto leading-relaxed">
-              Retaliate AI makes sure the steps you're taking are carrying you in a direction you want to go.
+              Every night, that familiar feeling. Another day where your goals stayed goals.
+              Retaliate AI is the system that closes the loop — it remembers what you said,
+              holds you to it, and helps you actually become who you keep saying you'll be.
             </p>
 
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
@@ -76,223 +84,318 @@ export default function Landing() {
                 onClick={handleGetStarted}
                 className="px-10 py-5 bg-red-600 text-white rounded-lg hover:bg-red-700 font-bold text-lg transition-all shadow-2xl shadow-red-900/50 hover:shadow-red-900/70 flex items-center gap-3 uppercase tracking-wide group"
               >
-                Start Free Now
+                Start Your Free Week
                 <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
               </button>
             </div>
 
-            <p className="text-sm text-gray-600 mt-6 uppercase tracking-wider">
-              No credit card required • Setup in 30 seconds • Free forever
+            <p className="text-sm text-gray-500 mt-6 tracking-wide">
+              7 days free • No credit card • Feedback earns you another week
             </p>
           </div>
 
-          {/* Social Proof Stats */}
-          <div className="pb-20">
-            <div className="bg-gradient-to-b from-red-950/20 to-transparent border border-red-900/30 rounded-xl p-12 backdrop-blur-sm">
-              <div className="grid md:grid-cols-3 gap-12 text-center">
-                <div>
-                  <div className="w-12 h-12 bg-red-900/50 rounded-full flex items-center justify-center mx-auto mb-3">
-                    <Users className="w-6 h-6 text-red-500" />
-                  </div>
-                  <div className="text-5xl font-bold text-red-500 mb-2">500+</div>
-                  <div className="text-gray-400 uppercase tracking-wider text-sm">Active Users</div>
+          {/* ── 3. PROMO BANNER ── */}
+          <div className="pb-32">
+            <div className="bg-red-950/60 border border-red-700 rounded-2xl p-12 backdrop-blur">
+              <div className="text-center mb-10">
+                <h2 className="text-2xl font-bold text-white uppercase tracking-wide">
+                  Launch Offer — Limited Time
+                </h2>
+              </div>
+              <div className="grid md:grid-cols-3 gap-8 mb-10">
+                <div className="text-center">
+                  <div className="text-3xl mb-3">🗓️</div>
+                  <h3 className="font-bold text-white mb-2">7 Days Free</h3>
+                  <p className="text-gray-400 text-sm leading-relaxed">
+                    Full access, no credit card needed. See if this changes how you show up.
+                  </p>
                 </div>
-                <div>
-                  <div className="w-12 h-12 bg-red-900/50 rounded-full flex items-center justify-center mx-auto mb-3">
-                    <Zap className="w-6 h-6 text-red-500" />
-                  </div>
-                  <div className="text-5xl font-bold text-red-500 mb-2">10k+</div>
-                  <div className="text-gray-400 uppercase tracking-wider text-sm">Insights Generated</div>
+                <div className="text-center">
+                  <div className="text-3xl mb-3">💬</div>
+                  <h3 className="font-bold text-white mb-2">Feedback = Another Week</h3>
+                  <p className="text-gray-400 text-sm leading-relaxed">
+                    Submit honest feedback during your trial and we'll add a second free week automatically.
+                  </p>
                 </div>
-                <div>
-                  <div className="w-12 h-12 bg-red-900/50 rounded-full flex items-center justify-center mx-auto mb-3">
-                    <Award className="w-6 h-6 text-red-500" />
-                  </div>
-                  <div className="text-5xl font-bold text-red-500 mb-2">95%</div>
-                  <div className="text-gray-400 uppercase tracking-wider text-sm">Satisfaction Rate</div>
+                <div className="text-center">
+                  <div className="text-3xl mb-3">🔒</div>
+                  <h3 className="font-bold text-white mb-2">No Risk</h3>
+                  <p className="text-gray-400 text-sm leading-relaxed">
+                    Cancel anytime. But most people don't want to.
+                  </p>
                 </div>
+              </div>
+              <div className="text-center">
+                <button
+                  onClick={handleGetStarted}
+                  className="px-10 py-4 bg-red-600 text-white rounded-lg hover:bg-red-700 font-bold text-lg transition-all shadow-xl shadow-red-900/50 uppercase tracking-wide inline-flex items-center gap-3 group"
+                >
+                  Claim Your Free Week
+                  <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                </button>
               </div>
             </div>
           </div>
 
-          {/* 🔥 MOCKUP SLIDESHOW - NEW SECTION 🔥 */}
-          <div className="pb-32">
-            <MockupSlideshow />
-          </div>
-
-          {/* Features Grid */}
+          {/* ── 4. GUIDE SECTION ── */}
           <div className="pb-32">
             <div className="text-center mb-16">
-              <h2 className="text-4xl md:text-5xl font-bold text-white mb-4 uppercase tracking-tight">
-                Your Practices
+              <p className="text-red-500 text-sm font-bold uppercase tracking-widest mb-4">
+                Why This Works
+              </p>
+              <h2 className="text-4xl md:text-5xl font-bold text-white mb-6 leading-tight">
+                We've figured out what actually makes people follow through.
               </h2>
-              <p className="text-xl text-gray-400 max-w-2xl mx-auto">
-                Stop guessing. Start knowing. Let AI reveal what you can't see.
+              <p className="text-xl text-gray-400 max-w-3xl mx-auto leading-relaxed">
+                Most apps track what you want. We track whether you did it — and why you didn't.
+                Retaliate AI was built around one insight from behavioral research and real interviews:
+                people change when they're consistently reconnected to why their goals matter and held
+                accountable to what they said yesterday.
               </p>
             </div>
             <div className="grid md:grid-cols-3 gap-8">
-              <FeatureCard
-                icon={<Brain className="w-7 h-7" />}
-                title="AI Insights"
-                description="Get intelligent analysis of your thoughts, emotions, and behavioral patterns—automatically after every entry."
-                tooltip={{
-                  title: 'The Science',
-                  description: 'AI pattern recognition mimics your brain\'s Default Mode Network, identifying connections you\'d miss consciously. External analysis reduces cognitive bias—seeing yourself through data reveals blind spots your emotional brain filters out.'
-                }}
-              />
-              <FeatureCard
-                icon={<Sparkles className="w-7 h-7" />}
-                title="Clarity"
-                description="7-stage deep-dive session that interrogates your goals. No surface-level bullshit. Find what you're really after."
-                tooltip={{
-                  title: 'The Science',
-                  description: 'Structured questioning bypasses your brain\'s automatic defensive responses. Each layer activates deeper prefrontal cortex processing, moving from surface-level justifications to core motivations. Research shows iterative reflection increases goal clarity by 3x.'
-                }}
-              />
-              <FeatureCard
-                icon={<Heart className="w-7 h-7" />}
-                title="Gratitude"
-                description="Build appreciation as a daily practice. What you focus on grows. Train your mind to see what's working."
-                tooltip={{
-                  title: 'The Science',
-                  description: 'Gratitude journaling stimulates the hypothalamus (stress regulation) and ventral tegmental area (dopamine release). Consistent practice rewires your Reticular Activating System to notice positive stimuli, counteracting evolutionary negativity bias. 2 minutes daily shows measurable effects in 14 days.'
-                }}
-              />
-              <FeatureCard
-                icon={<Target className="w-7 h-7" />}
-                title="Goals"
-                description="AI auto-detects when you're working toward something and tracks progress. No manual checkboxes."
-                tooltip={{
-                  title: 'The Science',
-                  description: 'Writing goals activates your RAS—your brain\'s attention filter. This primes your visual cortex to spot relevant opportunities. Automated tracking provides external validation (reducing working memory load) and triggers dopamine when progress is detected, reinforcing the behavior loop.'
-                }}
-              />
-              <FeatureCard
-                icon={<TrendingUp className="w-7 h-7" />}
-                title="Pattern Detection"
-                description="See what's holding you back and what's working—backed by real data from your journal over time."
-                tooltip={{
-                  title: 'The Science',
-                  description: 'Longitudinal data analysis reveals patterns invisible to in-the-moment reflection. Your working memory can only hold 4-7 items—AI processes thousands of data points to identify behavioral trends, emotional triggers, and success predictors your conscious mind can\'t track.'
-                }}
-              />
-              <FeatureCard
-                icon={<Shield className="w-7 h-7" />}
-                title="Follow-Up Questions"
-                description="AI asks deeper questions when you're avoiding the real issue. Forces you to go deeper until you hit truth."
-                tooltip={{
-                  title: 'The Science',
-                  description: 'Socratic questioning activates the anterior cingulate cortex—your brain\'s conflict monitor. When surface answers conflict with deeper values, targeted questions create cognitive dissonance, forcing prefrontal cortex engagement to resolve the inconsistency. This breaks through amygdala-driven avoidance.'
-                }}
-              />
+              <div className="bg-gradient-to-b from-red-950/30 to-transparent border border-red-900/40 rounded-xl p-8 text-center">
+                <div className="text-4xl font-bold text-red-500 mb-3">7 data points</div>
+                <p className="text-gray-400 text-sm">captured every session</p>
+              </div>
+              <div className="bg-gradient-to-b from-red-950/30 to-transparent border border-red-900/40 rounded-xl p-8 text-center">
+                <div className="text-2xl font-bold text-red-500 mb-3">Cross-session memory</div>
+                <p className="text-gray-400 text-sm">AI remembers your patterns, not just your last message</p>
+              </div>
+              <div className="bg-gradient-to-b from-red-950/30 to-transparent border border-red-900/40 rounded-xl p-8 text-center">
+                <div className="text-2xl font-bold text-red-500 mb-3">Commitment tracking</div>
+                <p className="text-gray-400 text-sm">Knows if you did what you said</p>
+              </div>
             </div>
           </div>
 
-          {/* How It Works */}
+          {/* ── 5. THREE-STEP PLAN ── */}
           <div className="pb-32">
             <div className="text-center mb-16">
               <h2 className="text-4xl md:text-5xl font-bold text-white mb-4 uppercase tracking-tight">
                 How It Works
               </h2>
               <p className="text-xl text-gray-400">
-                Three steps. No complexity. Just results.
+                Three steps. Every night. Takes five minutes.
               </p>
             </div>
             <div className="grid md:grid-cols-3 gap-8">
               <StepCard
                 number="1"
-                title="Pick Your Practice"
-                description="Journal freely, dig deep with Clarity, or reflect with Gratitude—choose what fits your goal today."
+                title="Tell it how your day went"
+                description="Open the app, share your wins and where you fell short. No blank page. The AI leads the conversation."
               />
               <StepCard
                 number="2"
-                title="AI Analyzes"
-                description="Pattern recognition, emotion detection, goal tracking—all automatic. No manual work required."
+                title="It holds you to yesterday. You commit to tomorrow."
+                description="It remembers what you said last night. Asks about it. Then helps you make a specific, realistic plan for tomorrow — not a vague intention."
               />
               <StepCard
                 number="3"
-                title="Take Action"
-                description="Get clear, actionable insights and next steps. Turn reflection into real improvement."
+                title="Over time, it knows you better than you know yourself."
+                description="It tracks your patterns, your excuses, your breakthroughs. The longer you use it, the harder it is to bullshit."
               />
             </div>
           </div>
 
-          {/* Benefits Section */}
+          {/* ── 6. PRODUCT SCREENSHOT / MOCKUP ── */}
           <div className="pb-32">
-            <div className="bg-gradient-to-b from-red-950/40 to-transparent border-2 border-red-900 rounded-2xl p-16 backdrop-blur">
-              <div className="max-w-4xl mx-auto">
-                <h2 className="text-4xl md:text-5xl font-bold text-white text-center mb-4 uppercase tracking-tight">
-                  Built for People Who Want Results
-                </h2>
-                <p className="text-xl text-gray-400 text-center mb-12">
-                  Not another productivity hack. Actual self-improvement backed by AI.
+            <div className="text-center mb-12">
+              <p className="text-red-500 text-sm font-bold uppercase tracking-widest mb-4">
+                See It In Action
+              </p>
+              <h2 className="text-4xl md:text-5xl font-bold text-white mb-4 uppercase tracking-tight">
+                A real conversation. Every night.
+              </h2>
+              <p className="text-xl text-gray-400 max-w-2xl mx-auto">
+                Not prompts. Not a form. A coach that remembers everything.
+              </p>
+            </div>
+            <MockupSlideshow />
+          </div>
+
+          {/* ── 7. FEATURES ── */}
+          <div className="pb-32">
+            <div className="text-center mb-16">
+              <h2 className="text-4xl md:text-5xl font-bold text-white mb-4 uppercase tracking-tight">
+                Built Around How People Actually Change
+              </h2>
+            </div>
+            <div className="grid md:grid-cols-3 gap-8">
+              <FeatureCard
+                icon={<Brain className="w-7 h-7" />}
+                title="It Remembers"
+                description="Every session is stored. Your wins, your misses, your excuses. The AI builds a picture of you over time — not just what you did, but why you keep doing it."
+                tooltip={{
+                  title: 'Long-term memory',
+                  description: 'Vector-embedded session history lets the AI surface semantically similar moments from weeks ago — connecting patterns you\'d never notice in the moment.'
+                }}
+              />
+              <FeatureCard
+                icon={<Target className="w-7 h-7" />}
+                title="It Tracks Your Word"
+                description="You committed to something last night. It knows. Tonight it's going to ask you about it. That's the loop most apps don't close."
+                tooltip={{
+                  title: 'Commitment accountability',
+                  description: 'Commitment kept/missed rates, trajectory (improving, stable, declining), and a live gauge for the current week — behavioral data, not self-reported feelings.'
+                }}
+              />
+              <FeatureCard
+                icon={<Shield className="w-7 h-7" />}
+                title="It Won't Let You Off the Hook"
+                description="It hears excuses. It acknowledges them — and pivots to what's in your control. Warm but direct. No shame, no coddling."
+                tooltip={{
+                  title: 'Anti-excuse system',
+                  description: 'Intent classification detects excuse patterns in real-time. After three consecutive excuse signals, it escalates — pulling your future self vision into the conversation.'
+                }}
+              />
+              <FeatureCard
+                icon={<TrendingUp className="w-7 h-7" />}
+                title="It Sees Your Patterns"
+                description="The blockers that keep showing up. The wins that keep happening. The gap between who you say you are and what you actually do. It names it."
+                tooltip={{
+                  title: 'Behavioral pattern synthesis',
+                  description: 'Cross-session insight synthesis runs after every completed session — identifying recurring themes, emerging strengths, and persistent blockers from up to 30 sessions of data.'
+                }}
+              />
+              <FeatureCard
+                icon={<Sparkles className="w-7 h-7" />}
+                title="It Builds Your Why"
+                description="Goals without a reason behind them don't survive hard days. This AI works to deepen your understanding of why your goals actually matter to you — not the surface answer, the real one."
+                tooltip={{
+                  title: 'Motivation architecture',
+                  description: 'Why-building is tracked per goal over time. The system knows when your motivation signal is declining and prioritizes reconnecting you to your why before you quietly quit.'
+                }}
+              />
+              <FeatureCard
+                icon={<Heart className="w-7 h-7" />}
+                title="It Evolves With You"
+                description="After every session, your profile updates. Your strengths, your patterns, your identity. The AI that talks to you in month three knows things about you that month-one you couldn't have told it."
+                tooltip={{
+                  title: 'Adaptive profile evolution',
+                  description: 'Post-session GPT-4o pass updates your short-term state, long-term patterns, growth areas, values, and strengths — building a behavioral profile that makes every future session more accurate.'
+                }}
+              />
+            </div>
+          </div>
+
+          {/* ── 8. SUCCESS VISION ── */}
+          <div className="pb-32">
+            <div className="text-center mb-16">
+              <h2 className="text-4xl md:text-5xl font-bold text-white mb-4 uppercase tracking-tight">
+                What It Looks Like When It's Working
+              </h2>
+            </div>
+            <div className="grid md:grid-cols-2 gap-8">
+              {/* Before */}
+              <div className="bg-gradient-to-b from-gray-900/40 to-transparent border border-gray-800 rounded-2xl p-10">
+                <p className="text-gray-500 text-sm font-bold uppercase tracking-widest mb-6">
+                  Right now
                 </p>
-                <div className="grid md:grid-cols-2 gap-6">
-                  <BenefitItem text="No more staring at a blank page" />
-                  <BenefitItem text="Track goals without manual updates" />
-                  <BenefitItem text="See patterns you'd never notice alone" />
-                  <BenefitItem text="Get accountability from AI insights" />
-                  <BenefitItem text="Understand yourself faster" />
-                  <BenefitItem text="Turn reflection into action" />
-                </div>
+                <ul className="space-y-4">
+                  {[
+                    'Goals you think about but don\'t move on',
+                    'Nights where you feel behind but don\'t know why',
+                    'Promising yourself things that don\'t stick',
+                    'Motivation that spikes and disappears',
+                  ].map((item) => (
+                    <li key={item} className="flex items-start gap-3 text-gray-500">
+                      <span className="mt-1 w-4 h-4 flex-shrink-0 rounded-full border border-gray-700" />
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              {/* After */}
+              <div className="bg-gradient-to-b from-red-950/40 to-transparent border border-red-800 rounded-2xl p-10">
+                <p className="text-red-500 text-sm font-bold uppercase tracking-widest mb-6">
+                  After 30 days
+                </p>
+                <ul className="space-y-4">
+                  {[
+                    'You know exactly what you committed to and whether you kept it',
+                    'You understand the pattern behind your own inconsistency',
+                    'Your goals have a real why behind them — one you\'ve tested',
+                    'You\'re becoming someone who does what they say',
+                  ].map((item) => (
+                    <li key={item} className="flex items-start gap-3 text-white">
+                      <CheckCircle className="mt-0.5 w-5 h-5 flex-shrink-0 text-red-500" />
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
               </div>
             </div>
           </div>
 
-          {/* Testimonials */}
+          {/* ── 9. FAILURE WARNING ── */}
           <div className="pb-32">
-            <div className="text-center mb-16">
-              <h2 className="text-4xl md:text-5xl font-bold text-white mb-4 uppercase tracking-tight">
-                What People Are Saying
+            <div className="max-w-3xl mx-auto text-center">
+              <h2 className="text-4xl md:text-5xl font-bold text-white mb-8 uppercase tracking-tight">
+                Or Nothing Changes.
               </h2>
-            </div>
-            <div className="grid md:grid-cols-3 gap-8">
-              <TestimonialCard
-                quote="This app actually changed how I think about my goals. The AI caught patterns I completely missed."
-                author="Sarah M."
-                role="Product Manager"
-              />
-              <TestimonialCard
-                quote="I've tried journaling apps before. This one actually keeps me accountable. The insights are scary accurate."
-                author="James K."
-                role="Entrepreneur"
-              />
-              <TestimonialCard
-                quote="Finally, a journal that doesn't just store my thoughts—it helps me understand them. Game changer."
-                author="Emily R."
-                role="Designer"
-              />
+              <p className="text-xl text-gray-500 leading-relaxed mb-10">
+                Same goals. Same excuses. Same feeling every night that you're behind.
+                A year from now you'll still know what you want. You just won't have done it.
+                That's not a motivation problem. It's a system problem.
+              </p>
+              <button
+                onClick={handleGetStarted}
+                className="px-10 py-5 bg-red-600 text-white rounded-lg hover:bg-red-700 font-bold text-lg transition-all shadow-2xl shadow-red-900/50 uppercase tracking-wide inline-flex items-center gap-3 group"
+              >
+                Get the system. Start free.
+                <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+              </button>
             </div>
           </div>
 
-          {/* Final CTA */}
+          {/* ── 10. FINAL CTA ── */}
           <div className="pb-32">
             <div className="bg-gradient-to-b from-red-950/40 to-transparent border-2 border-red-900 rounded-2xl p-16 backdrop-blur text-center">
-              <h2 className="text-4xl md:text-5xl font-bold text-white mb-6 uppercase tracking-tight">
-                It's Only a Matter of Time Until You Reach Your Goals.
-                <br />
-                <span className="text-red-600">Start the Countdown.</span>
+              <h2 className="text-4xl md:text-5xl font-bold text-white mb-4 leading-tight">
+                One week. No card. No commitment.
               </h2>
-              <button
-                onClick={handleGetStarted}
-                className="px-12 py-6 bg-red-600 text-white rounded-lg hover:bg-red-700 font-bold text-xl transition-all shadow-2xl shadow-red-900/60 uppercase tracking-wide inline-flex items-center gap-3 group mt-8"
-              >
-                Start Your Retaliation
-                <ArrowRight className="w-6 h-6 group-hover:translate-x-1 transition-transform" />
-              </button>
-              <p className="text-sm text-gray-600 mt-6 uppercase tracking-wider">
-                Free forever • No credit card • Cancel anytime
+              <p className="text-xl text-gray-400 mb-10 max-w-2xl mx-auto">
+                Just seven nights to find out if this is the thing that actually works for you.
+              </p>
+              {/* Promo reminder card */}
+              <div className="inline-block bg-red-950/60 border border-red-800 rounded-xl px-8 py-6 mb-10 text-left">
+                <ul className="space-y-2">
+                  {[
+                    '7 days free',
+                    'No credit card required',
+                    'Submit feedback → get a second week free',
+                    'Cancel anytime',
+                  ].map((item) => (
+                    <li key={item} className="flex items-center gap-3 text-white text-sm">
+                      <CheckCircle className="w-4 h-4 flex-shrink-0 text-red-500" />
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div>
+                <button
+                  onClick={handleGetStarted}
+                  className="px-12 py-6 bg-red-600 text-white rounded-lg hover:bg-red-700 font-bold text-xl transition-all shadow-2xl shadow-red-900/60 uppercase tracking-wide inline-flex items-center gap-3 group"
+                >
+                  Start Your Free Week
+                  <ArrowRight className="w-6 h-6 group-hover:translate-x-1 transition-transform" />
+                </button>
+              </div>
+              <p className="text-sm text-gray-500 mt-6">
+                Built for people who are serious about becoming who they say they'll be.
               </p>
             </div>
           </div>
 
-          {/* Footer */}
+          {/* ── 11. FOOTER ── */}
           <footer className="border-t border-red-900/30 py-8">
             <div className="flex flex-col md:flex-row items-center justify-between gap-4">
               <div className="flex items-center gap-2">
                 <img src="/logo.png" alt="Retaliate AI" className="w-5 h-5" />
                 <p className="text-gray-600 text-sm">
-                  © 2025 Retaliate AI. Built for warriors, not victims.
+                  © 2026 Retaliate AI. Built for people who are done making excuses.
                 </p>
               </div>
               <div className="flex gap-6 text-sm text-gray-600">
@@ -311,6 +414,7 @@ export default function Landing() {
               </div>
             </div>
           </footer>
+
         </div>
       </div>
     </div>
@@ -476,27 +580,6 @@ function BenefitItem({ text }) {
     <div className="flex items-center gap-3">
       <CheckCircle className="w-5 h-5 flex-shrink-0 text-red-500" />
       <span className="text-white">{text}</span>
-    </div>
-  );
-}
-
-function TestimonialCard({ quote, author, role }) {
-  return (
-    <div className="bg-gradient-to-b from-red-950/30 to-transparent border border-red-900/40 rounded-xl p-8 backdrop-blur-sm">
-      <div className="mb-6">
-        <div className="flex gap-1 mb-4">
-          {[...Array(5)].map((_, i) => (
-            <svg key={i} className="w-5 h-5 text-red-500 fill-current" viewBox="0 0 20 20">
-              <path d="M10 15l-5.878 3.09 1.123-6.545L.489 6.91l6.572-.955L10 0l2.939 5.955 6.572.955-4.756 4.635 1.123 6.545z" />
-            </svg>
-          ))}
-        </div>
-        <p className="text-gray-300 leading-relaxed italic">"{quote}"</p>
-      </div>
-      <div className="border-t border-red-900/40 pt-4">
-        <p className="font-bold text-white">{author}</p>
-        <p className="text-sm text-gray-500">{role}</p>
-      </div>
     </div>
   );
 }
