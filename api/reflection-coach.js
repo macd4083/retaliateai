@@ -1429,6 +1429,7 @@ function buildDirectiveQueue({
       priority: 1,
       preferred_stage: 'wins',
       fire_next_session: false,
+      energy_type: 'planning',
     });
   }
 
@@ -1440,6 +1441,7 @@ function buildDirectiveQueue({
       priority: 1,
       preferred_stage: 'wins',
       fire_next_session: false,
+      energy_type: 'planning',
     });
   }
 
@@ -1451,6 +1453,7 @@ function buildDirectiveQueue({
       priority: 1,
       preferred_stage: 'wins',
       fire_next_session: false,
+      energy_type: 'planning',
     });
   }
 
@@ -1462,6 +1465,7 @@ function buildDirectiveQueue({
       priority: 2,
       preferred_stage: 'any',
       fire_next_session: false,
+      energy_type: 'planning',
     });
   }
 
@@ -1473,6 +1477,7 @@ function buildDirectiveQueue({
       priority: 1,
       preferred_stage: 'wins',
       fire_next_session: false,
+      energy_type: 'planning',
     });
   }
 
@@ -1484,6 +1489,7 @@ function buildDirectiveQueue({
       priority: 1,
       preferred_stage: 'any',
       fire_next_session: false,
+      energy_type: 'planning',
     });
   }
 
@@ -1500,6 +1506,7 @@ function buildDirectiveQueue({
       preferred_stage: isInitMessage ? 'wins' : 'honest',
       fire_next_session: true,
       followup_question: 'How did things go with what you were working through last time — has anything shifted since then?',
+      energy_type: 'reflective',
     });
   }
 
@@ -1512,6 +1519,7 @@ function buildDirectiveQueue({
       preferred_stage: 'honest',
       fire_next_session: true,
       followup_question: 'I wanted to check in on something — you were working through a theme last time. How has that been sitting with you?',
+      energy_type: 'reflective',
     });
   }
 
@@ -1523,6 +1531,7 @@ function buildDirectiveQueue({
       priority: 1,
       preferred_stage: 'any',
       fire_next_session: false,
+      energy_type: 'planning',
     });
   }
 
@@ -1534,6 +1543,7 @@ function buildDirectiveQueue({
       priority: 2,
       preferred_stage: 'any',
       fire_next_session: false,
+      energy_type: 'depth',
     });
   }
 
@@ -1546,11 +1556,12 @@ function buildDirectiveQueue({
       preferred_stage: 'honest',
       fire_next_session: true,
       followup_question: 'I want to come back to what you were exploring last time — did anything new come up around that after we talked?',
+      energy_type: 'depth',
     });
   }
 
   // ── wins_callback ──────────────────────────────────────────────────────
-  if (Array.isArray(sessionState.wins) && sessionState.wins.length > 0 && currentStage !== 'wins') {
+  if (Array.isArray(sessionState.wins) && sessionState.wins.length > 0 && currentStage !== 'wins' && currentStage !== 'close') {
     const winsText = sessionState.wins.map(w => typeof w === 'string' ? w : w?.text).filter(Boolean).join(', ');
     allDirectives.push({
       id: 'wins_callback',
@@ -1558,6 +1569,7 @@ function buildDirectiveQueue({
       priority: 3,
       preferred_stage: 'honest',
       fire_next_session: false,
+      energy_type: 'momentum',
     });
   }
 
@@ -1569,6 +1581,8 @@ function buildDirectiveQueue({
       priority: 2,
       preferred_stage: 'close',
       fire_next_session: false,
+      energy_type: 'depth',
+      close_order: 1,
     });
   }
 
@@ -1588,6 +1602,7 @@ function buildDirectiveQueue({
         priority: 1,
         preferred_stage: 'any',
         fire_next_session: false,
+        energy_type: 'planning',
       });
     }
   }
@@ -1601,6 +1616,7 @@ function buildDirectiveQueue({
       preferred_stage: 'honest',
       fire_next_session: true,
       followup_question: `I wanted to ask — what makes ${goalMissingWhy.title} actually matter to you? Not the goal itself, but what's underneath it.`,
+      energy_type: 'planning',
     });
   }
 
@@ -1616,6 +1632,7 @@ function buildDirectiveQueue({
       preferred_stage: 'honest',
       fire_next_session: true,
       followup_question: 'Before we close — was there a moment from last time that\'s still sitting with you, something you didn\'t fully land on?',
+      energy_type: 'depth',
     });
   }
 
@@ -1629,6 +1646,7 @@ function buildDirectiveQueue({
         priority: 1,
         preferred_stage: 'commitment_checkin',
         fire_next_session: false,
+        energy_type: 'momentum',
       });
     }
   }
@@ -1642,6 +1660,8 @@ function buildDirectiveQueue({
       preferred_stage: 'close',
       fire_next_session: true,
       followup_question: 'I want to end on something important — what does how you showed up last time say about who you\'re becoming?',
+      energy_type: 'identity',
+      close_order: 2,
     });
   }
 
@@ -1657,6 +1677,7 @@ function buildDirectiveQueue({
         priority: 2,
         preferred_stage: 'tomorrow',
         fire_next_session: false,
+        energy_type: 'planning',
       });
     }
   }
@@ -1688,6 +1709,7 @@ function buildDirectiveQueue({
         priority: 2,
         preferred_stage: 'wins',
         fire_next_session: false,
+        energy_type: 'planning',
       });
     }
   }
@@ -1702,6 +1724,7 @@ function buildDirectiveQueue({
       preferred_stage: 'honest',
       fire_next_session: true,
       followup_question: 'I\'ve been thinking about something that\'s shown up a few times — I want to check in on whether you\'re noticing it too.',
+      energy_type: 'reflective',
     });
   }
 
@@ -1721,6 +1744,7 @@ function buildDirectiveQueue({
           priority: 1,
           preferred_stage: 'commitment_checkin',
           fire_next_session: false,
+          energy_type: 'planning',
         });
       }
     }
@@ -1734,6 +1758,7 @@ function buildDirectiveQueue({
       priority: 2,
       preferred_stage: 'any',
       fire_next_session: false,
+      energy_type: 'planning',
     });
   }
 
@@ -1758,32 +1783,68 @@ function buildDirectiveQueue({
 /**
  * Picks the next directive to dispatch this message from the combined directive queue.
  * Prefers highest-priority, stage-matching directives.
+ * Uses intentEmotionalState as a tiebreaker when multiple candidates tie at the same level.
  */
-function dispatchNextDirective(directiveQueue, currentStage) {
+function dispatchNextDirective(directiveQueue, currentStage, intentEmotionalState) {
   if (!directiveQueue || directiveQueue.length === 0) return null;
 
-  // First: find highest-priority directive that matches current stage
-  const stageMatch = directiveQueue.find(
+  const EMOTIONAL_ENERGY_PREFERENCE = {
+    reflective: ['depth', 'reflective'],
+    stuck:      ['depth', 'reflective'],
+    proud:      ['momentum', 'identity'],
+    celebrate:  ['momentum', 'identity'],
+    flat:       ['depth', 'reflective'],
+    low:        ['depth', 'reflective'],
+    motivated:  ['planning'],
+  };
+
+  const preferredEnergies = EMOTIONAL_ENERGY_PREFERENCE[intentEmotionalState] || [];
+
+  function energyScore(directive) {
+    if (preferredEnergies.length === 0) return 999;
+    const idx = preferredEnergies.indexOf(directive.energy_type);
+    return idx === -1 ? 999 : idx;
+  }
+
+  function pickBest(candidates) {
+    if (candidates.length === 0) return null;
+    if (candidates.length === 1) return candidates[0];
+    if (currentStage === 'close') {
+      // Sort by close_order ascending; undefined close_order sorts last
+      const sorted = [...candidates].sort((a, b) => {
+        const ao = a.close_order != null ? a.close_order : 9999;
+        const bo = b.close_order != null ? b.close_order : 9999;
+        return ao - bo;
+      });
+      return sorted[0];
+    }
+    // Tiebreak by energy preference, then original order
+    const sorted = [...candidates].sort((a, b) => energyScore(a) - energyScore(b));
+    return sorted[0];
+  }
+
+  // Priority 1, stage match
+  const p1Stage = directiveQueue.filter(
     d => d.priority === 1 && (d.preferred_stage === currentStage || d.preferred_stage === 'any')
   );
-  if (stageMatch) return stageMatch;
+  if (p1Stage.length > 0) return pickBest(p1Stage);
 
-  // Second: any priority-1 directive regardless of stage
-  const anyP1 = directiveQueue.find(d => d.priority === 1);
-  if (anyP1) return anyP1;
+  // Priority 1, any stage
+  const p1Any = directiveQueue.filter(d => d.priority === 1);
+  if (p1Any.length > 0) return pickBest(p1Any);
 
-  // Third: priority-2 directive that matches current stage
-  const p2StageMatch = directiveQueue.find(
+  // Priority 2, stage match
+  const p2Stage = directiveQueue.filter(
     d => d.priority === 2 && (d.preferred_stage === currentStage || d.preferred_stage === 'any')
   );
-  if (p2StageMatch) return p2StageMatch;
+  if (p2Stage.length > 0) return pickBest(p2Stage);
 
-  // Fourth: any priority-2
-  const anyP2 = directiveQueue.find(d => d.priority === 2);
-  if (anyP2) return anyP2;
+  // Priority 2, any stage
+  const p2Any = directiveQueue.filter(d => d.priority === 2);
+  if (p2Any.length > 0) return pickBest(p2Any);
 
-  // Fifth: priority-3 (opportunistic)
-  return directiveQueue[0] || null;
+  // Priority 3+ / fallback
+  return pickBest(directiveQueue);
 }
 
 // ── Session context assembly ──────────────────────────────────────────────────
@@ -2295,7 +2356,7 @@ export default async function handler(req, res) {
 
     const currentStage = session_state.current_stage || 'wins';
     // isInit messages skip directive dispatch — init has its own fixed opener logic
-    const activeDirective = isInit ? null : dispatchNextDirective(combinedDirectiveQueue, currentStage);
+    const activeDirective = isInit ? null : dispatchNextDirective(combinedDirectiveQueue, currentStage, intentData?.emotional_state);
 
     const contextBlock = buildSessionContext({
       profile,
