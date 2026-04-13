@@ -30,6 +30,8 @@ function insightToNarrative(ins) {
     occurrences: ins.sessions_synthesized_from || 0,
     narrative: ins.pattern_narrative || '',
     watch_for: ins.trigger_context || null,
+    first_seen_date: ins.first_seen_date || null,
+    last_seen_date: ins.last_seen_date || null,
   };
 }
 
@@ -48,7 +50,7 @@ export default async function handler(req, res) {
     const [{ data: activeInsights }, { count: currentSessionCount }] = await Promise.all([
       supabase
         .from('user_insights')
-        .select('id, pattern_label, pattern_type, pattern_narrative, trigger_context, sessions_synthesized_from, synthesized_at, confidence_score')
+        .select('id, pattern_label, pattern_type, pattern_narrative, trigger_context, sessions_synthesized_from, synthesized_at, confidence_score, first_seen_date, last_seen_date')
         .eq('user_id', user_id)
         .eq('is_active', true)
         .order('confidence_score', { ascending: false })
