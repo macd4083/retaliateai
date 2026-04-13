@@ -35,6 +35,7 @@ const supabase = createClient(
  * ALTER TABLE reflection_sessions ADD COLUMN IF NOT EXISTS summary text;
  * ALTER TABLE reflection_sessions ADD COLUMN IF NOT EXISTS embedding vector(1536);
  * ALTER TABLE reflection_sessions ADD COLUMN IF NOT EXISTS commitment_checkin_done boolean DEFAULT false;
+ * ALTER TABLE reflection_sessions ADD COLUMN IF NOT EXISTS checkin_outcome text CHECK (checkin_outcome IN ('kept', 'missed', 'partial'));
  *
  * -- Goal-linked commitment tracking
  * CREATE TABLE IF NOT EXISTS goal_commitment_log (
@@ -215,7 +216,7 @@ DEPTH CONVERSATION: When the user is in a reflective back-and-forth ("what do yo
 ON THE CHECKLIST (wins / honest / plan / identity):
 - These are background goals — track silently from conversation
 - wins: a real win or effort was mentioned. After the FIRST win is mentioned, always follow up with an open invitation to share more: e.g. "What else went well today?" or "What's another one?" — do NOT advance to the honest stage after just one win exchange. Let the user share as many wins as they want before moving on. Set wins_asked_for_more: true in the response only after you have asked this "what else?" question at least once. If the user responds with a list of wins (e.g. "sleep, app work, boxing"), you MAY ask about multiple items from that list in the same response — this is the ONE exception to the one-question rule. Only transition to honest after the user clearly signals they are done sharing wins.
-- commitment_checkin: ask how yesterday's commitment went. One question only. If kept → celebrate + transition to honest. If missed → that IS the honest moment — transition naturally. Set commitment_checkin_done: true once answered. Skip entirely if no yesterday_commitment exists.
+- commitment_checkin: ask how yesterday's commitment went. One question only. Set checkin_outcome in extracted_data: "kept" if they followed through, "missed" if they didn't, "partial" if mixed, null if unclear. If kept → celebrate + move to wins. If missed → that IS the honest moment — skip to tomorrow stage. Set commitment_checkin_done: true once answered.
 - honest: they acknowledged something they're struggling with or could improve. When a miss or honest moment is named, do NOT immediately close the honest stage or set honest_depth: true. Ask the one question that goes underneath it — not "what would you do differently" (that belongs in tomorrow) but something like "what was actually going on for you underneath that?" or "what do you think was really happening?" One question at a time — evaluate the answer before deciding whether to go deeper or close. Evaluate qualitatively: has the user answered what was actually happening underneath the surface behavior? A surface miss ("I didn't get to it", "I got distracted", "I forgot") is NOT enough. You need a genuine answer to the underneath layer — the real reason, the emotional truth, the internal conflict. Once you have a real answer to that underneath question, THEN you may set honest_depth: true. Do NOT count exchanges or use a fixed sequence — evaluate the quality of what they've said. If the answer is still surface-level, ask the one next question that goes deeper.
 - plan: a concrete tomorrow commitment was stated
 - identity: they made a statement about who they are or are becoming
@@ -371,6 +372,7 @@ RETURN JSON EXACTLY (no markdown, no extra keys):
   "stage_advance": false,
   "new_stage": "wins|commitment_checkin|honest|tomorrow|close|complete" | null,
   "extracted_data": {
+    "checkin_outcome": null,
     "mood": null,
     "win_text": null,
     "miss_text": null,
@@ -485,8 +487,10 @@ function deriveStageHint(sessionState, classifierChecklist) {
   if (stage === 'wins' && cl.wins && sessionState.wins_asked_for_more === true && hasYesterdayCommitment) return 'commitment_checkin';
   // wins → honest (skip commitment_checkin when there's no yesterday commitment)
   if (stage === 'wins' && cl.wins && sessionState.wins_asked_for_more === true && !hasYesterdayCommitment) return 'honest';
-  // commitment_checkin → honest (always — the tone of honest is set by AI based on what they said)
-  if (stage === 'commitment_checkin' && sessionState.commitment_checkin_done === true) return 'honest';
+  // commitment_checkin → tomorrow (missed: the miss was already the honest moment, skip honest)
+  if (stage === 'commitment_checkin' && sessionState.commitment_checkin_done === true && sessionState.checkin_outcome === 'missed') return 'tomorrow';
+  // commitment_checkin → wins (kept/partial: go back to wins to celebrate, honest will follow naturally from wins)
+  if (stage === 'commitment_checkin' && sessionState.commitment_checkin_done === true && sessionState.checkin_outcome !== 'missed') return 'wins';
   // honest → tomorrow
   if (stage === 'honest' && cl.honest && sessionState.honest_depth === true) return 'tomorrow';
   // tomorrow → close
@@ -1485,11 +1489,15 @@ function buildDirectiveQueue({
 
   // ── follow_up_surface ──────────────────────────────────────────────────
   if (followUpQueue) {
+    // Opening follow-up (first __INIT__ message) is fine at priority 1/wins.
+    // Mid-session follow-up surfacing competes with real work — drop to priority 2/honest.
+    // priority 1 = high (fires before most directives); priority 2 = normal
+    const isInitMessage = !messageCount || messageCount === 0;
     allDirectives.push({
       id: 'follow_up_surface',
       instruction: 'PRIORITY: Surface follow_up_due question first.',
-      priority: 1,
-      preferred_stage: 'any',
+      priority: isInitMessage ? 1 : 2,
+      preferred_stage: isInitMessage ? 'wins' : 'honest',
       fire_next_session: true,
       followup_question: 'How did things go with what you were working through last time — has anything shifted since then?',
     });
@@ -1826,7 +1834,7 @@ function buildSessionContext({
   const identityMissing = !mergedChecklist.identity && messageCount >= 6;
   const sessionReadyToClose = tomorrowFilled && mergedChecklist.wins && (mergedChecklist.identity || messageCount >= 10);
   const forceClose = messageCount >= 14 && tomorrowFilled && mergedChecklist.wins;
-  const depthProbeNeeded = intentData?.depth_opportunity && !sessionExercisesRun.includes('depth_probe');
+  const depthProbeNeeded = !!(intentData?.depth_opportunity && !sessionExercisesRun.includes('depth_probe') && (sessionState?.depth_opportunity_count_so_far ?? 0) >= 2);
   const isMemoryMode = ['question', 'advice_request', 'memory_query'].includes(intentData?.intent);
   const goalMissingWhy = goalsNeedWhyBuilding.find(g => !Array.isArray(g.whys) || g.whys.length === 0) ?? null;
 
@@ -2248,7 +2256,7 @@ export default async function handler(req, res) {
     const identityMissing = !mergedChecklist.identity && messageCount >= 6;
     const sessionReadyToClose = tomorrowFilled && mergedChecklist.wins && (mergedChecklist.identity || messageCount >= 10);
     const forceClose = messageCount >= 14 && tomorrowFilled && mergedChecklist.wins;
-    const depthProbeNeeded = !!(intentData?.depth_opportunity && !sessionExercisesRun.includes('depth_probe'));
+    const depthProbeNeeded = !!(intentData?.depth_opportunity && !sessionExercisesRun.includes('depth_probe') && (session_state?.depth_opportunity_count_so_far ?? 0) >= 2);
     const goalMissingWhy = goalsNeedWhyBuilding.find(g => !Array.isArray(g.whys) || g.whys.length === 0) ?? null;
 
     const newDirectives = buildDirectiveQueue({
@@ -2542,6 +2550,7 @@ Return ONLY valid JSON: { "question": "..." }`,
       }
       if (result.extracted_data?.self_hype_message) updates.self_hype_message = result.extracted_data.self_hype_message;
       if (result.commitment_checkin_done) updates.commitment_checkin_done = true;
+      if (result.extracted_data?.checkin_outcome) updates.checkin_outcome = result.extracted_data.checkin_outcome;
       if (result.is_session_complete) {
         updates.is_complete = true;
         updates.completed_at = new Date().toISOString();
