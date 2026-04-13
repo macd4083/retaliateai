@@ -35,7 +35,8 @@ You will receive:
 - Their last 30 sessions (dates, summaries, wins, struggles, blocker tags, commitments)
 - Direct quotes/realizations from sessions (depth_insights)
 - Their existing tracked insights (update rather than duplicate)
-- Their profile (identity, goal, why, future self)
+- Their profile as a structured object with fields: profile.identity, profile.goal, profile.why, profile.future_self, profile.values, profile.current_state
+- Optionally: exercises_already_explained — a list of exercise IDs the user has already run
 
 For each insight produce:
 - pattern_narrative: 4–6 sentences, second person, SPECIFIC evidence (dates, quotes, actual events). Name the mechanism — what is the pattern doing/protecting/avoiding?
@@ -55,6 +56,12 @@ RULES:
 - No generic coaching language. No "it's worth sitting with", "this shows growth".
 - Second person throughout.
 - Update existing insights rather than creating duplicates.
+- For each insight's unlocked_practices: only include exercise IDs the user has NOT yet run (not in exercises_already_explained). If all applicable exercises are already explained, return an empty array.
+- Each pattern_narrative must begin with a different grammatical structure. Vary between: starting with 'You', starting with the pattern mechanism ('This pattern...', 'When...', 'Since...'), starting with a specific date reference, starting with an observation about frequency. No two narratives in the same response may open with the same word.
+
+WHAT NOT TO DO:
+❌ Generic: "This keeps coming up across your sessions. It's worth noting that you tend to avoid completion. This shows a pattern that might be worth sitting with."
+✅ Specific: "On March 14 you committed to shipping the landing page by Friday, then on March 21 you named 'fear of judgment' as the reason it still wasn't live — the same language you used on Feb 28. The pattern isn't avoidance of work; it's avoidance of the moment other people can evaluate it."
 
 Return ONLY valid JSON:
 {
@@ -152,9 +159,11 @@ export default async function handler(req, res) {
     // ── 4. Load profile ───────────────────────────────────────────────────
     const { data: profile } = await supabase
       .from('user_profiles')
-      .select('identity_statement, big_goal, why, future_self, values, short_term_state, long_term_patterns, strengths, growth_areas')
+      .select('identity_statement, big_goal, why, future_self, values, short_term_state, long_term_patterns, strengths, growth_areas, exercises_explained')
       .eq('id', authenticatedUserId)
       .maybeSingle();
+
+    const exercisesExplained = profile?.exercises_explained || [];
 
     // ── 5. Build GPT context ──────────────────────────────────────────────
     const sessionHistory = sessions.map((s) => {
@@ -174,15 +183,6 @@ export default async function handler(req, res) {
       return line;
     }).join('\n');
 
-    const profileContext = [
-      profile?.identity_statement ? `Identity: "${profile.identity_statement}"` : null,
-      profile?.big_goal ? `Goal: "${profile.big_goal}"` : null,
-      profile?.why ? `Why: "${profile.why}"` : null,
-      profile?.future_self ? `Future self: "${profile.future_self}"` : null,
-      profile?.values ? `Values: ${Array.isArray(profile.values) ? profile.values.join(', ') : profile.values}` : null,
-      profile?.short_term_state ? `Current state: ${profile.short_term_state}` : null,
-    ].filter(Boolean).join('\n');
-
     // ── 6. Call GPT-4o ────────────────────────────────────────────────────
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o',
@@ -196,7 +196,15 @@ export default async function handler(req, res) {
             existing_tracked_insights: (existingInsights || []).length > 0
               ? (existingInsights || []).map((i) => ({ id: i.id, label: i.pattern_label, type: i.pattern_type, last_synthesized: i.synthesized_at, confidence: i.confidence_score }))
               : undefined,
-            profile: profileContext || 'No profile data yet.',
+            profile: {
+              identity: profile?.identity_statement || null,
+              goal: profile?.big_goal || null,
+              why: profile?.why || null,
+              future_self: profile?.future_self || null,
+              values: profile?.values || null,
+              current_state: profile?.short_term_state || null,
+            },
+            exercises_already_explained: exercisesExplained.length > 0 ? exercisesExplained : undefined,
             total_sessions_analyzed: sessions.length,
           }),
         },
