@@ -1,7 +1,7 @@
 {
   "name": "Retaliate AI",
-  "short_name": "Retaliate",
-  "description": "AI-Powered Journaling for Results",
+  "short_name": "Retaliate AI",
+  "description": "AI-powered journaling that holds you accountable.",
   "icons": [
     {
       "src": "/android-chrome-192x192.png",
@@ -14,11 +14,18 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
     }
   ],
   "theme_color": "#dc2626",
-  "background_color": "#000000",
+  "background_color": "#09090b",
   "display": "standalone",
-  "start_url": "/",
-  "scope": "/"
+  "orientation": "portrait",
+  "start_url": "/reflection",
+  "scope": "/",
+  "categories": ["productivity", "lifestyle"]
 }
