@@ -30,6 +30,12 @@ function getMondayOf(dateStr) {
   return `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')}`;
 }
 
+function formatInsightDate(dateStr) {
+  if (!dateStr) return '';
+  const [y, m] = dateStr.split('-').map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+}
+
 // ─── Main Component ────────────────────────────────────��──────────────────────
 
 // Returns true if an array has at least one object item with an evidence field
@@ -122,6 +128,7 @@ export default function InsightsV2() {
     setLivingProfile(data);
   }
 
+  // Intentionally does not select reflection_streak — live streak is computed in loadStreak() via reflectionHelpers.getReflectionStreak()
   async function loadSessions() {
     const today = localDateStr(0);
 
@@ -880,6 +887,27 @@ export default function InsightsV2() {
                           {n.occurrences} time{n.occurrences !== 1 ? 's' : ''} in your reflections
                         </p>
                       )}
+                      {n.first_seen_date && (() => {
+                        const first = formatInsightDate(n.first_seen_date);
+                        const last  = n.last_seen_date ? formatInsightDate(n.last_seen_date) : null;
+
+                        // Determine if span > 14 days
+                        const spanDays = n.last_seen_date
+                          ? Math.round(
+                              (new Date(n.last_seen_date) - new Date(n.first_seen_date)) / (1000 * 60 * 60 * 24)
+                            )
+                          : 0;
+
+                        const showRange = last && spanDays > 14;
+
+                        return (
+                          <p className="text-zinc-600 text-xs mt-1">
+                            {showRange
+                              ? `${first} → ${last}`
+                              : `First noticed ${first}`}
+                          </p>
+                        );
+                      })()}
                     </div>
                   );
                 })}
