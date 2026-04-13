@@ -795,13 +795,17 @@ export default function ReflectionV2() {
 
       if (isSessionComplete) {
         setIsComplete(true);
-        const finalStreak = streak + 1;
-        setStreak(finalStreak);
         reflectionHelpers.updateSession(sid, {
           is_complete: true,
           current_stage: 'complete',
           completed_at: new Date().toISOString(),
-          reflection_streak: finalStreak,
+        }).then(() => {
+          // Session is now marked is_complete = true in the DB, so
+          // getReflectionStreak will include today's session in its count.
+          return reflectionHelpers.getReflectionStreak(user.id);
+        }).then((accurateStreak) => {
+          setStreak(accurateStreak);
+          return reflectionHelpers.updateSession(sid, { reflection_streak: accurateStreak });
         }).catch(() => {});
 
         // Fetch follow-through stats to show in the summary card
