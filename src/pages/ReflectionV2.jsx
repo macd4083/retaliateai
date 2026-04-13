@@ -286,6 +286,8 @@ export default function ReflectionV2() {
     honest_depth: false,
     yesterday_commitment: null,
     commitment_checkin_done: false,
+    checkin_outcome: null,
+    depth_opportunity_count: 0,
     directive_queue: [],
     completed_directives: [],
   });
@@ -301,16 +303,43 @@ export default function ReflectionV2() {
 
   const timeContext = getTimeContext();
 
-  // Dynamic stages — include commitment_checkin only when there's a yesterday commitment
-  const stages = sessionState.yesterday_commitment
-    ? [
+  // Dynamic stages — shape based on yesterday_commitment, commitment_checkin_done, and checkin_outcome
+  const stages = (() => {
+    const { yesterday_commitment, commitment_checkin_done, checkin_outcome } = sessionState;
+
+    if (!yesterday_commitment) return BASE_STAGES;
+
+    // Check-in not yet done — show check-in stage in the bar
+    if (!commitment_checkin_done) {
+      return [
         { id: 'wins', label: 'Wins' },
         { id: 'commitment_checkin', label: 'Check-in' },
         { id: 'honest', label: 'Honest' },
         { id: 'tomorrow', label: 'Tomorrow' },
         { id: 'close', label: 'Close' },
-      ]
-    : BASE_STAGES;
+      ];
+    }
+
+    // Check-in done — shape bar based on outcome
+    if (checkin_outcome === 'missed') {
+      // Honest stage collapsed — commitment was missed
+      return [
+        { id: 'wins', label: 'Wins' },
+        { id: 'commitment_checkin', label: 'Check-in' },
+        { id: 'tomorrow', label: 'Tomorrow' },
+        { id: 'close', label: 'Close' },
+      ];
+    }
+
+    // checkin_outcome === 'kept' OR checkin_outcome === null but checkin is done — standard
+    return [
+      { id: 'wins', label: 'Wins' },
+      { id: 'commitment_checkin', label: 'Check-in' },
+      { id: 'honest', label: 'Honest' },
+      { id: 'tomorrow', label: 'Tomorrow' },
+      { id: 'close', label: 'Close' },
+    ];
+  })();
 
   // Keep messagesRef in sync with messages state
   useEffect(() => {
@@ -400,6 +429,8 @@ export default function ReflectionV2() {
         honest_depth: false,
         yesterday_commitment: session.yesterday_commitment || fetchedYesterdayCommitment || null,
         commitment_checkin_done: session.commitment_checkin_done === true,
+        checkin_outcome: session.checkin_outcome || null,
+        depth_opportunity_count: session.depth_opportunity_count || 0,
         directive_queue: Array.isArray(session.directive_queue) ? session.directive_queue : [],
         completed_directives: Array.isArray(session.completed_directives) ? session.completed_directives : [],
       };
@@ -608,6 +639,8 @@ export default function ReflectionV2() {
               is_first_message: isInit,
               yesterday_commitment: state.yesterday_commitment,
               commitment_checkin_done: state.commitment_checkin_done,
+              checkin_outcome: state.checkin_outcome,
+              depth_opportunity_count: state.depth_opportunity_count || 0,
               yesterday_commitment_in_state: !!state.yesterday_commitment,
               consecutive_excuses: state.consecutive_excuses || 0,
               checklist: state.checklist || { ...DEFAULT_CHECKLIST },
@@ -716,6 +749,10 @@ export default function ReflectionV2() {
         if (data.wins_asked_for_more === true) newState.wins_asked_for_more = true;
         if (data.honest_depth === true) newState.honest_depth = true;
         if (data.commitment_checkin_done === true) newState.commitment_checkin_done = true;
+        if (data.checkin_outcome) newState.checkin_outcome = data.checkin_outcome;
+        if (data.depth_opportunity === true || data.intentData?.depth_opportunity === true) {
+          newState.depth_opportunity_count = (newState.depth_opportunity_count || 0) + 1;
+        }
         if (data.extracted_data?.yesterday_commitment && !newState.yesterday_commitment) {
           newState.yesterday_commitment = data.extracted_data.yesterday_commitment;
         }
@@ -737,6 +774,9 @@ export default function ReflectionV2() {
         if (data.stage_advance && data.new_stage) dbUpdates.current_stage = data.new_stage;
         if (data.commitment_checkin_done === true && !state.commitment_checkin_done) {
           dbUpdates.commitment_checkin_done = true;
+        }
+        if (data.checkin_outcome && !state.checkin_outcome) {
+          dbUpdates.checkin_outcome = data.checkin_outcome;
         }
         if (Object.keys(dbUpdates).length > 0)
           reflectionHelpers.updateSession(sid, dbUpdates).catch(() => {});
@@ -854,6 +894,8 @@ export default function ReflectionV2() {
           honest_depth: false,
           yesterday_commitment: null,
           commitment_checkin_done: false,
+          checkin_outcome: null,
+          depth_opportunity_count: 0,
         });
         initCalledRef.current = false;
         initSentRef.current = false;
