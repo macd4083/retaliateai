@@ -73,7 +73,9 @@ export const reflectionHelpers = {
     return data;
   },
 
-  // Count consecutive days with is_complete = true (the streak)
+  // Count consecutive days with is_complete = true (the streak).
+  // Callers should ensure the session has already been marked is_complete = true
+  // in the DB before calling, so today's just-completed session is included in the count.
   async getReflectionStreak(userId) {
     const { data, error } = await supabase
       .from('reflection_sessions')
