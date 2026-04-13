@@ -23,3 +23,4 @@ Run files in filename order (alphabetical / chronological).
 14. `20260411_user_progress_events.sql` — Creates user_progress_events table for recording real threshold crossings; adds last_motivation_signal to goals
 15. `20260412_consolidation_prereqs.sql` — Adds first_seen_date, last_seen_date, strength_evidence to user_insights; backfills from synthesized_at
 16. `20260412_seed_whys_from_why_it_matters.sql` — Ensures whys column exists on goals; seeds whys[0] from why_it_matters for all goals that had it but no whys
+17. `20260413_consolidate_why_it_matters.sql` — Drops the legacy goals.why_it_matters column (data already migrated to whys[] by migration 16)

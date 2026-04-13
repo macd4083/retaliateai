@@ -587,6 +587,8 @@ export default function InsightsV2() {
                 return (to === 'strong' || to === 'medium') ? '📈' : '📉';
               }
               if (type === 'blocker_fading') return '💡';
+              if (type === 'strength_resolved') return '⭐';
+              if (type === 'growth_area_resolved') return '🌱';
               if (type === 'foothold_unlocked') return '🔓';
               if (type === 'first_depth_insight') return '🧠';
               return '📌';
@@ -601,6 +603,8 @@ export default function InsightsV2() {
                 return 'border-l-zinc-500';
               }
               if (type === 'blocker_fading') return 'border-l-yellow-500';
+              if (type === 'strength_resolved') return 'border-l-emerald-500';
+              if (type === 'growth_area_resolved') return 'border-l-teal-500';
               if (type === 'foothold_unlocked') return 'border-l-blue-500';
               if (type === 'first_depth_insight') return 'border-l-purple-500';
               return 'border-l-zinc-500';
@@ -610,6 +614,8 @@ export default function InsightsV2() {
               if (type === 'followthrough_milestone') return 'Commitment milestone';
               if (type === 'motivation_signal_change') return 'Momentum shift';
               if (type === 'blocker_fading') return 'Pattern fading';
+              if (type === 'strength_resolved') return 'Strength solidifying';
+              if (type === 'growth_area_resolved') return 'Growth achieved';
               if (type === 'foothold_unlocked') return "Something's changing";
               if (type === 'first_depth_insight') return 'First real insight';
               return 'Progress marker';

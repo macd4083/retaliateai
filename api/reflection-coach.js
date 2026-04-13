@@ -1064,7 +1064,7 @@ function generateSessionSummary(sessionState, result, profile, dateStr) {
   return summary;
 }
 
-async function evolveUserProfile(userId, summaryText, currentProfile, recentSessions) {
+async function evolveUserProfile(userId, summaryText, currentProfile, recentSessions, sessionId) {
   try {
     // Check if a monthly deep pattern pass is due
     const lastUpdated = currentProfile?.profile_updated_at ? new Date(currentProfile.profile_updated_at) : null;
@@ -1203,11 +1203,120 @@ Return valid JSON only:
 
     const evolution = JSON.parse(completion.choices[0].message.content);
 
+    const todayStr = new Date().toISOString().split('T')[0];
+    const thirtyDaysAgoStr = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0];
+    const sixtyDaysAgoStr = new Date(Date.now() - 60 * 86400000).toISOString().split('T')[0];
+
+    // ── Merge strengths — carry forward history, don't full-replace ───────
+    const normLabel = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const existingStrengths = Array.isArray(currentProfile?.strengths) ? currentProfile.strengths : [];
+    const aiStrengths = Array.isArray(evolution.strengths) ? evolution.strengths : [];
+    const aiStrengthKeys = new Set(aiStrengths.map((s) => normLabel(s.label)));
+
+    const mergedAiStrengths = aiStrengths.map((aiS) => {
+      const existing = existingStrengths.find((e) => normLabel(e.label) === normLabel(aiS.label));
+      return {
+        label: aiS.label,
+        evidence: aiS.evidence,
+        first_seen: existing?.first_seen || aiS.first_seen || todayStr,
+        occurrence_count: (existing?.occurrence_count || 0) + 1,
+        last_seen: todayStr,
+      };
+    });
+    // Keep established entries (occurrence_count >= 2) that weren't in this session's output
+    const keptStrengths = existingStrengths
+      .filter((e) => !aiStrengthKeys.has(normLabel(e.label)) && (e.occurrence_count || 0) >= 2)
+      .map((e) => ({ ...e, last_seen: e.last_seen || todayStr }));
+    const mergedStrengths = [...mergedAiStrengths, ...keptStrengths].slice(0, 6);
+
+    // ── Merge growth_areas — keep established entries, carry started date ─
+    const existingGrowthAreas = Array.isArray(currentProfile?.growth_areas) ? currentProfile.growth_areas : [];
+    const aiGrowthAreas = Array.isArray(evolution.growth_areas) ? evolution.growth_areas : [];
+    const aiGrowthKeys = new Set(aiGrowthAreas.map((g) => normLabel(g.label)));
+
+    const mergedAiGrowthAreas = aiGrowthAreas.map((aiG) => {
+      const existing = existingGrowthAreas.find((e) => normLabel(e.label) === normLabel(aiG.label));
+      return {
+        label: aiG.label,
+        evidence: aiG.evidence,
+        started: existing?.started || aiG.started || null,
+        last_seen: todayStr,
+      };
+    });
+    // Keep entries not in this session's output if they've been seen recently or have no last_seen yet (migration grace)
+    const keptGrowthAreas = existingGrowthAreas
+      .filter((e) => !aiGrowthKeys.has(normLabel(e.label)) && (!e.last_seen || e.last_seen >= sixtyDaysAgoStr))
+      .map((e) => ({ ...e, last_seen: e.last_seen || todayStr }));
+    const mergedGrowthAreas = [...mergedAiGrowthAreas, ...keptGrowthAreas].slice(0, 6);
+
+    // ── Dedupe long_term_patterns ─────────────────────────────────────────
+    const rawPatterns = Array.isArray(evolution.long_term_patterns) ? evolution.long_term_patterns : [];
+    const seenPatterns = new Set();
+    const dedupedPatterns = rawPatterns.filter((p) => {
+      const key = normLabel(p);
+      if (seenPatterns.has(key)) return false;
+      seenPatterns.add(key);
+      return true;
+    });
+
+    // ── Fire strength_resolved events for established strengths that faded ─
+    for (const existing of existingStrengths) {
+      if (
+        !aiStrengthKeys.has(normLabel(existing.label)) &&
+        (existing.occurrence_count || 0) >= 3 &&
+        existing.last_seen && existing.last_seen < thirtyDaysAgoStr
+      ) {
+        (async () => {
+          const { data: existingEvt } = await supabase
+            .from('user_progress_events')
+            .select('id')
+            .eq('user_id', userId)
+            .eq('event_type', 'strength_resolved')
+            .contains('payload', { label: existing.label })
+            .maybeSingle();
+          if (!existingEvt) {
+            await writeProgressEvent(userId, sessionId || null, 'strength_resolved', {
+              label: existing.label,
+              occurrence_count: existing.occurrence_count,
+              first_seen: existing.first_seen,
+              display_text: `"${existing.label}" has shown up ${existing.occurrence_count} times since ${existing.first_seen || 'your first session'}. It may be becoming second nature.`,
+            });
+          }
+        })().catch(() => {});
+      }
+    }
+
+    // ── Fire growth_area_resolved events for areas that have faded out ────
+    for (const existing of existingGrowthAreas) {
+      if (
+        !aiGrowthKeys.has(normLabel(existing.label)) &&
+        existing.last_seen && existing.last_seen < thirtyDaysAgoStr &&
+        existing.started && existing.started < sixtyDaysAgoStr
+      ) {
+        (async () => {
+          const { data: existingEvt } = await supabase
+            .from('user_progress_events')
+            .select('id')
+            .eq('user_id', userId)
+            .eq('event_type', 'growth_area_resolved')
+            .contains('payload', { label: existing.label })
+            .maybeSingle();
+          if (!existingEvt) {
+            await writeProgressEvent(userId, sessionId || null, 'growth_area_resolved', {
+              label: existing.label,
+              started: existing.started,
+              display_text: `"${existing.label}" has been an active growth area since ${existing.started}. It looks like you've made real progress here.`,
+            });
+          }
+        })().catch(() => {});
+      }
+    }
+
     const profileUpdates = {
       short_term_state: evolution.short_term_state,
-      long_term_patterns: evolution.long_term_patterns,
-      growth_areas: evolution.growth_areas,
-      strengths: evolution.strengths,
+      long_term_patterns: dedupedPatterns,
+      growth_areas: mergedGrowthAreas,
+      strengths: mergedStrengths,
       values: evolution.values,
       profile_updated_at: new Date().toISOString(),
     };
@@ -2801,7 +2910,7 @@ Only link when genuinely relevant. Do not force links. Multiple items can have t
           const sessionUpdates = { summary: summaryText };
           if (embedding) sessionUpdates.embedding = embedding;
           await supabase.from('reflection_sessions').update(sessionUpdates).eq('id', session_id);
-          await evolveUserProfile(authenticatedUserId, summaryText, userProfile, recentSessions);
+          await evolveUserProfile(authenticatedUserId, summaryText, userProfile, recentSessions, session_id);
 
           // Shallow session detector — if wins or honest checklist items are missing,
           // queue a strategic follow-up for the next night
