@@ -9,4 +9,12 @@ export default defineConfig({
       '@': path.resolve(__dirname, 'src'),
     },
   },
+  optimizeDeps: {
+    exclude: ['web-push', 'resend'],
+  },
+  build: {
+    rollupOptions: {
+      external: ['web-push', 'resend'],
+    },
+  },
 });
