@@ -257,6 +257,7 @@ EXERCISE WORKFLOWS:
 GOAL CONNECTION — WHEN AND HOW TO BUILD MEANING
 
 You have a goals array. Each goal may have: id, area, title, whys (array of {text, added_at, source, motivation_signal}), vision_snapshot, depth_insights (array of {date, insight}), days_since_mentioned, suggested_next_action, motivation_signal ("strong"|"medium"|"low"|"struggling"|"unknown").
+- baseline_snapshot + baseline_date: where the user was when they created this goal — use for 'you've come a long way from when you [baseline_snapshot]' framing when motivation_signal is strong or improving
 
 GOAL WHYS (whys array):
 - Each goal has a list of whys — reasons the user has articulated at different points in time
@@ -759,7 +760,7 @@ async function loadActiveGoals(userId) {
   try {
     const { data } = await supabase
       .from('goals')
-      .select('id, title, category, whys, vision_snapshot, depth_insights, last_mentioned_at, suggested_next_action')
+      .select('id, title, category, whys, vision_snapshot, depth_insights, last_mentioned_at, suggested_next_action, baseline_snapshot, baseline_date')
       .eq('user_id', userId)
       .eq('status', 'active')
       .limit(6);
@@ -884,12 +885,23 @@ async function runGoalCommitmentEvaluation(userId, clientDate) {
 
     // Mark yesterday's pending commitments as kept if today's session is already complete
     if (completedSession) {
+      // Set kept: true only for rows that don't have an explicit override from the coach
       await supabase
         .from('goal_commitment_log')
         .update({ kept: true, evaluated_at: now })
         .eq('user_id', userId)
         .eq('date', yesterday)
-        .is('kept', null);
+        .is('kept', null)
+        .not('checkin_outcome', 'in', '("missed","partial")');
+
+      // For rows where coach explicitly said missed or partial, set kept: false
+      await supabase
+        .from('goal_commitment_log')
+        .update({ kept: false, evaluated_at: now })
+        .eq('user_id', userId)
+        .eq('date', yesterday)
+        .is('kept', null)
+        .in('checkin_outcome', ['missed', 'partial']);
     }
 
     // Mark commitments from 2+ days ago that are still null as missed
@@ -2275,6 +2287,8 @@ export default async function handler(req, res) {
             depth_insights: g.depth_insights?.length > 0 ? g.depth_insights : null,
             suggested_next_action: g.suggested_next_action || null,
             motivation_signal: g.motivation_signal || 'unknown',
+            baseline_snapshot: g.baseline_snapshot || null,
+            baseline_date: g.baseline_date || null,
           };
           if (g.days_since_mentioned !== null && g.days_since_mentioned > 7) {
             obj.days_since_mentioned = g.days_since_mentioned;
@@ -2622,6 +2636,19 @@ Return ONLY valid JSON: { "question": "..." }`,
             .update({ ...updates, updated_at: new Date().toISOString() })
             .eq('id', session_id).then(() => {}).catch(() => {})
         );
+      }
+
+      // Propagate checkin_outcome to goal_commitment_log rows for yesterday
+      const resolvedCheckinOutcome = result.extracted_data?.checkin_outcome;
+      if (['kept', 'missed', 'partial'].includes(resolvedCheckinOutcome) && client_local_date) {
+        const yesterdayForCheckin = localDate(-1, client_local_date);
+        supabase
+          .from('goal_commitment_log')
+          .update({ checkin_outcome: resolvedCheckinOutcome })
+          .eq('user_id', authenticatedUserId)
+          .eq('date', yesterdayForCheckin)
+          .is('kept', null)
+          .then(() => {}).catch(() => {});
       }
       if (result.is_session_complete && client_local_date) {
         dbPromises.push(
