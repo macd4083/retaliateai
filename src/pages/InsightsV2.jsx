@@ -53,6 +53,7 @@ export default function InsightsV2() {
   const [showAddGoal, setShowAddGoal]             = useState(false);
   const [newGoalTitle, setNewGoalTitle]           = useState('');
   const [newGoalCategory, setNewGoalCategory]     = useState('');
+  const [newGoalBaseline, setNewGoalBaseline]     = useState('');
   const [savingGoal, setSavingGoal]               = useState(false);
   const [progressEvents, setProgressEvents]       = useState([]);
 
@@ -81,7 +82,7 @@ export default function InsightsV2() {
   async function loadActiveGoals() {
     const { data } = await supabase
       .from('goals')
-      .select('id, title, category, whys, status, created_at, vision_snapshot, last_mentioned_at, last_motivation_signal')
+      .select('id, title, category, whys, status, created_at, vision_snapshot, last_mentioned_at, last_motivation_signal, baseline_snapshot, baseline_date')
       .eq('user_id', user.id)
       .eq('status', 'active')
       .order('created_at', { ascending: true })
@@ -99,6 +100,10 @@ export default function InsightsV2() {
         category: newGoalCategory || null,
         status: 'active',
         whys: [],
+        ...(newGoalBaseline.trim() && {
+          baseline_snapshot: newGoalBaseline.trim(),
+          baseline_date: new Date().toISOString().split('T')[0],
+        }),
       });
       if (error) {
         console.error('Failed to save goal:', error.message);
@@ -106,6 +111,7 @@ export default function InsightsV2() {
       }
       setNewGoalTitle('');
       setNewGoalCategory('');
+      setNewGoalBaseline('');
       setShowAddGoal(false);
       await loadActiveGoals();
     } finally {
@@ -690,6 +696,13 @@ export default function InsightsV2() {
                   <option value="mindset">Mindset</option>
                   <option value="other">Other</option>
                 </select>
+                <textarea
+                  value={newGoalBaseline}
+                  onChange={(e) => setNewGoalBaseline(e.target.value)}
+                  placeholder="Where are you starting from? (optional)"
+                  rows={2}
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-500 resize-none"
+                />
                 <div className="flex gap-2">
                   <button
                     onClick={handleSaveGoal}
@@ -699,7 +712,7 @@ export default function InsightsV2() {
                     {savingGoal ? 'Saving…' : 'Save'}
                   </button>
                   <button
-                    onClick={() => { setShowAddGoal(false); setNewGoalTitle(''); setNewGoalCategory(''); }}
+                    onClick={() => { setShowAddGoal(false); setNewGoalTitle(''); setNewGoalCategory(''); setNewGoalBaseline(''); }}
                     className="px-4 py-2 text-zinc-400 hover:text-white rounded-xl text-sm transition-colors"
                   >
                     Cancel
@@ -755,6 +768,19 @@ export default function InsightsV2() {
                               )}
                             </div>
                           </div>
+
+                          {/* Baseline snapshot */}
+                          {goal.baseline_snapshot && (
+                            <p className="text-zinc-500 text-xs mt-1 leading-relaxed">
+                              Started:{' '}
+                              <span className="text-zinc-400">{goal.baseline_snapshot}</span>
+                              {goal.baseline_date && (
+                                <span className="text-zinc-600 ml-1">
+                                  · {new Date(goal.baseline_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                                </span>
+                              )}
+                            </p>
+                          )}
 
                           {/* Whys list */}
                           {whysList.length > 0 && (
