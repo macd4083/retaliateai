@@ -7,8 +7,18 @@
   ],
   "functions": {
     "api/**/*.js": {
-      "memory":  1024,
+      "memory": 1024,
       "maxDuration": 50
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/nightly-push",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/missed-sessions-email",
+      "schedule": "0 12 * * *"
+    }
+  ]
 }

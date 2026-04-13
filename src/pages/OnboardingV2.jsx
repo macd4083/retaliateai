@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, ArrowLeft, Check } from 'lucide-react';
 import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase/client';
+import { subscribeToPush, isMobile, isStandalone } from '../lib/pushNotifications';
 
 const DEFAULT_LIFE_AREA_OPTIONS = [
   { emoji: '💼', label: 'Career & Business' },
@@ -54,7 +55,7 @@ const TIMEZONES = [
   { label: 'UTC', value: 'UTC' },
 ];
 
-const TOTAL_STEPS = 7;
+const TOTAL_STEPS = 8;
 
 function ProgressDots({ step }) {
   return (
@@ -116,6 +117,11 @@ export default function OnboardingV2({ onOnboardingComplete } = {}) {
   // Step 6
   const [reflectionTime, setReflectionTime] = useState('21:00');
   const [timezone, setTimezone] = useState('America/New_York');
+
+  // Step 7 — password creation
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordError, setPasswordError] = useState('');
 
   const saveProfile = async (updates) => {
     if (!user?.id) return;
@@ -317,13 +323,53 @@ export default function OnboardingV2({ onOnboardingComplete } = {}) {
     }
   };
 
+  const handleStep7 = async () => {
+    setPasswordError('');
+    if (password.length < 8) {
+      setPasswordError('Password must be at least 8 characters.');
+      return;
+    }
+    if (password !== confirmPassword) {
+      setPasswordError('Passwords do not match.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const { error } = await supabase.auth.updateUser({ password });
+      if (error) throw error;
+      await saveProfile({ onboarding_step: 8 });
+      setStep(8);
+    } catch (_e) {
+      setPasswordError('Failed to set password. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleStep7Skip = async () => {
+    setSaving(true);
+    try {
+      await saveProfile({ onboarding_step: 8 });
+      setStep(8);
+    } catch (_e) {
+      // non-critical — still advance
+      setStep(8);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleComplete = async () => {
     setSaving(true);
     try {
-      await saveProfile({ onboarding_completed: true, onboarding_step: 7 });
+      await saveProfile({ onboarding_completed: true, onboarding_step: 8 });
       // Signal parent (AuthGuardV2) that onboarding is done — avoids stale cache issue
       if (onOnboardingComplete) onOnboardingComplete();
       else navigate('/reflection');
+      // Subscribe to push notifications silently after navigation
+      if (user?.id) {
+        subscribeToPush(user.id, supabase).catch(() => {});
+      }
     } catch (_e) {
       alert('Failed to complete setup. Please try again.');
     } finally {
@@ -782,8 +828,75 @@ export default function OnboardingV2({ onOnboardingComplete } = {}) {
           </div>
         )}
 
-        {/* ── Step 7 ── Identity Commitment + Complete ── */}
+        {/* ── Step 7 ── Password Creation ── */}
         {step === 7 && (
+          <div className="flex flex-col flex-1">
+            <h2 className="text-2xl font-bold text-white mb-2">Create a password</h2>
+            <p className="text-zinc-400 text-sm mb-8">
+              So you can sign in normally next time — no magic link required.
+            </p>
+
+            {/* Hidden username field for password manager association */}
+            <input
+              type="text"
+              autoComplete="username"
+              value={user?.email || ''}
+              readOnly
+              aria-hidden="true"
+              style={{ display: 'none' }}
+            />
+
+            <label className="block text-zinc-400 text-xs uppercase tracking-wider mb-2">
+              Create a password
+            </label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="new-password"
+              placeholder="At least 8 characters"
+              autoFocus
+              className="bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-white placeholder-zinc-500 text-sm focus:outline-none focus:border-red-600 transition-colors mb-4"
+            />
+
+            <label className="block text-zinc-400 text-xs uppercase tracking-wider mb-2">
+              Confirm password
+            </label>
+            <input
+              type="password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              autoComplete="new-password"
+              placeholder="Re-enter your password"
+              onKeyDown={(e) => e.key === 'Enter' && handleStep7()}
+              className="bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-white placeholder-zinc-500 text-sm focus:outline-none focus:border-red-600 transition-colors mb-auto"
+            />
+
+            {passwordError && (
+              <p className="text-red-400 text-sm mt-3">{passwordError}</p>
+            )}
+
+            <div className="flex gap-3 mt-8">
+              <button
+                onClick={handleStep7Skip}
+                disabled={saving}
+                className="flex-1 py-3.5 rounded-xl border border-zinc-700 text-zinc-400 hover:text-white hover:border-zinc-500 disabled:opacity-40 transition-colors text-sm font-medium"
+              >
+                Skip for now
+              </button>
+              <button
+                onClick={handleStep7}
+                disabled={!password || !confirmPassword || saving}
+                className="flex-1 flex items-center justify-center gap-2 bg-red-600 hover:bg-red-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold py-3.5 rounded-xl transition-colors"
+              >
+                {saving ? 'Saving...' : 'Continue'} <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Step 8 ── Identity Commitment + Complete ── */}
+        {step === 8 && (
           <Step7Summary
             fullName={fullName}
             futureSelf={futureSelf}
@@ -804,6 +917,27 @@ function Step7Summary({ fullName, futureSelf, bigGoal, why, selectedLifeAreas, l
   const truncate = (text, len = 120) =>
     text && text.length > len ? text.slice(0, len) + '...' : text;
 
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const onMobile = isMobile();
+  const alreadyInstalled = isStandalone();
+  const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+  useEffect(() => {
+    const handler = (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
+
+  const handleInstall = () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      deferredPrompt.userChoice.finally(() => setDeferredPrompt(null));
+    }
+  };
+
   return (
     <div className="flex flex-col flex-1">
       <h2 className="text-2xl font-bold text-white mb-2">You're ready.</h2>
@@ -812,7 +946,7 @@ function Step7Summary({ fullName, futureSelf, bigGoal, why, selectedLifeAreas, l
       </p>
 
       {/* Summary card */}
-      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4 mb-auto">
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
         {fullName && (
           <div>
             <p className="text-zinc-500 text-xs uppercase tracking-wider mb-0.5">Name</p>
@@ -855,6 +989,30 @@ function Step7Summary({ fullName, futureSelf, bigGoal, why, selectedLifeAreas, l
           </div>
         )}
       </div>
+
+      {/* PWA install prompts */}
+      {onMobile && !alreadyInstalled && (
+        <div className="mt-5">
+          {isIOS ? (
+            <div className="bg-zinc-800 border border-zinc-700 rounded-xl p-4">
+              <p className="text-zinc-300 text-sm">
+                📲 <strong className="text-white">For nightly reminders</strong>, add Retaliate AI to your home screen — tap the{' '}
+                <strong className="text-white">share icon</strong>, then{' '}
+                <strong className="text-white">"Add to Home Screen"</strong>.
+              </p>
+            </div>
+          ) : deferredPrompt ? (
+            <button
+              onClick={handleInstall}
+              className="w-full flex items-center justify-center gap-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-white font-semibold py-3 rounded-xl transition-colors text-sm"
+            >
+              📲 Add to Home Screen for daily reminders
+            </button>
+          ) : null}
+        </div>
+      )}
+
+      <div className="mb-auto" />
 
       <button
         onClick={onComplete}

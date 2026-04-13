@@ -46,6 +46,13 @@
     <!-- Web manifest -->
     <link rel="manifest" href="/site.webmanifest" />
     <link rel="canonical" href="https://retaliateai.com/" />
+
+    <!-- PWA / mobile app meta tags -->
+    <meta name="theme-color" content="#dc2626" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Retaliate AI" />
     
     <!-- Schema.org markup for Google -->
     <script type="application/ld+json">
@@ -69,5 +76,12 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch(() => {});
+        });
+      }
+    </script>
   </body>
 </html> 

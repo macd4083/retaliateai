@@ -9,24 +9,32 @@ export default function AuthCallback() {
   useEffect(() => {
     const handleCallback = async () => {
       try {
-        // Supabase automatically handles the token from URL
-        const { data, error } = await supabase.auth.getSession();
-        
+        // Exchange PKCE code / magic-link token from the URL for a session
+        const { error } = await supabase.auth.exchangeCodeForSession(window.location.href);
+
         if (error) {
           console.error('Auth error:', error);
           setStatus('error');
           return;
         }
 
+        // Listen for the session to be confirmed
+        let subscription;
+        ({ data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+          if (session) {
+            subscription.unsubscribe();
+            setStatus('success');
+            // AuthGuardV2 will handle the onboarding redirect automatically
+            navigate('/reflection', { replace: true });
+          }
+        }));
+
+        // Also check immediately in case the session is already set
+        const { data } = await supabase.auth.getSession();
         if (data.session) {
+          subscription.unsubscribe();
           setStatus('success');
-          // Broadcast to other tabs that user is now signed in
-          localStorage.setItem('supabase.auth.token', JSON.stringify(data.session));
-          window.dispatchEvent(new Event('storage'));
-          
-          setTimeout(() => navigate('/Journal'), 2000);
-        } else {
-          setStatus('error');
+          navigate('/reflection', { replace: true });
         }
       } catch (err) {
         console.error('Callback error:', err);
@@ -38,8 +46,10 @@ export default function AuthCallback() {
   }, [navigate]);
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-red-50">
+    <div className="min-h-screen flex items-center justify-center bg-zinc-950">
       <div className="text-center">
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+
         {status === 'verifying' && (
           <>
             <div className="relative mx-auto mb-6 h-20 w-20">
@@ -48,35 +58,32 @@ export default function AuthCallback() {
                 style={{
                   borderWidth: 4,
                   borderStyle: 'solid',
-                  borderColor: 'rgba(148,163,184,0.45)',
-                  borderTopColor: 'rgba(220,38,38,0.85)',
+                  borderColor: 'rgba(63,63,70,0.8)',
+                  borderTopColor: '#dc2626',
                   animation: 'spin 0.9s linear infinite',
                 }}
               />
             </div>
-            <p className="text-slate-700 font-medium">Verifying your email...</p>
-            <style>{`
-              @keyframes spin { to { transform: rotate(360deg); } }
-            `}</style>
+            <p className="text-white font-medium">Verifying your email...</p>
           </>
         )}
-        
+
         {status === 'success' && (
           <>
-            <div className="text-green-600 text-5xl mb-4">✓</div>
-            <p className="text-slate-900 font-semibold mb-2">Email confirmed!</p>
-            <p className="text-slate-600">Redirecting to your journal...</p>
+            <div className="text-red-500 text-5xl mb-4">✓</div>
+            <p className="text-white font-semibold mb-2">Email confirmed!</p>
+            <p className="text-zinc-400">Redirecting...</p>
           </>
         )}
-        
+
         {status === 'error' && (
           <>
-            <div className="text-red-600 text-5xl mb-4">✗</div>
-            <p className="text-slate-900 font-semibold mb-2">Verification failed</p>
-            <p className="text-slate-600 mb-4">The link may be expired or invalid.</p>
+            <div className="text-red-500 text-5xl mb-4">✗</div>
+            <p className="text-white font-semibold mb-2">Verification failed</p>
+            <p className="text-zinc-400 mb-6">The link may be expired or invalid.</p>
             <button
               onClick={() => navigate('/login')}
-              className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+              className="px-6 py-2.5 bg-red-600 hover:bg-red-500 text-white font-semibold rounded-xl transition-colors"
             >
               Back to Login
             </button>
