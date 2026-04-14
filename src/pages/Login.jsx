@@ -24,6 +24,12 @@ export default function Login() {
     }
   }, [searchParams]);
 
+  useEffect(() => {
+    if (searchParams.get('utm_source') === 'instagram' && window.fbq) {
+      window.fbq('track', 'Lead');
+    }
+  }, [searchParams]);
+
   const handleLogin = async (e) => {
     e.preventDefault();
     setLoading(true);

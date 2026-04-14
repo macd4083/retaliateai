@@ -363,6 +363,10 @@ export default function OnboardingV2({ onOnboardingComplete } = {}) {
     setSaving(true);
     try {
       await saveProfile({ onboarding_completed: true, onboarding_step: 8 });
+      // Fire Meta Pixel conversion event
+      if (typeof window !== 'undefined' && window.fbq) {
+        window.fbq('track', 'CompleteRegistration');
+      }
       // Signal parent (AuthGuardV2) that onboarding is done — avoids stale cache issue
       if (onOnboardingComplete) onOnboardingComplete();
       else navigate('/reflection');
