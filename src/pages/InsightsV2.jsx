@@ -141,7 +141,7 @@ export default function InsightsV2() {
     // Fetch all sessions with a commitment (desc, up to 100)
     const { data: allWithCommitment } = await supabase
       .from('reflection_sessions')
-      .select('date, tomorrow_commitment, is_complete')
+      .select('date, tomorrow_commitment, commitment_minimum, commitment_stretch, commitment_score, is_complete')
       .eq('user_id', user.id)
       .not('tomorrow_commitment', 'is', null)
       .order('date', { ascending: false })
@@ -176,7 +176,14 @@ export default function InsightsV2() {
         const status = isNewest
           ? (sessionsByDate[nextDay]?.is_complete ? 'kept' : 'pending')
           : (sessionsByDate[nextDay]?.is_complete ? 'kept' : 'missed');
-        return { date: s.date, commitment: s.tomorrow_commitment, status };
+        return {
+          date: s.date,
+          commitment: s.tomorrow_commitment,
+          minimum: s.commitment_minimum || null,
+          stretch: s.commitment_stretch || null,
+          score: s.commitment_score ?? null,
+          status,
+        };
       });
 
       setAllCommitments(computed);
@@ -448,6 +455,34 @@ export default function InsightsV2() {
                     <p className="text-zinc-500 text-xs mt-3">{trajectoryLine()}</p>
                   )}
 
+                  {commitmentStats?.avgScore7 != null && (
+                    <div className="mt-3 pt-3 border-t border-zinc-800">
+                      <div className="flex items-center justify-between mb-1">
+                        <p className="text-zinc-400 text-xs">Avg commitment score</p>
+                        <span className={`text-sm font-bold ${
+                          commitmentStats.avgScore7 >= 80 ? 'text-red-400' :
+                          commitmentStats.avgScore7 >= 60 ? 'text-orange-400' : 'text-zinc-400'
+                        }`}>
+                          {Math.round(commitmentStats.avgScore7)}/100
+                        </span>
+                      </div>
+                      <p className="text-zinc-600 text-xs">
+                        {commitmentStats.scoreTrajectory === 'improving' ? '↑ Improving from last week' :
+                         commitmentStats.scoreTrajectory === 'declining' ? '↓ Declining from last week' :
+                         'Consistent with last week'}
+                      </p>
+                    </div>
+                  )}
+
+                  {commitmentStats?.avgScore7 >= 80 && (
+                    <div className="mt-3 p-3 bg-red-950/30 border border-red-900/40 rounded-xl">
+                      <p className="text-red-400 text-xs font-semibold mb-1">⚡ Time to raise the bar</p>
+                      <p className="text-zinc-400 text-xs leading-relaxed">
+                        Your score has averaged {Math.round(commitmentStats.avgScore7)} — you're consistently hitting your stretch goals. Your coach will push you to raise the ceiling in your next session.
+                      </p>
+                    </div>
+                  )}
+
                   {/* Week description */}
                   <p className="text-zinc-400 text-xs mt-1">{weekDescText}</p>
                 </>
@@ -471,17 +506,39 @@ export default function InsightsV2() {
                 </p>
               ) : (
                 displayedCommitments.map((c, i) => (
-                  <div key={i} className="bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2.5">
-                    <div className="flex items-start gap-2">
-                      <span className="flex-shrink-0 mt-0.5">
-                        {c.status === 'kept'   ? '✅' :
-                         c.status === 'missed' ? '❌' : '⏳'}
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-zinc-200 text-sm leading-snug">{c.commitment}</p>
-                        <p className="text-zinc-500 text-xs mt-0.5">
-                          {formatDate(c.date)} ·{' '}
-                          {c.status === 'kept'   ? 'Kept' :
+                    <div key={i} className="bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2.5">
+                      <div className="flex items-start gap-2">
+                        <span className="flex-shrink-0 mt-0.5">
+                          {c.status === 'kept'   ? '✅' :
+                           c.status === 'missed' ? '❌' : '⏳'}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-start gap-2">
+                            <p className="text-zinc-200 text-sm leading-snug">{c.commitment}</p>
+                            {c.score != null && (
+                              <span className={`ml-auto text-xs font-bold px-2 py-0.5 rounded-full flex-shrink-0 ${
+                                c.score >= 90 ? 'bg-red-900/50 text-red-300 border border-red-700' :
+                                c.score >= 75 ? 'bg-orange-900/50 text-orange-300 border border-orange-700' :
+                                c.score >= 60 ? 'bg-zinc-800 text-zinc-300 border border-zinc-600' :
+                                'bg-zinc-900 text-zinc-500 border border-zinc-700'
+                              }`}>
+                                {c.score}/100
+                              </span>
+                            )}
+                          </div>
+                          {c.minimum && (
+                            <p className="text-zinc-600 text-xs mt-0.5">
+                              <span className="text-zinc-500">Floor:</span> {c.minimum}
+                            </p>
+                          )}
+                          {c.stretch && (
+                            <p className="text-zinc-600 text-xs mt-0.5">
+                              <span className="text-zinc-500">Stretch:</span> {c.stretch}
+                            </p>
+                          )}
+                          <p className="text-zinc-500 text-xs mt-0.5">
+                            {formatDate(c.date)} ·{' '}
+                            {c.status === 'kept'   ? 'Kept' :
                            c.status === 'missed' ? 'Missed' :
                            'Pending — check back tomorrow'}
                         </p>

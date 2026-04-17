@@ -143,11 +143,33 @@ function SummaryCard({ data, streak, followThroughStats }) {
           </div>
         )}
         {data.tomorrow_commitment && (
+          <>
+            {!data.commitment_minimum && !data.commitment_stretch && (
+              <div className="flex items-start gap-2">
+                <span className="text-blue-400 mt-0.5">📋</span>
+                <div>
+                  <span className="text-zinc-400 text-xs">Tomorrow</span>
+                  <p className="text-white text-sm">{data.tomorrow_commitment}</p>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+        {data.commitment_minimum && (
           <div className="flex items-start gap-2">
-            <span className="text-blue-400 mt-0.5">📋</span>
+            <span className="text-blue-400 mt-0.5">🎯</span>
             <div>
-              <span className="text-zinc-400 text-xs">Tomorrow</span>
-              <p className="text-white text-sm">{data.tomorrow_commitment}</p>
+              <span className="text-zinc-400 text-xs">Minimum</span>
+              <p className="text-white text-sm">{data.commitment_minimum}</p>
+            </div>
+          </div>
+        )}
+        {data.commitment_stretch && (
+          <div className="flex items-start gap-2">
+            <span className="text-purple-400 mt-0.5">🚀</span>
+            <div>
+              <span className="text-zinc-400 text-xs">Stretch</span>
+              <p className="text-white text-sm">{data.commitment_stretch}</p>
             </div>
           </div>
         )}
@@ -278,6 +300,8 @@ export default function ReflectionV2() {
     misses: [],
     blocker_tags: [],
     tomorrow_commitment: null,
+    commitment_minimum: null,
+    commitment_stretch: null,
     self_hype_message: null,
     consecutive_excuses: 0,
     checklist: { ...DEFAULT_CHECKLIST },
@@ -421,6 +445,8 @@ export default function ReflectionV2() {
         misses: session.misses || [],
         blocker_tags: session.blocker_tags || [],
         tomorrow_commitment: session.tomorrow_commitment || null,
+        commitment_minimum: session.commitment_minimum || null,
+        commitment_stretch: session.commitment_stretch || null,
         self_hype_message: session.self_hype_message || null,
         consecutive_excuses: session.consecutive_excuses || 0,
         checklist: session.checklist || { ...DEFAULT_CHECKLIST },
@@ -728,6 +754,10 @@ export default function ReflectionV2() {
           newState.blocker_tags = [...new Set([...(newState.blocker_tags || []), ...data.extracted_data.blocker_tags])];
         if (data.extracted_data?.tomorrow_commitment)
           newState.tomorrow_commitment = data.extracted_data.tomorrow_commitment;
+        if (data.extracted_data?.commitment_minimum)
+          newState.commitment_minimum = data.extracted_data.commitment_minimum;
+        if (data.extracted_data?.commitment_stretch)
+          newState.commitment_stretch = data.extracted_data.commitment_stretch;
         if (data.extracted_data?.self_hype_message)
           newState.self_hype_message = data.extracted_data.self_hype_message;
         if (data.extracted_data?.depth_insight)
@@ -769,6 +799,12 @@ export default function ReflectionV2() {
             dbUpdates.commitment_made_at = new Date().toISOString();
           }
         }
+        if (data.extracted_data?.commitment_minimum && !state.commitment_minimum)
+          dbUpdates.commitment_minimum = data.extracted_data.commitment_minimum;
+        if (data.extracted_data?.commitment_stretch && !state.commitment_stretch)
+          dbUpdates.commitment_stretch = data.extracted_data.commitment_stretch;
+        if (data.extracted_data?.commitment_score != null)
+          dbUpdates.commitment_score = data.extracted_data.commitment_score;
         if (data.extracted_data?.self_hype_message)
           dbUpdates.self_hype_message = data.extracted_data.self_hype_message;
         if (data.stage_advance && data.new_stage) dbUpdates.current_stage = data.new_stage;
@@ -890,6 +926,8 @@ export default function ReflectionV2() {
           misses: [],
           blocker_tags: [],
           tomorrow_commitment: null,
+          commitment_minimum: null,
+          commitment_stretch: null,
           self_hype_message: null,
           consecutive_excuses: 0,
           checklist: { ...DEFAULT_CHECKLIST },
