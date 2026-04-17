@@ -27,6 +27,8 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+const SCORE_TRAJECTORY_THRESHOLD = 5;
+
 // Return YYYY-MM-DD string for today (server UTC)
 function todayStr() {
   const d = new Date();
@@ -117,7 +119,11 @@ function computeWeeklyKeptOutOf7(wSessions, allSessionsByDate) {
   return { kept, total: 7 };
 }
 
-function averageCommitmentScore(sessions, minSamples = 3) {
+/**
+ * Computes the average commitment_score for a list of sessions.
+ * Returns null when there are fewer than minSamples non-null numeric scores.
+ */
+function averageCommitmentScoreOrNull(sessions, minSamples = 3) {
   const scored = sessions
     .map((s) => s.commitment_score)
     .filter((score) => Number.isFinite(score));
@@ -169,8 +175,8 @@ export default async function handler(req, res) {
 
     const followThrough7 = computeFollowThrough(last7, allSessionsByDate);
     const followThroughPrior7 = computeFollowThrough(prior7, allSessionsByDate);
-    const avgScore7 = averageCommitmentScore(last7);
-    const avgScorePrior7 = averageCommitmentScore(prior7);
+    const avgScore7 = averageCommitmentScoreOrNull(last7);
+    const avgScorePrior7 = averageCommitmentScoreOrNull(prior7);
 
     // Trajectory — compare rates (ignore if either window has insufficient data)
     const rate7 = followThrough7.total > 0 ? followThrough7.kept / followThrough7.total : null;
@@ -184,8 +190,8 @@ export default async function handler(req, res) {
 
     let scoreTrajectory = 'stable';
     if (avgScore7 !== null && avgScorePrior7 !== null) {
-      if (avgScore7 - avgScorePrior7 >= 5) scoreTrajectory = 'improving';
-      else if (avgScorePrior7 - avgScore7 >= 5) scoreTrajectory = 'declining';
+      if (avgScore7 - avgScorePrior7 >= SCORE_TRAJECTORY_THRESHOLD) scoreTrajectory = 'improving';
+      else if (avgScorePrior7 - avgScore7 >= SCORE_TRAJECTORY_THRESHOLD) scoreTrajectory = 'declining';
     }
 
     // ── Recovery stats — gaps between completed sessions in last 30 days ──

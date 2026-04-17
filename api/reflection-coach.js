@@ -2559,9 +2559,9 @@ export default async function handler(req, res) {
     result.commitment_checkin_done = result.commitment_checkin_done === true;
     result.show_goal_chips = result.show_goal_chips === true;
     if (result.extracted_data?.commitment_score != null) {
-      const parsedScore = Number.parseInt(result.extracted_data.commitment_score, 10);
+      const parsedScore = Number.parseFloat(result.extracted_data.commitment_score);
       result.extracted_data.commitment_score = Number.isFinite(parsedScore)
-        ? Math.min(100, Math.max(0, parsedScore))
+        ? Math.min(100, Math.max(0, Math.round(parsedScore)))
         : null;
     }
 

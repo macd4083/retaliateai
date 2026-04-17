@@ -43,6 +43,11 @@ function hasEvidenceItems(items) {
   return Array.isArray(items) && items.some((item) => typeof item === 'object' && item?.evidence);
 }
 
+const COMMITMENT_SCORE_EXCEPTIONAL_THRESHOLD = 90;
+const COMMITMENT_SCORE_GOOD_THRESHOLD = 75;
+const COMMITMENT_SCORE_RAISE_BAR_THRESHOLD = 80;
+const COMMITMENT_SCORE_SOLID_THRESHOLD = 60;
+
 export default function InsightsV2() {
   const { user } = useAuth();
 
@@ -460,8 +465,8 @@ export default function InsightsV2() {
                       <div className="flex items-center justify-between mb-1">
                         <p className="text-zinc-400 text-xs">Avg commitment score</p>
                         <span className={`text-sm font-bold ${
-                          commitmentStats.avgScore7 >= 80 ? 'text-red-400' :
-                          commitmentStats.avgScore7 >= 60 ? 'text-orange-400' : 'text-zinc-400'
+                          commitmentStats.avgScore7 >= COMMITMENT_SCORE_RAISE_BAR_THRESHOLD ? 'text-red-400' :
+                          commitmentStats.avgScore7 >= COMMITMENT_SCORE_SOLID_THRESHOLD ? 'text-orange-400' : 'text-zinc-400'
                         }`}>
                           {Math.round(commitmentStats.avgScore7)}/100
                         </span>
@@ -474,7 +479,7 @@ export default function InsightsV2() {
                     </div>
                   )}
 
-                  {commitmentStats?.avgScore7 >= 80 && (
+                  {commitmentStats?.avgScore7 >= COMMITMENT_SCORE_RAISE_BAR_THRESHOLD && (
                     <div className="mt-3 p-3 bg-red-950/30 border border-red-900/40 rounded-xl">
                       <p className="text-red-400 text-xs font-semibold mb-1">⚡ Time to raise the bar</p>
                       <p className="text-zinc-400 text-xs leading-relaxed">
@@ -517,9 +522,9 @@ export default function InsightsV2() {
                             <p className="text-zinc-200 text-sm leading-snug">{c.commitment}</p>
                             {c.score != null && (
                               <span className={`ml-auto text-xs font-bold px-2 py-0.5 rounded-full flex-shrink-0 ${
-                                c.score >= 90 ? 'bg-red-900/50 text-red-300 border border-red-700' :
-                                c.score >= 75 ? 'bg-orange-900/50 text-orange-300 border border-orange-700' :
-                                c.score >= 60 ? 'bg-zinc-800 text-zinc-300 border border-zinc-600' :
+                                c.score >= COMMITMENT_SCORE_EXCEPTIONAL_THRESHOLD ? 'bg-red-900/50 text-red-300 border border-red-700' :
+                                c.score >= COMMITMENT_SCORE_GOOD_THRESHOLD ? 'bg-orange-900/50 text-orange-300 border border-orange-700' :
+                                c.score >= COMMITMENT_SCORE_SOLID_THRESHOLD ? 'bg-zinc-800 text-zinc-300 border border-zinc-600' :
                                 'bg-zinc-900 text-zinc-500 border border-zinc-700'
                               }`}>
                                 {c.score}/100
@@ -528,7 +533,7 @@ export default function InsightsV2() {
                           </div>
                           {c.minimum && (
                             <p className="text-zinc-600 text-xs mt-0.5">
-                              <span className="text-zinc-500">Floor:</span> {c.minimum}
+                              <span className="text-zinc-500">Minimum:</span> {c.minimum}
                             </p>
                           )}
                           {c.stretch && (
