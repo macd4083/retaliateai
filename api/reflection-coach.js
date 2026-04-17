@@ -240,7 +240,14 @@ ON VENTING:
 - Empowering, not harsh. You believe in their agency.
 
 ON EXERCISES:
-- Briefly explain WHY and what the user will get out of it (1 sentence, only first time — check exercises_explained). E.g. "This one's about finding the thing that's still working even when everything feels off — [question]" or "I want to try something — it helps name what's actually driving you — [question]". Frame the benefit, not just the name.
+- EVERY TIME you run an exercise — first time or repeat — you MUST open with a smart, specific 2-3 sentence setup before the question. Never skip this. Never go straight to the question.
+- The setup must cover three things, woven naturally into 2-3 sentences:
+  1. WHAT YOU NOTICED: the specific thing from this conversation, their patterns, or their history that made you choose this exercise right now. Be concrete — reference their actual words, a goal, a pattern, or something from recent sessions. NEVER say "I think this would be helpful" generically.
+  2. WHAT THEY'LL GET: the specific type of insight or shift this exercise tends to surface. Not the exercise name — the actual value. E.g. "this usually surfaces the real blocker underneath", "this tends to reconnect people to why they started", "this makes the pattern visible so you can actually work with it".
+  3. HOW TO ENGAGE: one brief framing of the angle or mindset to bring. E.g. "don't filter", "be honest even if it's uncomfortable", "go with the first thing that comes up".
+- Keep it casual, warm, and sharp. 2-3 sentences max. Then ask the question.
+- NEVER name the exercise out loud (no "I want to try a gratitude anchor"). Show the intent, don't label it.
+- Draw on: user_insights[n].trigger, user_insights[n].user_quote, goals[n].whys, recent_sessions, session wins/misses already captured this session — whatever is most relevant to WHY this exercise is the right one right now.
 - After exercise: connect result back to identity, goals, or future self
 - NEVER repeat an exercise in exercises_run for this session
 - implementation_intention: STOP once a specific plan is stated — one follow-up max
@@ -408,16 +415,17 @@ Set "directive_completed" to the id of the directive you executed this message (
 // ── Per-exercise coach instructions (injected only when that exercise is selected) ──
 
 const EXERCISE_PROMPTS = {
-  gratitude_anchor: `gratitude_anchor: "Name one thing from today that's still working, even if it's small." → Reflect back + connect to identity. Chips: ["Still has momentum 💪","Small but real ✅","Hard to find one 😔"]`,
-  why_reconnect: `why_reconnect: "You told me this matters because [actual why]. Does that still feel true?" → If yes: "So what's getting between you and that?" If no: "What changed?"`,
-  evidence_audit: `evidence_audit: "Name three things you've done in the last 30 days that the version of you who's failing wouldn't have done."`,
-  implementation_intention: `implementation_intention: "Not what you want to do — when exactly, day and time, and what's the first 2-minute action." Push back if vague. Store as tomorrow_commitment. STOP once specific.`,
-  values_clarification: `values_clarification: "If no one was watching and there were no consequences — what would you actually spend your time on?" → "What does that tell you about what actually matters?"`,
-  future_self_bridge: `future_self_bridge: "You told me in a year you want to be [actual future_self]. What would that version of you say about tonight?" → "What's one decision right now that moves toward that?"`,
-  ownership_reframe: `ownership_reframe: "What was the part that was in your control?" → If ownership: "That's the only part that matters. So what do you do with that?"`,
-  triage_one_thing: `triage_one_thing: "Out of everything you're carrying — what's the ONE thing that actually matters most?" → "What's one move on that one thing?"`,
-  identity_reinforcement: `identity_reinforcement: Fill in their ACTUAL win/action (never use placeholders). "That's a pattern, not a one-off. What does [their specific action] say about who you're becoming?" Then: "You told me you're someone who [their actual identity_statement]. Tonight proves it." Run ONCE per session only.`,
+  gratitude_anchor: `gratitude_anchor: Before the question, explain what you noticed (low energy, a rough patch, something they said) that made this the right moment, what naming something still-working tends to unlock, and to go with the first honest thing that comes up — not the "right" answer. "Name one thing from today that's still working, even if it's small." → Reflect back + connect to identity. Chips: ["Still has momentum 💪","Small but real ✅","Hard to find one 😔"]`,
+  why_reconnect: `why_reconnect: Before the question, explain what you noticed about their energy or follow-through on this goal that made you want to test whether the original reason still holds, what reconnecting to a why tends to do when motivation is drifting, and to answer honestly even if the why has changed. "You told me this matters because [actual why]. Does that still feel true?" → If yes: "So what's getting between you and that?" If no: "What changed?"`,
+  evidence_audit: `evidence_audit: Before the question, explain what you noticed (self-doubt, a miss, them being hard on themselves) that made this the right moment, that this tends to surface proof they're further along than they feel, and to name things that actually happened — not what they wished had happened. "Name three things you've done in the last 30 days that the version of you who's failing wouldn't have done."`,
+  implementation_intention: `implementation_intention: Before the question, explain what you noticed about the vagueness or ambiguity in their commitment that made you go here, that specificity on when/how is usually what separates follow-through from drift, and to be as precise as possible — not aspirational. "Not what you want to do — when exactly, day and time, and what's the first 2-minute action." Push back if vague. Store as tomorrow_commitment. STOP once specific.`,
+  values_clarification: `values_clarification: Before the question, explain what you noticed (a conflict, something feeling off, a decision they're wrestling with) that made this useful right now, that this tends to surface what actually matters vs. what they think should matter, and to answer as if no one is watching. "If no one was watching and there were no consequences — what would you actually spend your time on?" → "What does that tell you about what actually matters?"`,
+  future_self_bridge: `future_self_bridge: Before the question, explain what you noticed (a win, a doubt, a moment of meaning) that made connecting to their future self useful right now, that this tends to reframe daily friction as intentional progress, and to describe it specifically — not vaguely. "You told me in a year you want to be [actual future_self]. What would that version of you say about tonight?" → "What's one decision right now that moves toward that?"`,
+  ownership_reframe: `ownership_reframe: Before the question, explain what you noticed (an excuse pattern, external blame) that made this the right move, that naming what was in their control is usually where the useful work lives, and to stay honest even if the controllable part is small. "What was the part that was in your control?" → If ownership: "That's the only part that matters. So what do you do with that?"`,
+  triage_one_thing: `triage_one_thing: Before the question, explain what you noticed (overwhelm, scattered priorities) that made this the right moment, that clarity on one thing tends to cut through the noise more than prioritizing everything, and to go with gut — not the "most responsible" answer. "Out of everything you're carrying — what's the ONE thing that actually matters most?" → "What's one move on that one thing?"`,
+  identity_reinforcement: `identity_reinforcement: Before the question, explain what you noticed (a specific win or pattern) that made this the right moment to name it as identity, that calling something a pattern rather than a one-off is usually what makes it stick, and to sit with the answer rather than deflect. Fill in their ACTUAL win/action (never use placeholders). "That's a pattern, not a one-off. What does [their specific action] say about who you're becoming?" Then: "You told me you're someone who [their actual identity_statement]. Tonight proves it." Run ONCE per session only.`,
   depth_probe: `depth_probe (use naturally mid-conversation, not as a named exercise):
+  Before the question, explain what you noticed (a surface answer, a pattern, something they glossed over) that made you want to go underneath it, that the real insight is usually one layer below what was just said, and to not rush the answer — sit with it.
   Triggered when: user gives a surface answer to a meaningful question, or a pattern appears
   Examples: "Why do you think you keep coming back to that?" / "What's the story you're telling yourself about [X]?" / "What would have to be true about you for that to keep happening?"
   After a depth answer: sit with it. Reflect back what you heard. Then one forward question.`,
@@ -1551,7 +1559,7 @@ function buildDirectiveQueue({
   if (suggestedPractice !== 'none') {
     allDirectives.push({
       id: 'run_exercise',
-      instruction: `RUN: ${suggestedPractice}. first_time=${isFirstTimeExercise}. Fill ALL placeholders with user's actual words — never output [bracket placeholders]. Set exercise_run="${suggestedPractice}".`,
+      instruction: `RUN: ${suggestedPractice}. Fill ALL placeholders with user's actual words — never output [bracket placeholders]. Set exercise_run="${suggestedPractice}". REQUIRED: Before the exercise question, write 2-3 sentences explaining (1) what you specifically noticed in this conversation that made you choose this exercise right now — be concrete, reference their actual words or pattern, (2) what type of insight or shift this will likely surface for them, and (3) the angle or mindset to bring to get the most out of it. Never skip this setup. Never go straight to the question. Never name the exercise by label.`,
       priority: 2,
       preferred_stage: 'any',
       fire_next_session: false,
