@@ -13,10 +13,6 @@
   },
   "crons": [
     {
-      "path": "/api/nightly-push",
-      "schedule": "* * * * *"
-    },
-    {
       "path": "/api/missed-sessions-email",
       "schedule": "0 12 * * *"
     }
