@@ -1,0 +1,325 @@
+{
+  "meta": {
+    "persona": "ambitious_but_inconsistent",
+    "start_date": "2026-03-14",
+    "run_at": "2026-04-02T16:45:00.522Z",
+    "user_id": "bfde06ab-1e0d-4c8f-bd9a-3a9682d61b02"
+  },
+  "days": [
+    {
+      "day": 1,
+      "date": "2026-03-14",
+      "exercises_run": [
+        "depth_probe",
+        "future_self_bridge"
+      ],
+      "why_reconnect_fired": false,
+      "coach_referenced_specific_why": false,
+      "why_evolution_events": [],
+      "conversation": [
+        {
+          "turn": 1,
+          "coach": "That's awesome, congrats on the recognition! It's not just a dashboard — it's a reflection of your skills and effort. Why do you think part of you doubts the compliment?",
+          "user": "Hey! Good morning! I'm actually feeling pretty proud today. Dom gave me a compliment about the new dashboard design for Stackline, and it really hit home. He said it looks super polished and user-friendly, which is nice to hear after all the tweaking I’ve done. I dunno, it feels good, but I also can’t shake this thought that maybe he was just being nice. Like, it’s just a dashboard, you know? But still, it’s nice to get some recognition for the effort I put in. Just hope it lives up to that praise when I finally share it more broadly."
+        },
+        {
+          "turn": 2,
+          "coach": "Sounds like there's a lot riding on this for you. What's the story you're telling yourself about what happens if it doesn't live up to those expectations?",
+          "user": "Thanks! I appreciate that. I guess it’s just hard not to second-guess myself. Like, I put a lot into it, but I can't help but think maybe Dom was just trying to be supportive. It’s kinda scary to think about sharing it more widely, you know? What if people don’t see it the same way? I just want it to be good, and I don't want to disappoint anyone. It's like, the more praise I get, the more pressure I feel to keep it up. And then I start worrying about what happens if it doesn’t live up to expectations. I don’t know, it’s just this weird push and pull."
+        },
+        {
+          "turn": 3,
+          "coach": "I hear you. It's like you're juggling the desire to show your work and make sure it's perfect first. Why do you think that fear of letting people down holds so much power over your decision to share?",
+          "user": "I mean, yeah, exactly. It’s tough, right? I feel like I’m caught in this loop of wanting to share and get that validation, but then there's that voice in my head saying, \"What if it doesn't go well?\" I guess I just want to make sure I’m ready before I put it out there. Like, if I can nail the onboarding experience or polish up the features a bit more, maybe that’ll ease some of those worries. But then, it’s like, am I just using that as an excuse to hold off? \n\nI really don’t want to let Dom or anyone down, and the thought of people not getting it or thinking it’s not good enough makes me freeze up. But at the same time, I know I should be proud of what I’ve made so far. It's just... balancing that pride with the fear is a lot, you know? I want to have that moment where I show it off and feel good about it, but"
+        },
+        {
+          "turn": 4,
+          "coach": "Sounds like there's a strong connection between your work and your sense of self-worth. What would it mean for you to trust yourself in this process — not just in the outcome, but in your ability to keep growing and learning, regardless of the response?",
+          "user": "Alex: Yeah, it really does feel like a juggling act. I guess that fear just feels huge because I’ve always been the one striving to do things right, you know? I mean, when I was growing up, everyone had high hopes for me, and I don’t want to be the one who drops the ball. Like, I think about how proud Dom is, and I don't want to let him down or make him feel like his support was misplaced. It feels like there's this weight on me to meet those expectations, and I start wondering if I can actually do it, you know? It's like the more I care about it, the scarier it gets. I want to be the person who builds things that matter, but then I think what if I don't? That's tough to wrestle with."
+        },
+        {
+          "turn": 5,
+          "coach": "Embracing feedback as growth rather than judgment could be a real game-changer for you. What’s one step you could take to start trusting in your ability to adapt and grow?",
+          "user": "Alex: Yeah, that connection is definitely there. I guess trusting myself would mean letting go of that pressure a bit, you know? Like, if I could really believe that growth is part of the journey, it might take some of the weight off. It would feel freeing to know that even if I share and it doesn’t go as planned, I can still learn from it and keep building. \n\nIt’d be nice to focus more on the progress and less on the fear of failing to meet expectations. I mean, I want to celebrate the wins, like the compliment from Dom, instead of worrying about the next hurdle all the time. It’s just hard to shift that mindset when I’ve been so focused on making everything perfect. But maybe, just maybe, if I trust in my ability to adapt and grow, I could feel a little more at ease about sharing. Like, what if I actually saw feedback as a chance to improve rather than a judgment on my worth? That feels like"
+        },
+        {
+          "turn": 6,
+          "coach": "That sounds like a solid plan. Sharing with a trusted small group can definitely ease you into the feedback process and build confidence. What does this step say about who you're becoming?",
+          "user": "Alex: Yeah, I think you're right. Embracing feedback could really help me shift that mindset. So, I was thinking maybe I could share the new dashboard design with a small group, like just a few people I trust to give me honest thoughts. It’s a little scary, but I guess starting small could make it easier to handle. Like, Dom already likes what I've done, so maybe I could ask him to help me gather a couple more people to look at it. I just want to get past that initial fear of visibility, you know? And seeing how they respond might help me feel more confident about the next steps. It’s like, if I can just get over that first hurdle of sharing, maybe it'll motivate me to keep pushing forward. What do you think?"
+        },
+        {
+          "turn": 7,
+          "coach": "You're definitely taking a big step by sharing your work — it shows you're ready to own your space and trust the process. That mix of excitement and fear is part of growth, and it's a sign you're pushing your boundaries. You're becoming someone who's willing to show up even when it's uncomfortable. That's huge.",
+          "user": "Alex: Yeah, I think it shows I’m starting to take myself seriously, you know? Like, I’m not just hiding behind the screen anymore. It feels like I'm moving from just building things to actually sharing them and inviting others into the process. That’s kinda huge for me! I mean, it’s a step toward being this person who isn’t afraid to let others see what I’m working on. Even if it’s just a small group for now, it feels like I’m claiming my space in this whole building something that matters thing.\n\nBut at the same time, there’s that nagging thought of, \"What if they don’t get it?\" I don’t know, it’s like I’m excited and scared at the same time. It’s hard to shake that feeling that if I share and it doesn’t go well, then maybe I’m not cut out for this. But I guess trusting that it’s part of the journey is a big step, right? It feels"
+        }
+      ]
+    },
+    {
+      "day": 2,
+      "date": "2026-03-15",
+      "exercises_run": [
+        "depth_probe",
+        "values_clarification"
+      ],
+      "why_reconnect_fired": false,
+      "coach_referenced_specific_why": false,
+      "why_evolution_events": [],
+      "conversation": [
+        {
+          "turn": 1,
+          "coach": "Congrats on nailing the Stripe integration — that's a huge win! On sharing the design, what's the story you're telling yourself about needing it to be perfect before getting feedback? What does that say about how you see yourself?",
+          "user": "Hey! Good morning! So, I actually didn’t share the new dashboard design yet. I know I said I would, but I got a bit caught up in finishing the Stripe integration, which I’m really proud of, by the way! It’s the biggest technical lift so far, and it feels like a huge step forward for Stackline.\n\nBut yeah, about sharing the design... I dunno, I just feel like it’s not quite ready for feedback. I want to make sure everything’s smooth before I show it, you know? I guess I just got a little hesitant about putting it out there. I want them to see it when it’s more polished, but I know I should probably still get their thoughts. Just feels a bit vulnerable, I guess."
+        },
+        {
+          "turn": 2,
+          "coach": "Sounds like there's a mix of fear from past experiences and a concern about how your growth could impact relationships. Let's explore this: If no one was watching and there were no consequences, what would you actually spend your time on?",
+          "user": "Thanks! I really appreciate it. The Stripe thing feels like a milestone, honestly.\n\nAbout the design... I guess I just want to avoid any kind of negative feedback, you know? It just kind of takes me back to that time when I first shared something and got a lot of silence, or worse, that cold comment. It sticks with you. So, wanting it to be perfect feels like a way to protect myself from that, I guess. Like if I show something that’s really polished, there’s less chance of someone not getting it or thinking it’s not good enough.\n\nI also wonder if part of it is about keeping my friends close. Like, if I start sharing more and things go well, what does that mean for my relationships? I don’t want to feel like I'm leaving people behind or something. But I know I need to get feedback to keep moving forward, right? It’s just hard to shake off that hesitation."
+        },
+        {
+          "turn": 3,
+          "coach": "Sounds like you really value creativity and connection. What if sharing your process could actually strengthen those relationships instead of harming them? What would change about how you approach feedback if you believed it could bring you and your friends closer?",
+          "user": "Alex: Yeah, that's a good question. If there were no consequences... I mean, I’d probably just dive into building out the features I actually want to experiment with. Maybe play around with some cool new ideas for Stackline, like better analytics or client communication tools. Just let my curiosity lead me, you know? \n\nI think I’d also share more of the work as I go, get feedback earlier instead of waiting for everything to be perfect. There’s something liberating about that idea, honestly. It's like I could just focus on being creative and let the rest fall where it may. \n\nBut then there's that nagging feeling — what if it doesn't resonate with people? Or worse, what if it makes my friends feel like they're not part of this anymore? It’s like I want to enjoy the ride, but I also don’t want to leave anyone behind. I dunno, it’s a balancing act in my head."
+        },
+        {
+          "turn": 4,
+          "coach": "It sounds like you're seeing feedback as an invitation rather than a critique, which is huge. If you viewed feedback as a way to deepen your connections and creativity, what's one small step you could take to test that approach?",
+          "user": "Alex: Hmm, that’s an interesting thought... I mean, I guess if I really believed sharing could bring us closer, I’d probably feel more motivated to put myself out there. Like, maybe I could frame it as a way for my friends to be part of the journey instead of feeling left behind. \n\nIf I thought of it like that, I’d approach feedback way differently. It wouldn’t just be about me showing off something I made; it’d be more like inviting them into the process, you know? Like, “Hey, I’m working on this, and I’d love your input!” \n\nBut I still can’t shake that feeling of vulnerability. What if they don’t connect with it, or worse, what if they think it’s not good enough? I dunno, it just feels risky. But if it could bring us closer, maybe it’s worth considering. There's definitely a cool angle there. Just gotta find that balance between sharing and not feeling like I'm leaving"
+        },
+        {
+          "turn": 5,
+          "coach": "That sounds like a solid plan! Starting with Dom and keeping it casual makes it less intimidating. What does taking this step say about who you're becoming?",
+          "user": "Alex: Yeah, I think I am starting to see it that way a bit more. Like, maybe I could just share the design with Dom first. He’s someone I trust, and I feel like he’d give me good, honest feedback without any judgment. Plus, it’d be less overwhelming than sharing it with a whole group right away.\n\nI could frame it like, “Hey, I’m working on this — would love your thoughts!” Just a casual little check-in. It feels manageable, you know? If it goes well, I could maybe think about sharing it with a few others. Just gotta take that first step without overthinking it too much. That sounds doable, right?"
+        },
+        {
+          "turn": 6,
+          "coach": "That's a powerful shift! You're transforming feedback into a source of connection and collaboration. What you've described shows you're becoming someone who embraces growth and community. Keep leaning into that openness — it's a game-changer.",
+          "user": "Alex: Honestly, it feels like a step towards being more open and confident. Like, I’m learning to trust myself a bit more and to lean on my friends for support instead of just keeping everything to myself. It’s kinda cool to think that I can turn this feedback thing into a way to invite people in rather than just worrying about judgment. \n\nI mean, if I can share ideas with Dom and get his input, it’s like I’m not just building Stackline alone anymore. I’m creating this little community around it. That’s pretty empowering, right? It feels like I'm becoming someone who values collaboration over perfection, which is definitely a shift for me. Just gotta keep that momentum going and not let the old fears creep back in."
+        }
+      ]
+    },
+    {
+      "day": 3,
+      "date": "2026-03-16",
+      "exercises_run": [
+        "depth_probe",
+        "future_self_bridge"
+      ],
+      "why_reconnect_fired": false,
+      "coach_referenced_specific_why": false,
+      "why_evolution_events": [],
+      "conversation": [
+        {
+          "turn": 1,
+          "coach": "It's great to hear that your call with Priya went well! It sounds like you're on the right track, but there's still something holding you back. What do you think is the real story behind feeling your design isn't ready yet?",
+          "user": "Hey! Morning. So, I didn’t actually share the design with Dom. I was planning to, but I just felt like it wasn't really ready yet, you know? Like there are still a few things I want to smooth out. \n\nI had that call with Priya, though, and it went really well! She asked some great questions that made me feel like I’m on the right track. But then I came back to not sharing with Dom and felt a bit disappointed in myself. It’s like, I got this validation, but I still hesitated to put it out there. \n\nI guess sharing still feels a bit daunting. Like what if Dom has thoughts that make me second-guess everything? I dunno, it's just tough, especially when I think about where I want to be versus where I am right now."
+        },
+        {
+          "turn": 2,
+          "coach": "It's tough when pride and fear collide like that. Do you think getting Dom's feedback could actually help refine those details you're worried about, even if it's not perfect yet?",
+          "user": "Hey, thanks! Yeah, the call with Priya was definitely a boost. But honestly, I keep thinking about the design and all the little details that feel off. Like, I don't know if the onboarding flow is smooth enough or if the color scheme really hits the vibe I’m going for. There’s just this nagging feeling that it's not quite there yet, and I feel like if I share it with Dom, he might think the same and then I’ll just feel kind of crushed.\n\nI guess I’m just worried that I’m not delivering my best self, and I want it to really shine, you know? It’s like... I have this great feedback from Priya, but then I spiral back to doubting what I have. I want it to be perfect, but I also know that waiting isn’t helping me get there either. It’s just this weird balance of pride and fear, I guess."
+        },
+        {
+          "turn": 3,
+          "coach": "It's understandable to want to protect your work. But what if showing it to Dom, even imperfect, is part of getting it to that stronger place? How does that fit with how you want to grow?",
+          "user": "Yeah, I mean, I get what you're saying. I know Dom’s feedback could help and maybe even point out things I’m not seeing. He always has good insights, so it would probably be valuable. But there’s this part of me that just feels like I need to get it to a better place before I let him in on it. Like, I don’t want to embarrass myself if he points out stuff that’s obvious or isn’t working. \n\nIt’s just frustrating, you know? I want to be open to feedback, but I feel like I need to protect this little project of mine until I think it’s stronger. But then I remember Priya’s call and how that made me feel, and it’s like... maybe showing it to Dom could give me that clarity I’m missing. I guess I’m just worried about feeling exposed or something."
+        },
+        {
+          "turn": 4,
+          "coach": "And that shift in mindset could be the key. It sounds like you're leaning toward being someone who embraces feedback as a growth tool. How does it feel thinking about yourself as that person?",
+          "user": "Alex: Yeah, I see what you mean. I guess it just feels like a big risk, you know? Like, if I show it to him and he finds a bunch of things wrong, it could really mess with my motivation. But then again, I’m not gonna improve if I’m the only one looking at it. \n\nThat call with Priya was really encouraging, and it makes me think maybe I need to lean into that more. I mean, getting feedback could help me see things I’m too close to notice. It’s just tricky to let go of that protective instinct. I want to grow and get better, but there’s also this part of me that just wants to keep everything under wraps until it feels perfectly ready. \n\nMaybe I should try to shift my mindset — like, think of it as a stepping stone rather than an examination or something. It just kind of feels like a big leap. But I do want to be the person who puts stuff out there and"
+        },
+        {
+          "turn": 5,
+          "coach": "That's a huge step forward, and it shows your commitment to growth. What specific time and day will you share it with Dom? Let's make it concrete.",
+          "user": "Hey, thanks for that. I really appreciate you understanding where I’m coming from. It’s just this tug-of-war between wanting to grow and feeling scared of putting myself out there. That call with Priya really lit a fire in me, but now I’m stuck worrying about all the little things that aren’t “perfect” yet. \n\nI keep telling myself that getting feedback could help me see things I might be missing, but then that fear of judgment creeps in. I guess I really need to lean into that sense of vulnerability and trust that sharing is part of the process. \n\nSo, I think I’m finally ready to commit to sharing the design with Dom. Even if I’m feeling shaky about it, I know that’s a step towards growth. It won’t be easy, but I want to push through that discomfort. I just need to keep reminding myself that this is all part of building something real, and it doesn’t have to be flawless to be valuable."
+        },
+        {
+          "turn": 6,
+          "coach": "Perfect plan. You've got this! Sharing it at 3 PM with a video call is a great move. You're really stepping into being that person who embraces growth. What does this decision say about who you're becoming?",
+          "user": "Alex: Alright, I think I can do this! Let’s say tomorrow afternoon, around 3 PM. I’ll send it to Dom then and maybe set up a quick video call to go through it together. It feels a bit nerve-wracking, but it’s time to just push through that fear, right? I know it’ll be a good step, even if I’m nervous about what he might say. Thanks for keeping me accountable!"
+        }
+      ]
+    },
+    {
+      "day": 4,
+      "date": "2026-03-17",
+      "exercises_run": [
+        "depth_probe",
+        "implementation_intention"
+      ],
+      "why_reconnect_fired": false,
+      "coach_referenced_specific_why": false,
+      "why_evolution_events": [],
+      "conversation": [
+        {
+          "turn": 1,
+          "coach": "Nice job on sharing the design and sparking those new ideas! It sounds like you're worried about how the dynamic might shift with these changes. What's the story you're telling yourself about what might happen if your connection with Dom evolves?",
+          "user": "Hey! Good morning! So, I did share the design with Dom, which felt good. We ended up having a solid video call where we brainstormed a couple of new product ideas. It's funny how just chatting can spark something fresh, you know? \n\nI guess I'm still kinda processing it all, though. I mean, the ideas are exciting, but part of me worries about where we go from here. Like, I don’t want to rock the boat too much with our dynamic if things start changing, y'know? It's just nice to have that connection with him. \n\nBut yeah, feeling okay about it overall! Just trying to figure out the next steps without overthinking everything."
+        },
+        {
+          "turn": 2,
+          "coach": "It's clear that your connection with Dom really matters. What do you think it says about you that you're prioritizing this balance so much?",
+          "user": "Thanks! I appreciate it. Yeah, I guess I’m just thinking about how we’ve always had this rhythm together, you know? Like, if we start pursuing these new ideas, will it change how we talk or work together? I don’t want to mess that up. \n\nThere's this part of me that worries if things start going really well, it might feel different between us. Like, I might be diving into a world he can't follow or something—and that just feels weird to me. I really value our friendship, and I don’t want any of this to create distance, you know? \n\nIt’s exciting, but I guess I’m just trying to balance it all without losing that connection."
+        },
+        {
+          "turn": 3,
+          "coach": "Your relationships clearly ground you, and that's a strength. What's one small step you can take to ensure your connection with Dom remains strong while you're both exploring these new ideas?",
+          "user": "I think it says a lot about how much I value relationships, you know? Like, for me, it's not just about the work or the ideas. It’s also about the people I’m doing this with. Dom's been there through a lot, and I guess I just don’t want to risk that connection for the sake of something new. \n\nI mean, it’s awesome to explore fresh ideas, and I definitely want to grow and push things forward, but not at the cost of our friendship. I just feel like when things change, it can be hard to keep that same vibe. Like, I want to make sure we’re still on the same page and that we don't lose that collaborative spark. \n\nI dunno, maybe it’s just me trying to protect what we've built together. I really appreciate having that anchor, especially when the rest of the world feels like it’s changing so fast."
+        },
+        {
+          "turn": 4,
+          "coach": "That sounds like a solid plan. Picking a day and time for those check-ins could make it real. When will your first one be?",
+          "user": "Alex: Yeah, totally. I think a simple step could be scheduling regular check-ins with Dom, like maybe once every couple of weeks. We can talk about both the work stuff and how we're feeling about everything. It’d help keep that vibe alive, you know? Plus, it’d give us a chance to air out any concerns before they snowball. \n\nI really want to make sure we stay connected through this. I mean, I don’t want to get so caught up in new ideas that we forget to check in with each other. So yeah, I think that could be a good move. Just gotta make it happen!"
+        },
+        {
+          "turn": 5,
+          "coach": "That sounds like a perfect plan to keep the connection strong while embracing change. You've set a time that respects your routine and maintains your values. What does this say about who you're becoming?",
+          "user": "Alex: Yeah, I think we could do our first check-in this Friday at 5 PM. That way, we can wrap up the week and catch up on everything. I just want to make sure this doesn’t disrupt our usual flow, you know? I mean, it's great to bring in new ideas, but I feel like keeping our connection strong is most important. So, yeah, Friday at 5 sounds good! Just gotta remember to stick to it!"
+        }
+      ]
+    },
+    {
+      "day": 5,
+      "date": "2026-03-18",
+      "exercises_run": [
+        "gratitude_anchor",
+        "depth_probe",
+        "ownership_reframe",
+        "triage_one_thing"
+      ],
+      "why_reconnect_fired": false,
+      "coach_referenced_specific_why": false,
+      "why_evolution_events": [],
+      "conversation": [
+        {
+          "turn": 1,
+          "coach": "Three signups is a win for sure! What's one thing about those signups that's still working for you, even if it feels a bit overwhelming? And about not scheduling with Dom — what do you think is really behind that? Something more than just getting caught up?",
+          "user": "Hey. Morning. So, um, I didn’t end up scheduling the check-ins with Dom. I kinda got caught up in everything else, I guess. \n\nBut, I did get three signups overnight from that Reddit post Dom shared, which is exciting... but honestly, it’s also a bit scary. Like, now it feels so real, and I don’t know if I’m ready for that pressure. \n\nI mean, part of me is relieved that there’s some movement, but it also makes me anxious about what’s next. I just hope I can keep up with everything. I don't want to let anyone down, you know?"
+        },
+        {
+          "turn": 2,
+          "coach": "It's great to see that interest translating into signups — validation like that is huge. Now, about Dom: what would \"feeling ready\" actually look like for you? Do you think there's something specific you'd need to have or feel to get there?",
+          "user": "Alex: Yeah, it is a win. I think what’s working for me is just knowing that people are actually interested, you know? Like, it feels validating to see those signups. But then I start thinking about what comes next, like onboarding them and making sure they have a good experience. It’s a lot, and I don’t want to mess it up.\n\nAs for Dom, I guess I just... I don’t know. I thought about scheduling something, but then I got distracted. It’s not that I don’t want to talk to him, but I think part of me is just getting nervous about sharing everything. Like, what if he asks me questions I don’t have answers to? I just want to feel more ready before I put it all out there, you know?"
+        },
+        {
+          "turn": 3,
+          "coach": "Setting a date for a casual check-in sounds like a smart move. It could help ease some of that pressure and give you space to share your progress. What would it take for you to feel comfortable just having that open conversation with Dom?",
+          "user": "Alex: Yeah, it's just a lot, you know? I mean, I get that I’m putting this pressure on myself, but it feels hard to shake that feeling of needing to be perfect first. I keep thinking of all the stuff I still need to figure out, like how to onboard these new users without dropping the ball. \n\nAnd I really do want to talk to Dom — I know he'll be supportive and all that. It just feels easier to put it off and say I'm not ready yet. But maybe I should just set a date for a casual check-in, even if it’s not fully polished. Like just a chat to share where I’m at. I dunno, that could take some weight off, right? I guess I need to remind myself that it’s okay to be a bit messy while I’m figuring things out."
+        },
+        {
+          "turn": 4,
+          "coach": "It's understandable to want everything perfect, but remember, growth often comes from those imperfect moments. What’s one thing you could say to Dom that you’re confident about right now?",
+          "user": "Alex: Yeah, I mean, setting a date does sound like a good idea. But I guess I keep thinking about what that conversation would actually look like. Like, I want to feel comfortable enough to just say where I’m at, but what if I don’t have all my ducks in a row, you know? \n\nI think if I could just have a few key points ready, maybe that would help. But then I also worry that it’s not enough. What if we get into specifics and I can’t answer? It feels like a lot of pressure to just open up like that. \n\nI dunno, I guess I need to remind myself that it’s okay to not have everything figured out. Dom’s always been chill, so maybe I just need to trust that he’ll be supportive, even if I don’t have it all polished up. But still, that feeling of being not fully ready is kind of hanging over me, you know? It’s tough to shake that"
+        },
+        {
+          "turn": 5,
+          "coach": "Sharing your excitement about the three signups is a great start, and it's a genuine win. If you could let yourself embrace that win, even a little, how would that change how you're feeling about the conversation with Dom?",
+          "user": "Alex: Yeah, I get that. It's just hard when I'm feeling this tired and a bit overwhelmed. I guess one thing I could confidently share is that I’ve got those 3 signups from the Reddit post. That feels good, like proof that people are actually interested in what I’m building. \n\nBut then I start thinking about onboarding and if I’ll be able to keep them engaged. It’s like, I want to celebrate that win, but my brain immediately jumps to what I need to do next. I dunno, maybe I could just start with that — telling Dom about the signups and how excited I am about what’s happening, even if I’m still figuring things out. It feels like a good step, right? But still, there’s a bit of that nagging feeling that I should have everything else sorted first. It’s frustrating."
+        },
+        {
+          "turn": 6,
+          "coach": "Embracing that win doesn't mean ignoring the work ahead — it just balances the weight of it all. If you could trust that showing your excitement is enough right now, how might that shift things with Dom?",
+          "user": "Alex: I dunno, it does feel good to think about, but then I just start spiraling again. Like, what if I get too excited and then totally drop the ball later? I guess if I let myself embrace that win, maybe I’d feel a bit lighter going into the convo, but then there's that voice in my head saying I should have more to show for it. \n\nI mean, I want to be proud of those signups, but it feels almost... weird? Like, celebrating feels foreign when I’m still figuring out the next steps. It’s like I wanna focus on all the things that need fixing instead. But yeah, if I could just own that win a little, maybe it would make the conversation feel less heavy. I guess it’s just hard to break that cycle of thinking I need to have everything sorted before I even talk about it."
+        }
+      ]
+    },
+    {
+      "day": 6,
+      "date": "2026-03-19",
+      "exercises_run": [
+        "triage_one_thing",
+        "depth_probe",
+        "values_clarification"
+      ],
+      "why_reconnect_fired": false,
+      "coach_referenced_specific_why": false,
+      "why_evolution_events": [],
+      "conversation": [
+        {
+          "turn": 1,
+          "coach": "Seems like you're feeling stuck, both with Dom and the gym. When you think about releasing the need for perfection, how might that influence your approach to the next task you prioritize?",
+          "user": "Hey, morning. Yeah, I actually did set a date with Dom for next week. But honestly, I’m not sure it’s that big of a deal? Like, I don’t know if it’s really gonna help anything. \n\nI mean, what’s the point of chatting if I’m just gonna end up talking about the same stuff? I guess I’m just feeling kinda overwhelmed with everything, you know? And, I dunno, maybe it’ll just lead to more pressure or something. \n\nOh, and I’ve skipped the gym again. It’s like, I keep telling myself “tomorrow for sure,” but it’s getting annoying. Just feels like a lot right now."
+        },
+        {
+          "turn": 2,
+          "coach": "Seems like your perfectionism is keeping you from starting things unless you feel fully ready. What does that tell you about what you believe about yourself and your abilities?",
+          "user": "Ugh, yeah, I guess that makes sense. Stuck is a good word for it. I mean, the gym is just like this thing I keep putting off because I feel like I should be in top shape before I go back. Like if I’m not killing it every time, what’s the point? \n\nAnd the chat with Dom? I don’t know… I keep thinking I need to have my act together before we talk. Like, if I don’t have some big breakthrough or something to show, what am I even gonna say? Maybe I’m just overthinking it all.\n\nReleasing the need for perfection sounds nice in theory, but then I worry about just… not being good enough, I guess? If I just dive into something, what if it flops? I dunno. Just feels like I'm juggling a lot and don't want to drop anything, you know?"
+        },
+        {
+          "turn": 3,
+          "coach": "Sounds like a heavy cycle. What would it mean for you to start valuing progress over perfection?",
+          "user": "Yeah, I guess it kinda points to me feeling like I need to prove something. Like, if I can't show up perfectly, then what's the point? It’s frustrating, ‘cause I know I can do stuff, but then I just freeze up.  \n\nI think there’s this whole thing about needing to be accepted, you know? Like if I put something out there that isn’t “good enough,” it’ll just reinforce that fear of being seen as a failure. And then I get stuck in this loop of thinking, \"Okay, if I just hold off a bit longer, maybe I can get it right next time.\" \n\nIt’s like I want to be seen as someone who’s killing it, but then when I think about sharing, I just overthink everything. It’s exhausting, honestly. I just want to figure out how to get past all this and feel okay putting myself out there, even if it’s not perfect."
+        },
+        {
+          "turn": 4,
+          "coach": "It sounds like there's a lot tied up in that idea of perfection and how you measure success. What’s one small step you could take this week that feels like progress, not pressure?",
+          "user": "Yeah, it does feel heavy. Valuing progress over perfection? Honestly, it sounds kinda freeing, but also really daunting. Like, I know I should focus on the small wins, but that just feels… weird? I mean, I guess I’ve always linked my value to how well I perform. \n\nIf I started measuring progress instead of perfection, maybe I’d actually be more productive? But then there’s that nagging fear, you know? Like, what if I just end up coasting or not pushing myself enough? \n\nIt's like I have this image in my head of what success looks like, and I’m scared that if I lower that bar even a little, I might end up not achieving anything significant. And with the gym thing, it’s so tied to that. Like, if I don’t go in and crush it right away, it feels like I’m failing. \n\nBut maybe… if I could just let myself take those small steps? I don’t know."
+        },
+        {
+          "turn": 5,
+          "coach": "A 15-minute home workout sounds like a solid step forward. It’s about moving, not proving, right? What does this willingness to take small steps say about who you're becoming?",
+          "user": "Alex: Hm. One small step? I guess I could try a 15-minute home workout instead of stressing about hitting the gym hard. Like, it doesn’t have to be anything crazy, just something to get me moving again. \n\nI mean, it feels less daunting, right? And I wouldn’t have to think about whether I’m crushing it or not. Just a way to ease back in. I dunno, maybe it won’t feel like I’m failing if I just take it easy at first? \n\nAnd it kinda helps with that pressure of needing to show something to Dom, too. Like, if I’m not expecting perfection from myself, then I won’t feel like I need to have a big breakthrough to share, you know? \n\nI don’t wanna abandon the people I care about while I’m figuring this out. Just gotta remember it’s okay to take small steps."
+        },
+        {
+          "turn": 6,
+          "coach": "That's really cool, Alex. You're embracing who you are beyond the need for perfection, and that’s powerful. Looks like you're on the path to becoming someone who values growth over getting it perfect every single time. Keep that momentum going.",
+          "user": "Alex: Yeah, that’s true. I guess it does feel like I’m trying to shift my mindset a bit. Like, maybe I’m starting to accept that I don’t have to be perfect to make progress. It feels a little freeing, but also kinda scary, you know? \n\nTaking those small steps feels like I’m actually giving myself a chance to grow without all the pressure. It’s weird, though. I keep wondering if I’m just making excuses or if this is actually a good way to navigate things. I mean, I want to be someone who can take action without overthinking it too much. \n\nIt’s like I’m slowly realizing I can still be me, even if I’m not crushing every little thing. Just gotta keep reminding myself that it’s okay to keep moving forward, even if that means going at my own pace. So, yeah, maybe I’m becoming someone who isn’t just defined by perfection. That’s kinda cool, right?"
+        }
+      ]
+    },
+    {
+      "day": 7,
+      "date": "2026-03-20",
+      "exercises_run": [
+        "depth_probe"
+      ],
+      "why_reconnect_fired": false,
+      "coach_referenced_specific_why": false,
+      "why_evolution_events": [],
+      "conversation": [
+        {
+          "turn": 1,
+          "coach": "That's awesome on both fronts — getting the workout in and moving Stackline forward. You mentioned feeling nervous about sharing it because you want it to be perfect. What's driving that need for perfection before putting it out there?",
+          "user": "Hey! Good morning! Yeah, the workout actually went pretty well. I did a quick circuit with some push-ups, squats, and lunges. Felt good to get moving again, you know? \n\nI mean, it’s just 15 minutes, so part of me is like, was that even enough? But I did feel more energized afterward, especially after pushing out the new build of Stackline last night. It’s nice to see it coming together, even if I’m still kinda nervous about sharing it with anyone. Just want it to be perfect, I guess. But yeah, definitely a win on the workout front!"
+        },
+        {
+          "turn": 2,
+          "coach": "I hear you on wanting it to be solid. But at what point do you think the desire for perfection is holding you back more than helping? What's the line between improving and overthinking?",
+          "user": "Thanks! I appreciate it. Yeah, I guess the perfection thing kinda creeps in. Like, with this latest build, I spent extra time on the onboarding flow. It’s something I really want to nail because I think it can make such a difference for users. I just don’t want anyone to hit a snag and think it’s not worth their time, you know? \n\nBut then I get stuck because I keep worrying if it’s totally ready. I mean, I know I should just share it to get some feedback, but there's this voice in my head saying, “What if it’s not good enough?” It’s frustrating because I want validation, but I also don’t want to put myself out there too soon. I guess I just want it to be solid before I let anyone see it."
+        },
+        {
+          "turn": 3,
+          "coach": "Sounds like you're recognizing that real feedback could be your best friend right now. So what's one small step you can take to get that feedback without feeling like you're exposing everything at once?",
+          "user": "Yeah, that’s a good question. I mean, I definitely feel like I can overthink things sometimes. Like with this onboarding flow, I spent a lot of time tweaking it, and I think it’s better because of that. But at the same time, there’s always gonna be something else I can improve, right? \n\nI guess I just worry about people trying it out and hitting a roadblock. But maybe I’m thinking too much about what could go wrong instead of focusing on how to make it better with real feedback. I want to make it great, but I also don’t want to be stuck in this loop of second-guessing myself. Maybe I just need to remind myself that it’s a work in progress, and getting input could actually help it get even better. \n\nIt's tough to find that sweet spot where I feel confident enough to share but also still want to keep making it better. I dunno, maybe I need to just push myself to share it soon"
+        },
+        {
+          "turn": 4,
+          "coach": "That sounds like a great step. Sharing with Dom could give you the feedback you need without the overwhelm. When are you planning to connect with him to get his thoughts?",
+          "user": "Hey, yeah, I think you're right. It would be super helpful to get some real feedback. Maybe I could share just the onboarding flow with Dom first? He’s always got good insights and I trust him to give me honest feedback without being harsh. \n\nI mean, it feels a bit safer to share something small, and it could help me see if I’m overthinking things. I just want to make sure I don’t get too wrapped up in my own head about it. If he has some thoughts, maybe I can tweak it from there. Gotta start somewhere, right?"
+        },
+        {
+          "turn": 5,
+          "coach": "Texting Dom tomorrow sounds like a solid plan. It’s all about those small, manageable steps. What does taking this step say about the kind of person you're becoming?",
+          "user": "Hey! Yeah, I think I’ll text him by tomorrow afternoon. That way I can get my thoughts together and maybe do a quick walkthrough before reaching out. I feel like sharing just the onboarding flow will be a good way to ease into it without diving into the whole thing at once. \n\nI mean, I really trust Dom to give me some solid feedback, but there’s still that little bit of hesitation. I just hope it doesn’t lead to him wanting to see everything else right away, you know? Just taking it one step at a time feels like a safer approach. But yeah, definitely want to get his thoughts on it!"
+        },
+        {
+          "turn": 6,
+          "coach": "Opening up and taking these steps shows you're growing into someone who values feedback and connection. What would have to be true about you to handle the pressure if more is asked of you after sharing?",
+          "user": "Hey, thanks! I mean, I guess it says I’m trying to be someone who opens up more, right? Like, taking these steps and actually reaching out feels like I’m moving in the right direction. But then again, part of me wonders if I'm just setting myself up for more pressure. \n\nI really want to be confident and show that I’m serious about Stackline, but I can’t shake the feeling that if I share this and it goes well, Dom might want to see everything else. And then it’s like, what if I can’t deliver on all that? I dunno, it feels like a mix of progress and this nagging doubt about where it might lead. \n\nSo yeah, I’m motivated, but there’s still that little voice saying, “What if this opens a can of worms?” Just trying to keep it chill and manageable, you know?"
+        }
+      ]
+    }
+  ],
+  "why_evolution_history": [],
+  "assertions": {
+    "day1_shallow_why_present": false,
+    "day3_why_reconnect_fired": false,
+    "day3_why_evolved": false,
+    "day5_additive_why_detected": false,
+    "day7_specific_why_referenced": false
+  },
+  "summary": {
+    "total_why_evolution_events": 0,
+    "final_whys_per_goal": []
+  }
+}
