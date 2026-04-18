@@ -913,6 +913,7 @@ function computeGoalMotivationSignal(goalStats, goal) {
   if (!goalStats || goalStats.total_last_14 < MIN_EVALUABLE_COMMITMENTS) return 'unknown';
   const { rate_last_14, rate_last_7, trajectory } = goalStats;
   const daysSilent = goal.days_since_mentioned ?? 999;
+  // Weight short-term behavior more heavily so recent slippage/improvement shows up faster.
   const effectiveRate = rate_last_7 !== null ? (rate_last_14 * 0.4 + rate_last_7 * 0.6) : rate_last_14;
 
   if (effectiveRate >= MOTIVATION_STRONG_THRESHOLD && trajectory !== 'declining') return 'strong';
