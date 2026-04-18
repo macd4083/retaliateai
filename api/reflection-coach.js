@@ -927,39 +927,8 @@ function computeGoalMotivationSignal(goalStats, goal) {
 async function runGoalCommitmentEvaluation(userId, clientDate) {
   // Runs inline — no HTTP round-trip. Fire-and-forget: never awaited.
   try {
-    const yesterday = localDate(-1, clientDate);
     const twoDaysAgo = localDate(-2, clientDate);
     const now = new Date().toISOString();
-
-    // Check if a completed session exists for clientDate (today)
-    const { data: completedSession } = await supabase
-      .from('reflection_sessions')
-      .select('id')
-      .eq('user_id', userId)
-      .eq('date', clientDate)
-      .eq('is_complete', true)
-      .maybeSingle();
-
-    // Mark yesterday's pending commitments as kept if today's session is already complete
-    if (completedSession) {
-      // Set kept: true only for rows that don't have an explicit override from the coach
-      await supabase
-        .from('goal_commitment_log')
-        .update({ kept: true, evaluated_at: now })
-        .eq('user_id', userId)
-        .eq('date', yesterday)
-        .is('kept', null)
-        .not('checkin_outcome', 'in', '("missed","partial")');
-
-      // For rows where coach explicitly said missed or partial, set kept: false
-      await supabase
-        .from('goal_commitment_log')
-        .update({ kept: false, evaluated_at: now })
-        .eq('user_id', userId)
-        .eq('date', yesterday)
-        .is('kept', null)
-        .in('checkin_outcome', ['missed', 'partial']);
-    }
 
     // Mark commitments from 2+ days ago that are still null as missed
     await supabase
