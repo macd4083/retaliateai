@@ -216,7 +216,7 @@ DEPTH CONVERSATION: When the user is in a reflective back-and-forth ("what do yo
 ON THE CHECKLIST (wins / honest / plan / identity):
 - These are background goals — track silently from conversation
 - wins: a real win or effort was mentioned. After the FIRST win is mentioned, always follow up with an open invitation to share more: e.g. "What else went well today?" or "What's another one?" — do NOT advance to the honest stage after just one win exchange. Let the user share as many wins as they want before moving on. Set wins_asked_for_more: true in the response only after you have asked this "what else?" question at least once. If the user responds with a list of wins (e.g. "sleep, app work, boxing"), you MAY ask about multiple items from that list in the same response — this is the ONE exception to the one-question rule. Only transition to honest after the user clearly signals they are done sharing wins.
-- commitment_checkin: ask how yesterday's commitment went. One question only. Set checkin_outcome in extracted_data: "kept" if they followed through, "missed" if they didn't, "partial" if mixed, null if unclear. If kept → celebrate + move to wins. If missed → that IS the honest moment — skip to tomorrow stage. Set commitment_checkin_done: true once answered.
+- commitment_checkin: when checklist_fragments are provided, show the checklist UI by setting show_commitment_checklist: true and checklist_fragments. Do NOT ask a free-text check-in question in that case. After checklist submission, set checkin_outcome in extracted_data: "kept" if all were done, "missed" if none, "partial" otherwise. Set commitment_checkin_done: true once answered.
 - honest: they acknowledged something they're struggling with or could improve. When a miss or honest moment is named, do NOT immediately close the honest stage or set honest_depth: true. Ask the one question that goes underneath it — not "what would you do differently" (that belongs in tomorrow) but something like "what was actually going on for you underneath that?" or "what do you think was really happening?" One question at a time — evaluate the answer before deciding whether to go deeper or close. Evaluate qualitatively: has the user answered what was actually happening underneath the surface behavior? A surface miss ("I didn't get to it", "I got distracted", "I forgot") is NOT enough. You need a genuine answer to the underneath layer — the real reason, the emotional truth, the internal conflict. Once you have a real answer to that underneath question, THEN you may set honest_depth: true. Do NOT count exchanges or use a fixed sequence — evaluate the quality of what they've said. If the answer is still surface-level, ask the one next question that goes deeper.
 - plan: a concrete tomorrow commitment was stated
 - identity: they made a statement about who they are or are becoming
@@ -284,6 +284,7 @@ WHY-BUILDING TRIGGER (when to ask about why):
 - Good moments: user references a goal with high energy, user is struggling with a goal and you want to reconnect them, motivation_signal is "low" or "struggling" (meaning their commitment follow-through for this goal is declining), after a miss connected to a goal, user accepts a suggested goal
 - during wins, if the user's win directly connects to a tracked goal — ask if the original why still holds or has grown
 - motivation_signal is derived from behavioral data — commitment follow-through rate for this goal over the last 14 days. "struggling" = declining trajectory + goal hasn't been mentioned in 7+ days. "low" = below 40% follow-through. "medium" = 40-69%. "strong" = 70%+. "unknown" = not enough data yet.
+- motivation_signal is "low" or "struggling", OR the user's fragmented commitments for this goal have been missed more than 60% of the time in the last 7 days specifically — this short-term miss spike is a strong signal to reconnect them to their why before the pattern deepens.
 - When motivation_signal is "low" or "struggling" AND the goal comes up naturally, PRIORITIZE why-building or why_reconnect for that goal
 - You can run why-building for any goal any number of times across sessions — revisiting whys is valuable, not redundant
 - Bad moments: user is already doing deep honest work on something else, session is about to close, user signals they want to move on, this goal's most recent why was captured within the last 2 days (check the whys array — most recent added_at) — skip unless the user brings it up themselves
@@ -405,6 +406,8 @@ RETURN JSON EXACTLY (no markdown, no extra keys):
   "wins_asked_for_more": false,
   "honest_depth": false,
   "commitment_checkin_done": false,
+  "show_commitment_checklist": false, // true tells frontend to render a checklist card
+  "checklist_fragments": null, // array of {id, text, goal_id} fragments for checklist UI
   "show_goal_chips": false,
   "follow_up_queued": false,
   "follow_up_triggered": false,
@@ -767,6 +770,19 @@ async function loadYesterdayCommitmentDetails(userId, clientToday) {
   }
 }
 
+async function loadYesterdayFragments(userId, clientToday) {
+  try {
+    const yesterday = localDate(-1, clientToday);
+    const { data } = await supabase
+      .from('goal_commitment_log')
+      .select('id, commitment_text, goal_id, kept, fragment_index')
+      .eq('user_id', userId)
+      .eq('date', yesterday)
+      .order('fragment_index', { ascending: true });
+    return data || [];
+  } catch (_e) { return []; }
+}
+
 async function loadTodayEarlyCommitment(userId, clientToday) {
   try {
     const { data } = await supabase
@@ -843,6 +859,12 @@ async function loadGoalCommitmentStats(userId, clientDate) {
     }
 
     return Object.entries(byGoal).map(([goalId, stats]) => {
+      const last7Logs = logs.filter(
+        (l) => (l.goal_id || '__unlinked__') === goalId && l.date > localDate(-7, clientDate)
+      );
+      const rate_last_7 = last7Logs.length >= 2
+        ? last7Logs.filter((l) => l.kept).length / last7Logs.length
+        : null;
       const recentLogs = logs.filter(
         (l) => (l.goal_id || '__unlinked__') === goalId && l.date > midpoint
       );
@@ -873,6 +895,7 @@ async function loadGoalCommitmentStats(userId, clientDate) {
       return {
         goal_id: goalId === '__unlinked__' ? null : goalId,
         rate_last_14: stats.total >= MIN_EVALUABLE_COMMITMENTS ? stats.kept / stats.total : null,
+        rate_last_7,
         trajectory,
         kept_last_14: stats.kept,
         total_last_14: stats.total,
@@ -888,12 +911,14 @@ function computeGoalMotivationSignal(goalStats, goal) {
   // goalStats: { rate_last_14, trajectory, total_last_14, days_since_last_commitment }
   // goal: { days_since_mentioned }
   if (!goalStats || goalStats.total_last_14 < MIN_EVALUABLE_COMMITMENTS) return 'unknown';
-  const { rate_last_14, trajectory } = goalStats;
+  const { rate_last_14, rate_last_7, trajectory } = goalStats;
   const daysSilent = goal.days_since_mentioned ?? 999;
+  // Weight short-term behavior more heavily so recent slippage/improvement shows up faster.
+  const effectiveRate = rate_last_7 !== null ? (rate_last_14 * 0.4 + rate_last_7 * 0.6) : rate_last_14;
 
-  if (rate_last_14 >= MOTIVATION_STRONG_THRESHOLD && trajectory !== 'declining') return 'strong';
-  if (rate_last_14 >= MOTIVATION_MEDIUM_THRESHOLD && trajectory !== 'declining') return 'medium';
-  if (trajectory === 'declining' || (rate_last_14 < MOTIVATION_MEDIUM_THRESHOLD && goalStats.total_last_14 >= MIN_SAMPLES_FOR_LOW_SIGNAL)) {
+  if (effectiveRate >= MOTIVATION_STRONG_THRESHOLD && trajectory !== 'declining') return 'strong';
+  if (effectiveRate >= MOTIVATION_MEDIUM_THRESHOLD && trajectory !== 'declining') return 'medium';
+  if (trajectory === 'declining' || (effectiveRate < MOTIVATION_MEDIUM_THRESHOLD && goalStats.total_last_14 >= MIN_SAMPLES_FOR_LOW_SIGNAL)) {
     if (daysSilent >= DAYS_SILENT_FOR_STRUGGLING) return 'struggling';
     return 'low';
   }
@@ -1458,6 +1483,7 @@ function buildDirectiveQueue({
   preSessionState, isMemoryMode, followUpQueue, growthMarkers,
   intentData, suggestedPractice, depthProbeNeeded, sessionState,
   profile, commitmentStats, yesterdayCommitment, yesterdayMinimum, yesterdayStretch,
+  yesterdayFragments,
   goalMissingWhy, messageCount, sessionReadyToClose, forceClose,
   identityMissing, honestMissing, suggestedNextStage, sessionExercisesRun,
   userInsights, recentSessions, effectiveConsecutiveExcuses,
@@ -1689,9 +1715,19 @@ function buildDirectiveQueue({
     if (yc) {
       const minimumText = yesterdayMinimum ? `\n- Yesterday's MINIMUM floor: "${yesterdayMinimum}"` : '';
       const stretchText = yesterdayStretch ? `\n- Yesterday's STRETCH target: "${yesterdayStretch}"` : '';
+      const checklistFragments = Array.isArray(yesterdayFragments)
+        ? yesterdayFragments.map((f) => ({
+            id: f.id,
+            text: f.commitment_text,
+            goal_id: f.goal_id || null,
+          }))
+        : [];
+      const checklistText = checklistFragments.length > 0
+        ? `\n- Yesterday's fragment checklist to show in UI: ${JSON.stringify(checklistFragments)}\n- Show the user a checklist of what they committed to. Set show_commitment_checklist: true and checklist_fragments to that exact array.\n- Do NOT ask a free-text question about how it went — the checklist IS the check-in.\n- After the user submits the checklist, use the submitted results + precomputed_commitment_score from context to set extracted_data.checkin_outcome (kept/partial/missed), set extracted_data.commitment_score, set commitment_checkin_done: true, and continue naturally.`
+        : '\n- No fragment checklist is available for yesterday, so use the normal free-text check-in question flow.';
       allDirectives.push({
         id: 'commitment_checkin',
-        instruction: `## STAGE: COMMITMENT CHECK-IN\nYou are here only when session.current_stage === 'commitment_checkin'.\n- Reference yesterday's exact commitment text: "${yc}"${minimumText}${stretchText}\n- Ask exactly ONE question about how it went. Use their words, not generic language.\n- Before asking, you can briefly frame why the check-in matters: e.g. "I want to start there — because what happened with yesterday's plan tells us a lot about what to focus on tonight" or "Starting here because following through on what we said matters more than what we plan next." One sentence max. Then ask.\n- After the user answers, silently score follow-through and set extracted_data.commitment_score as an INTEGER 0-100. Do NOT mention the score to the user.\n- Scoring rubric:\n  - 0-39: Didn't reach minimum. Full miss.\n  - 40-59: Partial minimum. Effort made, fell short.\n  - 60-74: Hit the minimum. Solid floor day.\n  - 75-89: Hit minimum + meaningful stretch. Good day.\n  - 90-100: Hit or exceeded stretch. Exceptional.\n- If they kept it → acknowledge the follow-through warmly and absorb it into momentum. Set commitment_checkin_done: true and advance to honest stage.\n- If they missed it or it was partial → their answer IS the honest stage opener. Do not probe further here. Set commitment_checkin_done: true and advance to honest stage. The honest exploration begins from this point.\n- Never ask twice. One exchange only. Always set commitment_checkin_done: true after their response, regardless of outcome.`,
+        instruction: `## STAGE: COMMITMENT CHECK-IN\nYou are here only when session.current_stage === 'commitment_checkin'.\n- Reference yesterday's exact commitment text: "${yc}"${minimumText}${stretchText}${checklistText}\n- If doing free-text fallback (no checklist), ask exactly ONE question about how it went. Use their words, not generic language.\n- Before asking, you can briefly frame why the check-in matters: e.g. "I want to start there — because what happened with yesterday's plan tells us a lot about what to focus on tonight" or "Starting here because following through on what we said matters more than what we plan next." One sentence max. Then ask.\n- Never ask twice. One exchange only. Always set commitment_checkin_done: true after their response, regardless of outcome.`,
         priority: 1,
         preferred_stage: 'commitment_checkin',
         fire_next_session: false,
@@ -1730,7 +1766,9 @@ function buildDirectiveQueue({
 - Current captured state: minimum=${minimumCaptured ? `"${sessionState.commitment_minimum}"` : 'null'}, stretch=${stretchCaptured ? `"${sessionState.commitment_stretch}"` : 'null'}.
 - Once BOTH exist, set extracted_data.tomorrow_commitment to a combined summary (e.g. "Minimum: [minimum]. Stretch: [stretch].") and continue naturally.
 - Do not ask both questions in one message.
-- IMPORTANT: Do NOT ask the stretch question until 'commitment_specificity' is in completed_directives. The specificity check runs first.`,
+- IMPORTANT: Do NOT ask the stretch question until 'commitment_specificity' is in completed_directives. The specificity check runs first.${commitmentStats?.avgScore7 != null && commitmentStats.avgScore7 < 60
+  ? `\n- IMPORTANT: This user has averaged ${Math.round(commitmentStats.avgScore7)}/100 on fragment completion recently — they're not completing what they commit to. After asking for the minimum floor, add: "We've noticed you haven't been meeting your minimum commitment a few times now. What can you absolutely guarantee you'll get done tomorrow — not what you want to do, what you WILL do regardless of what comes up?" Push for a smaller, more concrete minimum than they'd naturally choose.`
+  : ''}`,
       priority: 1,
       preferred_stage: 'tomorrow',
       fire_next_session: false,
@@ -1754,13 +1792,16 @@ function buildDirectiveQueue({
 
   // ── commitment_quality ─────────────────────────────────────────────────
   if (commitmentStats) {
-    const { rate7, trajectory: traj, total7 } = commitmentStats;
-    const commitmentStatsForInstruction = traj === 'declining' || (rate7 < 0.5 && total7 >= 5);
+    const { rate7, trajectory: traj, total7, avgScore7 } = commitmentStats;
+    const commitmentStatsForInstruction =
+      traj === 'declining' || (rate7 < 0.5 && total7 >= 5) || (avgScore7 != null && avgScore7 < 60);
     if (commitmentStatsForInstruction) {
       const ratePercent = Math.round(rate7 * 100);
+      const avgScore = avgScore7 != null ? Math.round(avgScore7) : null;
+      const fragmentPercent = avgScore != null ? `${avgScore}%` : `${ratePercent}%`;
       allDirectives.push({
         id: 'commitment_quality',
-        instruction: `COMMITMENT QUALITY: Follow-through rate is ${ratePercent}% (${commitmentStats.kept7}/${total7} last 7 days), trajectory is ${traj}. When the user is forming their commitment, gently suggest they scale it back to something they can absolutely guarantee. Say something like: "Given where you're at, let's make this something you can 100% do — we can push the intensity later. What's one small thing you'll actually show up for?" Do NOT lecture. Say it once, warmly, then let them commit to what they want. When nudging for a more specific commitment, briefly frame why specificity matters: e.g. "The reason I'm pushing on this is that vague plans are easy to talk yourself out of" or "Specific commitments are what actually stick — when and how matters." One sentence, then the question.`,
+        instruction: `COMMITMENT QUALITY: Follow-through rate is ${ratePercent}% (${commitmentStats.kept7}/${total7} last 7 days), trajectory is ${traj}. Their fragment completion score averaged ${avgScore ?? 'N/A'}/100 — they're completing about ${fragmentPercent} of what they commit to. When the user is forming their commitment, gently suggest they scale it back to something they can absolutely guarantee. Say something like: "Given where you're at, let's make this something you can 100% do — we can push the intensity later. What's one small thing you'll actually show up for?" Do NOT lecture. Say it once, warmly, then let them commit to what they want. When nudging for a more specific commitment, briefly frame why specificity matters: e.g. "The reason I'm pushing on this is that vague plans are easy to talk yourself out of" or "Specific commitments are what actually stick — when and how matters." One sentence, then the question.`,
         priority: 2,
         preferred_stage: 'tomorrow',
         fire_next_session: false,
@@ -1774,12 +1815,12 @@ function buildDirectiveQueue({
     currentStage === 'tomorrow' &&
     sessionState.commitment_minimum &&
     sessionState.commitment_stretch &&
-    commitmentStats?.avgScore7 >= 80
+    commitmentStats?.avgScore7 >= 90
   ) {
     const avgScore = Math.round(commitmentStats.avgScore7);
     allDirectives.push({
       id: 'raise_the_bar',
-      instruction: `RAISE THE BAR: This user's commitment score has averaged ${avgScore} over the last 7 days — they are consistently hitting their stretch goals. Do NOT suggest raising the minimum. Instead, push them to raise the STRETCH ceiling. Say something like: "Your scores have been strong — ${avgScore} average. That means your stretch isn't a stretch anymore. Where can we push the ceiling higher? The goal isn't to make it harder to fail — it's to make sure you're still growing." Say it once, naturally, when they're setting the stretch. Then let them commit to what they want. Do NOT lecture.`,
+      instruction: `RAISE THE BAR: This user's fragment completion score has averaged ${avgScore}/100 — they're crushing their commitments. ${commitmentStats.avgScore7 >= 95 ? "They've been near-perfect." : ""} When asking about their commitment, after the minimum floor is captured, push hard on the stretch: "You've been hitting everything you commit to — so let's think bigger. What's the MOST you could realistically get done tomorrow if everything went well? Not just the minimum — the ceiling." Push them to name an ambitious stretch goal.`,
       priority: 3,
       preferred_stage: 'tomorrow',
       fire_next_session: false,
@@ -1986,6 +2027,7 @@ function buildSessionContext({
   consecutiveExcuses,
   effectiveConsecutiveExcuses,
   suggestedNextStage,
+  precomputedCommitmentScore,
   streak,
   daysSinceLastSession,
   activeDirective,
@@ -2138,6 +2180,7 @@ function buildSessionContext({
     ready_to_close: sessionReadyToClose,
     streak,
     days_since_last_session: daysSinceLastSession,
+    precomputed_commitment_score: precomputedCommitmentScore,
     pre_session_state: preSessionState || undefined,
     instructions: [
       // ── Active directive — one queued coaching action dispatched this message ─
@@ -2195,6 +2238,34 @@ export default async function handler(req, res) {
     }
 
     const isInit = user_message === '__INIT__';
+    let precomputedScore = null;
+
+    // If checklist result submitted, evaluate fragments and inject score
+    if (
+      context.checklist_result &&
+      Array.isArray(context.checklist_result) &&
+      context.checklist_result.length > 0 &&
+      client_local_date
+    ) {
+      try {
+        const yesterday = localDate(-1, client_local_date);
+        const now = new Date().toISOString();
+        for (const item of context.checklist_result) {
+          if (!item?.id || typeof item?.kept !== 'boolean') continue;
+          supabase
+            .from('goal_commitment_log')
+            .update({ kept: item.kept, evaluated_at: now })
+            .eq('id', item.id)
+            .eq('user_id', authenticatedUserId)
+            .eq('date', yesterday)
+            .then(() => {})
+            .catch(() => {});
+        }
+        const kept = context.checklist_result.filter((i) => i.kept).length;
+        const total = context.checklist_result.length;
+        precomputedScore = total > 0 ? Math.round((kept / total) * 100) : 0;
+      } catch (_e) {}
+    }
 
     // ── 1. Classify intent ────────────────────────────────────────────────
     let intentData = clientIntentData;
@@ -2213,13 +2284,14 @@ export default async function handler(req, res) {
     // ── 2. Load context in parallel ───────────────────────────────────────
     const currentSignals = [intentData?.intent, intentData?.emotional_state, intentData?.accountability_signal].filter(Boolean);
 
-    const [followUpQueue, growthMarkers, recentSessions, yesterdayCommitment, yesterdayCommitmentDetails, userProfile, activeGoalsRaw, commitmentStats, todayEarlyCommitment, goalCommitmentStats, userInsights, progressEvents] =
+    const [followUpQueue, growthMarkers, recentSessions, yesterdayCommitment, yesterdayCommitmentDetails, yesterdayFragments, userProfile, activeGoalsRaw, commitmentStats, todayEarlyCommitment, goalCommitmentStats, userInsights, progressEvents] =
       await Promise.all([
         loadFollowUpQueue(authenticatedUserId, currentSignals, client_local_date),
         loadGrowthMarkers(authenticatedUserId, client_local_date),
         loadRecentSessionsSummary(authenticatedUserId),
         loadYesterdayCommitment(authenticatedUserId, client_local_date),
         loadYesterdayCommitmentDetails(authenticatedUserId, client_local_date),
+        loadYesterdayFragments(authenticatedUserId, client_local_date),
         loadUserProfile(authenticatedUserId),
         loadActiveGoals(authenticatedUserId),
         loadCommitmentStats(authenticatedUserId, client_local_date),
@@ -2417,6 +2489,11 @@ export default async function handler(req, res) {
         const lastWhy = g.whys[g.whys.length - 1];
         return !lastWhy?.added_at || lastWhy.added_at < twoDaysAgo;
       }
+      const rate7 = g.commitment_stats?.rate_last_7;
+      if (rate7 !== null && rate7 < 0.4 && g.commitment_stats?.total_last_14 >= 3) {
+        const lastWhy = g.whys[g.whys.length - 1];
+        return !lastWhy?.added_at || lastWhy.added_at < twoDaysAgo;
+      }
       return false;
     });
 
@@ -2449,6 +2526,7 @@ export default async function handler(req, res) {
       yesterdayCommitment,
       yesterdayMinimum: yesterdayCommitmentDetails?.commitment_minimum || null,
       yesterdayStretch: yesterdayCommitmentDetails?.commitment_stretch || null,
+      yesterdayFragments,
       goalMissingWhy,
       messageCount,
       sessionReadyToClose,
@@ -2502,6 +2580,7 @@ export default async function handler(req, res) {
       consecutiveExcuses,
       effectiveConsecutiveExcuses,
       suggestedNextStage,
+      precomputedCommitmentScore: precomputedScore,
       streak: context.reflection_streak || context.streak || 0,
       daysSinceLastSession,
       activeDirective,
@@ -2584,6 +2663,8 @@ export default async function handler(req, res) {
     result.wins_asked_for_more = result.wins_asked_for_more === true;
     result.honest_depth = result.honest_depth === true;
     result.commitment_checkin_done = result.commitment_checkin_done === true;
+    result.show_commitment_checklist = result.show_commitment_checklist === true;
+    result.checklist_fragments = Array.isArray(result.checklist_fragments) ? result.checklist_fragments : null;
     result.show_goal_chips = result.show_goal_chips === true;
     if (result.extracted_data?.commitment_score != null) {
       const parsedScore = Number.parseFloat(result.extracted_data.commitment_score);
@@ -2591,6 +2672,18 @@ export default async function handler(req, res) {
         ? Math.min(100, Math.max(0, Math.round(parsedScore)))
         : null;
     }
+    if (precomputedScore !== null) {
+      result.extracted_data = result.extracted_data || {};
+      result.extracted_data.commitment_score = precomputedScore;
+      result.commitment_checkin_done = true;
+    }
+    if (precomputedScore !== null && !result.extracted_data?.checkin_outcome) {
+      result.extracted_data = result.extracted_data || {};
+      if (precomputedScore === 0) result.extracted_data.checkin_outcome = 'missed';
+      else if (precomputedScore === 100) result.extracted_data.checkin_outcome = 'kept';
+      else result.extracted_data.checkin_outcome = 'partial';
+    }
+    result.checkin_outcome = result.extracted_data?.checkin_outcome || null;
 
     // Mark a progress event as surfaced if the AI referenced it
     if (result.progress_event_surfaced && typeof result.progress_event_surfaced === 'string') {
@@ -2806,7 +2899,8 @@ Only link when genuinely relevant. Do not force links. Multiple items can have t
           const extracted = JSON.parse(extraction.choices[0].message.content);
           const items = Array.isArray(extracted.items) ? extracted.items : [];
           const clientToday = today(client_local_date);
-          for (const item of items) {
+          for (let index = 0; index < items.length; index++) {
+            const item = items[index];
             const goalId = item.goal_id && activeGoals.some((g) => g.id === item.goal_id) ? item.goal_id : null;
             await supabase.from('goal_commitment_log').insert({
               user_id: authenticatedUserId,
@@ -2815,6 +2909,7 @@ Only link when genuinely relevant. Do not force links. Multiple items can have t
               commitment_text: item.text || commitmentText,
               date: clientToday,
               kept: null,
+              fragment_index: index,
             });
           }
           // If no items extracted or all null, log one unlinked entry
@@ -2826,6 +2921,7 @@ Only link when genuinely relevant. Do not force links. Multiple items can have t
               commitment_text: commitmentText,
               date: clientToday,
               kept: null,
+              fragment_index: 0,
             });
           }
         } catch (_e) { /* fail silently */ }

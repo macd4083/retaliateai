@@ -1,10 +1,9 @@
 /**
  * api/evaluate-goal-commitments.js
  *
- * Marks goal commitments as kept or missed.
- * Called when a session completes (or can be called independently).
+ * Marks goal commitments as kept or missed and computes commitment score.
  *
- * POST { user_id, session_date }
+ * POST { user_id, session_date, fragment_results?: [{ id, kept }] }
  *
  * Logic:
  *   - For goal_commitment_log rows where date = session_date - 1 and kept IS NULL:
@@ -31,7 +30,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { user_id, session_date } = req.body || {};
+  const { user_id, session_date, fragment_results } = req.body || {};
   if (!user_id || !session_date) {
     return res.status(400).json({ error: 'user_id and session_date are required' });
   }
@@ -41,25 +40,27 @@ export default async function handler(req, res) {
     const twoDaysAgo = addDays(session_date, -2);
     const now = new Date().toISOString();
 
-    // Check if a completed session exists for session_date
-    const { data: completedSession } = await supabase
-      .from('reflection_sessions')
-      .select('id')
-      .eq('user_id', user_id)
-      .eq('date', session_date)
-      .eq('is_complete', true)
-      .maybeSingle();
-
-    // Mark yesterday's pending commitments as kept if today's session is complete
-    if (completedSession) {
-      const { data: pendingLogs } = await supabase
-        .from('goal_commitment_log')
+    if (Array.isArray(fragment_results) && fragment_results.length > 0) {
+      for (const item of fragment_results) {
+        if (!item?.id || typeof item?.kept !== 'boolean') continue;
+        await supabase
+          .from('goal_commitment_log')
+          .update({ kept: item.kept, evaluated_at: now })
+          .eq('id', item.id)
+          .eq('user_id', user_id)
+          .eq('date', yesterday);
+      }
+    } else {
+      // Legacy fallback behavior
+      const { data: completedSession } = await supabase
+        .from('reflection_sessions')
         .select('id')
         .eq('user_id', user_id)
-        .eq('date', yesterday)
-        .is('kept', null);
+        .eq('date', session_date)
+        .eq('is_complete', true)
+        .maybeSingle();
 
-      if (pendingLogs && pendingLogs.length > 0) {
+      if (completedSession) {
         await supabase
           .from('goal_commitment_log')
           .update({ kept: true, evaluated_at: now })
@@ -77,7 +78,17 @@ export default async function handler(req, res) {
       .lt('date', twoDaysAgo)
       .is('kept', null);
 
-    return res.status(200).json({ ok: true });
+    const { data: yesterdayLogs } = await supabase
+      .from('goal_commitment_log')
+      .select('kept')
+      .eq('user_id', user_id)
+      .eq('date', yesterday);
+
+    const total_count = yesterdayLogs?.length || 0;
+    const kept_count = (yesterdayLogs || []).filter((r) => r.kept === true).length;
+    const score = total_count > 0 ? Math.round((kept_count / total_count) * 100) : 0;
+
+    return res.status(200).json({ ok: true, score, kept_count, total_count });
   } catch (err) {
     console.error('evaluate-goal-commitments error:', err);
     return res.status(500).json({ error: 'Internal server error' });

@@ -74,7 +74,8 @@ Only link when genuinely relevant. Do not force links. Multiple items can have t
     const goalIds = new Set(goalList.map((g) => g.id));
     const insertRows = [];
 
-    for (const item of items) {
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
       const goalId =
         item.goal_id && goalIds.has(item.goal_id) ? item.goal_id : null;
       insertRows.push({
@@ -84,6 +85,7 @@ Only link when genuinely relevant. Do not force links. Multiple items can have t
         commitment_text: item.text || commitment_text,
         date: todayDate,
         kept: null,
+        fragment_index: i,
       });
     }
 
@@ -96,6 +98,7 @@ Only link when genuinely relevant. Do not force links. Multiple items can have t
         commitment_text,
         date: todayDate,
         kept: null,
+        fragment_index: 0,
       });
     }
 

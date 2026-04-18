@@ -11,6 +11,7 @@
  *     {
  *       goal_id: string | null,
  *       rate_last_14: number | null,    // 0.0–1.0, null if < 3 evaluable
+ *       rate_last_7: number | null,     // 0.0–1.0, null if < 2 evaluable in last 7 days
  *       trajectory: "improving" | "declining" | "stable",
  *       kept_last_14: number,
  *       total_last_14: number,
@@ -75,6 +76,12 @@ export default async function handler(req, res) {
     }
 
     const per_goal = Object.entries(byGoal).map(([goalId, stats]) => {
+      const last7Logs = logs.filter(
+        (l) => (l.goal_id || '__unlinked__') === goalId && l.date > addDays(todayDate, -7)
+      );
+      const rate_last_7 = last7Logs.length >= 2
+        ? last7Logs.filter((l) => l.kept).length / last7Logs.length
+        : null;
       const recentLogs = logs.filter(
         (l) => (l.goal_id || '__unlinked__') === goalId && l.date > midpoint
       );
@@ -105,6 +112,7 @@ export default async function handler(req, res) {
       return {
         goal_id: goalId === '__unlinked__' ? null : goalId,
         rate_last_14: stats.total >= 3 ? stats.kept / stats.total : null,
+        rate_last_7,
         trajectory,
         kept_last_14: stats.kept,
         total_last_14: stats.total,
