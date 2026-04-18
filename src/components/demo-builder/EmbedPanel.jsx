@@ -15,6 +15,7 @@ function downloadFile(filename, content, type = 'application/json') {
 export default function EmbedPanel({ demo, onClose }) {
   const [tab, setTab] = useState('json');
   const [options, setOptions] = useState({ autoplay: true, trigger: '', position: 'center' });
+  const [copyStatus, setCopyStatus] = useState('');
 
   const jsonOutput = useMemo(() => generateJSON(demo), [demo]);
   const scriptOutput = useMemo(() => generateEmbedScript(demo, options), [demo, options]);
@@ -23,7 +24,12 @@ export default function EmbedPanel({ demo, onClose }) {
   const copyText = async (value) => {
     try {
       await navigator.clipboard.writeText(value);
-    } catch (_error) {}
+      setCopyStatus('Copied to clipboard');
+      window.setTimeout(() => setCopyStatus(''), 1800);
+    } catch (_error) {
+      setCopyStatus('Copy failed');
+      window.setTimeout(() => setCopyStatus(''), 1800);
+    }
   };
 
   return (
@@ -57,6 +63,7 @@ export default function EmbedPanel({ demo, onClose }) {
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          {copyStatus ? <p className="text-xs text-zinc-400">{copyStatus}</p> : null}
           {tab === 'json' && (
             <>
               <textarea readOnly value={jsonOutput} className="w-full h-[460px] rounded-xl bg-zinc-900 border border-zinc-700 p-3 text-xs text-zinc-200 font-mono" />

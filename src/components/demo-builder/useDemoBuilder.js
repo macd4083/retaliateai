@@ -1,4 +1,4 @@
-import { useMemo, useReducer } from 'react';
+import { useCallback, useMemo, useReducer } from 'react';
 import { createDemoProject, createDemoStep } from '../../utils/demoSchema';
 import { generateJSON } from '../../utils/embedGenerator';
 
@@ -192,20 +192,22 @@ export function useDemoBuilder() {
 
   const exportJSON = () => generateJSON(state.demo);
 
-  const saveToLocalStorage = () => {
+  const saveToLocalStorage = useCallback(() => {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state.demo));
     dispatch({ type: 'MARK_SAVED' });
-  };
+  }, [dispatch, state.demo]);
 
-  const loadFromLocalStorage = () => {
+  const loadFromLocalStorage = useCallback(() => {
     if (typeof window === 'undefined') return;
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return;
     try {
       dispatch({ type: 'LOAD_DEMO', payload: JSON.parse(raw) });
-    } catch (_error) {}
-  };
+    } catch (error) {
+      console.error('Unable to restore saved demo project', error);
+    }
+  }, [dispatch]);
 
   const newDemo = () => dispatch({ type: 'NEW_DEMO' });
 

@@ -113,9 +113,11 @@ export default function PreviewMode({
           {demo.snapshotUrl ? (
             <iframe title="Preview Snapshot" src={demo.snapshotUrl} className="absolute inset-0 w-full h-full bg-white" />
           ) : (
-            <div
-              className="absolute inset-0 w-full h-full bg-white overflow-auto"
-              dangerouslySetInnerHTML={{ __html: demo.snapshotHTML || '' }}
+            <iframe
+              title="Preview HTML Snapshot"
+              srcDoc={demo.snapshotHTML || ''}
+              sandbox="allow-same-origin allow-forms allow-modals allow-popups"
+              className="absolute inset-0 w-full h-full bg-white"
             />
           )}
 

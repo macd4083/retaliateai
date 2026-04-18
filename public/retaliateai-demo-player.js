@@ -3,6 +3,7 @@
 
   var PLAYER_ID = 'retaliateai-demo-player-overlay';
   var STYLE_ID = 'retaliateai-demo-player-styles';
+  var MIN_PATH_SEGMENT_MS = 180;
 
   function parseBool(value, fallback) {
     if (value === undefined || value === null || value === '') return fallback;
@@ -158,7 +159,7 @@
     if (step.type === 'highlight') {
       var rect = selectorRect(step.selector);
       if (!rect) return;
-      var pad = step.config && step.config.padding || 8;
+      var pad = step.config && step.config.padding != null ? step.config.padding : 8;
       var node = document.createElement('div');
       node.className = 'ra-highlight';
       node.style.left = (rect.left - pad) + 'px';
@@ -266,7 +267,7 @@
       stage.appendChild(cursor);
 
       var index = 0;
-      var segmentMs = Math.max((step.duration || 3000) / Math.max(points.length - 1, 1), 180);
+      var segmentMs = Math.max((step.duration || 3000) / Math.max(points.length - 1, 1), MIN_PATH_SEGMENT_MS);
       state.pathTimer = setInterval(function () {
         index += 1;
         if (index >= points.length) {

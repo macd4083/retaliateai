@@ -35,7 +35,7 @@ export default function DemoBuilder() {
 
   useEffect(() => {
     loadFromLocalStorage();
-  }, []);
+  }, [loadFromLocalStorage]);
 
   return (
     <AppShellV2 title="Demo Builder">

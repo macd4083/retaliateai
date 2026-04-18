@@ -8,21 +8,8 @@ import PointerOverlay from './overlays/PointerOverlay';
 import CursorPathOverlay from './overlays/CursorPathOverlay';
 import TextOverlay from './overlays/TextOverlay';
 
-function resolveTargetRect(step, { iframeRef, htmlRef, scale }) {
+function resolveTargetRect(step, { iframeRef }) {
   if (!step?.selector) return null;
-
-  if (htmlRef.current) {
-    const target = htmlRef.current.querySelector(step.selector);
-    if (!target) return null;
-    const targetRect = target.getBoundingClientRect();
-    const hostRect = htmlRef.current.getBoundingClientRect();
-    return {
-      left: (targetRect.left - hostRect.left) / scale,
-      top: (targetRect.top - hostRect.top) / scale,
-      width: targetRect.width / scale,
-      height: targetRect.height / scale,
-    };
-  }
 
   try {
     const iframe = iframeRef.current;
@@ -67,7 +54,6 @@ export default function DemoCanvas({ demo, selectedStep, updateStep, updateDemo,
   const containerRef = useRef(null);
   const frameRef = useRef(null);
   const iframeRef = useRef(null);
-  const htmlRef = useRef(null);
   const [scale, setScale] = useState(1);
 
   const width = demo.viewport?.width || 1280;
@@ -96,8 +82,8 @@ export default function DemoCanvas({ demo, selectedStep, updateStep, updateDemo,
   const hasSnapshot = Boolean(demo.snapshotUrl || demo.snapshotHTML);
 
   const targetRect = useMemo(
-    () => resolveTargetRect(selectedStep, { iframeRef, htmlRef, scale }),
-    [selectedStep, demo.snapshotUrl, demo.snapshotHTML, scale],
+    () => resolveTargetRect(selectedStep, { iframeRef }),
+    [selectedStep],
   );
 
   const handleOverlayClick = (event) => {
@@ -129,27 +115,14 @@ export default function DemoCanvas({ demo, selectedStep, updateStep, updateDemo,
 
     if (selectedStep.type === 'highlight' || selectedStep.type === 'tooltip') {
       let element = null;
-      if (htmlRef.current) {
-        const htmlBounds = htmlRef.current.getBoundingClientRect();
-        element = htmlRef.current.ownerDocument.elementFromPoint(event.clientX, event.clientY);
-        if (!element || !htmlRef.current.contains(element)) {
-          const localX = event.clientX - htmlBounds.left;
-          const localY = event.clientY - htmlBounds.top;
-          element = htmlRef.current.querySelectorAll('*').item(0);
-          if (!element && localX > 0 && localY > 0) {
-            element = htmlRef.current;
-          }
-        }
-      } else {
-        try {
-          const doc = iframeRef.current?.contentDocument;
-          element = doc?.elementFromPoint(
-            (event.clientX - frameBounds.left) / scale,
-            (event.clientY - frameBounds.top) / scale,
-          );
-        } catch (_error) {
-          element = null;
-        }
+      try {
+        const doc = iframeRef.current?.contentDocument;
+        element = doc?.elementFromPoint(
+          (event.clientX - frameBounds.left) / scale,
+          (event.clientY - frameBounds.top) / scale,
+        );
+      } catch (_error) {
+        element = null;
       }
 
       const selector = buildCssSelector(element);
@@ -174,8 +147,10 @@ export default function DemoCanvas({ demo, selectedStep, updateStep, updateDemo,
             updateDemo({ snapshotHTML: html, snapshotUrl: null });
           }}
           onUploadImage={(dataUrl) => {
+            if (!dataUrl.startsWith('data:image/')) return;
+            const safeDataUrl = dataUrl.replace(/'/g, '%27');
             updateDemo({
-              snapshotHTML: `<div style=\"width:100%;height:100%;background:#09090b url('${dataUrl}') center/cover no-repeat\"></div>`,
+              snapshotHTML: `<div style=\"width:100%;height:100%;background:#09090b url('${safeDataUrl}') center/cover no-repeat\"></div>`,
               snapshotUrl: null,
             });
           }}
@@ -199,10 +174,12 @@ export default function DemoCanvas({ demo, selectedStep, updateStep, updateDemo,
                 className="absolute inset-0 w-full h-full bg-white"
               />
             ) : (
-              <div
-                ref={htmlRef}
-                className="absolute inset-0 w-full h-full bg-white overflow-auto"
-                dangerouslySetInnerHTML={{ __html: demo.snapshotHTML || '' }}
+              <iframe
+                ref={iframeRef}
+                title="Demo HTML Snapshot"
+                srcDoc={demo.snapshotHTML || ''}
+                sandbox="allow-same-origin allow-forms allow-modals allow-popups"
+                className="absolute inset-0 w-full h-full bg-white"
               />
             )}
 

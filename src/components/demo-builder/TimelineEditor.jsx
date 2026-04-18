@@ -3,6 +3,8 @@ import { motion } from 'framer-motion';
 import { ChevronsLeft, ChevronsRight, Play } from 'lucide-react';
 
 const PIXELS_PER_SECOND = 48;
+const TIMELINE_PADDING = 280;
+const MIN_STEP_DURATION_MS = 500;
 const STEP_COLORS = {
   highlight: 'bg-red-600/80 border-red-500',
   tooltip: 'bg-sky-600/80 border-sky-500',
@@ -43,7 +45,10 @@ export default function TimelineEditor({
     if (!dragStateRef.current) return;
     const { step, startX, startDuration } = dragStateRef.current;
     const delta = event.clientX - startX;
-    const nextDuration = Math.max(500, startDuration + Math.round((delta / PIXELS_PER_SECOND) * 1000));
+    const nextDuration = Math.max(
+      MIN_STEP_DURATION_MS,
+      startDuration + Math.round((delta / PIXELS_PER_SECOND) * 1000),
+    );
     updateStep(step.id, { duration: nextDuration });
   };
 
@@ -97,7 +102,7 @@ export default function TimelineEditor({
       </div>
 
       <div className="flex-1 overflow-x-auto overflow-y-hidden p-3">
-        <div className="relative min-h-20" style={{ width: `${Math.max((totalDurationMs / 1000) * PIXELS_PER_SECOND + 280, 1000)}px` }}>
+        <div className="relative min-h-20" style={{ width: `${Math.max((totalDurationMs / 1000) * PIXELS_PER_SECOND + TIMELINE_PADDING, 1000)}px` }}>
           {steps.map((step, index) => {
             const left = (offsets[index] / 1000) * PIXELS_PER_SECOND;
             const width = (step.duration / 1000) * PIXELS_PER_SECOND;

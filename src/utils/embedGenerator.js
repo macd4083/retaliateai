@@ -10,6 +10,15 @@ function encodeDemo(demo) {
   }
 }
 
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 export function generateEmbedScript(demo, options = {}) {
   const {
     autoplay = true,
@@ -31,7 +40,7 @@ export function generateStandaloneHTML(demo) {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>${(demo?.name || 'RetaliateAI Demo').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</title>
+  <title>${escapeHtml(demo?.name || 'RetaliateAI Demo')}</title>
   <style>
     html, body { margin: 0; padding: 0; background: #09090b; color: #fff; font-family: Inter, system-ui, sans-serif; }
     #retaliateai-standalone-root { min-height: 100vh; display: grid; place-items: center; }
@@ -120,7 +129,7 @@ function standalonePlayerScript() {
         var rect = target.getBoundingClientRect();
         var ring = document.createElement('div');
         ring.className = 'retdemo-highlight';
-        var pad = step.config && step.config.padding || 8;
+        var pad = step.config && step.config.padding != null ? step.config.padding : 8;
         ring.style.left = (rect.left - pad) + 'px';
         ring.style.top = (rect.top - pad) + 'px';
         ring.style.width = (rect.width + pad * 2) + 'px';
