@@ -11,10 +11,24 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 const FROM_EMAIL =
   process.env.RESEND_FROM_EMAIL || 'delivered@resend.dev';
 
-const EMAIL_HTML = `
+function escapeHtml(text = '') {
+  return String(text)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function sanitizeSubject(text = '') {
+  return String(text).replace(/[\r\n]+/g, ' ').trim();
+}
+
+function buildEmailHtml(emailBodyOpener) {
+  return `
 <h2>Don't miss twice.</h2>
 
-<p>You've been building something. Missing one day happens. Missing two starts a pattern.</p>
+<p>${emailBodyOpener}</p>
 
 <p>Your reflection is waiting. It takes five minutes.</p>
 
@@ -31,6 +45,7 @@ const EMAIL_HTML = `
   © 2026 Retaliate AI. All rights reserved.
 </p>
 `;
+}
 
 export default async function handler(req, res) {
   if (req.method !== 'GET' && req.method !== 'POST') return res.status(405).end();
@@ -96,13 +111,31 @@ export default async function handler(req, res) {
       if (authError || !authUser?.user?.email) continue;
 
       const userEmail = authUser.user.email;
+      const { data: lastSession } = await supabase
+        .from('reflection_sessions')
+        .select('tomorrow_commitment, date, reflection_streak')
+        .eq('user_id', profile.id)
+        .eq('is_complete', true)
+        .order('date', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const lastCommitment = lastSession?.tomorrow_commitment;
+      const lastStreak = lastSession?.reflection_streak || 0;
+      const emailSubject = lastCommitment
+        ? `You said you'd "${lastCommitment.slice(0, 45)}${lastCommitment.length > 45 ? '...' : ''}" — still on track?`
+        : lastStreak >= 3
+        ? `Your ${lastStreak}-night streak is waiting`
+        : `Come back — your reflection is waiting`;
+      const emailBodyOpener = lastCommitment
+        ? `Last time you were here, you committed to: "${lastCommitment}". The fastest way back is tonight's check-in — it only takes a few minutes.`
+        : `You were building something real. A pause isn't failure — tonight is just the next step.`;
 
       // Send re-engagement email
       const { error: sendError } = await resend.emails.send({
         from: FROM_EMAIL,
         to: userEmail,
-        subject: "Don't miss twice.",
-        html: EMAIL_HTML,
+        subject: sanitizeSubject(emailSubject),
+        html: buildEmailHtml(escapeHtml(emailBodyOpener)),
       });
 
       if (sendError) {

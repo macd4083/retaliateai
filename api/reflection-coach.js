@@ -1483,6 +1483,7 @@ function buildDirectiveQueue({
   preSessionState, isMemoryMode, followUpQueue, growthMarkers,
   intentData, suggestedPractice, depthProbeNeeded, sessionState,
   profile, commitmentStats, yesterdayCommitment, yesterdayMinimum, yesterdayStretch,
+  commitmentRate7Context, commitmentTrajectoryContext, avgCommitmentScoreContext, scoreTrajectoryContext,
   yesterdayFragments,
   goalMissingWhy, messageCount, sessionReadyToClose, forceClose,
   identityMissing, honestMissing, suggestedNextStage, sessionExercisesRun,
@@ -1493,6 +1494,11 @@ function buildDirectiveQueue({
   const allDirectives = [];
   const exercisesExplained = Array.isArray(profile?.exercises_explained) ? profile.exercises_explained : [];
   const isFirstTimeExercise = suggestedPractice !== 'none' && !exercisesExplained.includes(suggestedPractice);
+  const derivedRate7 = commitmentStats?.rate7 != null ? Math.round(commitmentStats.rate7 * 100) : null;
+  const rate = commitmentRate7Context !== null ? commitmentRate7Context : derivedRate7;
+  const trajectory = commitmentTrajectoryContext ?? commitmentStats?.trajectory ?? null;
+  const avgScore = avgCommitmentScoreContext ?? commitmentStats?.avgScore7 ?? null;
+  const scoreTrajectory = scoreTrajectoryContext ?? commitmentStats?.scoreTrajectory ?? null;
 
   // ── cold_start_opener ──────────────────────────────────────────────────
   if (preSessionState?.cold_start) {
@@ -1698,9 +1704,14 @@ function buildDirectiveQueue({
     const patternHint = userInsights.length > 0
       ? `Their recurring pattern is "${userInsights[0].pattern_label}" — if it came up today, help them name it. E.g. "Did ${userInsights[0].pattern_label.replace(/_/g, ' ')} show up anywhere today?" or "Was there a moment where you held back and you're not sure why?"`
       : `E.g. "Where did you feel like you weren't fully showing up today?" or "Is there a moment from today that's still sitting with you?" or "What part of today are you least proud of — not what you'd fix, just what happened?"`;
+    const topBlockerInsight = (userInsights || []).find((i) => i.pattern_type === 'blocker');
+    let patternContext = '';
+    if (topBlockerInsight) {
+      patternContext = `\n\nPATTERN CONTEXT: Their top identified blocker pattern is "${topBlockerInsight.pattern_label}". Trigger: "${topBlockerInsight.trigger_context || 'unclear'}". If what they share tonight clearly connects to this pattern, name it explicitly: "That sounds like the ${topBlockerInsight.pattern_label} pattern coming up — is that what's happening?" Don't force it if the connection isn't clear. But when it is clear, say it.`;
+    }
     allDirectives.push({
       id: 'honest_missing',
-      instruction: `HONEST MISSING: Gently probe for a miss or honest moment with self-awareness questions. ${patternHint} Goal is self-awareness about TODAY, not action planning. Do NOT ask "what would you do differently" — that belongs in tomorrow. Weave it naturally. Once a miss is named, ask the one question that goes underneath it — what was actually happening underneath that surface behavior, not just what they did or didn't do. Do NOT set honest_depth: true until the user has genuinely answered the underneath layer. A surface answer is not enough. Evaluate qualitatively: is this a real answer about why it happened — the actual reason, the emotional truth, the internal conflict? If yes → set honest_depth: true. If no → ask the one question that goes there. When probing for the honest moment, you can briefly frame what this part of the session is for — e.g. "Before we talk about tomorrow, I want to make sure we've gone there — the part of today that's worth being honest about" or "This is the part most people skip, but it's usually the most useful." Keep it to one sentence — then ask.`,
+      instruction: `HONEST MISSING: Gently probe for a miss or honest moment with self-awareness questions. ${patternHint} Goal is self-awareness about TODAY, not action planning. Do NOT ask "what would you do differently" — that belongs in tomorrow. Weave it naturally. Once a miss is named, ask the one question that goes underneath it — what was actually happening underneath that surface behavior, not just what they did or didn't do. Do NOT set honest_depth: true until the user has genuinely answered the underneath layer. A surface answer is not enough. Evaluate qualitatively: is this a real answer about why it happened — the actual reason, the emotional truth, the internal conflict? If yes → set honest_depth: true. If no → ask the one question that goes there. When probing for the honest moment, you can briefly frame what this part of the session is for — e.g. "Before we talk about tomorrow, I want to make sure we've gone there — the part of today that's worth being honest about" or "This is the part most people skip, but it's usually the most useful." Keep it to one sentence — then ask.${patternContext}`,
       priority: 2,
       preferred_stage: 'honest',
       fire_next_session: true,
@@ -1725,9 +1736,17 @@ function buildDirectiveQueue({
       const checklistText = checklistFragments.length > 0
         ? `\n- Yesterday's fragment checklist to show in UI: ${JSON.stringify(checklistFragments)}\n- Show the user a checklist of what they committed to. Set show_commitment_checklist: true and checklist_fragments to that exact array.\n- Do NOT ask a free-text question about how it went — the checklist IS the check-in.\n- After the user submits the checklist, use the submitted results + precomputed_commitment_score from context to set extracted_data.checkin_outcome (kept/partial/missed), set extracted_data.commitment_score, set commitment_checkin_done: true, and continue naturally.`
         : '\n- No fragment checklist is available for yesterday, so use the normal free-text check-in question flow.';
+      let checkinTone = '';
+      if (rate !== null && rate < 40) {
+        checkinTone = `\n\nTONE: They've followed through on only ${rate}% of commitments lately. Don't assume they did it. Ask: "You said you'd [commitment]. What actually happened?" — the word 'actually' signals you want honesty, not the polished version. If they missed it, ask "What specifically got in the way?" before advancing — get the real blocker named.`;
+      } else if (rate !== null && rate >= 70) {
+        checkinTone = `\n\nTONE: They've been strong at ${rate}% follow-through. Open from belief — "How did [commitment] go?" is enough. Let them tell you.`;
+      } else if (trajectory === 'declining') {
+        checkinTone = `\n\nTONE: Follow-through is declining. After they answer, if they missed it, don't move on — ask "What specifically got in the way?" We need the real blocker named before advancing stage.`;
+      }
       allDirectives.push({
         id: 'commitment_checkin',
-        instruction: `## STAGE: COMMITMENT CHECK-IN\nYou are here only when session.current_stage === 'commitment_checkin'.\n- Reference yesterday's exact commitment text: "${yc}"${minimumText}${stretchText}${checklistText}\n- If doing free-text fallback (no checklist), ask exactly ONE question about how it went. Use their words, not generic language.\n- Before asking, you can briefly frame why the check-in matters: e.g. "I want to start there — because what happened with yesterday's plan tells us a lot about what to focus on tonight" or "Starting here because following through on what we said matters more than what we plan next." One sentence max. Then ask.\n- Never ask twice. One exchange only. Always set commitment_checkin_done: true after their response, regardless of outcome.`,
+        instruction: `## STAGE: COMMITMENT CHECK-IN\nYou are here only when session.current_stage === 'commitment_checkin'.\n- Reference yesterday's exact commitment text: "${yc}"${minimumText}${stretchText}${checklistText}\n- If doing free-text fallback (no checklist), ask exactly ONE question about how it went. Use their words, not generic language.\n- Before asking, you can briefly frame why the check-in matters: e.g. "I want to start there — because what happened with yesterday's plan tells us a lot about what to focus on tonight" or "Starting here because following through on what we said matters more than what we plan next." One sentence max. Then ask.\n- Never ask twice. One exchange only. Always set commitment_checkin_done: true after their response, regardless of outcome.${checkinTone}`,
         priority: 1,
         preferred_stage: 'commitment_checkin',
         fire_next_session: false,
@@ -1758,10 +1777,27 @@ function buildDirectiveQueue({
   if (currentStage === 'tomorrow' && !sessionState.tomorrow_commitment) {
     const minimumCaptured = !!sessionState.commitment_minimum;
     const stretchCaptured = !!sessionState.commitment_stretch;
+    const honestMomentRaw = sessionState?.misses?.[0];
+    const honestMoment = typeof honestMomentRaw === 'string' ? honestMomentRaw : honestMomentRaw?.text;
+    let minimumFraming;
+    if (rate !== null && rate < 50) {
+      minimumFraming = `Name the data directly: "You've hit ${rate}% of your commitments recently. So let's get the floor right — what do you absolutely know you can get done tomorrow, no matter what?" Say the number first. Framing is certainty over ambition.`;
+    } else if (avgScore !== null && avgScore < 55 && scoreTrajectory === 'declining') {
+      minimumFraming = `Their commitment confidence has been scoring ${Math.round(avgScore)}/100 and declining — they keep setting bars too high and missing them. Ask: "What's the one thing you'd bet your life on finishing tomorrow?" Bet-your-life framing forces real commitment, not hopeful thinking.`;
+    } else if (trajectory === 'improving' && rate !== null && rate >= 60) {
+      minimumFraming = `They're trending up (${rate}%, improving). Ask: "You're on a roll — what's the floor that protects tomorrow's streak no matter what comes up?" Frame it as protecting momentum.`;
+    } else if (avgScore !== null && avgScore >= 80 && rate !== null && rate >= 70) {
+      minimumFraming = `They've been hitting ${rate}% with avg confidence ${Math.round(avgScore)}/100. Don't make the minimum too easy. Ask: "Given you've been nailing your commitments, what would make tomorrow a genuinely hard win?" Raise the standard.`;
+    } else {
+      minimumFraming = honestMoment
+        ? `They just admitted "${honestMoment.slice(0, 60)}...". Use it: "Given what you just shared — what's one thing you're committing to tomorrow that you won't let yourself off the hook on?" Reference the honest moment explicitly.`
+        : `Ask: "What's the bare minimum that makes tomorrow a real win — the one thing you won't negotiate away?"`;
+    }
     allDirectives.push({
       id: 'tomorrow_commitment_structure',
       instruction: `TOMORROW COMMITMENT STRUCTURE: In this stage, capture TWO commitments in sequence — never both at once.
 - First capture the floor commitment with this exact intent: "What's the bare minimum that would make tomorrow a genuine win for you — the floor you won't fall below?" Store it in extracted_data.commitment_minimum.
+- Minimum framing guidance: ${minimumFraming}
 - Only AFTER minimum is captured, ask the stretch question: "Now push it — if tomorrow went as well as it possibly could, what would you have gotten done on top of that?" Store it in extracted_data.commitment_stretch.
 - Current captured state: minimum=${minimumCaptured ? `"${sessionState.commitment_minimum}"` : 'null'}, stretch=${stretchCaptured ? `"${sessionState.commitment_stretch}"` : 'null'}.
 - Once BOTH exist, set extracted_data.tomorrow_commitment to a combined summary (e.g. "Minimum: [minimum]. Stretch: [stretch].") and continue naturally.
@@ -2232,6 +2268,12 @@ export default async function handler(req, res) {
     // client_tz_offset: minutes WEST of UTC (from new Date().getTimezoneOffset(), e.g. EST = 300)
     const client_local_date = context.client_local_date || null;
     const client_tz_offset = context.client_tz_offset != null ? context.client_tz_offset : null;
+    const contextCommitmentRate7Raw = Number(context.commitment_rate_7);
+    const contextCommitmentRate7 = Number.isFinite(contextCommitmentRate7Raw) ? contextCommitmentRate7Raw : null;
+    const contextCommitmentTrajectory = typeof context.commitment_trajectory === 'string' ? context.commitment_trajectory : null;
+    const contextAvgCommitmentScoreRaw = Number(context.avg_commitment_score);
+    const contextAvgCommitmentScore = Number.isFinite(contextAvgCommitmentScoreRaw) ? contextAvgCommitmentScoreRaw : null;
+    const contextScoreTrajectory = typeof context.score_trajectory === 'string' ? context.score_trajectory : null;
 
     if (!authenticatedUserId || !user_message) {
       return res.status(400).json({ error: 'user_id and user_message are required' });
@@ -2311,6 +2353,12 @@ export default async function handler(req, res) {
         _goalStats: gStats,
       };
     });
+    const resolvedCommitmentRate7 = contextCommitmentRate7 !== null
+      ? contextCommitmentRate7
+      : (commitmentStats?.rate7 != null ? Math.round(commitmentStats.rate7 * 100) : null);
+    const resolvedCommitmentTrajectory = contextCommitmentTrajectory ?? commitmentStats?.trajectory ?? null;
+    const resolvedAvgCommitmentScore = contextAvgCommitmentScore ?? commitmentStats?.avgScore7 ?? null;
+    const resolvedScoreTrajectory = contextScoreTrajectory ?? commitmentStats?.scoreTrajectory ?? null;
 
     // ── Tag prior-state flags for progress event dedup ───────────────────────
     // Run both tagging passes concurrently to avoid up to N sequential DB
@@ -2523,6 +2571,10 @@ export default async function handler(req, res) {
       sessionState: session_state,
       profile,
       commitmentStats,
+      commitmentRate7Context: resolvedCommitmentRate7,
+      commitmentTrajectoryContext: resolvedCommitmentTrajectory,
+      avgCommitmentScoreContext: resolvedAvgCommitmentScore,
+      scoreTrajectoryContext: resolvedScoreTrajectory,
       yesterdayCommitment,
       yesterdayMinimum: yesterdayCommitmentDetails?.commitment_minimum || null,
       yesterdayStretch: yesterdayCommitmentDetails?.commitment_stretch || null,
@@ -2601,13 +2653,22 @@ export default async function handler(req, res) {
     } else {
       const stage = session_state?.current_stage || 'wins';
       const streak = context.reflection_streak || context.streak || 0;
+      const rate = resolvedCommitmentRate7;
+      const trajectory = resolvedCommitmentTrajectory;
+      const scoreTrajectory = resolvedScoreTrajectory;
+      let commitmentContextNote = '';
+      if (rate !== null && rate < 50) {
+        commitmentContextNote = `NOTE: User has followed through on ${rate}% of commitments in the last 7 days (trajectory: ${trajectory}, score trajectory: ${scoreTrajectory || 'unknown'}). When the moment is right tonight — NOT in the opener — acknowledge this naturally. Don't lead with it. Find the right moment.`;
+      } else if (rate !== null && rate >= 70 && trajectory === 'improving') {
+        commitmentContextNote = `NOTE: User is on a strong run — ${rate}% follow-through, improving trajectory. Acknowledge momentum when wins come up tonight.`;
+      }
       messages.push({
         role: 'user',
         content: `Open the ${stage} stage of tonight's reflection. Greeting: "${getTimeGreeting(client_tz_offset)}". ${
           sameDayCommitment
             ? `This morning they committed to: "${sameDayCommitment.commitment}". Open by checking in on how that went today before starting the reflection. Then offer mood chips.`
             : 'Open with a warm greeting and mood chips.'
-        } ${streak > 1 ? `${streak}-night streak — acknowledge briefly.` : ''} Start with mood chips: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful 🙏","value":"grateful"},{"label":"Motivated 💪","value":"motivated"},{"label":"Okay 😐","value":"okay"},{"label":"Tired 😴","value":"tired"},{"label":"Stressed 😤","value":"stressed"}]`,
+        } ${streak > 1 ? `${streak}-night streak — acknowledge briefly.` : ''} ${commitmentContextNote} Start with mood chips: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful 🙏","value":"grateful"},{"label":"Motivated 💪","value":"motivated"},{"label":"Okay 😐","value":"okay"},{"label":"Tired 😴","value":"tired"},{"label":"Stressed 😤","value":"stressed"}]`,
       });
     }
 

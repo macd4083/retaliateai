@@ -45,6 +45,19 @@ const BLOCKER_OPTIONS = [
   'Comparison to others',
 ];
 
+const AREA_TO_LIKELY_BLOCKERS = {
+  'Career & Business': ['Procrastination', 'Fear of failure', 'Time management'],
+  'Health & Fitness': ['Consistency', 'Lack of focus', 'Time management'],
+  'Mental Health': ['Overwhelm', 'Self-doubt', 'Consistency'],
+  'Personal Growth': ['Procrastination', 'Consistency', 'Self-doubt'],
+  'Money & Finance': ['Procrastination', 'Fear of failure', 'Overwhelm'],
+  'Relationships': ['Comparison to others', 'Self-doubt', 'Overwhelm'],
+  'Education': ['Procrastination', 'Lack of focus', 'Time management'],
+  'Gaming': ['Consistency', 'Time management'],
+  'Creativity': ['Fear of failure', 'Procrastination', 'Self-doubt'],
+  'Spirituality': ['Consistency', 'Overwhelm'],
+};
+
 const TIMEZONES = [
   { label: 'Eastern (ET)', value: 'America/New_York' },
   { label: 'Central (CT)', value: 'America/Chicago' },
@@ -122,6 +135,40 @@ export default function OnboardingV2({ onOnboardingComplete } = {}) {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordError, setPasswordError] = useState('');
+
+  const why3Question = (() => {
+    const w = (why1 || '').toLowerCase();
+    if (w.includes('money') || w.includes('financial') || w.includes('income')) {
+      return 'And beyond the financial side — what does that security actually give you?';
+    }
+    if (w.includes('family') || w.includes('kids') || w.includes('children') || w.includes('parent')) {
+      return 'And what does this mean for the people you care about — at the deepest level?';
+    }
+    if (w.includes('free') || w.includes('freedom') || w.includes('independent')) {
+      return 'And what would that freedom actually let you do or become?';
+    }
+    return 'And why does that matter?';
+  })();
+
+  const why4Question = (() => {
+    const w = (why2 || '').toLowerCase();
+    if (w.includes('prove') || w.includes('worth') || w.includes('enough')) {
+      return 'What would it mean to finally feel like enough — what changes?';
+    }
+    if (w.includes('legacy') || w.includes('remembered') || w.includes('impact')) {
+      return 'What legacy do you actually want to leave — in one sentence?';
+    }
+    return 'And at the deepest level — why?';
+  })();
+
+  const likelyBlockers = [...new Set(
+    selectedLifeAreas.flatMap(area => AREA_TO_LIKELY_BLOCKERS[area] || [])
+  )];
+
+  const orderedBlockers = [
+    ...likelyBlockers.filter((b) => BLOCKER_OPTIONS.includes(b)),
+    ...BLOCKER_OPTIONS.filter((b) => !likelyBlockers.includes(b)),
+  ];
 
   const saveProfile = async (updates) => {
     if (!user?.id) return;
@@ -511,7 +558,7 @@ export default function OnboardingV2({ onOnboardingComplete } = {}) {
             {whySubStep === 3 && (
               <>
                 <h2 className="text-2xl font-bold text-white mb-2">
-                  And why does <em>that</em> matter?
+                  {why3Question}
                 </h2>
                 <p className="text-zinc-400 text-sm mb-2 italic">"{why1}"</p>
                 <p className="text-zinc-500 text-sm mb-8">Keep going.</p>
@@ -529,7 +576,7 @@ export default function OnboardingV2({ onOnboardingComplete } = {}) {
             {whySubStep === 4 && (
               <>
                 <h2 className="text-2xl font-bold text-white mb-2">
-                  And at the deepest level — why?
+                  {why4Question}
                 </h2>
                 <p className="text-zinc-400 text-sm mb-2 italic">"{why2}"</p>
                 <p className="text-zinc-500 text-sm mb-8">
@@ -568,8 +615,11 @@ export default function OnboardingV2({ onOnboardingComplete } = {}) {
           <div className="flex flex-col flex-1">
             <h2 className="text-2xl font-bold text-white mb-2">What usually gets in your way?</h2>
             <p className="text-zinc-400 text-sm mb-6">Select all that apply.</p>
+            {likelyBlockers.length > 0 && (
+              <p className="text-zinc-500 text-xs mb-2">Common for your goals:</p>
+            )}
             <div className="flex flex-wrap gap-2 mb-4">
-              {BLOCKER_OPTIONS.map((b) => {
+              {orderedBlockers.map((b) => {
                 const selected = selectedBlockers.includes(b);
                 return (
                   <button

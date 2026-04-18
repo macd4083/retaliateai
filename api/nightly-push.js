@@ -12,7 +12,7 @@ webpush.setVapidDetails(
   process.env.VAPID_PRIVATE_KEY
 );
 
-async function sendPushToUser(userId) {
+async function sendPushToUser(userId, notifTitle, notifBody) {
   const { data: subs } = await supabase
     .from('push_subscriptions')
     .select('subscription')
@@ -21,8 +21,8 @@ async function sendPushToUser(userId) {
   if (!subs?.length) return 0;
 
   const payload = JSON.stringify({
-    title: 'Time to reflect.',
-    body: 'Your streak is waiting. What happened today?',
+    title: notifTitle,
+    body: notifBody,
     url: '/reflection',
   });
 
@@ -78,7 +78,43 @@ export default async function handler(req, res) {
       const [prefHour, prefMinute] = profile.preferred_reflection_time.split(':').map(Number);
 
       if (userHour === prefHour && userMinute === prefMinute) {
-        const sent = await sendPushToUser(profile.id);
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        const yesterdayStr = yesterday.toISOString().slice(0, 10);
+
+        const { data: lastSession } = await supabase
+          .from('reflection_sessions')
+          .select('tomorrow_commitment, commitment_minimum, is_complete, date, reflection_streak')
+          .eq('user_id', profile.id)
+          .eq('date', yesterdayStr)
+          .maybeSingle();
+
+        const todayStr = new Date().toISOString().slice(0, 10);
+        const { data: todaySession } = await supabase
+          .from('reflection_sessions')
+          .select('is_complete')
+          .eq('user_id', profile.id)
+          .eq('date', todayStr)
+          .maybeSingle();
+
+        const alreadyDoneToday = todaySession?.is_complete === true;
+        if (alreadyDoneToday) continue;
+
+        const streak = lastSession?.reflection_streak || 0;
+        let notifTitle = 'Retaliate AI';
+        let notifBody = "Time for your nightly reflection. 🌙";
+
+        if (lastSession?.tomorrow_commitment) {
+          const commitment = lastSession.commitment_minimum || lastSession.tomorrow_commitment;
+          const shortCommitment = commitment.length > 65
+            ? commitment.slice(0, 62) + '...'
+            : commitment;
+          notifBody = `You said you'd: "${shortCommitment}" — did you?`;
+        } else if (streak >= 3) {
+          notifBody = `${streak}-night streak. Don't break it tonight. 🔥`;
+        }
+
+        const sent = await sendPushToUser(profile.id, notifTitle, notifBody);
         totalSent += sent;
       }
     } catch (err) {
