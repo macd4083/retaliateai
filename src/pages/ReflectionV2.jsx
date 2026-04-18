@@ -22,6 +22,7 @@ function getTimeContext() {
 
 const BASE_STAGES = [
   { id: 'wins', label: 'Wins' },
+  { id: 'commitment_checkin', label: 'Check-in' },
   { id: 'honest', label: 'Honest' },
   { id: 'tomorrow', label: 'Tomorrow' },
   { id: 'close', label: 'Close' },
@@ -384,43 +385,7 @@ export default function ReflectionV2() {
 
   const timeContext = getTimeContext();
 
-  // Dynamic stages — shape based on yesterday_commitment, commitment_checkin_done, and checkin_outcome
-  const stages = (() => {
-    const { yesterday_commitment, commitment_checkin_done, checkin_outcome } = sessionState;
-
-    if (!yesterday_commitment) return BASE_STAGES;
-
-    // Check-in not yet done — show check-in stage in the bar
-    if (!commitment_checkin_done) {
-      return [
-        { id: 'wins', label: 'Wins' },
-        { id: 'commitment_checkin', label: 'Check-in' },
-        { id: 'honest', label: checkin_outcome === 'partial' ? 'Honest*' : 'Honest' },
-        { id: 'tomorrow', label: 'Tomorrow' },
-        { id: 'close', label: 'Close' },
-      ];
-    }
-
-    // Check-in done — shape bar based on outcome
-    if (checkin_outcome === 'missed') {
-      // Honest stage collapsed — commitment was missed
-      return [
-        { id: 'wins', label: 'Wins' },
-        { id: 'commitment_checkin', label: 'Check-in' },
-        { id: 'tomorrow', label: 'Tomorrow' },
-        { id: 'close', label: 'Close' },
-      ];
-    }
-
-    // checkin_outcome === 'kept' OR checkin_outcome === null but checkin is done — standard
-    return [
-      { id: 'wins', label: 'Wins' },
-      { id: 'commitment_checkin', label: 'Check-in' },
-      { id: 'honest', label: 'Honest' },
-      { id: 'tomorrow', label: 'Tomorrow' },
-      { id: 'close', label: 'Close' },
-    ];
-  })();
+  const stages = BASE_STAGES;
 
   // Keep messagesRef in sync with messages state
   useEffect(() => {
@@ -514,7 +479,7 @@ export default function ReflectionV2() {
         commitment_checkin_done: session.commitment_checkin_done === true,
         checkin_outcome: session.checkin_outcome || null,
         checklist_fragments: [],
-        fragments_submitted: false,
+        fragments_submitted: !!(session.commitment_checkin_done && session.commitment_score != null),
         depth_opportunity_count: session.depth_opportunity_count || 0,
         directive_queue: Array.isArray(session.directive_queue) ? session.directive_queue : [],
         completed_directives: Array.isArray(session.completed_directives) ? session.completed_directives : [],
@@ -878,6 +843,7 @@ export default function ReflectionV2() {
           newState.fragments_submitted = false;
         }
         if (data.commitment_checkin_done === true) {
+          newState.checklist_fragments = [];
           newState.fragments_submitted = true;
         }
         if (data.depth_opportunity === true || data.intentData?.depth_opportunity === true) {
@@ -1002,10 +968,11 @@ export default function ReflectionV2() {
   async function handleAdminReset() {
     if (!confirm("Reset today's session? This deletes it from the database and reinitializes.")) return;
     try {
-      const res = await fetch('/api/admin-reset', {
+      const res = await fetch('/api/admin', {
         method: 'POST',
         headers: await getAuthHeaders(),
         body: JSON.stringify({
+          action: 'reset',
           user_id: user.id,
           admin_secret: import.meta.env.VITE_ADMIN_SECRET,
         }),
