@@ -7,6 +7,7 @@ import InsightsV2 from './pages/InsightsV2';
 import SettingsV2 from './pages/SettingsV2';
 import OnboardingV2 from './pages/OnboardingV2';
 import AdminV2 from './pages/AdminV2';
+import VideoExport from './pages/admin/VideoExport';
 import DemoBuilder from './pages/DemoBuilder';
 import UIRecorder from './pages/UIRecorder';
 import UIEditor from './pages/UIEditor';
@@ -145,6 +146,14 @@ export default function App() {
         element={
           <AuthGuardV2>
             <AdminV2 />
+          </AuthGuardV2>
+        }
+      />
+      <Route
+        path="/admin/video-export"
+        element={
+          <AuthGuardV2>
+            <VideoExport />
           </AuthGuardV2>
         }
       />

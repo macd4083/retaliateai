@@ -33,3 +33,9 @@ dist-ssr
 # Simulation
 !scripts/.env.simulation
 scripts/simulation-report.json
+public/exports/*.mp4
+public/exports/*.webm
+public/exports/*.gif
+public/exports/frames/
+!public/exports/frames/.gitkeep
+server/.env
