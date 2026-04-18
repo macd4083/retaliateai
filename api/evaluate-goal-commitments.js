@@ -6,8 +6,7 @@
  * POST { user_id, session_date, fragment_results?: [{ id, kept }] }
  *
  * Logic:
- *   - For goal_commitment_log rows where date = session_date - 1 and kept IS NULL:
- *     if a completed session exists for session_date → mark kept = true
+ *   - If fragment_results are provided, update yesterday rows by fragment id only.
  *   - For rows where date < session_date - 1 and kept IS NULL (2+ days old):
  *     mark kept = false (they'll never get a session)
  */
@@ -49,24 +48,6 @@ export default async function handler(req, res) {
           .eq('id', item.id)
           .eq('user_id', user_id)
           .eq('date', yesterday);
-      }
-    } else {
-      // Legacy fallback behavior
-      const { data: completedSession } = await supabase
-        .from('reflection_sessions')
-        .select('id')
-        .eq('user_id', user_id)
-        .eq('date', session_date)
-        .eq('is_complete', true)
-        .maybeSingle();
-
-      if (completedSession) {
-        await supabase
-          .from('goal_commitment_log')
-          .update({ kept: true, evaluated_at: now })
-          .eq('user_id', user_id)
-          .eq('date', yesterday)
-          .is('kept', null);
       }
     }
 

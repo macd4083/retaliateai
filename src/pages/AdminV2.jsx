@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Database, Trash2, ChevronDown, ChevronRight, RefreshCw } from 'lucide-react';
+import { Database, Trash2, ChevronDown, ChevronRight, RefreshCw, Play, WandSparkles } from 'lucide-react';
 import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase/client';
 import { localDateStr } from '../lib/dateUtils';
@@ -141,10 +141,11 @@ function SessionCard({ session, userId, onDelete, isToday }) {
     if (messages.length > 0) return;
     setLoadingMsgs(true);
     try {
-      const res = await fetch('/api/admin-data', {
+      const res = await fetch('/api/admin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          action: 'data',
           user_id: userId,
           admin_secret: ADMIN_SECRET,
           table: 'reflection_messages',
@@ -159,10 +160,11 @@ function SessionCard({ session, userId, onDelete, isToday }) {
 
   async function deleteMessage(msgId) {
     try {
-      await fetch('/api/admin-data', {
+      await fetch('/api/admin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          action: 'data',
           user_id: userId,
           admin_secret: ADMIN_SECRET,
           table: 'reflection_messages',
@@ -176,10 +178,11 @@ function SessionCard({ session, userId, onDelete, isToday }) {
   async function deleteAllMessages() {
     if (!confirm('Delete ALL messages for this session?')) return;
     try {
-      await fetch('/api/admin-data', {
+      await fetch('/api/admin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          action: 'data',
           user_id: userId,
           admin_secret: ADMIN_SECRET,
           table: 'reflection_messages',
@@ -352,10 +355,11 @@ export default function AdminV2() {
   async function loadSessions() {
     setLoading(true);
     try {
-      const res = await fetch('/api/admin-data', {
+      const res = await fetch('/api/admin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          action: 'data',
           user_id: user.id,
           admin_secret: ADMIN_SECRET,
           table: 'reflection_sessions',
@@ -371,10 +375,11 @@ export default function AdminV2() {
     setLoading(true);
     setTabData([]);
     try {
-      const res = await fetch('/api/admin-data', {
+      const res = await fetch('/api/admin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          action: 'data',
           user_id: user.id,
           admin_secret: ADMIN_SECRET,
           table: tab,
@@ -389,10 +394,11 @@ export default function AdminV2() {
   async function deleteTabRow(id) {
     if (!confirm('Delete this row?')) return;
     try {
-      await fetch('/api/admin-data', {
+      await fetch('/api/admin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          action: 'data',
           user_id: user.id,
           admin_secret: ADMIN_SECRET,
           table: activeTab,
@@ -406,10 +412,11 @@ export default function AdminV2() {
   async function deleteSession(id) {
     if (!confirm('Delete this session and its messages?')) return;
     try {
-      await fetch('/api/admin-data', {
+      await fetch('/api/admin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          action: 'data',
           user_id: user.id,
           admin_secret: ADMIN_SECRET,
           table: 'reflection_sessions',
@@ -426,10 +433,10 @@ export default function AdminV2() {
     if (!confirm("Reset today's reflection session? This deletes it and all its messages.")) return;
     setResultMsg('');
     try {
-      const res = await fetch('/api/admin-reset', {
+      const res = await fetch('/api/admin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user.id, admin_secret: ADMIN_SECRET, target_date: localDateStr() }),
+        body: JSON.stringify({ action: 'reset', user_id: user.id, admin_secret: ADMIN_SECRET, target_date: localDateStr() }),
       });
       const json = await res.json();
       if (json.ok) {
@@ -450,10 +457,10 @@ export default function AdminV2() {
     if (!confirm('⚠️ SECOND CONFIRM: Nuke all sessions, messages, follow-up queue, growth markers, and patterns? This cannot be undone.')) return;
     setResultMsg('');
     try {
-      const res = await fetch('/api/admin-reset', {
+      const res = await fetch('/api/admin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user.id, admin_secret: ADMIN_SECRET, delete_all: true }),
+        body: JSON.stringify({ action: 'reset', user_id: user.id, admin_secret: ADMIN_SECRET, delete_all: true }),
       });
       const json = await res.json();
       if (json.ok) {
@@ -515,6 +522,23 @@ export default function AdminV2() {
           >
             <RefreshCw className="w-4 h-4" />
             Refresh
+          </button>
+          <button
+            onClick={() => navigate('/admin/demo-builder')}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 hover:text-white text-sm transition-colors"
+          >
+            <Play className="w-4 h-4" />
+            Demo Builder
+          </button>
+          <button
+            onClick={() => navigate('/ui-editor')}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 hover:text-white text-sm transition-colors"
+          >
+            <WandSparkles className="w-4 h-4 text-red-400" />
+            <span className="text-left">
+              <span className="block">Visual UI Editor</span>
+              <span className="block text-[11px] text-zinc-500">Edit any captured UI snapshot with direct manipulation.</span>
+            </span>
           </button>
         </div>
 

@@ -496,12 +496,9 @@ function deriveStageHint(sessionState, classifierChecklist) {
   const stage = sessionState.current_stage || 'wins';
   const cl = { ...(sessionState.checklist || {}), ...(classifierChecklist || {}) };
   const hasPlan = !!sessionState.tomorrow_commitment;
-  const hasYesterdayCommitment = !!sessionState.yesterday_commitment;
 
-  // wins → commitment_checkin (only when there's a yesterday commitment)
-  if (stage === 'wins' && cl.wins && sessionState.wins_asked_for_more === true && hasYesterdayCommitment) return 'commitment_checkin';
-  // wins → honest (skip commitment_checkin when there's no yesterday commitment)
-  if (stage === 'wins' && cl.wins && sessionState.wins_asked_for_more === true && !hasYesterdayCommitment) return 'honest';
+  // wins → commitment_checkin
+  if (stage === 'wins' && cl.wins && sessionState.wins_asked_for_more === true) return 'commitment_checkin';
   // commitment_checkin → tomorrow (missed: the miss was already the honest moment, skip honest)
   if (stage === 'commitment_checkin' && sessionState.commitment_checkin_done === true && sessionState.checkin_outcome === 'missed') return 'tomorrow';
   // commitment_checkin → wins (kept/partial: go back to wins to celebrate, honest will follow naturally from wins)
@@ -930,39 +927,8 @@ function computeGoalMotivationSignal(goalStats, goal) {
 async function runGoalCommitmentEvaluation(userId, clientDate) {
   // Runs inline — no HTTP round-trip. Fire-and-forget: never awaited.
   try {
-    const yesterday = localDate(-1, clientDate);
     const twoDaysAgo = localDate(-2, clientDate);
     const now = new Date().toISOString();
-
-    // Check if a completed session exists for clientDate (today)
-    const { data: completedSession } = await supabase
-      .from('reflection_sessions')
-      .select('id')
-      .eq('user_id', userId)
-      .eq('date', clientDate)
-      .eq('is_complete', true)
-      .maybeSingle();
-
-    // Mark yesterday's pending commitments as kept if today's session is already complete
-    if (completedSession) {
-      // Set kept: true only for rows that don't have an explicit override from the coach
-      await supabase
-        .from('goal_commitment_log')
-        .update({ kept: true, evaluated_at: now })
-        .eq('user_id', userId)
-        .eq('date', yesterday)
-        .is('kept', null)
-        .not('checkin_outcome', 'in', '("missed","partial")');
-
-      // For rows where coach explicitly said missed or partial, set kept: false
-      await supabase
-        .from('goal_commitment_log')
-        .update({ kept: false, evaluated_at: now })
-        .eq('user_id', userId)
-        .eq('date', yesterday)
-        .is('kept', null)
-        .in('checkin_outcome', ['missed', 'partial']);
-    }
 
     // Mark commitments from 2+ days ago that are still null as missed
     await supabase
@@ -1752,6 +1718,15 @@ function buildDirectiveQueue({
         fire_next_session: false,
         energy_type: 'momentum',
       });
+    } else {
+      allDirectives.push({
+        id: 'commitment_checkin',
+        instruction: `## STAGE: COMMITMENT CHECK-IN\nNo yesterday commitment is available. Briefly acknowledge that there is nothing to check in on from yesterday, then move forward naturally with one free-text prompt about how today went. Set commitment_checkin_done: true so the session can continue.`,
+        priority: 1,
+        preferred_stage: 'commitment_checkin',
+        fire_next_session: false,
+        energy_type: 'momentum',
+      });
     }
   }
 
@@ -2262,6 +2237,7 @@ export default async function handler(req, res) {
       user_message, context = {},
       intent_data: clientIntentData = null,
     } = req.body;
+    const originalUserMessage = user_message;
 
     // Extract client-supplied local date and timezone offset (sent by the browser)
     // client_local_date: YYYY-MM-DD string in the user's local time
@@ -2275,12 +2251,20 @@ export default async function handler(req, res) {
     const contextAvgCommitmentScore = Number.isFinite(contextAvgCommitmentScoreRaw) ? contextAvgCommitmentScoreRaw : null;
     const contextScoreTrajectory = typeof context.score_trajectory === 'string' ? context.score_trajectory : null;
 
-    if (!authenticatedUserId || !user_message) {
+    if (!authenticatedUserId || !originalUserMessage) {
       return res.status(400).json({ error: 'user_id and user_message are required' });
     }
 
-    const isInit = user_message === '__INIT__';
+    const isInit = originalUserMessage === '__INIT__';
+    const isChecklistSubmission = originalUserMessage === '__CHECKLIST_SUBMITTED__';
+    let displayMessage = originalUserMessage;
     let precomputedScore = null;
+    if (isChecklistSubmission) {
+      const checklist = Array.isArray(context?.checklist_result) ? context.checklist_result : [];
+      const keptCount = checklist.filter((i) => i?.kept === true).length;
+      const total = checklist.length;
+      displayMessage = `I completed ${keptCount} out of ${total} things I committed to.`;
+    }
 
     // If checklist result submitted, evaluate fragments and inject score
     if (
@@ -2312,7 +2296,7 @@ export default async function handler(req, res) {
     // ── 1. Classify intent ────────────────────────────────────────────────
     let intentData = clientIntentData;
     if (!intentData && !isInit) {
-      intentData = await classifyIntent(user_message, session_state);
+      intentData = await classifyIntent(displayMessage, session_state);
     }
     if (!intentData) {
       intentData = { ...DEFAULT_CLASSIFICATION };
@@ -2494,7 +2478,7 @@ export default async function handler(req, res) {
     const shouldSearchMemories = isMemoryMode || intentData?.emotional_state === 'reflective';
     let relevantMemories = [];
     if (!isInit && shouldSearchMemories) {
-      relevantMemories = await searchRelevantMemories(authenticatedUserId, user_message, 3);
+      relevantMemories = await searchRelevantMemories(authenticatedUserId, displayMessage, 3);
     }
 
     const goalsContext = activeGoals.length > 0
@@ -2649,7 +2633,7 @@ export default async function handler(req, res) {
     const messages = [{ role: 'system', content: effectiveSystemPrompt }, contextBlock, ...history.slice(-18)];
 
     if (!isInit) {
-      messages.push({ role: 'user', content: user_message });
+      messages.push({ role: 'user', content: displayMessage });
     } else {
       const stage = session_state?.current_stage || 'wins';
       const streak = context.reflection_streak || context.streak || 0;

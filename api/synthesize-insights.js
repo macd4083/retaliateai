@@ -29,6 +29,18 @@ const STALE_INSIGHT_DAYS = 14;
 const MAX_ACTIVE_INSIGHTS = 7;
 const MIN_SESSIONS = 3;
 
+function insightToNarrative(ins) {
+  return {
+    label: ins.pattern_label || 'Insight',
+    type: ins.pattern_type || 'pattern',
+    occurrences: ins.sessions_synthesized_from || 0,
+    narrative: ins.pattern_narrative || '',
+    watch_for: ins.trigger_context || null,
+    first_seen_date: ins.first_seen_date || null,
+    last_seen_date: ins.last_seen_date || null,
+  };
+}
+
 const SYNTHESIS_SYSTEM = `You are analyzing a person's real reflection session data to synthesize 5–7 genuine psychological insights about patterns actively shaping their behavior. These are NOT summaries. They are precise, evidence-based observations.
 
 You will receive:
@@ -91,15 +103,53 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: err.message });
   }
 
-  const { force_refresh = false } = req.body || {};
+  const { force_refresh = false, return_as_narratives = false, user_id: requestedUserId = null } = req.body || {};
+  const targetUserId = requestedUserId || authenticatedUserId;
+  if (requestedUserId && requestedUserId !== authenticatedUserId) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
 
   try {
+    if (return_as_narratives) {
+      const [{ data: activeInsights }, { count: currentSessionCount }] = await Promise.all([
+        supabase
+          .from('user_insights')
+          .select('id, pattern_label, pattern_type, pattern_narrative, trigger_context, sessions_synthesized_from, synthesized_at, confidence_score, first_seen_date, last_seen_date')
+          .eq('user_id', targetUserId)
+          .eq('is_active', true)
+          .order('confidence_score', { ascending: false })
+          .limit(MAX_ACTIVE_INSIGHTS),
+        supabase
+          .from('reflection_sessions')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', targetUserId)
+          .eq('is_complete', true),
+      ]);
+
+      const sessionCount = currentSessionCount || 0;
+      if (activeInsights && activeInsights.length > 0) {
+        const mostRecent = activeInsights.reduce((a, b) =>
+          new Date(a.synthesized_at) > new Date(b.synthesized_at) ? a : b
+        );
+        const ageDays = (Date.now() - new Date(mostRecent.synthesized_at).getTime()) / 86400000;
+        const cachedSessionCount = mostRecent.sessions_synthesized_from || 0;
+        if (ageDays < SYNTHESIS_CACHE_DAYS && cachedSessionCount >= sessionCount) {
+          return res.status(200).json({
+            narratives: activeInsights.map(insightToNarrative),
+            cached: true,
+          });
+        }
+      }
+    }
+
+    const effectiveForceRefresh = return_as_narratives ? true : force_refresh;
+
     // ── 0. Cache check ────────────────────────────────────────────────────
-    if (!force_refresh) {
+    if (!effectiveForceRefresh) {
       const { data: recent } = await supabase
         .from('user_insights')
         .select('synthesized_at')
-        .eq('user_id', authenticatedUserId)
+        .eq('user_id', targetUserId)
         .eq('is_active', true)
         .order('synthesized_at', { ascending: false })
         .limit(1)
@@ -111,10 +161,13 @@ export default async function handler(req, res) {
           const { data: cached } = await supabase
             .from('user_insights')
             .select('*')
-            .eq('user_id', authenticatedUserId)
+            .eq('user_id', targetUserId)
             .eq('is_active', true)
             .order('confidence_score', { ascending: false })
             .limit(MAX_ACTIVE_INSIGHTS);
+          if (return_as_narratives) {
+            return res.status(200).json({ narratives: (cached || []).map(insightToNarrative), cached: true });
+          }
           return res.status(200).json({ insights: cached || [], cached: true });
         }
       }
@@ -124,12 +177,15 @@ export default async function handler(req, res) {
     const { data: sessions } = await supabase
       .from('reflection_sessions')
       .select('date, summary, wins, misses, tomorrow_commitment, mood_end_of_day, blocker_tags, checklist')
-      .eq('user_id', authenticatedUserId)
+      .eq('user_id', targetUserId)
       .eq('is_complete', true)
       .order('date', { ascending: false })
       .limit(30);
 
     if (!sessions || sessions.length < MIN_SESSIONS) {
+      if (return_as_narratives) {
+        return res.status(200).json({ narratives: [], message: `Need at least ${MIN_SESSIONS} sessions.` });
+      }
       return res.status(200).json({ insights: [], message: `Need at least ${MIN_SESSIONS} sessions.` });
     }
 
@@ -137,7 +193,7 @@ export default async function handler(req, res) {
     const { data: depthMessages } = await supabase
       .from('reflection_messages')
       .select('extracted_data, created_at')
-      .eq('user_id', authenticatedUserId)
+      .eq('user_id', targetUserId)
       .not('extracted_data', 'is', null)
       .gte('created_at', new Date(Date.now() - 30 * 86400000).toISOString())
       .order('created_at', { ascending: false })
@@ -151,7 +207,7 @@ export default async function handler(req, res) {
     const { data: existingInsights } = await supabase
       .from('user_insights')
       .select('id, pattern_label, pattern_type, pattern_narrative, synthesized_at, confidence_score')
-      .eq('user_id', authenticatedUserId)
+      .eq('user_id', targetUserId)
       .eq('is_active', true)
       .order('synthesized_at', { ascending: false })
       .limit(MAX_ACTIVE_INSIGHTS);
@@ -160,7 +216,7 @@ export default async function handler(req, res) {
     const { data: profile } = await supabase
       .from('user_profiles')
       .select('identity_statement, big_goal, why, future_self, values, short_term_state, long_term_patterns, strengths, growth_areas, exercises_explained')
-      .eq('id', authenticatedUserId)
+      .eq('id', targetUserId)
       .maybeSingle();
 
     const exercisesExplained = profile?.exercises_explained || [];
@@ -218,6 +274,9 @@ export default async function handler(req, res) {
     const newInsights = (result.insights || []).slice(0, MAX_ACTIVE_INSIGHTS);
 
     if (newInsights.length === 0) {
+      if (return_as_narratives) {
+        return res.status(200).json({ narratives: [], message: 'No clear patterns found yet.' });
+      }
       return res.status(200).json({ insights: [], message: 'No clear patterns found yet.' });
     }
 
@@ -228,7 +287,7 @@ export default async function handler(req, res) {
     // ── 7. Upsert insights ────────────────────────────────────────────────
     for (const insight of newInsights) {
       const row = {
-        user_id: authenticatedUserId,
+        user_id: targetUserId,
         pattern_label: insight.pattern_label,
         pattern_type: insight.pattern_type,
         pattern_narrative: insight.pattern_narrative,
@@ -251,7 +310,7 @@ export default async function handler(req, res) {
           .from('user_insights')
           .update(row)
           .eq('id', insight.existing_insight_id)
-          .eq('user_id', authenticatedUserId)
+          .eq('user_id', targetUserId)
           .select('id')
           .maybeSingle();
         if (updated?.id) upsertedIds.add(updated.id);
@@ -283,11 +342,14 @@ export default async function handler(req, res) {
     const { data: fresh } = await supabase
       .from('user_insights')
       .select('*')
-      .eq('user_id', authenticatedUserId)
+      .eq('user_id', targetUserId)
       .eq('is_active', true)
       .order('confidence_score', { ascending: false })
       .limit(MAX_ACTIVE_INSIGHTS);
 
+    if (return_as_narratives) {
+      return res.status(200).json({ narratives: (fresh || []).map(insightToNarrative) });
+    }
     return res.status(200).json({ insights: fresh || [] });
   } catch (err) {
     console.error('synthesize-insights error:', err);

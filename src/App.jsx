@@ -8,6 +8,9 @@ import SettingsV2 from './pages/SettingsV2';
 import OnboardingV2 from './pages/OnboardingV2';
 import AdminV2 from './pages/AdminV2';
 import VideoExport from './pages/admin/VideoExport';
+import DemoBuilder from './pages/DemoBuilder';
+import UIRecorder from './pages/UIRecorder';
+import UIEditor from './pages/UIEditor';
 import Login from './pages/Login';
 import ResetPassword from './pages/ResetPassword';
 import EmailConfirmed from './pages/EmailConfirmed';
@@ -18,7 +21,7 @@ import Landing from './pages/Landing';
 import { useAuth } from './lib/AuthContext';
 import { supabase } from './lib/supabase/client';
 
-// ── Old imports (preserved, not deleted) ───────────────���──────────────────
+// ── Old imports (preserved, not deleted) ────────────────────────────────────
 // import Sidebar from './components/layout/Sidebar';
 // import JournalEditor from './components/journal/JournalEditor';
 // import EntryDetailModal from './components/journal/EntryDetailModal';
@@ -48,7 +51,7 @@ function LoadingScreen() {
   );
 }
 
-// ── AuthGuardV2 ────────────────────────────────────────────────────────────
+// ── AuthGuardV2 ───────────────────────────────────────────────────────────
 // Checks auth + onboarding_completed. If not onboarded, shows OnboardingV2.
 function AuthGuardV2({ children }) {
   const { user, loading } = useAuth();
@@ -100,7 +103,7 @@ function AuthGuardV2({ children }) {
   return children;
 }
 
-// ── App ────────────────────────────────────────────────────────────────────
+// ── App ──────────────────────────────────────────────────────────────────
 export default function App() {
   return (
     <Routes>
@@ -151,6 +154,30 @@ export default function App() {
         element={
           <AuthGuardV2>
             <VideoExport />
+          </AuthGuardV2>
+        }
+      />
+      <Route
+        path="/admin/demo-builder"
+        element={
+          <AuthGuardV2>
+            <DemoBuilder />
+          </AuthGuardV2>
+        }
+      />
+      <Route
+        path="/recorder"
+        element={
+          <AuthGuardV2>
+            <UIRecorder />
+          </AuthGuardV2>
+        }
+      />
+      <Route
+        path="/ui-editor"
+        element={
+          <AuthGuardV2>
+            <UIEditor />
           </AuthGuardV2>
         }
       />
