@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Database, Trash2, ChevronDown, ChevronRight, RefreshCw, WandSparkles } from 'lucide-react';
+import { Database, Trash2, ChevronDown, ChevronRight, RefreshCw, Play, WandSparkles } from 'lucide-react';
 import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase/client';
 import { localDateStr } from '../lib/dateUtils';
@@ -522,6 +522,13 @@ export default function AdminV2() {
           >
             <RefreshCw className="w-4 h-4" />
             Refresh
+          </button>
+          <button
+            onClick={() => navigate('/admin/demo-builder')}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 hover:text-white text-sm transition-colors"
+          >
+            <Play className="w-4 h-4" />
+            Demo Builder
           </button>
           <button
             onClick={() => navigate('/ui-editor')}

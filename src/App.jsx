@@ -7,6 +7,7 @@ import InsightsV2 from './pages/InsightsV2';
 import SettingsV2 from './pages/SettingsV2';
 import OnboardingV2 from './pages/OnboardingV2';
 import AdminV2 from './pages/AdminV2';
+import DemoBuilder from './pages/DemoBuilder';
 import UIRecorder from './pages/UIRecorder';
 import UIEditor from './pages/UIEditor';
 import Login from './pages/Login';
@@ -144,6 +145,14 @@ export default function App() {
         element={
           <AuthGuardV2>
             <AdminV2 />
+          </AuthGuardV2>
+        }
+      />
+      <Route
+        path="/admin/demo-builder"
+        element={
+          <AuthGuardV2>
+            <DemoBuilder />
           </AuthGuardV2>
         }
       />
