@@ -94,39 +94,6 @@ function TypingIndicator() {
   );
 }
 
-function CommitmentChecklistCard({ fragments, onSubmit }) {
-  const [checkedIds, setCheckedIds] = useState([]);
-
-  function toggleItem(id) {
-    setCheckedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
-  }
-
-  return (
-    <div className="bg-zinc-800 border border-zinc-700 rounded-2xl p-4">
-      <p className="text-zinc-300 text-xs mb-3">What did you actually get done?</p>
-      <div className="space-y-2">
-        {(fragments || []).map((fragment) => (
-          <label key={fragment.id} className="flex items-start gap-2 text-sm text-white cursor-pointer">
-            <input
-              type="checkbox"
-              checked={checkedIds.includes(fragment.id)}
-              onChange={() => toggleItem(fragment.id)}
-              className="mt-0.5"
-            />
-            <span>{fragment.text}</span>
-          </label>
-        ))}
-      </div>
-      <button
-        onClick={() => onSubmit(checkedIds)}
-        className="mt-4 px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-xl text-sm font-medium transition-colors"
-      >
-        Submit
-      </button>
-    </div>
-  );
-}
-
 function SummaryCard({ data, streak, followThroughStats }) {
   const navigate = useNavigate();
 
@@ -243,24 +210,9 @@ function SummaryCard({ data, streak, followThroughStats }) {
 }
 
 
-function ChatMessage({ message, isFirstMessage, onChipSelect, chipsDisabled, streak, followThroughStats, sessionState, onChecklistSubmit }) {
+function ChatMessage({ message, isFirstMessage, onChipSelect, chipsDisabled, streak, followThroughStats }) {
   const isUser = message.role === 'user';
   if (message.isTyping) return <TypingIndicator />;
-  if (message.message_type === 'commitment_checklist' && !sessionState.fragments_submitted) {
-    return (
-      <div className="flex items-start gap-3 mb-4">
-        <div className="w-8 h-8 rounded-full bg-red-900 border border-red-700 flex items-center justify-center flex-shrink-0 mt-1">
-          <Moon className="w-4 h-4 text-red-400" />
-        </div>
-        <div className="max-w-[80%]">
-          <CommitmentChecklistCard
-            fragments={sessionState.checklist_fragments}
-            onSubmit={onChecklistSubmit}
-          />
-        </div>
-      </div>
-    );
-  }
   if (message.message_type === 'summary_card' && message.card_data) {
     return (
       <div className="flex items-start gap-3 mb-4">
@@ -366,6 +318,7 @@ export default function ReflectionV2() {
     yesterday_commitment: null,
     commitment_checkin_done: false,
     checkin_outcome: null,
+    commitment_score: null,
     checklist_fragments: [],
     fragments_submitted: false,
     depth_opportunity_count: 0,
@@ -381,6 +334,7 @@ export default function ReflectionV2() {
   const [activeGoals, setActiveGoals] = useState([]);
   const [showGoalChips, setShowGoalChips] = useState(false);
   const [selectedGoalChips, setSelectedGoalChips] = useState([]);
+  const [checkedFragments, setCheckedFragments] = useState({});
   const [chatFocused, setChatFocused] = useState(false);
 
   const timeContext = getTimeContext();
@@ -478,6 +432,7 @@ export default function ReflectionV2() {
         yesterday_commitment: session.yesterday_commitment || fetchedYesterdayCommitment || null,
         commitment_checkin_done: session.commitment_checkin_done === true,
         checkin_outcome: session.checkin_outcome || null,
+        commitment_score: session.commitment_score ?? null,
         checklist_fragments: [],
         fragments_submitted: !!(session.commitment_checkin_done && session.commitment_score != null),
         depth_opportunity_count: session.depth_opportunity_count || 0,
@@ -705,6 +660,7 @@ export default function ReflectionV2() {
               yesterday_commitment: state.yesterday_commitment,
               commitment_checkin_done: state.commitment_checkin_done,
               checkin_outcome: state.checkin_outcome,
+              commitment_score: state.commitment_score,
               depth_opportunity_count: state.depth_opportunity_count || 0,
               yesterday_commitment_in_state: !!state.yesterday_commitment,
               consecutive_excuses: state.consecutive_excuses || 0,
@@ -773,9 +729,7 @@ export default function ReflectionV2() {
         chips: data.chips || null,
         message_type: isSummaryCard
           ? 'summary_card'
-          : shouldShowChecklist
-            ? 'commitment_checklist'
-            : data.message_type || 'question',
+          : data.message_type || 'question',
         card_data: isSummaryCard ? newSummaryData : null,
         isTyping: false,
       };
@@ -834,17 +788,20 @@ export default function ReflectionV2() {
         if (data.honest_depth === true) newState.honest_depth = true;
         if (data.commitment_checkin_done === true) newState.commitment_checkin_done = true;
         if (data.checkin_outcome) newState.checkin_outcome = data.checkin_outcome;
+        if (data.extracted_data?.commitment_score != null)
+          newState.commitment_score = data.extracted_data.commitment_score;
         if (shouldShowChecklist) {
           newState.checklist_fragments = data.checklist_fragments.map((f) => ({
             id: f.id,
             text: f.text || f.commitment_text || '',
-            goal_id: f.goal_id || null,
           }));
           newState.fragments_submitted = false;
+          setCheckedFragments({});
         }
         if (data.commitment_checkin_done === true) {
           newState.checklist_fragments = [];
           newState.fragments_submitted = true;
+          setCheckedFragments({});
         }
         if (data.depth_opportunity === true || data.intentData?.depth_opportunity === true) {
           newState.depth_opportunity_count = (newState.depth_opportunity_count || 0) + 1;
@@ -1006,6 +963,7 @@ export default function ReflectionV2() {
           yesterday_commitment: null,
           commitment_checkin_done: false,
           checkin_outcome: null,
+          commitment_score: null,
           checklist_fragments: [],
           fragments_submitted: false,
           depth_opportunity_count: 0,
@@ -1065,12 +1023,23 @@ export default function ReflectionV2() {
     sendMessage(chip.label);
   }
 
-  async function handleChecklistSubmit(checkedIds) {
-    const fragmentResults = sessionState.checklist_fragments.map((f) => ({
-      id: f.id,
-      kept: checkedIds.includes(f.id),
-    }));
+  async function handleChecklistSubmit() {
+    const fragments = sessionState.checklist_fragments;
+    const fragmentResults = fragments.map((f) => ({ id: f.id, kept: !!checkedFragments[f.id] }));
 
+    try {
+      await fetch('/api/evaluate-goal-commitments', {
+        method: 'POST',
+        headers: await getAuthHeaders(),
+        body: JSON.stringify({
+          user_id: user.id,
+          session_date: sessionState.date || localDateStr(),
+          fragment_results: fragmentResults,
+        }),
+      });
+    } catch (_e) {}
+
+    setCheckedFragments({});
     setSessionState((prev) => ({ ...prev, fragments_submitted: true }));
     await sendMessage('__CHECKLIST_SUBMITTED__', undefined, undefined, {
       checklist_result: fragmentResults,
@@ -1125,7 +1094,7 @@ export default function ReflectionV2() {
 
   // ── Render ───────────────────────────
   const isChecklistBlocking =
-    messages.some((m) => m.message_type === 'commitment_checklist') &&
+    sessionState.checklist_fragments.length > 0 &&
     !sessionState.fragments_submitted;
   const showHero = !chatFocused && !isInitializing && messages.length === 1 && messages[0]?.role === 'assistant';
   const textareaPlaceholder = showHero
@@ -1219,10 +1188,30 @@ export default function ReflectionV2() {
                   chipsDisabled={usedChipMessageIds.has(message.id) || isLoading}
                   streak={streak}
                   followThroughStats={followThroughStats}
-                  sessionState={sessionState}
-                  onChecklistSubmit={handleChecklistSubmit}
                 />
               ))}
+              {sessionState.checklist_fragments.length > 0 && !sessionState.fragments_submitted && (
+                <div className="mx-4 mb-3 bg-zinc-900 border border-zinc-700 rounded-xl p-4">
+                  <p className="text-sm text-zinc-400 mb-3">Check off what you completed:</p>
+                  {sessionState.checklist_fragments.map((frag) => (
+                    <label key={frag.id} className="flex items-start gap-3 mb-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="mt-0.5 accent-red-500"
+                        checked={!!checkedFragments[frag.id]}
+                        onChange={(e) => setCheckedFragments((prev) => ({ ...prev, [frag.id]: e.target.checked }))}
+                      />
+                      <span className="text-sm text-white">{frag.text}</span>
+                    </label>
+                  ))}
+                  <button
+                    onClick={handleChecklistSubmit}
+                    className="mt-3 w-full bg-red-600 hover:bg-red-700 text-white text-sm font-medium py-2 rounded-lg transition-colors"
+                  >
+                    Submit
+                  </button>
+                </div>
+              )}
               {initError && (
                 <div className="flex justify-center mt-3">
                   <button
@@ -1282,6 +1271,9 @@ export default function ReflectionV2() {
                   Reset Session
                 </button>
               </div>
+            )}
+            {isChecklistBlocking && (
+              <p className="text-xs text-zinc-500">Complete the check-in above to continue</p>
             )}
             <div className="flex items-end gap-3">
             {showGoalChips && activeGoals.length > 0 ? (
