@@ -116,6 +116,7 @@ const MAX_DEPTH_INSIGHTS_RETAINED = 4;
 const MOTIVATION_STRONG_THRESHOLD = 0.7;   // ≥70% follow-through → strong
 const MOTIVATION_MEDIUM_THRESHOLD = 0.4;   // ≥40% follow-through → medium; <40% → low
 const MIN_EVALUABLE_COMMITMENTS = 3;       // minimum logged entries before signal is meaningful
+const MIN_EVALUABLE_LAST7_COMMITMENTS = 3; // minimum last-7 fragments before rate_last_7 is considered stable
 const MIN_SAMPLES_FOR_LOW_SIGNAL = 5;      // need ≥5 samples to classify as "low" vs "unknown"
 const TRAJECTORY_DELTA_THRESHOLD = 0.1;   // >10% rate change between halves = improving/declining
 const DAYS_SILENT_FOR_STRUGGLING = 7;      // goal not mentioned in 7+ days + declining = struggling
@@ -851,6 +852,9 @@ async function loadGoalCommitmentStats(userId, clientDate) {
       .eq('user_id', userId)
       .gte('date', sinceDate)
       .lte('date', todayStr);
+    // Intentionally include kept=null rows here:
+    // - rate calculations below only use rowsWithKept
+    // - but date recency (days_since_last_commitment) should still reflect pending fragments
 
     if (!logs || logs.length === 0) return [];
 
@@ -872,7 +876,10 @@ async function loadGoalCommitmentStats(userId, clientDate) {
       const last7Rows = rows.filter((r) => r.date > day7ago);
       const last7WithKept = last7Rows.filter((r) => r.kept !== null);
       const last7Kept = last7WithKept.filter((r) => r.kept === true).length;
-      const rate_last_7 = last7WithKept.length >= 3 ? last7Kept / last7WithKept.length : null;
+      // Keep threshold aligned with MIN_EVALUABLE_LAST7_COMMITMENTS to avoid overreacting to 1-2 fragments.
+      const rate_last_7 = last7WithKept.length >= MIN_EVALUABLE_LAST7_COMMITMENTS
+        ? last7Kept / last7WithKept.length
+        : null;
 
       const recentLogs = rowsWithKept.filter((l) => l.date > midpoint);
       const priorLogs = rowsWithKept.filter((l) => l.date <= midpoint);
@@ -1667,7 +1674,7 @@ function buildDirectiveQueue({
   // ── why_missing ────────────────────────────────────────────────────────
   if (goalMissingWhy && !sessionReadyToClose && !forceClose) {
     const missedLast7Text = goalMissingWhy.commitment_stats?.rate_last_7 != null
-      ? ` Their fragmented commitments for ${goalMissingWhy.title} have been missed ${Math.round((1 - goalMissingWhy.commitment_stats.rate_last_7) * 100)}% of the time in the last 7 days.`
+      ? ` Their fragment commitments for ${goalMissingWhy.title} have been missed ${Math.round((1 - goalMissingWhy.commitment_stats.rate_last_7) * 100)}% of the time in the last 7 days.`
       : '';
     allDirectives.push({
       id: 'why_missing',
@@ -1822,7 +1829,7 @@ function buildDirectiveQueue({
   if (commitmentStats) {
     const { rate7, trajectory: traj, total7, avgScore7 } = commitmentStats;
     const commitmentStatsForInstruction =
-      traj === 'declining' || rate7 < 0.5 || (avgScore7 != null && avgScore7 < 60);
+      traj === 'declining' || (rate7 != null && rate7 < 0.5) || (avgScore7 != null && avgScore7 < 60);
     if (commitmentStatsForInstruction) {
       const ratePercent = Math.round(rate7 * 100);
       const avgScore = avgScore7 != null ? Math.round(avgScore7) : ratePercent;
