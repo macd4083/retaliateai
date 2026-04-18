@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Database, Trash2, ChevronDown, ChevronRight, RefreshCw } from 'lucide-react';
+import { Database, Trash2, ChevronDown, ChevronRight, RefreshCw, WandSparkles } from 'lucide-react';
 import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase/client';
 import { localDateStr } from '../lib/dateUtils';
@@ -515,6 +515,16 @@ export default function AdminV2() {
           >
             <RefreshCw className="w-4 h-4" />
             Refresh
+          </button>
+          <button
+            onClick={() => navigate('/ui-editor')}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 hover:text-white text-sm transition-colors"
+          >
+            <WandSparkles className="w-4 h-4 text-red-400" />
+            <span className="text-left">
+              <span className="block">Visual UI Editor</span>
+              <span className="block text-[11px] text-zinc-500">Edit any captured UI snapshot with direct manipulation.</span>
+            </span>
           </button>
         </div>
 
