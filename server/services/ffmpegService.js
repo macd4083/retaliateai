@@ -20,7 +20,12 @@ function escapeDrawText(text) {
     .replace(/\\/g, '\\\\')
     .replace(/:/g, '\\:')
     .replace(/'/g, "\\'")
-    .replace(/%/g, '\\%');
+    .replace(/%/g, '\\%')
+    .replace(/=/g, '\\=')
+    .replace(/\[/g, '\\[')
+    .replace(/\]/g, '\\]')
+    .replace(/,/g, '\\,')
+    .replace(/;/g, '\\;');
 }
 
 export async function processVideo({
@@ -78,10 +83,16 @@ export async function processVideo({
               fs.rmSync(framesDir, { recursive: true, force: true });
               resolve({ outputFile, outputUrl: `/exports/${jobId}.gif` });
             })
-            .on('error', (error) => reject(error))
+            .on('error', (error) => {
+              fs.rmSync(framesDir, { recursive: true, force: true });
+              reject(error);
+            })
             .run();
         })
-        .on('error', (error) => reject(error))
+        .on('error', (error) => {
+          fs.rmSync(framesDir, { recursive: true, force: true });
+          reject(error);
+        })
         .run();
 
       return;
@@ -110,7 +121,10 @@ export async function processVideo({
         fs.rmSync(framesDir, { recursive: true, force: true });
         resolve({ outputFile, outputUrl: `/exports/${jobId}.${ext}` });
       })
-      .on('error', (error) => reject(error))
+      .on('error', (error) => {
+        fs.rmSync(framesDir, { recursive: true, force: true });
+        reject(error);
+      })
       .run();
   });
 }

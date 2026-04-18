@@ -1,11 +1,14 @@
 import path from 'path';
 import { Router } from 'express';
+import { fileURLToPath } from 'url';
 import { createJob, getJob, updateJob, getAllJobs, deleteJob } from '../utils/jobManager.js';
 import { captureDemo } from '../services/captureService.js';
 import { processVideo } from '../services/ffmpegService.js';
 import { storeFile } from '../services/storageService.js';
 
 const router = Router();
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const uploadsDir = path.resolve(__dirname, '../../public/exports/uploads');
 
 function isValidUrl(value) {
   try {
@@ -14,6 +17,57 @@ function isValidUrl(value) {
   } catch {
     return false;
   }
+}
+
+function getAllowedDemoOrigins() {
+  const configuredOrigins = (process.env.VIDEO_EXPORT_ALLOWED_ORIGINS || process.env.CLIENT_ORIGIN || 'http://localhost:5173')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  return new Set(configuredOrigins);
+}
+
+function getAllowedDemoPathPrefix() {
+  return process.env.VIDEO_EXPORT_ALLOWED_PATH_PREFIX || '/demo/';
+}
+
+function isAllowedDemoUrl(value) {
+  try {
+    const url = new URL(value);
+    if (!['http:', 'https:'].includes(url.protocol)) return false;
+    return getAllowedDemoOrigins().has(url.origin) && url.pathname.startsWith(getAllowedDemoPathPrefix());
+  } catch {
+    return false;
+  }
+}
+
+function normalizeWatermarkText(text) {
+  const sanitized = String(text || 'RetaliateAI')
+    .replace(/[^a-zA-Z0-9 _.,!@#&()\-]/g, '')
+    .trim();
+  return sanitized.slice(0, 80) || 'RetaliateAI';
+}
+
+function validateUploadedMusic(file) {
+  if (!file) return null;
+  const allowedMimes = new Set([
+    'audio/mpeg',
+    'audio/mp3',
+    'audio/mp4',
+    'audio/x-m4a',
+    'audio/wav',
+    'audio/webm',
+    'audio/ogg',
+  ]);
+  const name = String(file.originalname || '').toLowerCase();
+  const allowedExt = ['.mp3', '.wav', '.ogg', '.m4a', '.aac', '.webm'];
+  const extValid = allowedExt.some((ext) => name.endsWith(ext));
+  const mimeValid = !file.mimetype || allowedMimes.has(file.mimetype);
+  if (!extValid || !mimeValid) {
+    return 'Uploaded music file must be a supported audio type';
+  }
+  return null;
 }
 
 router.post('/start', async (req, res) => {
@@ -29,8 +83,12 @@ router.post('/start', async (req, res) => {
     storage = 'local',
   } = req.body;
 
-  if (!demoUrl || !isValidUrl(demoUrl)) {
-    return res.status(400).json({ error: 'A valid demoUrl is required' });
+  if (!demoUrl || !isAllowedDemoUrl(demoUrl)) {
+    return res.status(400).json({
+      error: 'demoUrl must be a valid URL from an allowed origin',
+      allowedOrigins: Array.from(getAllowedDemoOrigins()),
+      allowedPathPrefix: getAllowedDemoPathPrefix(),
+    });
   }
 
   if (!['1080p', '1440p', '4k'].includes(resolution)) {
@@ -67,12 +125,22 @@ router.post('/start', async (req, res) => {
   const uploadedMusic = Array.isArray(req.files) && req.files[0]?.path
     ? path.resolve(req.files[0].path)
     : null;
+  const uploadedMusicFile = Array.isArray(req.files) ? req.files[0] : null;
+
+  const uploadValidationError = validateUploadedMusic(uploadedMusicFile);
+  if (uploadValidationError) {
+    return res.status(400).json({ error: uploadValidationError });
+  }
+
+  if (uploadedMusic && !uploadedMusic.startsWith(`${uploadsDir}${path.sep}`)) {
+    return res.status(400).json({ error: 'Invalid uploaded music path' });
+  }
 
   const finalMusicUrl = uploadedMusic || musicUrl || null;
 
   const normalizedWatermark = {
     enabled: Boolean(watermark?.enabled),
-    text: watermark?.text || 'RetaliateAI',
+    text: normalizeWatermarkText(watermark?.text),
     position: watermark?.position || 'bottom-right',
     opacity: watermark?.opacity == null ? 0.7 : Number(watermark.opacity),
   };
@@ -89,7 +157,10 @@ router.post('/start', async (req, res) => {
     storage,
   });
 
-  const isCancelled = () => !getJob(job.id);
+  const isCancelled = () => {
+    const current = getJob(job.id);
+    return !current || current.status === 'cancelled';
+  };
 
   (async () => {
     try {
@@ -197,6 +268,25 @@ router.get('/jobs', (_req, res) => {
   }));
 
   res.json(jobs);
+});
+
+router.patch('/jobs/:jobId/cancel', (req, res) => {
+  const job = getJob(req.params.jobId);
+
+  if (!job) {
+    return res.status(404).json({ error: 'Job not found' });
+  }
+
+  if (job.status === 'done' || job.status === 'failed' || job.status === 'cancelled') {
+    return res.json({ success: true, job });
+  }
+
+  const updated = updateJob(job.id, {
+    status: 'cancelled',
+    message: 'Job cancelled',
+  });
+
+  return res.json({ success: true, job: updated });
 });
 
 router.delete('/jobs/:jobId', (req, res) => {

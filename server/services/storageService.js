@@ -34,7 +34,7 @@ async function uploadToS3({ filePath, jobId, format }) {
     Key: key,
     Body: fileStream,
     ContentType: contentTypeMap[format] || 'video/mp4',
-    ACL: 'public-read',
+    ...(process.env.PUBLIC_S3_EXPORTS === 'true' ? { ACL: 'public-read' } : {}),
   });
 
   await client.send(command);

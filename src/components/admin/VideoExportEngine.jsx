@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Download, Loader2, Trash2 } from 'lucide-react';
 import { ExportProgressBar } from './ExportProgressBar';
-import { videoExportApi } from '../../utils/videoExportApi';
+import { resolveExportUrl, videoExportApi } from '../../utils/videoExportApi';
 
 const defaultConfig = {
   demoUrl: 'http://localhost:5173/demo/abc123',
@@ -129,7 +129,7 @@ export default function VideoExportEngine() {
     }
   };
 
-  const previewUrl = activeJob?.outputUrl ? `http://localhost:3001${activeJob.outputUrl}` : null;
+  const previewUrl = resolveExportUrl(activeJob?.outputUrl);
   const isGif = activeJob?.outputUrl?.endsWith('.gif');
 
   return (
@@ -353,7 +353,7 @@ export default function VideoExportEngine() {
                   <td className="px-3 py-2">{new Date(job.createdAt).toLocaleString()}</td>
                   <td className="px-3 py-2">
                     {job.outputUrl ? (
-                      <a href={`http://localhost:3001${job.outputUrl}`} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">
+                      <a href={resolveExportUrl(job.outputUrl)} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">
                         View file
                       </a>
                     ) : (

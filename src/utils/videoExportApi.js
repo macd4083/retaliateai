@@ -1,4 +1,10 @@
-const API_BASE = import.meta.env.VITE_EXPORT_API_URL || 'http://localhost:3001';
+export const API_BASE = import.meta.env.VITE_EXPORT_API_URL || 'http://localhost:3001';
+
+export function resolveExportUrl(outputUrl) {
+  if (!outputUrl) return null;
+  if (outputUrl.startsWith('http://') || outputUrl.startsWith('https://')) return outputUrl;
+  return `${API_BASE}${outputUrl}`;
+}
 
 async function parseResponse(response) {
   if (!response.ok) {
@@ -34,6 +40,14 @@ export const videoExportApi = {
   deleteJob: async (jobId) => {
     const response = await fetch(`${API_BASE}/api/video-export/jobs/${jobId}`, {
       method: 'DELETE',
+    });
+
+    return parseResponse(response);
+  },
+
+  cancelJob: async (jobId) => {
+    const response = await fetch(`${API_BASE}/api/video-export/jobs/${jobId}/cancel`, {
+      method: 'PATCH',
     });
 
     return parseResponse(response);

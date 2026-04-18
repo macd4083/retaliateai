@@ -51,6 +51,14 @@ node server/index.js
 
 ## Environment Variables
 Copy `server/.env.example` to `server/.env` and fill in your values.
+- Required (all deployments): `SERVER_PORT`, `CLIENT_ORIGIN`
+- Required for S3 storage: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `S3_BUCKET_NAME` (and usually `AWS_REGION`)
+- Optional hardening/config: `VIDEO_EXPORT_ALLOWED_ORIGINS`, `VIDEO_EXPORT_ALLOWED_PATH_PREFIX`, `VIDEO_EXPORT_NAV_TIMEOUT_MS`, `PUBLIC_S3_EXPORTS`, `DELETE_LOCAL_AFTER_S3`
+- `VIDEO_EXPORT_CAPTURE_ORIGIN` forces Puppeteer to load from a fixed trusted origin while preserving the validated demo path/query.
+- `VIDEO_EXPORT_ALLOWED_ORIGINS` can be a comma-separated allowlist for demo URLs.
+- `VIDEO_EXPORT_ALLOWED_PATH_PREFIX` limits demo capture to a safe path prefix (default `/demo/`).
+- `VIDEO_EXPORT_NAV_TIMEOUT_MS` controls Puppeteer navigation timeout (default `30000`).
+- `PUBLIC_S3_EXPORTS=true` enables public-read ACL on uploaded objects (default is private).
 
 ## Supported Configurations
 | Setting | Options |
@@ -66,4 +74,5 @@ Copy `server/.env.example` to `server/.env` and fill in your values.
 - For 4K exports, ensure your machine has ≥8GB RAM
 - GIF exports are larger; recommend max 15s duration
 - S3 requires `public-read` ACL or a pre-signed URL approach
+- If `PUBLIC_S3_EXPORTS=false`, direct S3 object URLs may not be publicly accessible
 - The demo page should include `data-demo-ready` attribute when loaded

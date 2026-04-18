@@ -6,6 +6,37 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FRAMES_DIR = path.join(__dirname, '../../public/exports/frames');
 
+function getAllowedDemoOrigins() {
+  const configuredOrigins = (process.env.VIDEO_EXPORT_ALLOWED_ORIGINS || process.env.CLIENT_ORIGIN || 'http://localhost:5173')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  return new Set(configuredOrigins);
+}
+
+function getAllowedDemoPathPrefix() {
+  return process.env.VIDEO_EXPORT_ALLOWED_PATH_PREFIX || '/demo/';
+}
+
+function getCaptureOrigin() {
+  return process.env.VIDEO_EXPORT_CAPTURE_ORIGIN || process.env.CLIENT_ORIGIN || 'http://localhost:5173';
+}
+
+function buildSafeDemoUrl(demoUrl) {
+  const parsed = new URL(demoUrl);
+  if (!['http:', 'https:'].includes(parsed.protocol)) {
+    throw new Error('Invalid demoUrl protocol');
+  }
+  if (!getAllowedDemoOrigins().has(parsed.origin)) {
+    throw new Error('demoUrl origin is not allowed');
+  }
+  if (!parsed.pathname.startsWith(getAllowedDemoPathPrefix())) {
+    throw new Error('demoUrl path is not allowed');
+  }
+
+  return new URL(`${parsed.pathname}${parsed.search}`, getCaptureOrigin()).toString();
+}
+
 export async function captureDemo({ demoUrl, resolution, fps, duration, jobId, onProgress }) {
   const resolutions = {
     '1080p': { width: 1920, height: 1080 },
@@ -19,8 +50,11 @@ export async function captureDemo({ demoUrl, resolution, fps, duration, jobId, o
 
   let browser;
   try {
+    const safeDemoUrl = buildSafeDemoUrl(demoUrl);
+    const navigationTimeout = Number(process.env.VIDEO_EXPORT_NAV_TIMEOUT_MS || 30000);
+
     browser = await puppeteer.launch({
-      headless: 'new',
+      headless: true,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -30,7 +64,7 @@ export async function captureDemo({ demoUrl, resolution, fps, duration, jobId, o
 
     const page = await browser.newPage();
     await page.setViewport({ width, height, deviceScaleFactor: 1 });
-    await page.goto(demoUrl, { waitUntil: 'networkidle0', timeout: 60000 });
+    await page.goto(safeDemoUrl, { waitUntil: 'networkidle0', timeout: navigationTimeout });
 
     try {
       await page.waitForSelector('[data-demo-ready]', { timeout: 5000 });

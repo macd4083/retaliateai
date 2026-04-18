@@ -6,6 +6,7 @@ export function ExportProgressBar({ progress, status, message }) {
     capturing: 'bg-blue-500',
     processing: 'bg-purple-500',
     uploading: 'bg-yellow-500',
+    cancelled: 'bg-zinc-500',
     done: 'bg-green-500',
     failed: 'bg-red-500',
   };
