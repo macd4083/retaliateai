@@ -233,9 +233,14 @@ function ChatMessage({ message, isFirstMessage, onChipSelect, chipsDisabled, str
       )}
       <div className="max-w-[75%]">
         <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.2, ease: 'easeOut' }}
+          layoutId={isFirstMessage ? 'first-message-bubble' : undefined}
+          initial={isFirstMessage ? false : { opacity: 0, y: 8 }}
+          animate={isFirstMessage ? {} : { opacity: 1, y: 0 }}
+          transition={
+            isFirstMessage
+              ? { type: 'spring', stiffness: 280, damping: 28 }
+              : { duration: 0.2, ease: 'easeOut' }
+          }
           className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
             isUser
               ? 'bg-red-600 text-white rounded-tr-sm'
@@ -1073,11 +1078,12 @@ export default function ReflectionV2() {
               key="hero"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+              exit={{ opacity: 0, transition: { duration: 0 } }}
               transition={{ duration: 0.35, ease: 'easeOut' }}
               className="flex-1 flex flex-col items-center justify-start pt-20 px-4 pb-8"
             >
               <motion.div
+                layoutId="first-message-bubble"
                 initial={{ opacity: 0, y: 16 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.4, ease: 'easeOut', delay: 0.1 }}
@@ -1116,9 +1122,9 @@ export default function ReflectionV2() {
           ) : (
             <motion.div
               key="chat"
-              initial={{ opacity: 0 }}
+              initial={{ opacity: 1 }}
               animate={{ opacity: 1 }}
-              transition={{ duration: 0.25 }}
+              transition={{ duration: 0 }}
               className="flex-1 overflow-y-auto px-4 py-4"
             >
               {messages.map((message, index) => (
