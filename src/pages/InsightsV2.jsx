@@ -235,12 +235,21 @@ export default function InsightsV2() {
     } catch (_e) {}
   }
 
+  async function getAuthHeaders() {
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    return {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
+  }
+
   async function loadNarratives() {
     try {
-      const res = await fetch('/api/generate-pattern-narrative', {
+      const res = await fetch('/api/synthesize-insights', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user.id }),
+        headers: await getAuthHeaders(),
+        body: JSON.stringify({ user_id: user.id, return_as_narratives: true }),
       });
       if (res.ok) {
         const data = await res.json();
