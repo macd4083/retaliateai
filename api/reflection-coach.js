@@ -1700,6 +1700,24 @@ function buildDirectiveQueue({
     }
   }
 
+  // ── commitment_specificity ────────────────────────────────────────────
+  if (
+    currentStage === 'tomorrow' &&
+    sessionState.commitment_minimum &&
+    !sessionState.commitment_stretch &&
+    !sessionState.tomorrow_commitment &&
+    !completedDirectives.includes('commitment_specificity')
+  ) {
+    allDirectives.push({
+      id: 'commitment_specificity',
+      instruction: `COMMITMENT SPECIFICITY CHECK: The user just stated their minimum commitment: "${sessionState.commitment_minimum}". Before moving to the stretch question, evaluate whether this minimum is genuinely specific. A specific minimum commitment must have: (1) a WHEN — a day and time, not just "tomorrow" or "this week", (2) a clear first action — not aspirational language like "work on X" or "focus on Y". If the commitment is vague, push back directly and warmly — this is your one chance before the session closes. Say something like: "That's a start — but when exactly? Give me a day, a time, and the first thing you'll actually do." or "Be honest — is that specific enough to actually happen, or does it need a time and a first step?" Do NOT accept vague minimums. Push back once, clearly, then wait. If they sharpen it, update commitment_minimum in extracted_data with the improved version and set directive_completed: "commitment_specificity". If the minimum is already specific (has a time anchor and a concrete first action), set directive_completed: "commitment_specificity" immediately and proceed. Do NOT ask the stretch question until this check is complete.`,
+      priority: 1,
+      preferred_stage: 'tomorrow',
+      fire_next_session: false,
+      energy_type: 'planning',
+    });
+  }
+
   // ── tomorrow_commitment_structure ─────────────────────────────────────
   if (currentStage === 'tomorrow' && !sessionState.tomorrow_commitment) {
     const minimumCaptured = !!sessionState.commitment_minimum;
@@ -1711,7 +1729,8 @@ function buildDirectiveQueue({
 - Only AFTER minimum is captured, ask the stretch question: "Now push it — if tomorrow went as well as it possibly could, what would you have gotten done on top of that?" Store it in extracted_data.commitment_stretch.
 - Current captured state: minimum=${minimumCaptured ? `"${sessionState.commitment_minimum}"` : 'null'}, stretch=${stretchCaptured ? `"${sessionState.commitment_stretch}"` : 'null'}.
 - Once BOTH exist, set extracted_data.tomorrow_commitment to a combined summary (e.g. "Minimum: [minimum]. Stretch: [stretch].") and continue naturally.
-- Do not ask both questions in one message.`,
+- Do not ask both questions in one message.
+- IMPORTANT: Do NOT ask the stretch question until 'commitment_specificity' is in completed_directives. The specificity check runs first.`,
       priority: 1,
       preferred_stage: 'tomorrow',
       fire_next_session: false,
