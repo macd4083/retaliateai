@@ -1,5 +1,5 @@
 // @ts-nocheck
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -12,6 +12,26 @@ import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useUIEditorStore } from '@/store/uiEditorStore';
 
+function sanitizeImageSrc(value) {
+  const candidate = String(value || '').trim();
+  if (!candidate) return '';
+
+  if (candidate.startsWith('data:image/')) return candidate;
+  if (candidate.startsWith('blob:')) return candidate;
+  if (candidate.startsWith('/')) return candidate;
+
+  try {
+    const parsed = new URL(candidate, window.location.origin);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      return parsed.toString();
+    }
+  } catch {
+    return '';
+  }
+
+  return '';
+}
+
 export default function ImageReplaceModal({ iframeRef }) {
   const selectedNode = useUIEditorStore((state) => state.selectedNode);
   const imageModalOpen = useUIEditorStore((state) => state.imageModalOpen);
@@ -20,11 +40,13 @@ export default function ImageReplaceModal({ iframeRef }) {
 
   const [urlValue, setUrlValue] = useState('');
   const [previewSrc, setPreviewSrc] = useState('');
+  const [renderPreviewSrc, setRenderPreviewSrc] = useState('');
 
   function postSrc(src) {
-    if (!selectedNode?.eid || !src) return;
-    applyImageSrc(selectedNode.eid, src);
-    iframeRef?.current?.contentWindow?.postMessage({ type: 'CMD_SRC', eid: selectedNode.eid, value: src }, '*');
+    const safeSrc = sanitizeImageSrc(src);
+    if (!selectedNode?.eid || !safeSrc) return;
+    applyImageSrc(selectedNode.eid, safeSrc);
+    iframeRef?.current?.contentWindow?.postMessage({ type: 'CMD_SRC', eid: selectedNode.eid, value: safeSrc }, '*');
     setImageModalOpen(false);
   }
 
@@ -41,7 +63,47 @@ export default function ImageReplaceModal({ iframeRef }) {
     reader.readAsDataURL(file);
   }
 
-  const currentSrc = previewSrc || urlValue || selectedNode?.src || '';
+  const currentSrc = sanitizeImageSrc(previewSrc || urlValue || selectedNode?.src || '');
+
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl = '';
+
+    async function loadPreview() {
+      if (!currentSrc) {
+        setRenderPreviewSrc('');
+        return;
+      }
+
+      if (currentSrc.startsWith('data:image/') || currentSrc.startsWith('blob:')) {
+        setRenderPreviewSrc(currentSrc);
+        return;
+      }
+
+      try {
+        const response = await fetch(currentSrc);
+        if (!response.ok) throw new Error('Preview fetch failed');
+        const blob = await response.blob();
+        objectUrl = URL.createObjectURL(blob);
+        if (!cancelled) {
+          setRenderPreviewSrc(objectUrl);
+        }
+      } catch {
+        if (!cancelled) {
+          setRenderPreviewSrc('');
+        }
+      }
+    }
+
+    loadPreview();
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [currentSrc]);
 
   return (
     <Dialog open={imageModalOpen} onOpenChange={setImageModalOpen}>
@@ -52,8 +114,13 @@ export default function ImageReplaceModal({ iframeRef }) {
         </DialogHeader>
 
         <div className="rounded-lg border border-zinc-700 bg-zinc-950 p-3">
-          {currentSrc ? (
-            <img src={currentSrc} alt="Current preview" className="max-h-64 w-full object-contain rounded" />
+          {renderPreviewSrc ? (
+            <div
+              role="img"
+              aria-label="Current preview"
+              className="h-64 w-full rounded bg-center bg-contain bg-no-repeat"
+              style={{ backgroundImage: `url(\"${renderPreviewSrc}\")` }}
+            />
           ) : (
             <div className="h-40 flex items-center justify-center text-sm text-zinc-500">No preview available</div>
           )}

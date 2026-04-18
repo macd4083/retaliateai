@@ -25,6 +25,13 @@ function styleObjectToString(styles = {}) {
     .join(' ');
 }
 
+function escapeCSSIdentifier(value) {
+  if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
+    return CSS.escape(String(value || ''));
+  }
+  return String(value || '').replace(/[^a-zA-Z0-9_-]/g, '\\$&');
+}
+
 export function tagHTMLElements(html) {
   const doc = safeParseHTML(html);
   if (!doc) return html || '';
@@ -103,11 +110,11 @@ export function exportHTMLWithStyles(html, overrides = {}) {
   const updatedHTML = applyOverridesToHTML(tagged, overrides);
   const exportDoc = safeParseHTML(updatedHTML);
 
-  const cssRules = Object.entries(overrides || [])
+  const cssRules = Object.entries(overrides || {})
     .map(([eid, override]) => {
       const styleString = styleObjectToString(override?.styles || {});
       if (!styleString) return '';
-      return `.eid-${eid.replace(/^eid-/, '')} { ${styleString} }`;
+      return `.${escapeCSSIdentifier(eid)} { ${styleString} }`;
     })
     .filter(Boolean);
 
@@ -115,8 +122,7 @@ export function exportHTMLWithStyles(html, overrides = {}) {
     Object.keys(overrides || {}).forEach((eid) => {
       const target = exportDoc.querySelector(`[data-eid="${eid}"]`);
       if (!target) return;
-      const className = `eid-${eid.replace(/^eid-/, '')}`;
-      target.classList.add(className);
+      target.classList.add(eid);
     });
   }
 

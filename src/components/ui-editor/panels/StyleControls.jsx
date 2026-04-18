@@ -24,6 +24,13 @@ function normalizeColor(value, fallback = '#000000') {
   return fallback;
 }
 
+function extractUrlFromCss(value) {
+  const source = String(value || '').trim();
+  const match = source.match(/^url\((.*)\)$/i);
+  if (!match) return source;
+  return match[1].replace(/^['"]|['"]$/g, '');
+}
+
 function Row({ label, children }) {
   return (
     <div className="space-y-1.5">
@@ -68,7 +75,7 @@ export default function StyleControls({ selectedNode, applyStyle, applyAttr }) {
 
       <Row label="Background Image URL">
         <Input
-          value={String(styles.backgroundImage || '').replace(/^url\((.*)\)$/i, '$1').replace(/"/g, '')}
+          value={extractUrlFromCss(styles.backgroundImage)}
           onChange={(event) => {
             const value = event.target.value.trim();
             applyStyle('backgroundImage', value ? `url(${value})` : 'none');

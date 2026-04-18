@@ -4,6 +4,9 @@ import { create } from 'zustand';
 const MAX_HISTORY = 100;
 
 function cloneOverrides(overrides) {
+  if (typeof structuredClone === 'function') {
+    return structuredClone(overrides || {});
+  }
   return JSON.parse(JSON.stringify(overrides || {}));
 }
 

@@ -10,6 +10,10 @@ function pxValue(value) {
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
+function sideProperty(prefix, side) {
+  return `${prefix}${side.charAt(0).toUpperCase()}${side.slice(1)}`;
+}
+
 function EditableValue({ value, onCommit }) {
   const [editing, setEditing] = useState(false);
   const [local, setLocal] = useState(String(value));
@@ -110,7 +114,7 @@ export default function SpacingControls({ selectedNode, applyStyles }) {
       return;
     }
 
-    const key = `margin${side[0].toUpperCase()}${side.slice(1)}`;
+    const key = sideProperty('margin', side);
     applyStyles({ [key]: px });
   }
 
@@ -121,7 +125,7 @@ export default function SpacingControls({ selectedNode, applyStyles }) {
       return;
     }
 
-    const key = `padding${side[0].toUpperCase()}${side.slice(1)}`;
+    const key = sideProperty('padding', side);
     applyStyles({ [key]: px });
   }
 

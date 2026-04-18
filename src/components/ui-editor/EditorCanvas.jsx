@@ -4,6 +4,7 @@ import { UploadCloud } from 'lucide-react';
 import { useUIEditorStore } from '@/store/uiEditorStore';
 import { tagHTMLElements } from '@/utils/uiEditorUtils';
 
+const EXPORT_TIMEOUT_MS = 5000;
 let pendingExportResolver = null;
 
 export function requestEditorHTMLExport(iframeRef) {
@@ -22,7 +23,7 @@ export function requestEditorHTMLExport(iframeRef) {
         pendingExportResolver = null;
         reject(new Error('Timed out waiting for editor export.'));
       }
-    }, 5000);
+    }, EXPORT_TIMEOUT_MS);
   });
 }
 
@@ -110,7 +111,11 @@ export const EDITOR_INJECTION_SCRIPT = `(function() {
   document.addEventListener('dblclick', (e) => {
     const el = e.target.closest('[data-eid]');
     if (!el) return;
-    const isTextNode = el.childNodes.length === 1 && el.firstChild.nodeType === 3;
+    const nonWhitespaceNodes = Array.from(el.childNodes).filter((node) => {
+      if (node.nodeType !== 3) return true;
+      return node.textContent.trim() !== '';
+    });
+    const isTextNode = nonWhitespaceNodes.length === 1 && nonWhitespaceNodes[0].nodeType === 3;
     const isImg = el.tagName === 'IMG';
     if (isImg) {
       window.parent.postMessage({ type: 'EDITOR_IMAGE_CLICK', data: getNodeData(el) }, '*');
@@ -158,6 +163,7 @@ export const EDITOR_INJECTION_SCRIPT = `(function() {
   document.addEventListener('mouseup', () => { dragging = null; });
 
   window.addEventListener('message', (e) => {
+    if (e.source !== window.parent) return;
     const { type, eid, key, value, styles, text, attr } = e.data || {};
     const el = eid ? document.querySelector('[data-eid="' + eid + '"]') : null;
     if (type === 'CMD_STYLE' && el) { el.style[key] = value; }
@@ -221,6 +227,7 @@ export default function EditorCanvas({ iframeRef }) {
 
   useEffect(() => {
     function handleMessage(event) {
+      if (event.source !== localFrameRef.current?.contentWindow) return;
       const payload = event?.data;
       if (!payload || typeof payload !== 'object') return;
 

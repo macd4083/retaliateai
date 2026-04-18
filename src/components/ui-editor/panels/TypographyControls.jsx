@@ -27,6 +27,17 @@ function normalizeColor(value, fallback = '#ffffff') {
 }
 
 const FONT_FAMILIES = ['Inter', 'Arial', 'Helvetica', 'Georgia', 'Times New Roman', 'monospace'];
+const DEFAULT_LINE_HEIGHT = 1.2;
+const DEFAULT_LETTER_SPACING = 0;
+
+function parseFontSizeValue(value) {
+  const source = String(value || '').trim();
+  const match = source.match(/^(-?\d*\.?\d+)(px|rem)?$/i);
+  if (!match) return { number: 16, unit: 'px' };
+  const number = parseFloat(match[1]);
+  const unit = (match[2] || 'px').toLowerCase();
+  return { number: Number.isNaN(number) ? 16 : number, unit };
+}
 
 function Row({ label, children }) {
   return (
@@ -39,10 +50,11 @@ function Row({ label, children }) {
 
 export default function TypographyControls({ selectedNode, applyStyle }) {
   const styles = selectedNode?.styles || {};
-
-  const fontSizePx = parseFloat(String(styles.fontSize || '16')) || 16;
-  const lineHeight = parseFloat(String(styles.lineHeight || '1.2')) || 1.2;
-  const letterSpacing = parseFloat(String(styles.letterSpacing || '0')) || 0;
+  const parsedFontSize = parseFontSizeValue(styles.fontSize || '16px');
+  const fontSizePx = parsedFontSize.number;
+  const fontUnit = parsedFontSize.unit === 'rem' ? 'rem' : 'px';
+  const lineHeight = parseFloat(String(styles.lineHeight || DEFAULT_LINE_HEIGHT)) || DEFAULT_LINE_HEIGHT;
+  const letterSpacing = parseFloat(String(styles.letterSpacing || DEFAULT_LETTER_SPACING)) || DEFAULT_LETTER_SPACING;
   const colorHex = normalizeColor(styles.color, '#ffffff');
 
   const isUnderline = String(styles.textDecoration || '').includes('underline');
@@ -81,7 +93,7 @@ export default function TypographyControls({ selectedNode, applyStyle }) {
           />
         </Row>
         <Row label="Unit">
-          <Select value="px" onValueChange={(unit) => applyStyle('fontSize', `${fontSizePx}${unit}`)}>
+          <Select value={fontUnit} onValueChange={(unit) => applyStyle('fontSize', `${fontSizePx}${unit}`)}>
             <SelectTrigger className="bg-zinc-900 border-zinc-700">
               <SelectValue />
             </SelectTrigger>
@@ -110,7 +122,7 @@ export default function TypographyControls({ selectedNode, applyStyle }) {
             type="number"
             step="0.1"
             value={Number.isNaN(lineHeight) ? '' : lineHeight}
-            onChange={(event) => applyStyle('lineHeight', event.target.value || '1.2')}
+            onChange={(event) => applyStyle('lineHeight', event.target.value || String(DEFAULT_LINE_HEIGHT))}
             className="bg-zinc-900 border-zinc-700"
           />
         </Row>
