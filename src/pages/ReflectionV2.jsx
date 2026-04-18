@@ -93,6 +93,39 @@ function TypingIndicator() {
   );
 }
 
+function CommitmentChecklistCard({ fragments, onSubmit }) {
+  const [checkedIds, setCheckedIds] = useState([]);
+
+  function toggleItem(id) {
+    setCheckedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
+
+  return (
+    <div className="bg-zinc-800 border border-zinc-700 rounded-2xl p-4">
+      <p className="text-zinc-300 text-xs mb-3">What did you actually get done?</p>
+      <div className="space-y-2">
+        {(fragments || []).map((fragment) => (
+          <label key={fragment.id} className="flex items-start gap-2 text-sm text-white cursor-pointer">
+            <input
+              type="checkbox"
+              checked={checkedIds.includes(fragment.id)}
+              onChange={() => toggleItem(fragment.id)}
+              className="mt-0.5"
+            />
+            <span>{fragment.text}</span>
+          </label>
+        ))}
+      </div>
+      <button
+        onClick={() => onSubmit(checkedIds)}
+        className="mt-4 px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-xl text-sm font-medium transition-colors"
+      >
+        Submit
+      </button>
+    </div>
+  );
+}
+
 function SummaryCard({ data, streak, followThroughStats }) {
   const navigate = useNavigate();
 
@@ -209,9 +242,24 @@ function SummaryCard({ data, streak, followThroughStats }) {
 }
 
 
-function ChatMessage({ message, isFirstMessage, onChipSelect, chipsDisabled, streak, followThroughStats }) {
+function ChatMessage({ message, isFirstMessage, onChipSelect, chipsDisabled, streak, followThroughStats, sessionState, onChecklistSubmit }) {
   const isUser = message.role === 'user';
   if (message.isTyping) return <TypingIndicator />;
+  if (message.message_type === 'commitment_checklist' && !sessionState.fragments_submitted) {
+    return (
+      <div className="flex items-start gap-3 mb-4">
+        <div className="w-8 h-8 rounded-full bg-red-900 border border-red-700 flex items-center justify-center flex-shrink-0 mt-1">
+          <Moon className="w-4 h-4 text-red-400" />
+        </div>
+        <div className="max-w-[80%]">
+          <CommitmentChecklistCard
+            fragments={sessionState.checklist_fragments}
+            onSubmit={onChecklistSubmit}
+          />
+        </div>
+      </div>
+    );
+  }
   if (message.message_type === 'summary_card' && message.card_data) {
     return (
       <div className="flex items-start gap-3 mb-4">
@@ -316,6 +364,8 @@ export default function ReflectionV2() {
     yesterday_commitment: null,
     commitment_checkin_done: false,
     checkin_outcome: null,
+    checklist_fragments: [],
+    fragments_submitted: false,
     depth_opportunity_count: 0,
     directive_queue: [],
     completed_directives: [],
@@ -343,7 +393,7 @@ export default function ReflectionV2() {
       return [
         { id: 'wins', label: 'Wins' },
         { id: 'commitment_checkin', label: 'Check-in' },
-        { id: 'honest', label: 'Honest' },
+        { id: 'honest', label: checkin_outcome === 'partial' ? 'Honest*' : 'Honest' },
         { id: 'tomorrow', label: 'Tomorrow' },
         { id: 'close', label: 'Close' },
       ];
@@ -461,6 +511,8 @@ export default function ReflectionV2() {
         yesterday_commitment: session.yesterday_commitment || fetchedYesterdayCommitment || null,
         commitment_checkin_done: session.commitment_checkin_done === true,
         checkin_outcome: session.checkin_outcome || null,
+        checklist_fragments: [],
+        fragments_submitted: false,
         depth_opportunity_count: session.depth_opportunity_count || 0,
         directive_queue: Array.isArray(session.directive_queue) ? session.directive_queue : [],
         completed_directives: Array.isArray(session.completed_directives) ? session.completed_directives : [],
@@ -574,16 +626,17 @@ export default function ReflectionV2() {
 
   // ── Send message ──────────────────────────────────────────────────────────
 
-  async function sendMessage(userText, overrideSessionId, overrideState) {
+  async function sendMessage(userText, overrideSessionId, overrideState, extraContext = {}) {
     const sid = overrideSessionId || sessionId;
     const state = overrideState || sessionState;
     if (!sid || !user?.id) return;
 
     const isInit = userText === '__INIT__';
+    const isChecklistSubmission = userText === '__CHECKLIST_SUBMITTED__';
 
     let currentMsgs = messagesRef.current;
 
-    if (!isInit) {
+    if (!isInit && !isChecklistSubmission) {
       const userMsg = {
         id: `user-${Date.now()}`,
         role: 'user',
@@ -691,6 +744,7 @@ export default function ReflectionV2() {
               display_name: profile?.display_name || profile?.full_name || null,
               client_local_date: localDateStr(),
               client_tz_offset: new Date().getTimezoneOffset(),
+              ...extraContext,
             },
           }),
         });
@@ -721,12 +775,20 @@ export default function ReflectionV2() {
         setSummaryCardData(newSummaryData);
       }
 
+      const shouldShowChecklist =
+        data.show_commitment_checklist === true &&
+        Array.isArray(data.checklist_fragments) &&
+        data.checklist_fragments.length > 0;
       const aiMessage = {
         id: `ai-${Date.now()}`,
         role: 'assistant',
         content: data.assistant_message || '',
         chips: data.chips || null,
-        message_type: isSummaryCard ? 'summary_card' : data.message_type || 'question',
+        message_type: isSummaryCard
+          ? 'summary_card'
+          : shouldShowChecklist
+            ? 'commitment_checklist'
+            : data.message_type || 'question',
         card_data: isSummaryCard ? newSummaryData : null,
         isTyping: false,
       };
@@ -748,7 +810,7 @@ export default function ReflectionV2() {
         })
         .catch(() => {});
 
-      if (data.extracted_data || data.stage_advance || data.checklist_updates || data.consecutive_excuses !== undefined || data.wins_asked_for_more || data.honest_depth || data.commitment_checkin_done) {
+      if (data.extracted_data || data.stage_advance || data.checklist_updates || data.consecutive_excuses !== undefined || data.wins_asked_for_more || data.honest_depth || data.commitment_checkin_done || shouldShowChecklist) {
         const newState = { ...state };
         if (data.extracted_data?.mood) newState.mood_end_of_day = data.extracted_data.mood;
         if (data.extracted_data?.win_text)
@@ -785,6 +847,17 @@ export default function ReflectionV2() {
         if (data.honest_depth === true) newState.honest_depth = true;
         if (data.commitment_checkin_done === true) newState.commitment_checkin_done = true;
         if (data.checkin_outcome) newState.checkin_outcome = data.checkin_outcome;
+        if (shouldShowChecklist) {
+          newState.checklist_fragments = data.checklist_fragments.map((f) => ({
+            id: f.id,
+            text: f.text || f.commitment_text || '',
+            goal_id: f.goal_id || null,
+          }));
+          newState.fragments_submitted = false;
+        }
+        if (data.commitment_checkin_done === true) {
+          newState.fragments_submitted = true;
+        }
         if (data.depth_opportunity === true || data.intentData?.depth_opportunity === true) {
           newState.depth_opportunity_count = (newState.depth_opportunity_count || 0) + 1;
         }
@@ -942,7 +1015,11 @@ export default function ReflectionV2() {
           yesterday_commitment: null,
           commitment_checkin_done: false,
           checkin_outcome: null,
+          checklist_fragments: [],
+          fragments_submitted: false,
           depth_opportunity_count: 0,
+          directive_queue: [],
+          completed_directives: [],
         });
         initCalledRef.current = false;
         initSentRef.current = false;
@@ -997,6 +1074,18 @@ export default function ReflectionV2() {
     sendMessage(chip.label);
   }
 
+  async function handleChecklistSubmit(checkedIds) {
+    const fragmentResults = sessionState.checklist_fragments.map((f) => ({
+      id: f.id,
+      kept: checkedIds.includes(f.id),
+    }));
+
+    setSessionState((prev) => ({ ...prev, fragments_submitted: true }));
+    await sendMessage('__CHECKLIST_SUBMITTED__', undefined, undefined, {
+      checklist_result: fragmentResults,
+    });
+  }
+
   // ── Handle send ───────────────────────────────────────────────────────────
 
   function handleSend() {
@@ -1044,6 +1133,9 @@ export default function ReflectionV2() {
   }, [isInitializing, chatFocused]);
 
   // ── Render ───────────────────────────
+  const isChecklistBlocking =
+    messages.some((m) => m.message_type === 'commitment_checklist') &&
+    !sessionState.fragments_submitted;
   const showHero = !chatFocused && !isInitializing && messages.length === 1 && messages[0]?.role === 'assistant';
   const textareaPlaceholder = showHero
     ? 'Start typing...'
@@ -1136,6 +1228,8 @@ export default function ReflectionV2() {
                   chipsDisabled={usedChipMessageIds.has(message.id) || isLoading}
                   streak={streak}
                   followThroughStats={followThroughStats}
+                  sessionState={sessionState}
+                  onChecklistSubmit={handleChecklistSubmit}
                 />
               ))}
               {initError && (
@@ -1230,7 +1324,7 @@ export default function ReflectionV2() {
                   onChange={handleTextareaChange}
                   onKeyDown={handleKeyDown}
                   onFocus={() => setChatFocused(true)}
-                  disabled={isInitializing}
+                  disabled={isInitializing || isChecklistBlocking}
                   placeholder="Anything else on your mind..."
                   rows={1}
                   className="w-full bg-transparent px-4 py-3 text-sm text-white placeholder-zinc-500 resize-none focus:outline-none"
@@ -1250,7 +1344,7 @@ export default function ReflectionV2() {
                   onChange={handleTextareaChange}
                   onKeyDown={handleKeyDown}
                   onFocus={() => setChatFocused(true)}
-                  disabled={isInitializing}
+                  disabled={isInitializing || isChecklistBlocking}
                   placeholder={textareaPlaceholder}
                   rows={1}
                   className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-500 resize-none focus:outline-none focus:border-zinc-500 transition-colors disabled:opacity-50"
@@ -1265,6 +1359,7 @@ export default function ReflectionV2() {
                   ? selectedGoalChips.length === 0 && !inputValue.trim()
                   : !inputValue.trim()
                 ) || isLoading || isInitializing
+                  || isChecklistBlocking
               }
               className="w-10 h-10 rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center flex-shrink-0"
             >
