@@ -195,6 +195,9 @@ export function useDemoBuilder() {
   const saveToLocalStorage = useCallback(() => {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state.demo));
+    if (state.demo?.id) {
+      window.localStorage.setItem(`retaliateai_demo_${state.demo.id}`, JSON.stringify(state.demo));
+    }
     dispatch({ type: 'MARK_SAVED' });
   }, [dispatch, state.demo]);
 

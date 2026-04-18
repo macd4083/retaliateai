@@ -336,7 +336,12 @@
     goTo(state.index + 1);
   }
 
-  function play() {
+  function play(nextDemo) {
+    if (nextDemo && typeof nextDemo === 'object') {
+      state.demo = nextDemo;
+      state.index = 0;
+      state.currentStep = null;
+    }
     if (!state.demo.steps.length) return;
     ensureStyles();
     state.root = createContainer();

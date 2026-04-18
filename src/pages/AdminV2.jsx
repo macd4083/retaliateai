@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Database, Trash2, ChevronDown, ChevronRight, RefreshCw, Play, WandSparkles } from 'lucide-react';
+import { Database, Trash2, ChevronDown, ChevronRight, RefreshCw, Play, Video, WandSparkles } from 'lucide-react';
 import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase/client';
 import { localDateStr } from '../lib/dateUtils';
 import AppShellV2 from '../components/v2/AppShellV2';
+import AdminToolsNav from '../components/admin/AdminToolsNav';
 
 const ADMIN_SECRET = import.meta.env.VITE_ADMIN_SECRET;
 
@@ -524,7 +525,7 @@ export default function AdminV2() {
             Refresh
           </button>
           <button
-            onClick={() => navigate('/admin/demo-builder')}
+            onClick={() => navigate('/demo-builder')}
             className="flex items-center gap-2 px-4 py-2 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 hover:text-white text-sm transition-colors"
           >
             <Play className="w-4 h-4" />
@@ -540,7 +541,16 @@ export default function AdminV2() {
               <span className="block text-[11px] text-zinc-500">Edit any captured UI snapshot with direct manipulation.</span>
             </span>
           </button>
+          <button
+            onClick={() => navigate('/video-export')}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 hover:text-white text-sm transition-colors"
+          >
+            <Video className="w-4 h-4 text-blue-400" />
+            Video Export
+          </button>
         </div>
+
+        <AdminToolsNav />
 
         {resultMsg && (
           <div className="px-4 py-3 rounded-xl bg-zinc-900 border border-zinc-700 text-sm text-zinc-300">
