@@ -334,6 +334,7 @@ export default function ReflectionV2() {
   // messagesRef always holds the latest messages array so sendMessage
   // never closes over a stale snapshot.
   const messagesRef = useRef([]);
+  const commitmentStatsCacheRef = useRef(null);
 
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState('');
@@ -372,6 +373,7 @@ export default function ReflectionV2() {
   });
   const [summaryCardData, setSummaryCardData] = useState({});
   const [followThroughStats, setFollowThroughStats] = useState(null);
+  const [commitmentStatsCache, setCommitmentStatsCache] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [pendingGoalSuggestion, setPendingGoalSuggestion] = useState(null);
   const [pendingWhyCapture, setPendingWhyCapture] = useState(null); // { goalId, title }
@@ -526,6 +528,19 @@ export default function ReflectionV2() {
       } catch (streakErr) {
         console.error('[initSession] getReflectionStreak failed:', streakErr);
       }
+
+      try {
+        const statsRes = await fetch('/api/commitment-stats', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: user.id, client_local_date: localDateStr() }),
+        });
+        if (statsRes.ok) {
+          const stats = await statsRes.json();
+          setCommitmentStatsCache(stats);
+          commitmentStatsCacheRef.current = stats;
+        }
+      } catch (_e) {}
 
       // Active goals — non-critical, fail silently
       try {
@@ -708,6 +723,7 @@ export default function ReflectionV2() {
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 25000);
+      const commitmentStats = commitmentStatsCacheRef.current || commitmentStatsCache;
 
       let response;
       try {
@@ -744,6 +760,12 @@ export default function ReflectionV2() {
               display_name: profile?.display_name || profile?.full_name || null,
               client_local_date: localDateStr(),
               client_tz_offset: new Date().getTimezoneOffset(),
+              commitment_rate_7: commitmentStats?.followThrough7?.total >= 3
+                ? Math.round((commitmentStats.followThrough7.kept / commitmentStats.followThrough7.total) * 100)
+                : null,
+              commitment_trajectory: commitmentStats?.trajectory ?? null,
+              avg_commitment_score: commitmentStats?.avgScore7 ?? null,
+              score_trajectory: commitmentStats?.scoreTrajectory ?? null,
               ...extraContext,
             },
           }),
@@ -996,6 +1018,8 @@ export default function ReflectionV2() {
         setIsComplete(false);
         setSummaryCardData({});
         setUsedChipMessageIds(new Set());
+        setCommitmentStatsCache(null);
+        commitmentStatsCacheRef.current = null;
         setSessionState({
           current_stage: 'wins',
           mood_end_of_day: null,
