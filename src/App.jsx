@@ -9,6 +9,7 @@ import OnboardingV2 from './pages/OnboardingV2';
 import AdminV2 from './pages/AdminV2';
 import VideoExport from './pages/admin/VideoExport';
 import DemoBuilder from './pages/DemoBuilder';
+import DemoPlayerPage from './pages/DemoPlayerPage';
 import UIRecorder from './pages/UIRecorder';
 import UIEditor from './pages/UIEditor';
 import Login from './pages/Login';
@@ -114,6 +115,7 @@ export default function App() {
       <Route path="/privacy" element={<PrivacyPolicy />} />
       <Route path="/terms" element={<TermsOfService />} />
       <Route path="/" element={<Landing />} />
+      <Route path="/demo/:id" element={<DemoPlayerPage />} />
 
       {/* V2 protected routes */}
       <Route
@@ -158,7 +160,23 @@ export default function App() {
         }
       />
       <Route
+        path="/video-export"
+        element={
+          <AuthGuardV2>
+            <VideoExport />
+          </AuthGuardV2>
+        }
+      />
+      <Route
         path="/admin/demo-builder"
+        element={
+          <AuthGuardV2>
+            <DemoBuilder />
+          </AuthGuardV2>
+        }
+      />
+      <Route
+        path="/demo-builder"
         element={
           <AuthGuardV2>
             <DemoBuilder />

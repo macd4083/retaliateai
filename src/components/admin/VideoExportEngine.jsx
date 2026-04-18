@@ -20,13 +20,29 @@ const defaultConfig = {
   storage: 'local',
 };
 
-export default function VideoExportEngine() {
+export default function VideoExportEngine({ initialDemoUrl = '', handoffMessage = '' }) {
   const [config, setConfig] = useState(defaultConfig);
   const [activeJob, setActiveJob] = useState(null);
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [handoffNotice, setHandoffNotice] = useState(handoffMessage);
   const sourceRef = useRef(null);
+
+  useEffect(() => {
+    if (!initialDemoUrl) return;
+    setConfig((prev) => ({ ...prev, demoUrl: initialDemoUrl }));
+  }, [initialDemoUrl]);
+
+  useEffect(() => {
+    setHandoffNotice(handoffMessage || '');
+  }, [handoffMessage]);
+
+  useEffect(() => {
+    if (!handoffNotice) return;
+    const timer = window.setTimeout(() => setHandoffNotice(''), 2800);
+    return () => window.clearTimeout(timer);
+  }, [handoffNotice]);
 
   const refreshJobs = async () => {
     try {
@@ -138,6 +154,12 @@ export default function VideoExportEngine() {
         <h1 className="text-2xl font-semibold text-white">Video Export Engine</h1>
         <p className="text-sm text-zinc-400">Export demo playback to MP4, WebM, or GIF with watermark and optional music.</p>
       </div>
+
+      {handoffNotice ? (
+        <div className="rounded-lg border border-emerald-800 bg-emerald-950/40 p-3 text-sm text-emerald-300">
+          {handoffNotice}
+        </div>
+      ) : null}
 
       {error && <div className="rounded-lg border border-red-700 bg-red-950/60 p-3 text-sm text-red-300">{error}</div>}
 
