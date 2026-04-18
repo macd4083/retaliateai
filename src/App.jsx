@@ -7,6 +7,7 @@ import InsightsV2 from './pages/InsightsV2';
 import SettingsV2 from './pages/SettingsV2';
 import OnboardingV2 from './pages/OnboardingV2';
 import AdminV2 from './pages/AdminV2';
+import UIRecorder from './pages/UIRecorder';
 import Login from './pages/Login';
 import ResetPassword from './pages/ResetPassword';
 import EmailConfirmed from './pages/EmailConfirmed';
@@ -142,6 +143,14 @@ export default function App() {
         element={
           <AuthGuardV2>
             <AdminV2 />
+          </AuthGuardV2>
+        }
+      />
+      <Route
+        path="/recorder"
+        element={
+          <AuthGuardV2>
+            <UIRecorder />
           </AuthGuardV2>
         }
       />
