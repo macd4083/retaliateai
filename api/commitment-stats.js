@@ -9,9 +9,12 @@
  *   followThrough7:      { kept, total } — commitments kept in the last 7 calendar days
  *   followThroughPrior7: { kept, total } — commitments kept in days 8–14
  *   trajectory:          "improving" | "declining" | "stable"
+ *   avgScore7:           average commitment_score in last 7 days (null if <3 scored sessions)
+ *   avgScorePrior7:      average commitment_score in days 8–14 (null if <3 scored sessions)
+ *   scoreTrajectory:     "improving" | "declining" | "stable"
  *   recoveryDays:        longest gap (missed days) between sessions in last 30 days
  *   recoveriesCount:     number of times user missed ≥1 day and came back
- *   weeklyData:          array of { weekLabel, kept, total, rate } — 8 weeks, oldest→newest
+ *   weeklyData:          array of { weekLabel, kept, total, rate, avgScore } — 8 weeks, oldest→newest
  *                        total is always 7 (days in the week), kept = how many commitments were followed through
  *   thisWeekKept:        commitments kept so far this calendar week (Mon–today)
  *   thisWeekTotal:       commitments made+evaluable so far this calendar week
@@ -23,6 +26,8 @@ const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
+
+const SCORE_TRAJECTORY_THRESHOLD = 5;
 
 // Return YYYY-MM-DD string for today (server UTC)
 function todayStr() {
@@ -114,6 +119,18 @@ function computeWeeklyKeptOutOf7(wSessions, allSessionsByDate) {
   return { kept, total: 7 };
 }
 
+/**
+ * Computes the average commitment_score for a list of sessions.
+ * Returns null when there are fewer than minSamples non-null numeric scores.
+ */
+function averageCommitmentScoreOrNull(sessions, minSamples = 3) {
+  const scored = sessions
+    .map((s) => s.commitment_score)
+    .filter((score) => Number.isFinite(score));
+  if (scored.length < minSamples) return null;
+  return scored.reduce((sum, score) => sum + score, 0) / scored.length;
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -134,7 +151,7 @@ export default async function handler(req, res) {
     // ── Fetch last 15 days (14 + 1 for next-day lookups) ─────────────────
     const { data: sessions15 } = await supabase
       .from('reflection_sessions')
-      .select('date, tomorrow_commitment, is_complete')
+      .select('date, tomorrow_commitment, is_complete, commitment_score')
       .eq('user_id', user_id)
       .gte('date', addDays(day14ago, -1)) // one extra day for next-day lookup on the oldest
       .lte('date', addDays(today, 1))     // include tomorrow in case someone reflects tonight and we need it
@@ -158,6 +175,8 @@ export default async function handler(req, res) {
 
     const followThrough7 = computeFollowThrough(last7, allSessionsByDate);
     const followThroughPrior7 = computeFollowThrough(prior7, allSessionsByDate);
+    const avgScore7 = averageCommitmentScoreOrNull(last7);
+    const avgScorePrior7 = averageCommitmentScoreOrNull(prior7);
 
     // Trajectory — compare rates (ignore if either window has insufficient data)
     const rate7 = followThrough7.total > 0 ? followThrough7.kept / followThrough7.total : null;
@@ -167,6 +186,12 @@ export default async function handler(req, res) {
     if (rate7 !== null && ratePrior !== null) {
       if (rate7 - ratePrior > 0.1) trajectory = 'improving';
       else if (ratePrior - rate7 > 0.1) trajectory = 'declining';
+    }
+
+    let scoreTrajectory = 'stable';
+    if (avgScore7 !== null && avgScorePrior7 !== null) {
+      if (avgScore7 - avgScorePrior7 >= SCORE_TRAJECTORY_THRESHOLD) scoreTrajectory = 'improving';
+      else if (avgScorePrior7 - avgScore7 >= SCORE_TRAJECTORY_THRESHOLD) scoreTrajectory = 'declining';
     }
 
     // ── Recovery stats — gaps between completed sessions in last 30 days ──
@@ -199,7 +224,7 @@ export default async function handler(req, res) {
     // "total" is always 7 so the graph is always out of 7.
     const { data: sessions8w } = await supabase
       .from('reflection_sessions')
-      .select('date, tomorrow_commitment, is_complete')
+      .select('date, tomorrow_commitment, is_complete, commitment_score')
       .eq('user_id', user_id)
       .gte('date', weekStart8ago)
       .lte('date', addDays(today, 1)) // include tomorrow for next-day lookups on Sunday
@@ -218,11 +243,17 @@ export default async function handler(req, res) {
       const wEnd = addDays(wStart, 6);
       const wSessions = all8wSessions.filter((s) => s.date >= wStart && s.date <= wEnd);
       const { kept } = computeWeeklyKeptOutOf7(wSessions, all8wByDate);
+      const weeklyScored = wSessions
+        .map((s) => s.commitment_score)
+        .filter((score) => Number.isFinite(score));
       weeklyData.push({
         weekLabel: formatWeekLabel(wStart),
         kept,
         total: 7,
         rate: kept / 7,
+        avgScore: weeklyScored.length > 0
+          ? weeklyScored.reduce((sum, score) => sum + score, 0) / weeklyScored.length
+          : null,
       });
     }
 
@@ -239,6 +270,9 @@ export default async function handler(req, res) {
       followThrough7,
       followThroughPrior7,
       trajectory,
+      avgScore7,
+      avgScorePrior7,
+      scoreTrajectory,
       recoveryDays,
       recoveriesCount,
       weeklyData,
