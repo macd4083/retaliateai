@@ -8,21 +8,8 @@ export const aiWorkflows = {
       // Step 1: Save the raw entry first
       const savedEntry = await journalHelpers.createEntry(userId, entryData);
 
-      // Step 2: Generate embedding
-      const embeddingResponse = await fetch('/api/generate-embedding', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: entryData.content }),
-      });
-
-      if (!embeddingResponse.ok) {
-        throw new Error('Failed to generate embedding');
-      }
-
-      const { embedding } = await embeddingResponse.json();
-
-      // Step 3: Update entry with embedding
-      await journalHelpers.updateEntry(savedEntry.id, { embedding });
+      // Step 2: Embedding endpoint removed from API consolidation path
+      const embedding = null;
 
       // Step 4: Get entry count to determine search strategy
       const allEntries = await journalHelpers.getEntries(userId);
@@ -32,21 +19,22 @@ export const aiWorkflows = {
       const searchLimit = entryCount < 10 ? Math.max(entryCount - 1, 3) : 5;
 
       // Step 5: Search for similar past entries
-      const similarResponse = await fetch('/api/search-similar-entries', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: userId,
-          embedding,
-          limit: searchLimit,
-        }),
-      });
-
-      if (!similarResponse.ok) {
-        throw new Error('Failed to search similar entries');
-      }
-
-      const { entries: similarEntries } = await similarResponse.json();
+      const similarEntries = embedding
+        ? await (async () => {
+            const similarResponse = await fetch('/api/search-similar-entries', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                user_id: userId,
+                embedding,
+                limit: searchLimit,
+              }),
+            });
+            if (!similarResponse.ok) throw new Error('Failed to search similar entries');
+            const payload = await similarResponse.json();
+            return payload.entries || [];
+          })()
+        : [];
 
       // Step 6: Enrich summaries with temporal context
       const enrichedSummaries = similarEntries.map(e => {
@@ -139,41 +127,29 @@ export const aiWorkflows = {
 
       const savedEntry = await journalHelpers.createEntry(userId, entryData);
 
-      // Step 3: Generate embedding (same as journal)
-      const embeddingResponse = await fetch('/api/generate-embedding', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: fullContent }),
-      });
-
-      if (!embeddingResponse.ok) {
-        throw new Error('Failed to generate embedding');
-      }
-
-      const { embedding } = await embeddingResponse.json();
-
-      // Step 4: Update entry with embedding
-      await journalHelpers.updateEntry(savedEntry.id, { embedding });
+      // Step 3: Embedding endpoint removed from API consolidation path
+      const embedding = null;
 
       // Step 5: Search for similar past entries
       const allEntries = await journalHelpers.getEntries(userId);
       const searchLimit = allEntries.length < 10 ? Math.max(allEntries.length - 1, 3) : 5;
 
-      const similarResponse = await fetch('/api/search-similar-entries', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: userId,
-          embedding,
-          limit: searchLimit,
-        }),
-      });
-
-      if (!similarResponse.ok) {
-        throw new Error('Failed to search similar entries');
-      }
-
-      const { entries: similarEntries } = await similarResponse.json();
+      const similarEntries = embedding
+        ? await (async () => {
+            const similarResponse = await fetch('/api/search-similar-entries', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                user_id: userId,
+                embedding,
+                limit: searchLimit,
+              }),
+            });
+            if (!similarResponse.ok) throw new Error('Failed to search similar entries');
+            const payload = await similarResponse.json();
+            return payload.entries || [];
+          })()
+        : [];
 
       // Step 6: Enrich with temporal context
       const enrichedSummaries = similarEntries.map(e => {

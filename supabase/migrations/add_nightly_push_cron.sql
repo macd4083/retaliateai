@@ -1,6 +1,6 @@
 -- Supabase pg_cron job: nightly push notifications
 --
--- This replaces the Vercel cron job for /api/nightly-push which required
+-- This replaces the Vercel cron job for /api/push which required
 -- running every minute (to match per-user preferred_reflection_time across timezones).
 -- Vercel hobby plan only allows daily crons, so we use Supabase pg_cron instead.
 --
@@ -24,13 +24,13 @@ BEGIN
   END IF;
 END $$;
 
--- Schedule: runs every minute, calls the Vercel nightly-push endpoint
+-- Schedule: runs every minute, calls the Vercel push endpoint
 SELECT cron.schedule(
   'nightly-push-notifications',
   '* * * * *',
   $$
   SELECT pg_net.http_post(
-    url := 'https://your-vercel-deployment-url.vercel.app/api/nightly-push',
+    url := 'https://your-vercel-deployment-url.vercel.app/api/push',
     headers := '{"Content-Type": "application/json"}'::jsonb,
     body := '{}'::jsonb
   );

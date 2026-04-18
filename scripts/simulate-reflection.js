@@ -22,10 +22,7 @@ import { randomUUID } from 'crypto';
 
 import handler from '../api/reflection-coach.js';
 import commitmentStatsHandler from '../api/commitment-stats.js';
-import generatePatternNarrativeHandler from '../api/generate-pattern-narrative.js';
 import createGoalHandler from '../api/create-goal.js';
-import classifyIntentHandler from '../api/classify-intent.js';
-import generateEmbeddingHandler from '../api/generate-embedding.js';
 import extractGoalCommitmentsHandler from '../api/extract-goal-commitments.js';
 import goalCommitmentStatsHandler from '../api/goal-commitment-stats.js';
 import evaluateGoalCommitmentsHandler from '../api/evaluate-goal-commitments.js';
@@ -278,18 +275,12 @@ async function validateBackend(supabase, userId, simulatedDate, prevGoalWhysCoun
         .join(', ');
       console.log(`    🔁  Insights: ${insightStr}`);
 
-      // 3. Generate narrative if insights exist
-      try {
-        const narrativeResult = await callHandler(generatePatternNarrativeHandler, { user_id: userId });
-        if (narrativeResult.narratives && narrativeResult.narratives.length > 0) {
-          const first = narrativeResult.narratives[0];
-          const preview = first.narrative ?? '';
-          backendState.narrative_sample = preview || null;
-          const display = preview.length > 120 ? `${preview.slice(0, 120)}...` : preview;
-          console.log(`    💬  Narrative (${first.label}): "${display}"`);
-        }
-      } catch (err) {
-        console.warn(`    ⚠️  generate-pattern-narrative failed: ${err.message}`);
+      const first = insights[0];
+      const preview = first?.pattern_narrative ?? '';
+      if (preview) {
+        backendState.narrative_sample = preview;
+        const display = preview.length > 120 ? `${preview.slice(0, 120)}...` : preview;
+        console.log(`    💬  Narrative (${first.pattern_label}): "${display}"`);
       }
     } else {
       console.log(`    🔁  Insights: none synthesized yet`);
@@ -373,40 +364,7 @@ async function validateBackend(supabase, userId, simulatedDate, prevGoalWhysCoun
     }
   }
 
-  // 4. Generate embedding (lightweight check — runs when a sample message is available)
-  if (options.sampleUserMessage) {
-    try {
-      const embedResult = await callHandler(generateEmbeddingHandler, { text: options.sampleUserMessage });
-      if (embedResult.embedding && Array.isArray(embedResult.embedding) && embedResult.embedding.length > 100) {
-        backendState.embedding_check = { vector_length: embedResult.embedding.length, passed: true };
-        console.log(`    🔢  Embedding: vector length ${embedResult.embedding.length} ✅`);
-      } else {
-        backendState.embedding_check = { passed: false };
-        console.log(`    🔢  Embedding: unexpected result ❌`);
-      }
-    } catch (err) {
-      console.warn(`    ⚠️  generate-embedding failed: ${err.message}`);
-    }
-  }
-
-  // 5. Classify intent (lightweight check — runs when a sample message is available)
-  if (options.sampleUserMessage) {
-    try {
-      const classifyResult = await callHandler(classifyIntentHandler, {
-        user_message: options.sampleUserMessage,
-        session_context: {},
-      });
-      if (classifyResult.intent && typeof classifyResult.intent === 'string' && classifyResult.intent.length > 0) {
-        backendState.classify_intent_check = { intent: classifyResult.intent, passed: true };
-        console.log(`    🏷️   Intent: "${classifyResult.intent}" ✅`);
-      } else {
-        backendState.classify_intent_check = { passed: false };
-        console.log(`    🏷️   Intent: invalid result ❌`);
-      }
-    } catch (err) {
-      console.warn(`    ⚠️  classify-intent failed: ${err.message}`);
-    }
-  }
+  // 4-5. Deprecated endpoint checks (generate-embedding, classify-intent) removed from API surface.
 
   // 6. Extract goal commitments (runs when a commitment was made this session)
   if (options.commitmentText && Array.isArray(options.sampleGoals) && options.sampleGoals.length > 0) {
@@ -461,7 +419,7 @@ async function validateBackend(supabase, userId, simulatedDate, prevGoalWhysCoun
   return backendState;
 }
 /**
- * Queries user_profiles and calls generatePatternNarrativeHandler to capture
+ * Queries user_profiles and user_insights to capture
  * the current state of the user's profile and generated narratives for the report.
  *
  * @param {object} supabase - Supabase client
@@ -485,10 +443,24 @@ async function fetchProfileSnapshot(supabase, userId) {
   }
 
   try {
-    const narrativeResult = await callHandler(generatePatternNarrativeHandler, { user_id: userId });
-    narratives = narrativeResult.narratives ?? [];
+    const { data: insightsData } = await supabase
+      .from('user_insights')
+      .select('pattern_label, pattern_type, sessions_synthesized_from, pattern_narrative, trigger_context, first_seen_date, last_seen_date')
+      .eq('user_id', userId)
+      .eq('is_active', true)
+      .order('confidence_score', { ascending: false })
+      .limit(7);
+    narratives = (insightsData || []).map((ins) => ({
+      label: ins.pattern_label || 'Insight',
+      type: ins.pattern_type || 'pattern',
+      occurrences: ins.sessions_synthesized_from || 0,
+      narrative: ins.pattern_narrative || '',
+      watch_for: ins.trigger_context || null,
+      first_seen_date: ins.first_seen_date || null,
+      last_seen_date: ins.last_seen_date || null,
+    }));
   } catch (err) {
-    console.warn(`    ⚠️  generate-pattern-narrative failed in profile snapshot: ${err.message}`);
+    console.warn(`    ⚠️  user_insights query failed in profile snapshot: ${err.message}`);
   }
 
   try {
