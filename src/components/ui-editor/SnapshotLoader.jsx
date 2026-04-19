@@ -1,6 +1,5 @@
 // @ts-nocheck
 import React, { useState } from 'react';
-import { Loader2 } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -28,12 +27,11 @@ export default function SnapshotLoader() {
   const snapshotLoaderOpen = useUIEditorStore((state) => state.snapshotLoaderOpen);
   const setSnapshotLoaderOpen = useUIEditorStore((state) => state.setSnapshotLoaderOpen);
   const loadSnapshot = useUIEditorStore((state) => state.loadSnapshot);
+  const loadSnapshotFromUrl = useUIEditorStore((state) => state.loadSnapshotFromUrl);
 
   const [pastedHTML, setPastedHTML] = useState('');
   const [urlInput, setUrlInput] = useState('');
   const [urlHTML, setUrlHTML] = useState('');
-  const [capturingPageRoute, setCapturingPageRoute] = useState('');
-  const [captureError, setCaptureError] = useState('');
 
   const closeModal = () => setSnapshotLoaderOpen(false);
 
@@ -46,80 +44,6 @@ export default function SnapshotLoader() {
   function captureLiveDOM() {
     const liveDOM = document.documentElement?.outerHTML || '';
     handleLoad(liveDOM, 'Live DOM Capture');
-  }
-
-  function captureAppPage(page) {
-    if (capturingPageRoute) return;
-
-    setCaptureError('');
-    setCapturingPageRoute(page.route);
-
-    const iframe = document.createElement('iframe');
-    iframe.setAttribute('aria-hidden', 'true');
-    iframe.style.position = 'fixed';
-    iframe.style.top = '-9999px';
-    iframe.style.left = '-9999px';
-    iframe.style.width = '1280px';
-    iframe.style.height = '800px';
-    iframe.style.border = '0';
-
-    let loadTimeoutId = null;
-    let renderDelayId = null;
-    let isCleanedUp = false;
-
-    const clearTimers = () => {
-      if (loadTimeoutId) window.clearTimeout(loadTimeoutId);
-      if (renderDelayId) window.clearTimeout(renderDelayId);
-      loadTimeoutId = null;
-      renderDelayId = null;
-    };
-
-    const cleanup = () => {
-      if (isCleanedUp) return;
-      isCleanedUp = true;
-      clearTimers();
-      iframe.onload = null;
-      iframe.onerror = null;
-      iframe.remove();
-    };
-
-    const fail = (message) => {
-      setCaptureError(message);
-      setCapturingPageRoute('');
-      cleanup();
-    };
-
-    iframe.onload = () => {
-      renderDelayId = window.setTimeout(() => {
-        try {
-          const html = iframe.contentDocument?.documentElement?.outerHTML || '';
-          if (!html.trim()) {
-            throw new Error('No HTML captured');
-          }
-          loadSnapshot(html, page.name);
-          closeModal();
-          setCapturingPageRoute('');
-          cleanup();
-        } catch {
-          fail(`Could not capture ${page.name}. Please try again.`);
-        }
-      }, 400);
-    };
-
-    iframe.onerror = () => {
-      fail(`Failed to load ${page.name}. Please try again.`);
-    };
-
-    loadTimeoutId = window.setTimeout(() => {
-      fail(`Loading ${page.name} timed out. Please try again.`);
-    }, 10000);
-
-    try {
-      document.body.appendChild(iframe);
-      iframe.src = `${window.location.origin}${page.route}`;
-    } catch {
-      fail(`Unable to start capture for ${page.name}.`);
-    }
   }
 
   return (
@@ -190,29 +114,22 @@ export default function SnapshotLoader() {
           </TabsContent>
 
           <TabsContent value="pages" className="space-y-4">
-            <p className="text-sm text-zinc-400">Capture live HTML from a same-origin app route.</p>
-            {captureError ? (
-              <div className="rounded-md border border-red-700 bg-red-950/50 px-3 py-2 text-xs text-red-300">
-                {captureError}
-              </div>
-            ) : null}
+            <p className="text-sm text-zinc-400">Load a same-origin app route directly in the editor.</p>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              {APP_PAGES.map((page) => {
-                const isLoading = capturingPageRoute === page.route;
-                return (
-                  <Button
-                    key={page.route}
-                    type="button"
-                    onClick={() => captureAppPage(page)}
-                    disabled={Boolean(capturingPageRoute)}
-                    className="justify-start bg-zinc-800 text-zinc-100 hover:bg-zinc-700 border border-zinc-700 disabled:opacity-70"
-                  >
-                    {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                    <span className="truncate">{page.name}</span>
-                    <span className="ml-2 text-[11px] text-zinc-400">{page.route}</span>
-                  </Button>
-                );
-              })}
+              {APP_PAGES.map((page) => (
+                <Button
+                  key={page.route}
+                  type="button"
+                  onClick={() => {
+                    loadSnapshotFromUrl(`${window.location.origin}${page.route}`, page.name);
+                    closeModal();
+                  }}
+                  className="justify-start bg-zinc-800 text-zinc-100 hover:bg-zinc-700 border border-zinc-700"
+                >
+                  <span className="truncate">{page.name}</span>
+                  <span className="ml-2 text-[11px] text-zinc-400">{page.route}</span>
+                </Button>
+              ))}
             </div>
           </TabsContent>
         </Tabs>

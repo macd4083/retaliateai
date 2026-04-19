@@ -193,6 +193,7 @@ export default function EditorCanvas({ iframeRef }) {
   const [srcDoc, setSrcDoc] = useState('');
 
   const rawHTML = useUIEditorStore((state) => state.rawHTML);
+  const snapshotUrl = useUIEditorStore((state) => state.snapshotUrl);
   const nodeOverrides = useUIEditorStore((state) => state.nodeOverrides);
   const selectNode = useUIEditorStore((state) => state.selectNode);
   const applyText = useUIEditorStore((state) => state.applyText);
@@ -297,7 +298,15 @@ export default function EditorCanvas({ iframeRef }) {
     previousOverridesRef.current = JSON.parse(JSON.stringify(nodeOverrides || {}));
   }, [nodeOverrides]);
 
-  if (!rawHTML) {
+  const handleUrlFrameLoad = () => {
+    const frame = localFrameRef.current;
+    if (!frame) return;
+    try {
+      frame.contentWindow.eval(EDITOR_INJECTION_SCRIPT);
+    } catch {}
+  };
+
+  if (!rawHTML && !snapshotUrl) {
     return (
       <div className="h-full min-h-[480px] rounded-xl border border-zinc-800 bg-zinc-900/80 flex items-center justify-center">
         <button
@@ -319,12 +328,18 @@ export default function EditorCanvas({ iframeRef }) {
 
   return (
     <div className="h-full min-h-[480px] rounded-xl border border-zinc-800 bg-white overflow-hidden">
-      <iframe
-        ref={combinedRef}
-        title="UI Editor Canvas"
-        srcDoc={srcDoc}
-        className="w-full h-full border-0 bg-white"
-      />
+      {snapshotUrl && !rawHTML ? (
+        <iframe
+          ref={combinedRef}
+          key={snapshotUrl}
+          title="UI Editor Canvas"
+          src={snapshotUrl}
+          onLoad={handleUrlFrameLoad}
+          className="w-full h-full border-0 bg-white"
+        />
+      ) : (
+        <iframe ref={combinedRef} title="UI Editor Canvas" srcDoc={srcDoc} className="w-full h-full border-0 bg-white" />
+      )}
     </div>
   );
 }
