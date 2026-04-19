@@ -515,7 +515,9 @@ function deriveStageHint(sessionState, classifierChecklist, completedDirectives 
   // honest → tomorrow
   if (stage === 'honest' && cl.honest && sessionState.honest_depth === true) return 'tomorrow';
   // tomorrow → close
-  // Allow close if a structured minimum exists OR the structure directive has already been completed.
+  // Allow close from either valid path:
+  // 1) structured flow captured commitment_minimum, or
+  // 2) legacy/summarized path already completed tomorrow_commitment_structure.
   if (stage === 'tomorrow' && hasPlan && (sessionState.commitment_minimum || completed.includes('tomorrow_commitment_structure'))) return 'close';
   // close → complete
   if (stage === 'close' && cl.identity && hasPlan) return 'complete';
