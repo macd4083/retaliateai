@@ -1,9 +1,20 @@
 import React, { useState } from 'react';
-import { Globe, ImageUp, Code2 } from 'lucide-react';
+import { Globe, ImageUp, Code2, Layout } from 'lucide-react';
+
+const APP_PAGES = [
+  { name: 'Landing', route: '/' },
+  { name: 'Login', route: '/login' },
+  { name: 'Reflection', route: '/reflection' },
+  { name: 'Insights', route: '/insights' },
+  { name: 'Settings', route: '/settings' },
+  { name: 'Privacy Policy', route: '/privacy' },
+  { name: 'Terms of Service', route: '/terms' },
+];
 
 export default function SnapshotLoader({ onLoadUrl, onUseHtml, onUploadImage }) {
   const [url, setUrl] = useState('');
   const [html, setHtml] = useState('');
+  const appOrigin = typeof window !== 'undefined' ? window.location.origin : '';
 
   const handleUpload = (event) => {
     const file = event.target.files?.[0];
@@ -19,7 +30,7 @@ export default function SnapshotLoader({ onLoadUrl, onUseHtml, onUploadImage }) 
 
   return (
     <div className="h-full flex items-center justify-center p-6">
-      <div className="w-full max-w-3xl grid md:grid-cols-2 gap-4">
+      <div className="w-full max-w-5xl grid md:grid-cols-3 gap-4">
         <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-3">
           <div className="flex items-center gap-2 text-white font-medium text-sm">
             <Globe className="w-4 h-4 text-red-500" />
@@ -64,6 +75,29 @@ export default function SnapshotLoader({ onLoadUrl, onUseHtml, onUploadImage }) 
             Upload Screenshot
             <input type="file" accept="image/png,image/jpeg" className="hidden" onChange={handleUpload} />
           </label>
+        </div>
+
+        <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-3">
+          <div className="flex items-center gap-2 text-white font-medium text-sm">
+            <Layout className="w-4 h-4 text-red-500" />
+            App Pages
+          </div>
+          <p className="text-xs text-zinc-500">Load a same-origin app page directly into the canvas iframe.</p>
+          <div className="grid grid-cols-1 gap-2">
+            {APP_PAGES.map((page) => (
+              <button
+                key={page.route}
+                onClick={() => onLoadUrl(`${appOrigin}${page.route}`)}
+                className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-200 text-sm hover:bg-zinc-700 hover:text-white transition-colors"
+              >
+                <span className="inline-flex items-center gap-2">
+                  <Layout className="w-3.5 h-3.5 text-red-400" />
+                  {page.name}
+                </span>
+                <span className="text-[11px] text-zinc-500">{page.route}</span>
+              </button>
+            ))}
+          </div>
         </div>
       </div>
     </div>
