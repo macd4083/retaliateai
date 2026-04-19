@@ -234,8 +234,8 @@ function ChatMessage({ message, isFirstMessage, onChipSelect, chipsDisabled, str
       )}
       <div className="max-w-[75%]">
         <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
           transition={{ duration: 0.2, ease: 'easeOut' }}
           className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
             isUser
@@ -1118,7 +1118,7 @@ export default function ReflectionV2() {
           <ProgressBar currentStage={isComplete ? 'complete' : sessionState.current_stage} stages={stages} />
         </div>
 
-        <AnimatePresence mode="sync">
+        <AnimatePresence mode="wait">
           {isInitializing ? (
             <motion.div
               key="loading"
