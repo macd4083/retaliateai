@@ -503,8 +503,9 @@ function deriveStageHint(sessionState, classifierChecklist, completedDirectives 
 
   // commitment_checkin done — route based on score
   if (stage === 'commitment_checkin' && sessionState.commitment_checkin_done === true) {
-    const score = sessionState.commitment_score;
-    // score = 100 (fully kept) → wins first, then honest
+    const parsedScore = Number(sessionState.commitment_score);
+    const score = Number.isFinite(parsedScore) ? parsedScore : null;
+    // score = 100 (fully kept) → wins next
     if (score === 100) return 'wins';
     // score < 100, 0, or unknown → honest first (name the miss/partial)
     return 'honest';
