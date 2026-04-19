@@ -234,14 +234,9 @@ function ChatMessage({ message, isFirstMessage, onChipSelect, chipsDisabled, str
       )}
       <div className="max-w-[75%]">
         <motion.div
-          layoutId={isFirstMessage ? 'first-message-bubble' : undefined}
-          initial={isFirstMessage ? false : { opacity: 0, y: 8 }}
-          animate={isFirstMessage ? {} : { opacity: 1, y: 0 }}
-          transition={
-            isFirstMessage
-              ? { type: 'spring', stiffness: 280, damping: 28 }
-              : { duration: 0.2, ease: 'easeOut' }
-          }
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2, ease: 'easeOut' }}
           className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
             isUser
               ? 'bg-red-600 text-white rounded-tr-sm'
@@ -1130,14 +1125,14 @@ export default function ReflectionV2() {
               key="hero"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              exit={{ opacity: 0, transition: { duration: 0 } }}
+              exit={{ opacity: 0, transition: { duration: 0.3, ease: 'easeIn' } }}
               transition={{ duration: 0.35, ease: 'easeOut' }}
               className="flex-1 flex flex-col items-center justify-start pt-20 px-4 pb-8"
             >
               <motion.div
-                layoutId="first-message-bubble"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
+                exit={{ x: -60, scale: 0.88, opacity: 0, transition: { duration: 0.25, ease: 'easeIn' } }}
                 transition={{ duration: 0.4, ease: 'easeOut', delay: 0.1 }}
                 className="bg-zinc-800 border border-zinc-700 rounded-2xl px-8 py-5 max-w-2xl w-full"
               >
@@ -1316,8 +1311,9 @@ export default function ReflectionV2() {
               </div>
             ) : (
               <motion.div
+                initial={false}
                 animate={{ maxHeight: showHero ? '44px' : '120px' }}
-                transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+                transition={showHero ? { duration: 0 } : { type: 'spring', stiffness: 300, damping: 30 }}
                 style={{ overflow: 'hidden' }}
                 className="flex-1"
               >
