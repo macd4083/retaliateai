@@ -10,7 +10,7 @@ const NAV_LINKS = [
   { label: 'Settings', path: '/settings', icon: Settings },
 ];
 
-export default function AppShellV2({ title, children }) {
+export default function AppShellV2({ title, children, adminAction = null }) {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, signOut } = useAuth();
@@ -57,14 +57,17 @@ export default function AppShellV2({ title, children }) {
         {/* Page Title */}
         <h1 className="text-white font-semibold text-sm tracking-wide">{title}</h1>
 
-        {/* Settings gear */}
-        <button
-          onClick={() => navigate('/settings')}
-          className="w-9 h-9 flex items-center justify-center rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
-          aria-label="Settings"
-        >
-          <Settings className="w-4 h-4" />
-        </button>
+        {/* Right side actions */}
+        <div className="flex items-center gap-1">
+          {adminAction && adminAction}
+          <button
+            onClick={() => navigate('/settings')}
+            className="w-9 h-9 flex items-center justify-center rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+            aria-label="Settings"
+          >
+            <Settings className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       {/* ── Content ──────────────────────────────────────────────────── */}

@@ -1099,7 +1099,20 @@ export default function ReflectionV2() {
     : STAGE_PLACEHOLDERS[sessionState.current_stage] || 'Tell me more...';
 
   return (
-    <AppShellV2 title="Nightly Reflection">
+    <AppShellV2
+      title="Nightly Reflection"
+      adminAction={
+        isAdmin ? (
+          <button
+            onClick={handleAdminReset}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 border border-zinc-800 transition-colors"
+          >
+            <RefreshCw className="w-3 h-3" />
+            Reset
+          </button>
+        ) : null
+      }
+    >
       <div className="flex flex-col h-full">
         <div className="flex-shrink-0 border-b border-zinc-800 bg-zinc-950">
           <ProgressBar currentStage={isComplete ? 'complete' : sessionState.current_stage} stages={stages} />
@@ -1125,14 +1138,13 @@ export default function ReflectionV2() {
               key="hero"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              exit={{ opacity: 0, transition: { duration: 0.3, ease: 'easeIn' } }}
+              exit={{ opacity: 0, transition: { duration: 0.25 } }}
               transition={{ duration: 0.35, ease: 'easeOut' }}
               className="flex-1 flex flex-col items-center justify-start pt-20 px-4 pb-8"
             >
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                exit={{ x: -60, scale: 0.88, opacity: 0, transition: { duration: 0.25, ease: 'easeIn' } }}
                 transition={{ duration: 0.4, ease: 'easeOut', delay: 0.1 }}
                 className="bg-zinc-800 border border-zinc-700 rounded-2xl px-8 py-5 max-w-2xl w-full"
               >
@@ -1169,9 +1181,9 @@ export default function ReflectionV2() {
           ) : (
             <motion.div
               key="chat"
-              initial={{ opacity: 1 }}
+              initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              transition={{ duration: 0 }}
+              transition={{ duration: 0.25 }}
               className="flex-1 overflow-y-auto px-4 py-4"
             >
               {messages.map((message, index) => (
@@ -1256,17 +1268,6 @@ export default function ReflectionV2() {
 
         <div className="flex-shrink-0 border-t border-zinc-800 bg-zinc-950 px-4 py-3">
           <div className="space-y-2">
-            {isAdmin && (
-              <div className="flex justify-end">
-                <button
-                  onClick={handleAdminReset}
-                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 border border-zinc-800 transition-colors"
-                >
-                  <RefreshCw className="w-3 h-3" />
-                  Reset Session
-                </button>
-              </div>
-            )}
             {isChecklistBlocking && (
               <p className="text-xs text-zinc-500">Complete the check-in above to continue</p>
             )}
@@ -1310,13 +1311,7 @@ export default function ReflectionV2() {
                 />
               </div>
             ) : (
-              <motion.div
-                initial={false}
-                animate={{ maxHeight: showHero ? '44px' : '120px' }}
-                transition={showHero ? { duration: 0 } : { type: 'spring', stiffness: 300, damping: 30 }}
-                style={{ overflow: 'hidden' }}
-                className="flex-1"
-              >
+              <div className="flex-1">
                 <textarea
                   ref={textareaRef}
                   value={inputValue}
@@ -1326,10 +1321,10 @@ export default function ReflectionV2() {
                   disabled={isInitializing || isChecklistBlocking}
                   placeholder={textareaPlaceholder}
                   rows={1}
-                  className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-500 resize-none focus:outline-none focus:border-zinc-500 transition-colors disabled:opacity-50"
+                  className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-500 resize-none focus:outline-none focus:border-zinc-500 transition-colors"
                   style={{ minHeight: '44px', maxHeight: '120px' }}
                 />
-              </motion.div>
+              </div>
             )}
             <button
               onClick={handleSend}
