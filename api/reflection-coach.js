@@ -494,30 +494,39 @@ function daysFromNow(n, clientDate) {
 // ── Stage advancement heuristic ───────────────────────────────────────────────
 
 function deriveStageHint(sessionState, classifierChecklist, completedDirectives = []) {
-  const stage = sessionState.current_stage || 'wins';
+  const stage = sessionState.current_stage || 'commitment_checkin';
   const cl = { ...(sessionState.checklist || {}), ...(classifierChecklist || {}) };
   const hasPlan = !!sessionState.tomorrow_commitment;
   const completed = Array.isArray(completedDirectives)
     ? completedDirectives
     : (Array.isArray(sessionState.completed_directives) ? sessionState.completed_directives : []);
 
-  // wins → commitment_checkin
-  if (stage === 'wins' && cl.wins && sessionState.wins_asked_for_more === true) return 'commitment_checkin';
   // commitment_checkin done — route based on score
   if (stage === 'commitment_checkin' && sessionState.commitment_checkin_done === true) {
     const score = sessionState.commitment_score;
-    if (score === 0) return 'tomorrow'; // fully missed — skip honest, miss IS the honest moment
-    if (score != null && score < 100) return 'honest'; // partial — keep honest stage
-    if (score === 100) return 'honest'; // kept — standard flow
-    // score unknown — default to honest
+    // score = 100 (fully kept) → wins first, then honest
+    if (score === 100) return 'wins';
+    // score < 100, 0, or unknown → honest first (name the miss/partial)
     return 'honest';
   }
-  // honest → tomorrow
-  if (stage === 'honest' && cl.honest && sessionState.honest_depth === true) return 'tomorrow';
+
+  // wins stage done — determine what comes next
+  if (stage === 'wins' && cl.wins && sessionState.wins_asked_for_more === true) {
+    // if honest is already completed (wins came after honest), advance to tomorrow
+    if (cl.honest) return 'tomorrow';
+    // honest hasn't happened yet, go to honest next
+    return 'honest';
+  }
+
+  // honest stage done — determine what comes next
+  if (stage === 'honest' && cl.honest && sessionState.honest_depth === true) {
+    // if wins is already completed (honest came after wins), advance to tomorrow
+    if (cl.wins) return 'tomorrow';
+    // wins hasn't happened yet, go to wins next
+    return 'wins';
+  }
+
   // tomorrow → close
-  // Allow close from either valid path:
-  // 1) structured flow captured commitment_minimum, or
-  // 2) legacy/summarized path already completed tomorrow_commitment_structure.
   if (stage === 'tomorrow' && hasPlan && (sessionState.commitment_minimum || completed.includes('tomorrow_commitment_structure'))) return 'close';
   // close → complete
   if (stage === 'close' && cl.identity && hasPlan) return 'complete';
@@ -1481,7 +1490,7 @@ function buildDirectiveQueue({
   userInsights, recentSessions, effectiveConsecutiveExcuses,
   currentDirectiveQueue, completedDirectives,
 }) {
-  const currentStage = sessionState.current_stage || 'wins';
+  const currentStage = sessionState.current_stage || 'commitment_checkin';
   const allDirectives = [];
   const exercisesExplained = Array.isArray(profile?.exercises_explained) ? profile.exercises_explained : [];
   const isFirstTimeExercise = suggestedPractice !== 'none' && !exercisesExplained.includes(suggestedPractice);
@@ -2204,7 +2213,7 @@ function buildSessionContext({
         }))
       : undefined,
     session: {
-      stage: sessionState.current_stage || 'wins',
+      stage: sessionState.current_stage || 'commitment_checkin',
       checklist: mergedChecklist,
       tomorrow_commitment: sessionState.tomorrow_commitment || null,
       exercises_run: sessionExercisesRun,
@@ -2634,7 +2643,7 @@ export default async function handler(req, res) {
       ...newDirectives.filter(d => !currentQueueIds.has(d.id)),
     ];
 
-    const currentStage = session_state.current_stage || 'wins';
+    const currentStage = session_state.current_stage || 'commitment_checkin';
     // isInit messages skip directive dispatch — init has its own fixed opener logic
     const activeDirective = isInit ? null : dispatchNextDirective(combinedDirectiveQueue, currentStage, intentData?.emotional_state);
 
@@ -2684,7 +2693,7 @@ export default async function handler(req, res) {
     if (!isInit) {
       messages.push({ role: 'user', content: displayMessage });
     } else {
-      const stage = session_state?.current_stage || 'wins';
+      const stage = session_state?.current_stage || 'commitment_checkin';
       const streak = context.reflection_streak || context.streak || 0;
       const rate = resolvedCommitmentRate7;
       const trajectory = resolvedCommitmentTrajectory;
