@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
-import { Download, Loader2, Trash2 } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Download, Loader2, RefreshCcw, Trash2 } from 'lucide-react';
 import { ExportProgressBar } from './ExportProgressBar';
 import { resolveExportUrl, videoExportApi } from '../../utils/videoExportApi';
+
+const DEMO_STORAGE_PREFIX = 'retaliateai_demo_';
 
 const defaultConfig = {
   demoUrl: 'http://localhost:5173/demo/abc123',
@@ -24,6 +26,8 @@ export default function VideoExportEngine({ initialDemoUrl = '', handoffMessage 
   const [config, setConfig] = useState(defaultConfig);
   const [activeJob, setActiveJob] = useState(null);
   const [jobs, setJobs] = useState([]);
+  const [savedDemos, setSavedDemos] = useState([]);
+  const [savedDemosError, setSavedDemosError] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [handoffNotice, setHandoffNotice] = useState(handoffMessage);
@@ -43,6 +47,46 @@ export default function VideoExportEngine({ initialDemoUrl = '', handoffMessage 
     const timer = window.setTimeout(() => setHandoffNotice(''), 2800);
     return () => window.clearTimeout(timer);
   }, [handoffNotice]);
+
+  const refreshSavedDemos = useCallback(() => {
+    if (typeof window === 'undefined') return;
+
+    try {
+      const nextDemos = [];
+      for (let i = 0; i < window.localStorage.length; i += 1) {
+        const key = window.localStorage.key(i);
+        if (!key || !key.startsWith(DEMO_STORAGE_PREFIX)) continue;
+        const rawDemo = window.localStorage.getItem(key);
+        if (!rawDemo) continue;
+
+        try {
+          const parsedDemo = JSON.parse(rawDemo);
+          if (!parsedDemo?.id) continue;
+          nextDemos.push({
+            id: String(parsedDemo.id),
+            name: parsedDemo.name || parsedDemo.title || `Demo ${parsedDemo.id}`,
+          });
+        } catch {
+          // Ignore malformed localStorage entries.
+        }
+      }
+
+      setSavedDemos(
+        nextDemos.sort((a, b) => {
+          if (a.name === b.name) return a.id.localeCompare(b.id);
+          return a.name.localeCompare(b.name);
+        }),
+      );
+      setSavedDemosError('');
+    } catch {
+      setSavedDemos([]);
+      setSavedDemosError('Unable to read saved demos from local storage.');
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshSavedDemos();
+  }, [refreshSavedDemos]);
 
   const refreshJobs = async () => {
     try {
@@ -164,6 +208,38 @@ export default function VideoExportEngine({ initialDemoUrl = '', handoffMessage 
       {error && <div className="rounded-lg border border-red-700 bg-red-950/60 p-3 text-sm text-red-300">{error}</div>}
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="space-y-2 rounded-xl border border-zinc-800 bg-zinc-900/60 p-3 md:col-span-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-sm font-medium text-zinc-200">Saved Demos</span>
+            <button
+              type="button"
+              onClick={refreshSavedDemos}
+              className="inline-flex items-center gap-1 rounded-md border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
+            >
+              <RefreshCcw className="size-3" />
+              Refresh
+            </button>
+          </div>
+          {savedDemosError ? <p className="text-xs text-red-300">{savedDemosError}</p> : null}
+          {savedDemos.length ? (
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {savedDemos.map((demo) => (
+                <button
+                  key={demo.id}
+                  type="button"
+                  onClick={() => setConfig((prev) => ({ ...prev, demoUrl: `${window.location.origin}/demo/${demo.id}` }))}
+                  className="flex items-center justify-between gap-2 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-left text-sm text-zinc-200 hover:bg-zinc-800"
+                >
+                  <span className="truncate">{demo.name}</span>
+                  <span className="font-mono text-[11px] text-zinc-500">{demo.id}</span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-zinc-500">No saved demos found in local storage.</p>
+          )}
+        </div>
+
         <label className="space-y-1 text-sm text-zinc-300 md:col-span-2">
           <span>Demo URL</span>
           <input
