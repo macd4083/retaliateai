@@ -497,7 +497,7 @@ function deriveStageHint(sessionState, classifierChecklist, completedDirectives 
   const stage = sessionState.current_stage || 'wins';
   const cl = { ...(sessionState.checklist || {}), ...(classifierChecklist || {}) };
   const hasPlan = !!sessionState.tomorrow_commitment;
-  const completed = Array.isArray(completedDirectives) && completedDirectives.length > 0
+  const completed = Array.isArray(completedDirectives)
     ? completedDirectives
     : (Array.isArray(sessionState.completed_directives) ? sessionState.completed_directives : []);
 
@@ -515,6 +515,7 @@ function deriveStageHint(sessionState, classifierChecklist, completedDirectives 
   // honest → tomorrow
   if (stage === 'honest' && cl.honest && sessionState.honest_depth === true) return 'tomorrow';
   // tomorrow → close
+  // Allow close if a structured minimum exists OR the structure directive has already been completed.
   if (stage === 'tomorrow' && hasPlan && (sessionState.commitment_minimum || completed.includes('tomorrow_commitment_structure'))) return 'close';
   // close → complete
   if (stage === 'close' && cl.identity && hasPlan) return 'complete';
