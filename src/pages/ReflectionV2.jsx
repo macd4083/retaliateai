@@ -371,8 +371,13 @@ export default function ReflectionV2() {
   useEffect(() => {
     if (!user?.id) return;
     if (initCalledRef.current) return;
-    initCalledRef.current = true;
-    initSession();
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session?.access_token) return;
+      initCalledRef.current = true;
+      initSession();
+    }).catch((err) => {
+      console.error('[initSession] session check failed:', err);
+    });
   }, [user?.id]);
 
   async function initSession() {
@@ -447,7 +452,7 @@ export default function ReflectionV2() {
       try {
         const statsRes = await fetch('/api/commitment-stats', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: await getAuthHeaders(),
           body: JSON.stringify({ user_id: user.id, client_local_date: localDateStr() }),
         });
         if (statsRes.ok) {
@@ -513,6 +518,8 @@ export default function ReflectionV2() {
             await sendMessage('__INIT__', session.id, restoredState);
           } catch (initMsgErr) {
             console.error('[initSession] sendMessage __INIT__ failed:', initMsgErr);
+            messagesRef.current = [];
+            setMessages([]);
             throw initMsgErr;
           }
         }
@@ -686,11 +693,13 @@ export default function ReflectionV2() {
             },
           }),
         });
+      } catch (fetchErr) {
+        throw fetchErr;
       } finally {
         clearTimeout(timeoutId);
       }
 
-      if (!response.ok) throw new Error('API error');
+      if (!response || !response.ok) throw new Error('API error');
 
       const data = await response.json();
 
