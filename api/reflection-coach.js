@@ -497,9 +497,7 @@ function deriveStageHint(sessionState, classifierChecklist, completedDirectives 
   const stage = sessionState.current_stage || 'wins';
   const cl = { ...(sessionState.checklist || {}), ...(classifierChecklist || {}) };
   const hasPlan = !!sessionState.tomorrow_commitment;
-  const completed = Array.isArray(completedDirectives)
-    ? completedDirectives
-    : (Array.isArray(sessionState.completed_directives) ? sessionState.completed_directives : []);
+  const completed = Array.isArray(completedDirectives) ? completedDirectives : [];
 
   // wins → commitment_checkin
   if (stage === 'wins' && cl.wins && sessionState.wins_asked_for_more === true) return 'commitment_checkin';
@@ -1784,7 +1782,7 @@ function buildDirectiveQueue({
   ) {
     allDirectives.push({
       id: 'commitment_specificity',
-      instruction: `COMMITMENT SPECIFICITY CHECK: The user just stated their minimum commitment: "${sessionState.commitment_minimum}". Before moving to the stretch question, evaluate whether this minimum is genuinely specific. A specific minimum commitment must have: (1) a WHEN — a day and time, not just "tomorrow" or "this week", (2) a clear first action — not aspirational language like "work on X" or "focus on Y". If the commitment is vague, push back directly and warmly — this is your one chance before the session closes. Say something like: "That's a start — but when exactly? Give me a day, a time, and the first thing you'll actually do." or "Be honest — is that specific enough to actually happen, or does it need a time and a first step?" Do NOT accept vague minimums. Push back once, clearly, then wait. If they sharpen it, update commitment_minimum in extracted_data with the improved version and set directive_completed: "commitment_specificity". If the minimum is already specific (has a time anchor and a concrete first action), set directive_completed: "commitment_specificity" immediately and proceed. Do NOT ask the stretch question until this check is complete. STRICT: Only mark directive_completed: "commitment_specificity" if they gave you a specific time AND a first action. If they deflected or stayed vague, push back ONE more time and do NOT mark complete. If they pushed back twice, accept and mark complete with a note to the user that we'll work on specificity over time.`,
+      instruction: `COMMITMENT SPECIFICITY CHECK: The user just stated their minimum commitment: "${sessionState.commitment_minimum}". Before moving to the stretch question, evaluate whether this minimum is genuinely specific. A specific minimum commitment must have: (1) a WHEN — a day and time, not just "tomorrow" or "this week", (2) a clear first action — not aspirational language like "work on X" or "focus on Y". If the commitment is vague, push back directly and warmly — this is your best chance before the session closes. Say something like: "That's a start — but when exactly? Give me a day, a time, and the first thing you'll actually do." or "Be honest — is that specific enough to actually happen, or does it need a time and a first step?" Do NOT accept vague minimums. Push back once, clearly, then wait. If they sharpen it, update commitment_minimum in extracted_data with the improved version and set directive_completed: "commitment_specificity". If the minimum is already specific (has a time anchor and a concrete first action), set directive_completed: "commitment_specificity" immediately and proceed. Do NOT ask the stretch question until this check is complete. STRICT: Only mark directive_completed: "commitment_specificity" if they gave you a specific time AND a first action. If they deflected or stayed vague, push back ONE more time and do NOT mark complete. If they pushed back twice, accept and mark complete with a note to the user that we'll work on specificity over time.`,
       priority: 1,
       preferred_stage: 'tomorrow',
       fire_next_session: false,
