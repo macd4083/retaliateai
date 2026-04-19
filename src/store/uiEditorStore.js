@@ -24,6 +24,7 @@ function withHistory(state) {
 export const useUIEditorStore = create((set) => ({
   rawHTML: '',
   originalHTML: '',
+  snapshotUrl: '',
   activeSnapshotName: '',
 
   nodeOverrides: {},
@@ -41,7 +42,23 @@ export const useUIEditorStore = create((set) => ({
     set(() => ({
       rawHTML: html || '',
       originalHTML: html || '',
+      snapshotUrl: '',
       activeSnapshotName: name || 'Untitled Snapshot',
+      nodeOverrides: {},
+      selectedNode: null,
+      past: [],
+      future: [],
+      imageModalOpen: false,
+      exportModalOpen: false,
+      snapshotLoaderOpen: false,
+    })),
+
+  loadSnapshotFromUrl: (url, name) =>
+    set(() => ({
+      snapshotUrl: url || '',
+      rawHTML: '',
+      originalHTML: '',
+      activeSnapshotName: name || url || 'URL Snapshot',
       nodeOverrides: {},
       selectedNode: null,
       past: [],
