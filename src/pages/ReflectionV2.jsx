@@ -1136,8 +1136,8 @@ export default function ReflectionV2() {
             >
               <motion.div
                 layoutId="first-message-bubble"
-                initial={{ opacity: 0, y: 16 }}
-                animate={{ opacity: 1, y: 0 }}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
                 transition={{ duration: 0.4, ease: 'easeOut', delay: 0.1 }}
                 className="bg-zinc-800 border border-zinc-700 rounded-2xl px-8 py-5 max-w-2xl w-full"
               >
@@ -1316,7 +1316,7 @@ export default function ReflectionV2() {
               </div>
             ) : (
               <motion.div
-                animate={{ maxHeight: showHero ? '56px' : '120px' }}
+                animate={{ maxHeight: showHero ? '44px' : '120px' }}
                 transition={{ type: 'spring', stiffness: 300, damping: 30 }}
                 style={{ overflow: 'hidden' }}
                 className="flex-1"
@@ -1331,7 +1331,7 @@ export default function ReflectionV2() {
                   placeholder={textareaPlaceholder}
                   rows={1}
                   className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-500 resize-none focus:outline-none focus:border-zinc-500 transition-colors disabled:opacity-50"
-                  style={{ minHeight: '44px', maxHeight: showHero ? '56px' : '120px' }}
+                  style={{ minHeight: '44px', maxHeight: '120px' }}
                 />
               </motion.div>
             )}
