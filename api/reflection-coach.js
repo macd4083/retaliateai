@@ -493,10 +493,13 @@ function daysFromNow(n, clientDate) {
 
 // ── Stage advancement heuristic ───────────────────────────────────────────────
 
-function deriveStageHint(sessionState, classifierChecklist) {
+function deriveStageHint(sessionState, classifierChecklist, completedDirectives = []) {
   const stage = sessionState.current_stage || 'wins';
   const cl = { ...(sessionState.checklist || {}), ...(classifierChecklist || {}) };
   const hasPlan = !!sessionState.tomorrow_commitment;
+  const completed = Array.isArray(completedDirectives)
+    ? completedDirectives
+    : (Array.isArray(sessionState.completed_directives) ? sessionState.completed_directives : []);
 
   // wins → commitment_checkin
   if (stage === 'wins' && cl.wins && sessionState.wins_asked_for_more === true) return 'commitment_checkin';
@@ -512,7 +515,10 @@ function deriveStageHint(sessionState, classifierChecklist) {
   // honest → tomorrow
   if (stage === 'honest' && cl.honest && sessionState.honest_depth === true) return 'tomorrow';
   // tomorrow → close
-  if (stage === 'tomorrow' && hasPlan) return 'close';
+  // Allow close from either valid path:
+  // 1) structured flow captured commitment_minimum, or
+  // 2) legacy/summarized path already completed tomorrow_commitment_structure.
+  if (stage === 'tomorrow' && hasPlan && (sessionState.commitment_minimum || completed.includes('tomorrow_commitment_structure'))) return 'close';
   // close → complete
   if (stage === 'close' && cl.identity && hasPlan) return 'complete';
   return null;
@@ -1688,7 +1694,7 @@ function buildDirectiveQueue({
   }
 
   // ── honest_missing ─────────────────────────────────────────────────────
-  if (honestMissing) {
+  if (honestMissing && sessionState?.checkin_outcome !== 'kept') {
     const patternHint = userInsights.length > 0
       ? `Their recurring pattern is "${userInsights[0].pattern_label}" — if it came up today, help them name it. E.g. "Did ${userInsights[0].pattern_label.replace(/_/g, ' ')} show up anywhere today?" or "Was there a moment where you held back and you're not sure why?"`
       : `E.g. "Where did you feel like you weren't fully showing up today?" or "Is there a moment from today that's still sitting with you?" or "What part of today are you least proud of — not what you'd fix, just what happened?"`;
@@ -1704,6 +1710,23 @@ function buildDirectiveQueue({
       preferred_stage: 'honest',
       fire_next_session: true,
       followup_question: 'Before we close — was there a moment from last time that\'s still sitting with you, something you didn\'t fully land on?',
+      energy_type: 'depth',
+    });
+  }
+
+  // ── honest_kept_expansion ──────────────────────────────────────────────
+  if (
+    !mergedChecklist.honest &&
+    sessionState?.checkin_outcome === 'kept' &&
+    messageCount >= 4 &&
+    !completedDirectives.includes('honest_kept_expansion')
+  ) {
+    allDirectives.push({
+      id: 'honest_kept_expansion',
+      instruction: `HONEST (KEPT): They fully completed their commitment. Don't probe for a miss — that would undercut the win. Instead, go deeper on what made it happen: "You actually did it — what made today different from the times you haven't?" or "What does it tell you about yourself that you followed through on that?" Extract a depth insight, not a miss. Set honest_depth: true once you have a real answer.`,
+      priority: 2,
+      preferred_stage: 'honest',
+      fire_next_session: false,
       energy_type: 'depth',
     });
   }
@@ -1761,7 +1784,7 @@ function buildDirectiveQueue({
   ) {
     allDirectives.push({
       id: 'commitment_specificity',
-      instruction: `COMMITMENT SPECIFICITY CHECK: The user just stated their minimum commitment: "${sessionState.commitment_minimum}". Before moving to the stretch question, evaluate whether this minimum is genuinely specific. A specific minimum commitment must have: (1) a WHEN — a day and time, not just "tomorrow" or "this week", (2) a clear first action — not aspirational language like "work on X" or "focus on Y". If the commitment is vague, push back directly and warmly — this is your one chance before the session closes. Say something like: "That's a start — but when exactly? Give me a day, a time, and the first thing you'll actually do." or "Be honest — is that specific enough to actually happen, or does it need a time and a first step?" Do NOT accept vague minimums. Push back once, clearly, then wait. If they sharpen it, update commitment_minimum in extracted_data with the improved version and set directive_completed: "commitment_specificity". If the minimum is already specific (has a time anchor and a concrete first action), set directive_completed: "commitment_specificity" immediately and proceed. Do NOT ask the stretch question until this check is complete.`,
+      instruction: `COMMITMENT SPECIFICITY CHECK: The user just stated their minimum commitment: "${sessionState.commitment_minimum}". Before moving to the stretch question, evaluate whether this minimum is genuinely specific. A specific minimum commitment must have: (1) a WHEN — a day and time, not just "tomorrow" or "this week", (2) a clear first action — not aspirational language like "work on X" or "focus on Y". If the commitment is vague, push back directly and warmly — this is your one chance before the session closes. Say something like: "That's a start — but when exactly? Give me a day, a time, and the first thing you'll actually do." or "Be honest — is that specific enough to actually happen, or does it need a time and a first step?" Do NOT accept vague minimums. Push back once, clearly, then wait. If they sharpen it, update commitment_minimum in extracted_data with the improved version and set directive_completed: "commitment_specificity". If the minimum is already specific (has a time anchor and a concrete first action), set directive_completed: "commitment_specificity" immediately and proceed. Do NOT ask the stretch question until this check is complete. STRICT: Only mark directive_completed: "commitment_specificity" if they gave you a specific time AND a first action. If they deflected or stayed vague, push back ONE more time and do NOT mark complete. If they pushed back twice, accept and mark complete with a note to the user that we'll work on specificity over time.`,
       priority: 1,
       preferred_stage: 'tomorrow',
       fire_next_session: false,
@@ -2493,7 +2516,8 @@ export default async function handler(req, res) {
 
     // ── 6b. Stage hint ─────────────────────────────────────────────────
     const messageCount = history.length;
-    const suggestedNextStage = deriveStageHint(session_state, intentData?.checklist_content);
+    const completedDirectives = Array.isArray(session_state.completed_directives) ? session_state.completed_directives : [];
+    const suggestedNextStage = deriveStageHint(session_state, intentData?.checklist_content, completedDirectives);
 
     // ── 8. Build compact context block ───────────────────────────────────
     const exercisesExplained = Array.isArray(profile.exercises_explained) ? profile.exercises_explained : [];
@@ -2554,7 +2578,6 @@ export default async function handler(req, res) {
 
     // ── Directive Queue ───────────────────────────────────────────────────
     const currentDirectiveQueue = Array.isArray(session_state.directive_queue) ? session_state.directive_queue : [];
-    const completedDirectives = Array.isArray(session_state.completed_directives) ? session_state.completed_directives : [];
 
     // Derive values needed for directive conditions
     const mergedChecklist = { ...(session_state.checklist || {}), ...(intentData?.checklist_content || {}) };
@@ -2562,8 +2585,11 @@ export default async function handler(req, res) {
     const hasMissInSession = Array.isArray(session_state.misses) && session_state.misses.length > 0;
     const honestMissing = !mergedChecklist.honest && !hasMissInSession && messageCount >= 4;
     const identityMissing = !mergedChecklist.identity && messageCount >= 6;
-    const sessionReadyToClose = tomorrowFilled && mergedChecklist.wins && (mergedChecklist.identity || messageCount >= 10);
-    const forceClose = messageCount >= 14 && tomorrowFilled && mergedChecklist.wins;
+    const hasCheckin = session_state?.commitment_checkin_done === true;
+    const sessionReadyThreshold = hasCheckin ? 12 : 10;
+    const forceCloseThreshold = hasCheckin ? 16 : 14;
+    const sessionReadyToClose = tomorrowFilled && mergedChecklist.wins && (mergedChecklist.identity || messageCount >= sessionReadyThreshold);
+    const forceClose = messageCount >= forceCloseThreshold && tomorrowFilled && mergedChecklist.wins;
     const depthProbeNeeded = !!(intentData?.depth_opportunity && !sessionExercisesRun.includes('depth_probe') && (session_state?.depth_opportunity_count_so_far ?? 0) >= 2);
     const goalMissingWhy = goalsNeedWhyBuilding.find(g => !Array.isArray(g.whys) || g.whys.length === 0) ?? null;
 
