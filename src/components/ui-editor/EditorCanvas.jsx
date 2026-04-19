@@ -227,10 +227,18 @@ export default function EditorCanvas({ iframeRef }) {
   }, [rawHTML]);
 
   useEffect(() => {
+    const EDITOR_EVENT_TYPES = new Set([
+      'EDITOR_SELECT',
+      'EDITOR_TEXT_CHANGE',
+      'EDITOR_IMAGE_CLICK',
+      'EDITOR_MOVE',
+      'EDITOR_HTML_EXPORT',
+    ]);
+
     function handleMessage(event) {
-      if (event.source !== localFrameRef.current?.contentWindow) return;
       const payload = event?.data;
       if (!payload || typeof payload !== 'object') return;
+      if (!EDITOR_EVENT_TYPES.has(payload.type)) return;
 
       if (payload.type === 'EDITOR_SELECT' && payload.data) {
         selectNode(payload.data);
