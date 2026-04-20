@@ -1500,6 +1500,7 @@ function buildDirectiveQueue({
   const trajectory = commitmentTrajectoryContext ?? commitmentStats?.trajectory ?? null;
   const avgScore = avgCommitmentScoreContext ?? commitmentStats?.avgScore7 ?? null;
   const scoreTrajectory = scoreTrajectoryContext ?? commitmentStats?.scoreTrajectory ?? null;
+  const mergedChecklist = { ...(sessionState.checklist || {}), ...(intentData?.checklist_content || {}) };
 
   // ── cold_start_opener ──────────────────────────────────────────────────
   if (preSessionState?.cold_start) {
