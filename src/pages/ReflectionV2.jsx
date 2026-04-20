@@ -949,6 +949,7 @@ export default function ReflectionV2() {
       if (data.ok) {
         messagesRef.current = [];
         setMessages([]);
+        setChatFocused(false);
         setSessionId(null);
         setIsComplete(false);
         setSummaryCardData({});
