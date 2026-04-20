@@ -504,7 +504,13 @@ export default function ReflectionV2() {
         setMessages(restored);
 
         const usedIds = new Set(
-          deduped.filter((m) => m.role === 'assistant' && m.chips).map((m) => m.id)
+          deduped
+            .filter((m, i) =>
+              m.role === 'assistant' &&
+              m.chips &&
+              deduped.slice(i + 1).some((n) => n.role === 'user')
+            )
+            .map((m) => m.id)
         );
         setUsedChipMessageIds(usedIds);
         // Only skip hero if there are actual conversation messages beyond the opener
