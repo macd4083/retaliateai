@@ -513,4 +513,4 @@ ${clarityMap.this_week_commitment}
       </div>
     </div>
   );
-}
+} 
