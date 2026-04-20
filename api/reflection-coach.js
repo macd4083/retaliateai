@@ -1819,7 +1819,7 @@ function buildDirectiveQueue({
   }
 
   // ── tomorrow_commitment_structure ─────────────────────────────────────
-  if ((currentStage === 'tomorrow' || (currentStage === 'honest' && mergedChecklist.honest && (mergedChecklist.wins || sessionState.wins_asked_for_more))) && !sessionState.tomorrow_commitment) {
+  if (currentStage === 'tomorrow' && !sessionState.tomorrow_commitment) {
     const minimumCaptured = !!sessionState.commitment_minimum;
     const stretchCaptured = !!sessionState.commitment_stretch;
     const latestScore = (commitmentStats?.recentScores || []).slice(-1)[0];
@@ -1831,20 +1831,20 @@ function buildDirectiveQueue({
     if (rate !== null && rate < 50) {
       minimumFraming = `Name the data directly: "You've hit ${rate}% of your commitments recently. So let's get the floor right — what do you absolutely know you can get done tomorrow, no matter what?" Say the number first. Framing is certainty over ambition.`;
     } else if (avgScore !== null && avgScore < 55 && scoreTrajectory === 'declining') {
-      minimumFraming = `Their commitment confidence has been scoring ${Math.round(avgScore)}/100 and declining — they keep setting bars too high and missing them. Ask: "What's the one thing you'd bet your life on finishing tomorrow?" Bet-your-life framing forces real commitment, not hopeful thinking.`;
+      minimumFraming = `Their commitment confidence has been scoring ${Math.round(avgScore)}/100 and declining — they keep setting bars too high and missing them. Ask: "What are all the core things you'd stake your reputation on finishing tomorrow to make it a productive day?" High-stakes framing forces real commitment, not hopeful thinking.`;
     } else if (trajectory === 'improving' && rate !== null && rate >= 60) {
       minimumFraming = `They're trending up (${rate}%, improving). Ask: "You're on a roll — what's the floor that protects tomorrow's streak no matter what comes up?" Frame it as protecting momentum.`;
     } else if (avgScore !== null && avgScore >= 80 && rate !== null && rate >= 70) {
       minimumFraming = `They've been hitting ${rate}% with avg confidence ${Math.round(avgScore)}/100. Don't make the minimum too easy. Ask: "Given you've been nailing your commitments, what would make tomorrow a genuinely hard win?" Raise the standard.`;
     } else {
       minimumFraming = honestMoment
-        ? `They just admitted "${honestMoment.slice(0, 60)}...". Use it: "Given what you just shared — what's one thing you're committing to tomorrow that you won't let yourself off the hook on?" Reference the honest moment explicitly.`
-        : `Ask: "What's the bare minimum that makes tomorrow a real win — the one thing you won't negotiate away?"`;
+        ? `They just admitted "${honestMoment.slice(0, 60)}...". Use it: "Given what you just shared — what are all the minimum steps you're committing to tomorrow that you won't let yourself off the hook on?" Reference the honest moment explicitly.`
+        : `Ask: "Let's map out tomorrow — what are all the things that would make it a real productive day for you? Start with the floor, everything you know needs to happen."`;
     }
     allDirectives.push({
       id: 'tomorrow_commitment_structure',
-      instruction: `TOMORROW COMMITMENT STRUCTURE: In this stage, capture TWO commitments in sequence — never both at once.
-- First capture the floor commitment with this exact intent: "What's the bare minimum that would make tomorrow a genuine win for you — the floor you won't fall below?" Store it in extracted_data.commitment_minimum.
+      instruction: `TOMORROW COMMITMENT STRUCTURE: In this stage, your first job is to help the user map out ALL the minimum steps that would make tomorrow a genuinely productive day — not just one commitment. Capture TWO commitments in sequence — never both at once.
+- First capture the complete set of floor commitments with this opening framing (you may paraphrase while keeping intent): "Let's build out tomorrow. What are all the things that, if you got them done, would make tomorrow a real win — the floor you wouldn't fall below?" Store it in extracted_data.commitment_minimum.
 - Minimum framing guidance: ${minimumFraming}
 - On the turn you ask/capture minimum, do NOT set extracted_data.commitment_stretch and do NOT set extracted_data.tomorrow_commitment. Wait for the next user reply.
 - Only AFTER minimum is captured and the specificity directive is completed, ask the stretch question: "Now push it — if tomorrow went as well as it possibly could, what would you have gotten done on top of that?" Store it in extracted_data.commitment_stretch.
