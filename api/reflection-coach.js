@@ -1750,7 +1750,7 @@ function buildDirectiveQueue({
   ) {
     allDirectives.push({
       id: 'honest_kept_expansion',
-      instruction: `HONEST (KEPT): They fully or mostly completed their commitment (score >= 50). Start by naming what they did complete before exploring what they missed. If it was partial, acknowledge the follow-through first, then gently ask what broke on the unfinished part. Example: "You still followed through on a solid chunk — what helped you get that part done?" then "And what got in the way of the rest?" Extract a depth insight from the mechanism, not just the miss. Set honest_depth: true once you have a real answer.`,
+      instruction: `HONEST (KEPT): They fully or mostly completed their commitment (score >= 50). Start by naming what they did complete. If score is 100 (fully completed), do NOT ask about misses — go deeper on what made the follow-through happen. If score is 50-99 (partial), acknowledge the follow-through first, then gently ask what broke on the unfinished part. Example: "You still followed through on a solid chunk — what helped you get that part done?" then "And what got in the way of the rest?" Extract a depth insight from the mechanism, not just the miss. Set honest_depth: true once you have a real answer.`,
       priority: 2,
       preferred_stage: 'honest',
       fire_next_session: false,
