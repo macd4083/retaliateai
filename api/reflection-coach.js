@@ -1971,7 +1971,7 @@ function buildDirectiveQueue({
   // ── stage_hint ─────────────────────────────────────────────────────────
   if (suggestedNextStage && !isMemoryMode) {
     allDirectives.push({
-      id: 'stage_hint',
+      id: `stage_hint_${suggestedNextStage}`,
       instruction: `STAGE HINT: Ready to move to "${suggestedNextStage}". Transition naturally if conversation supports it — use a soft bridging phrase that signals the shift without announcing it. E.g. for wins→honest: "Okay — I want to shift for a second." For honest→tomorrow: "Alright, I've got a good picture of today. Let's talk about tomorrow." For tomorrow→close: "Good — before I let you go..." For close→complete: "That's what I needed. Tonight you..." Never announce the stage name. Set stage_advance:true, new_stage:"${suggestedNextStage}".`,
       priority: 2,
       preferred_stage: 'any',
