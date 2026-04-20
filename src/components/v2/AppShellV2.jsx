@@ -44,21 +44,25 @@ export default function AppShellV2({ title, children, adminAction = null }) {
   return (
     <div className="flex flex-col h-screen bg-zinc-950 text-white overflow-hidden">
       {/* ── Top Bar ──────────────────────────────────────────────────── */}
-      <div className="h-14 flex-shrink-0 flex items-center justify-between px-4 border-b border-zinc-800 bg-zinc-950 z-10">
+      <div className="h-14 flex-shrink-0 flex items-center justify-between px-4 border-b border-zinc-800 bg-zinc-950 z-10 relative">
         {/* Hamburger */}
-        <button
-          onClick={() => setDrawerOpen(true)}
-          className="w-9 h-9 flex items-center justify-center rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
-          aria-label="Open menu"
-        >
-          <span className="text-xl leading-none">☰</span>
-        </button>
+        <div className="flex-1 flex items-center">
+          <button
+            onClick={() => setDrawerOpen(true)}
+            className="w-9 h-9 flex items-center justify-center rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+            aria-label="Open menu"
+          >
+            <span className="text-xl leading-none">☰</span>
+          </button>
+        </div>
 
         {/* Page Title */}
-        <h1 className="text-white font-semibold text-sm tracking-wide">{title}</h1>
+        <h1 className="absolute left-1/2 -translate-x-1/2 text-white font-semibold text-sm tracking-wide pointer-events-none select-none">
+          {title}
+        </h1>
 
         {/* Right side actions */}
-        <div className="flex items-center gap-1">
+        <div className="flex-1 flex items-center justify-end gap-1">
           {adminAction && adminAction}
           <button
             onClick={() => navigate('/settings')}
