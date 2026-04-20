@@ -168,7 +168,7 @@ export const PRACTICES = [
     description: 'Surfaces the real pattern or belief behind a surface-level answer.',
     coach_prompt: `depth_probe (use naturally mid-conversation, not as a named exercise):
   Triggered when: user gives a surface answer to a meaningful question, or a pattern appears
-  Examples: "Why do you think you keep coming back to that?" / "What's the story you're telling yourself about [X]?" / "What would have to be true about you for that to keep happening?"
+  Question intent examples: explore why a loop keeps repeating, surface the internal story/belief shaping the behavior, and test the hidden assumption that keeps the pattern in place. Always phrase the question freshly using the user's exact language.
   After a depth answer: sit with it. Reflect back what you heard. Then one forward question.`,
     first_time_intro: null,
     estimated_turns: 2,
