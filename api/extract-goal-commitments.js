@@ -5,7 +5,7 @@
  * to extract which goal IDs (if any) each piece of the commitment maps to, and
  * writes the results to goal_commitment_log.
  *
- * POST { user_id, session_id, commitment_text, goals: [{ id, title, category }] }
+ * POST { user_id, session_id, commitment_text, goals: [{ id, title, category }], commitment_type? }
  *
  * Returns:
  *   { goal_commitments: [{ goal_id: string | null, commitment_fragment: string, confidence: "high"|"medium"|"low" }] }
@@ -31,7 +31,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { user_id, session_id, commitment_text, goals, client_local_date } = req.body || {};
+  const { user_id, session_id, commitment_text, goals, client_local_date, commitment_type } = req.body || {};
   if (!user_id || !commitment_text) {
     return res.status(400).json({ error: 'user_id and commitment_text are required' });
   }
@@ -78,6 +78,7 @@ Only link when genuinely relevant. Do not force links. Multiple items can have t
       const item = items[i];
       const goalId =
         item.goal_id && goalIds.has(item.goal_id) ? item.goal_id : null;
+      const rowCommitmentType = item.commitment_type || commitment_type || null;
       insertRows.push({
         user_id,
         session_id: session_id || null,
@@ -86,6 +87,7 @@ Only link when genuinely relevant. Do not force links. Multiple items can have t
         date: todayDate,
         kept: null,
         fragment_index: i,
+        commitment_type: rowCommitmentType,
       });
     }
 
@@ -99,6 +101,7 @@ Only link when genuinely relevant. Do not force links. Multiple items can have t
         date: todayDate,
         kept: null,
         fragment_index: 0,
+        commitment_type: commitment_type || null,
       });
     }
 

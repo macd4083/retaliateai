@@ -408,7 +408,7 @@ RETURN JSON EXACTLY (no markdown, no extra keys):
   "honest_depth": false,
   "commitment_checkin_done": false,
   "show_commitment_checklist": false, // true when presenting fragment checklist to user
-  "checklist_fragments": null, // array of {id, text} fragments to check off
+  "checklist_fragments": null, // array of {id, text, type?} fragments to check off
   "show_goal_chips": false,
   "follow_up_queued": false,
   "follow_up_triggered": false,
@@ -800,11 +800,16 @@ async function loadYesterdayFragments(userId, clientToday) {
     const yesterday = localDate(-1, clientToday);
     const { data } = await supabase
       .from('goal_commitment_log')
-      .select('id, commitment_text, fragment_index, goal_id, kept')
+      .select('id, commitment_text, fragment_index, commitment_type, goal_id, kept')
       .eq('user_id', userId)
       .eq('date', yesterday)
       .order('fragment_index', { ascending: true });
-    return data || [];
+    return (data || []).map((fragment) => {
+      const type = (fragment.commitment_type === 'minimum' || fragment.commitment_type === 'stretch')
+        ? fragment.commitment_type
+        : (fragment.fragment_index === 0 ? 'minimum' : (fragment.fragment_index === 1 ? 'stretch' : null));
+      return { ...fragment, type };
+    });
   } catch (_e) { return []; }
 }
 
@@ -1753,11 +1758,14 @@ function buildDirectiveQueue({
       const checklistFragments = Array.isArray(yesterdayFragments)
         ? yesterdayFragments.map((f) => ({
             id: f.id,
-            text: f.commitment_text,
+            type: f.type || null,
+            text: f.type === 'minimum'
+              ? `Minimum: ${f.commitment_text}`
+              : (f.type === 'stretch' ? `Stretch: ${f.commitment_text}` : f.commitment_text),
           }))
         : [];
       const checklistText = checklistFragments.length > 0
-        ? `\n- Yesterday's fragment checklist to show in UI: ${JSON.stringify(checklistFragments)}\n- Present the checklist by returning show_commitment_checklist: true and checklist_fragments as an array of {id, text} objects from the fragments below.\n- Do NOT ask a free-text question. Wait for the user to submit the checklist.\n- After the user submits the checklist, use the submitted results + precomputed_commitment_score from context to set extracted_data.checkin_outcome (kept/partial/missed), set extracted_data.commitment_score, set commitment_checkin_done: true, and continue naturally.`
+        ? `\n- Yesterday's fragment checklist to show in UI: ${JSON.stringify(checklistFragments)}\n- Present the checklist by returning show_commitment_checklist: true and checklist_fragments as an array of {id, text, type} objects from the fragments below.\n- When a fragment has type="minimum" or type="stretch", keep that type and label intact in checklist_fragments so the user can see exactly which is minimum vs stretch.\n- Do NOT ask a free-text question. Wait for the user to submit the checklist.\n- After the user submits the checklist, use the submitted results + precomputed_commitment_score from context to set extracted_data.checkin_outcome (kept/partial/missed), set extracted_data.commitment_score, set commitment_checkin_done: true, and continue naturally.`
         : '\n- No fragment checklist is available for yesterday, so use the normal free-text check-in question flow.';
       let checkinTone = '';
       if (rate !== null && rate < 40) {
@@ -1792,7 +1800,6 @@ function buildDirectiveQueue({
     currentStage === 'tomorrow' &&
     sessionState.commitment_minimum &&
     !sessionState.commitment_stretch &&
-    !sessionState.tomorrow_commitment &&
     !completedDirectives.includes('commitment_specificity')
   ) {
     allDirectives.push({
@@ -1833,8 +1840,10 @@ function buildDirectiveQueue({
       instruction: `TOMORROW COMMITMENT STRUCTURE: In this stage, capture TWO commitments in sequence — never both at once.
 - First capture the floor commitment with this exact intent: "What's the bare minimum that would make tomorrow a genuine win for you — the floor you won't fall below?" Store it in extracted_data.commitment_minimum.
 - Minimum framing guidance: ${minimumFraming}
-- Only AFTER minimum is captured, ask the stretch question: "Now push it — if tomorrow went as well as it possibly could, what would you have gotten done on top of that?" Store it in extracted_data.commitment_stretch.
+- On the turn you ask/capture minimum, do NOT set extracted_data.commitment_stretch and do NOT set extracted_data.tomorrow_commitment. Wait for the next user reply.
+- Only AFTER minimum is captured and the specificity directive is completed, ask the stretch question: "Now push it — if tomorrow went as well as it possibly could, what would you have gotten done on top of that?" Store it in extracted_data.commitment_stretch.
 - Current captured state: minimum=${minimumCaptured ? `"${sessionState.commitment_minimum}"` : 'null'}, stretch=${stretchCaptured ? `"${sessionState.commitment_stretch}"` : 'null'}.
+- STRICT ORDER: extracted_data.tomorrow_commitment MUST be set only after BOTH extracted_data.commitment_minimum and extracted_data.commitment_stretch already exist (from this turn or prior turns).
 - Once BOTH exist, set extracted_data.tomorrow_commitment to a combined summary (e.g. "Minimum: [minimum]. Stretch: [stretch].") and continue naturally.
 - Do not ask both questions in one message.
 - IMPORTANT: Do NOT ask the stretch question until 'commitment_specificity' is in completed_directives. The specificity check runs first.${lowScoreNudge
@@ -1971,7 +1980,7 @@ function buildDirectiveQueue({
   // ── stage_hint ─────────────────────────────────────────────────────────
   if (suggestedNextStage && !isMemoryMode) {
     allDirectives.push({
-      id: `stage_hint_${suggestedNextStage}`,
+      id: 'stage_hint',
       instruction: `STAGE HINT: Ready to move to "${suggestedNextStage}". Transition naturally if conversation supports it — use a soft bridging phrase that signals the shift without announcing it. E.g. for wins→honest: "Okay — I want to shift for a second." For honest→tomorrow: "Alright, I've got a good picture of today. Let's talk about tomorrow." For tomorrow→close: "Good — before I let you go..." For close→complete: "That's what I needed. Tonight you..." Never announce the stage name. Set stage_advance:true, new_stage:"${suggestedNextStage}".`,
       priority: 2,
       preferred_stage: 'any',
@@ -2931,7 +2940,9 @@ Return ONLY valid JSON: { "question": "..." }`,
       const updates = {};
       if (result.stage_advance && result.new_stage) updates.current_stage = result.new_stage;
       if (result.extracted_data?.mood) updates.mood_end_of_day = result.extracted_data.mood;
-      if (result.extracted_data?.tomorrow_commitment) {
+      const resolvedMinimumCommitment = result.extracted_data?.commitment_minimum || session_state.commitment_minimum;
+      const resolvedStretchCommitment = result.extracted_data?.commitment_stretch || session_state.commitment_stretch;
+      if (result.extracted_data?.tomorrow_commitment && resolvedMinimumCommitment && resolvedStretchCommitment) {
         updates.tomorrow_commitment = result.extracted_data.tomorrow_commitment;
         // Only set commitment_made_at when first setting the commitment
         if (!session_state.tomorrow_commitment) {
@@ -2983,57 +2994,83 @@ Return ONLY valid JSON: { "question": "..." }`,
       }
     }
 
-    // Extract goal-linked commitments when tomorrow_commitment is first set
-    if (result.extracted_data?.tomorrow_commitment && !session_state.tomorrow_commitment && activeGoals.length > 0) {
+    // Log minimum/stretch commitment fragments once both are captured.
+    if (
+      client_local_date &&
+      (
+        (result.extracted_data?.commitment_minimum && !session_state.commitment_minimum)
+        || (result.extracted_data?.commitment_stretch && !session_state.commitment_stretch)
+      )
+      && (result.extracted_data?.commitment_minimum || session_state.commitment_minimum)
+      && (result.extracted_data?.commitment_stretch || session_state.commitment_stretch)
+    ) {
       (async () => {
         try {
-          const commitmentText = result.extracted_data.tomorrow_commitment;
+          const minimumCommitmentText = result.extracted_data?.commitment_minimum || session_state.commitment_minimum;
+          const stretchCommitmentText = result.extracted_data?.commitment_stretch || session_state.commitment_stretch;
           const goalList = activeGoals.map((g) => ({ id: g.id, title: g.title, category: g.category }));
-          const extraction = await openai.chat.completions.create({
-            model: 'gpt-4o-mini',
-            messages: [
-              {
-                role: 'system',
-                content: `You extract goal links from a commitment string. Split the commitment into individual commitments if multiple are present (e.g. "go to gym and work on app" → two items). For each, match to the most relevant goal_id from the goals list, or null if none fit clearly.
-Return ONLY valid JSON: { "items": [{ "goal_id": "uuid or null", "text": "commitment fragment", "confidence": "high|medium|low" }] }
-Only link when genuinely relevant. Do not force links. Multiple items can have the same goal_id. goal_id must be exactly from the provided list or null.`,
-              },
-              {
-                role: 'user',
-                content: JSON.stringify({ commitment: commitmentText, goals: goalList }),
-              },
-            ],
-            response_format: { type: 'json_object' },
-            temperature: 0.2,
-            max_tokens: 300,
-          });
-          const extracted = JSON.parse(extraction.choices[0].message.content);
-          const items = Array.isArray(extracted.items) ? extracted.items : [];
           const clientToday = today(client_local_date);
-          for (let index = 0; index < items.length; index++) {
-            const item = items[index];
-            const goalId = item.goal_id && activeGoals.some((g) => g.id === item.goal_id) ? item.goal_id : null;
-            await supabase.from('goal_commitment_log').insert({
+
+          const resolveGoalId = async (commitmentText) => {
+            if (!commitmentText || goalList.length === 0) return null;
+            try {
+              const extraction = await openai.chat.completions.create({
+                model: 'gpt-4o-mini',
+                messages: [
+                  {
+                    role: 'system',
+                    content: `You map one commitment line to one goal_id from the provided list, or null if no clear match.
+Return ONLY valid JSON: { "goal_id": "uuid or null" }
+Only return a goal_id that exists in the list.`,
+                  },
+                  {
+                    role: 'user',
+                    content: JSON.stringify({ commitment: commitmentText, goals: goalList }),
+                  },
+                ],
+                response_format: { type: 'json_object' },
+                temperature: 0.2,
+                max_tokens: 80,
+              });
+              const extracted = JSON.parse(extraction.choices[0].message.content || '{}');
+              return (extracted.goal_id && activeGoals.some((g) => g.id === extracted.goal_id)) ? extracted.goal_id : null;
+            } catch (_e) {
+              return null;
+            }
+          };
+
+          const [minimumGoalId, stretchGoalId] = await Promise.all([
+            resolveGoalId(minimumCommitmentText),
+            resolveGoalId(stretchCommitmentText),
+          ]);
+
+          const fragmentRows = [
+            {
               user_id: authenticatedUserId,
               session_id: session_id || null,
-              goal_id: goalId,
-              commitment_text: item.text || commitmentText,
+              goal_id: minimumGoalId,
+              commitment_text: minimumCommitmentText,
               date: clientToday,
               kept: null,
-              fragment_index: index,
-            });
-          }
-          // If no items extracted or all null, log one unlinked entry
-          if (items.length === 0) {
-            await supabase.from('goal_commitment_log').insert({
+              fragment_index: 0, // fallback convention for minimum when commitment_type is unavailable
+              commitment_type: 'minimum',
+            },
+            {
               user_id: authenticatedUserId,
               session_id: session_id || null,
-              goal_id: null,
-              commitment_text: commitmentText,
+              goal_id: stretchGoalId,
+              commitment_text: stretchCommitmentText,
               date: clientToday,
               kept: null,
-              fragment_index: 0,
-            });
+              fragment_index: 1, // fallback convention for stretch when commitment_type is unavailable
+              commitment_type: 'stretch',
+            },
+          ];
+
+          const { error: insertError } = await supabase.from('goal_commitment_log').insert(fragmentRows);
+          if (insertError && /commitment_type/i.test(insertError.message || '')) {
+            const fallbackRows = fragmentRows.map(({ commitment_type: _commitmentType, ...row }) => row);
+            await supabase.from('goal_commitment_log').insert(fallbackRows);
           }
         } catch (_e) { /* fail silently */ }
       })();
