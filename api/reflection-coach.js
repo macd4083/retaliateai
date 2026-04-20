@@ -493,7 +493,7 @@ function daysFromNow(n, clientDate) {
 
 // ── Stage advancement heuristic ───────────────────────────────────────────────
 
-function deriveStageHint(sessionState, classifierChecklist, completedDirectives = []) {
+function deriveStageHint(sessionState, classifierChecklist, completedDirectives = [], messageCount = 0) {
   const stage = sessionState.current_stage || 'commitment_checkin';
   const cl = { ...(sessionState.checklist || {}), ...(classifierChecklist || {}) };
   const hasPlan = !!sessionState.tomorrow_commitment;
@@ -520,7 +520,9 @@ function deriveStageHint(sessionState, classifierChecklist, completedDirectives 
   }
 
   // honest stage done — determine what comes next
-  if (stage === 'honest' && cl.honest && sessionState.honest_depth === true) {
+  // Advance if honest_depth fired OR if honest checklist is done and we've had enough messages (fallback)
+  const honestDepthSatisfied = sessionState.honest_depth === true || (cl.honest && messageCount >= 6);
+  if (stage === 'honest' && cl.honest && honestDepthSatisfied) {
     // if wins is already completed (honest came after wins), advance to tomorrow
     if (cl.wins) return 'tomorrow';
     // wins hasn't happened yet, go to wins next
@@ -1804,7 +1806,7 @@ function buildDirectiveQueue({
   }
 
   // ── tomorrow_commitment_structure ─────────────────────────────────────
-  if (currentStage === 'tomorrow' && !sessionState.tomorrow_commitment) {
+  if ((currentStage === 'tomorrow' || (currentStage === 'honest' && mergedChecklist.honest && (mergedChecklist.wins || sessionState.wins_asked_for_more))) && !sessionState.tomorrow_commitment) {
     const minimumCaptured = !!sessionState.commitment_minimum;
     const stretchCaptured = !!sessionState.commitment_stretch;
     const latestScore = (commitmentStats?.recentScores || []).slice(-1)[0];
@@ -2520,6 +2522,10 @@ export default async function handler(req, res) {
     if (suggestedExercise === 'implementation_intention' && session_state.tomorrow_commitment) {
       suggestedExercise = 'none';
     }
+    // Block implementation_intention outside the tomorrow stage — it's a planning exercise, not a reflection exercise
+    if (suggestedExercise === 'implementation_intention' && session_state.current_stage !== 'tomorrow') {
+      suggestedExercise = 'none';
+    }
     // depth_probe: allow once per session naturally; block if already run
     if (suggestedExercise === 'depth_probe' && sessionExercisesRun.includes('depth_probe')) {
       suggestedExercise = 'none';
@@ -2528,7 +2534,7 @@ export default async function handler(req, res) {
     // ── 6b. Stage hint ─────────────────────────────────────────────────
     const messageCount = history.length;
     const completedDirectives = Array.isArray(session_state.completed_directives) ? session_state.completed_directives : [];
-    const suggestedNextStage = deriveStageHint(session_state, intentData?.checklist_content, completedDirectives);
+    const suggestedNextStage = deriveStageHint(session_state, intentData?.checklist_content, completedDirectives, messageCount);
 
     // ── 8. Build compact context block ───────────────────────────────────
     const exercisesExplained = Array.isArray(profile.exercises_explained) ? profile.exercises_explained : [];
