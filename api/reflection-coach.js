@@ -2716,8 +2716,8 @@ export default async function handler(req, res) {
         role: 'user',
         content: `Open the ${stage} stage of tonight's reflection. Greeting: "${getTimeGreeting(client_tz_offset)}". ${
           sameDayCommitment
-            ? `This morning they committed to: "${sameDayCommitment.commitment}". Open by checking in on how that went today before starting the reflection. Then offer mood chips.`
-            : 'Open with a warm greeting and mood chips.'
+            ? `This morning they committed to: "${sameDayCommitment.commitment}". Open by checking in on how that went today before starting the reflection. Include mood chips in the response.`
+            : 'Open with a warm, personal greeting. Include mood chips in the response.'
         } ${streak > 1 ? `${streak}-night streak — acknowledge briefly.` : ''} ${commitmentContextNote} Start with mood chips: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful 🙏","value":"grateful"},{"label":"Motivated 💪","value":"motivated"},{"label":"Okay 😐","value":"okay"},{"label":"Tired 😴","value":"tired"},{"label":"Stressed 😤","value":"stressed"}]`,
       });
     }
