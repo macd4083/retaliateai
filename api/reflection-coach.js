@@ -218,7 +218,7 @@ DEPTH CONVERSATION: When the user is in a reflective back-and-forth ("what do yo
 ON THE CHECKLIST (wins / honest / plan / identity):
 - These are background goals — track silently from conversation
 - wins: a real win or effort was mentioned. After the FIRST win is mentioned, always follow up with an open invitation to share more: e.g. "What else went well today?" or "What's another one?" — do NOT advance to the honest stage after just one win exchange. Let the user share as many wins as they want before moving on. Set wins_asked_for_more: true in the response only after you have asked this "what else?" question at least once. If the user responds with a list of wins (e.g. "sleep, app work, boxing"), you MAY ask about multiple items from that list in the same response — this is the ONE exception to the one-question rule. Only transition to honest after the user clearly signals they are done sharing wins.
-- commitment_checkin: when checklist_fragments are provided, show the checklist UI by setting show_commitment_checklist: true and checklist_fragments. Do NOT ask a free-text check-in question in that case. After checklist submission, set checkin_outcome in extracted_data: "kept" if all were done, "missed" if none, "partial" otherwise. Set commitment_checkin_done: true once answered.
+- commitment_checkin: when checklist_fragments are provided, show the checklist UI by setting show_commitment_checklist: true and checklist_fragments. Do NOT ask a free-text check-in question in that case. After checklist submission, set checkin_outcome in extracted_data: "kept" if all were done, "missed" if none, "partial" otherwise. Set commitment_checkin_done: true once answered. ROUTING: after check-in is done, if commitment_score >= 50 route to wins next; if commitment_score < 50 or unknown route to honest next (set stage_advance/new_stage accordingly).
 - honest: they acknowledged something they're struggling with or could improve. When a miss or honest moment is named, do NOT immediately close the honest stage or set honest_depth: true. Ask the one question that goes underneath it — not "what would you do differently" (that belongs in tomorrow) but something like "what was actually going on for you underneath that?" or "what do you think was really happening?" One question at a time — evaluate the answer before deciding whether to go deeper or close. Evaluate qualitatively: has the user answered what was actually happening underneath the surface behavior? A surface miss ("I didn't get to it", "I got distracted", "I forgot") is NOT enough. You need a genuine answer to the underneath layer — the real reason, the emotional truth, the internal conflict. Once you have a real answer to that underneath question, THEN you may set honest_depth: true. Do NOT count exchanges or use a fixed sequence — evaluate the quality of what they've said. If the answer is still surface-level, ask the one next question that goes deeper.
 - plan: a concrete tomorrow commitment was stated
 - identity: they made a statement about who they are or are becoming
@@ -506,9 +506,9 @@ function deriveStageHint(sessionState, classifierChecklist, completedDirectives 
   if (stage === 'commitment_checkin' && sessionState.commitment_checkin_done === true) {
     const parsedScore = Number(sessionState.commitment_score);
     const score = Number.isFinite(parsedScore) ? parsedScore : null;
-    // score = 100 (fully kept) → wins next
-    if (score === 100) return 'wins';
-    // score < 100, 0, or unknown → honest first (name the miss/partial)
+    // score >= 50 (mostly kept) → wins next, celebrate first
+    if (score !== null && score >= 50) return 'wins';
+    // score < 50, 0, or unknown → honest first (name the miss/partial)
     return 'honest';
   }
 
@@ -1513,6 +1513,12 @@ function buildDirectiveQueue({
   const avgScore = avgCommitmentScoreContext ?? commitmentStats?.avgScore7 ?? null;
   const scoreTrajectory = scoreTrajectoryContext ?? commitmentStats?.scoreTrajectory ?? null;
   const mergedChecklist = { ...(sessionState.checklist || {}), ...(intentData?.checklist_content || {}) };
+  const parsedCommitmentScore = Number(sessionState?.commitment_score);
+  const commitmentScore = Number.isFinite(parsedCommitmentScore) ? parsedCommitmentScore : null;
+  // Priority: explicit kept outcome > score-based >=50 > partial fallback when score is unavailable.
+  const mostlyKeptCheckin = sessionState?.checkin_outcome === 'kept'
+    || (commitmentScore !== null && commitmentScore >= 50)
+    || (sessionState?.checkin_outcome === 'partial' && commitmentScore === null);
 
   // ── cold_start_opener ──────────────────────────────────────────────────
   if (preSessionState?.cold_start) {
@@ -1717,7 +1723,7 @@ function buildDirectiveQueue({
   }
 
   // ── honest_missing ─────────────────────────────────────────────────────
-  if (honestMissing && sessionState?.checkin_outcome !== 'kept') {
+  if (honestMissing && !mostlyKeptCheckin) {
     const patternHint = userInsights.length > 0
       ? `Their recurring pattern is "${userInsights[0].pattern_label}" — if it came up today, help them name it. E.g. "Did ${userInsights[0].pattern_label.replace(/_/g, ' ')} show up anywhere today?" or "Was there a moment where you held back and you're not sure why?"`
       : `E.g. "Where did you feel like you weren't fully showing up today?" or "Is there a moment from today that's still sitting with you?" or "What part of today are you least proud of — not what you'd fix, just what happened?"`;
@@ -1740,13 +1746,13 @@ function buildDirectiveQueue({
   // ── honest_kept_expansion ──────────────────────────────────────────────
   if (
     !mergedChecklist.honest &&
-    sessionState?.checkin_outcome === 'kept' &&
+    mostlyKeptCheckin &&
     messageCount >= 4 &&
     !completedDirectives.includes('honest_kept_expansion')
   ) {
     allDirectives.push({
       id: 'honest_kept_expansion',
-      instruction: `HONEST (KEPT): They fully completed their commitment. Don't probe for a miss — that would undercut the win. Instead, go deeper on what made it happen: "You actually did it — what made today different from the times you haven't?" or "What does it tell you about yourself that you followed through on that?" Extract a depth insight, not a miss. Set honest_depth: true once you have a real answer.`,
+      instruction: `HONEST (KEPT): They fully or mostly completed their commitment (score >= 50). Start by naming what they did complete. If score is 100 (fully completed), do NOT ask about misses — go deeper on what made the follow-through happen. If score is 50-99 (partial), acknowledge the follow-through first, then gently ask what broke on the unfinished part. Example: "You still followed through on a solid chunk — what helped you get that part done?" then "And what got in the way of the rest?" Extract a depth insight from the mechanism, not just the miss. Set honest_depth: true once you have a real answer.`,
       priority: 2,
       preferred_stage: 'honest',
       fire_next_session: false,
@@ -1784,7 +1790,7 @@ function buildDirectiveQueue({
       }
       allDirectives.push({
         id: 'commitment_checkin',
-        instruction: `## STAGE: COMMITMENT CHECK-IN\nYou are here when session.current_stage === 'commitment_checkin' or when transitioning from 'wins' into this check-in.\n- Reference yesterday's exact commitment text: "${yc}"${minimumText}${stretchText}${checklistText}\n- If doing free-text fallback (no checklist), ask exactly ONE question about how it went.\n- In free-text fallback, the FIRST sentence MUST name the specific commitment explicitly (e.g. "You said you'd [exact commitment]..."). Do not open with vague framing.\n- If checklist fragments are available, you MUST show the checklist (show_commitment_checklist: true) and MUST NOT ask a free-text question.\n- Optional framing sentence is one sentence max and must stay practical (e.g. "Before we get into wins — I want to check in on what you said you'd do."). Do NOT use philosophical or identity-focused framing.\n- Generic or identity questions are not allowed here (for example: "what does how you showed up say about who you're becoming").\n- Never ask twice. One exchange only. Always set commitment_checkin_done: true after their response, regardless of outcome.${checkinTone}`,
+        instruction: `## STAGE: COMMITMENT CHECK-IN\nYou are here when session.current_stage === 'commitment_checkin' or when transitioning from 'wins' into this check-in.\n- Reference yesterday's exact commitment text: "${yc}"${minimumText}${stretchText}${checklistText}\n- If doing free-text fallback (no checklist), ask exactly ONE question about how it went.\n- In free-text fallback, the FIRST sentence MUST name the specific commitment explicitly (e.g. "You said you'd [exact commitment]..."). Do not open with vague framing.\n- If checklist fragments are available, you MUST show the checklist (show_commitment_checklist: true) and MUST NOT ask a free-text question.\n- Optional framing sentence is one sentence max and must stay practical (e.g. "Before we get into wins — I want to check in on what you said you'd do."). Do NOT use philosophical or identity-focused framing.\n- Generic or identity questions are not allowed here (for example: "what does how you showed up say about who you're becoming").\n- Never ask twice. One exchange only. Always set commitment_checkin_done: true after their response, regardless of outcome.\n- ROUTING AFTER CHECK-IN: if commitment_score >= 50, set stage_advance:true and new_stage:"wins". If commitment_score < 50 (or score is unknown), set stage_advance:true and new_stage:"honest".${checkinTone}`,
         priority: 1,
         preferred_stage: 'commitment_checkin',
         fire_next_session: false,
