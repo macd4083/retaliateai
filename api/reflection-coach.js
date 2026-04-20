@@ -1514,6 +1514,7 @@ function buildDirectiveQueue({
   const mergedChecklist = { ...(sessionState.checklist || {}), ...(intentData?.checklist_content || {}) };
   const parsedCommitmentScore = Number(sessionState?.commitment_score);
   const commitmentScore = Number.isFinite(parsedCommitmentScore) ? parsedCommitmentScore : null;
+  // Priority: explicit kept outcome > score-based >=50 > partial fallback when score is unavailable.
   const mostlyKeptCheckin = sessionState?.checkin_outcome === 'kept'
     || (commitmentScore !== null && commitmentScore >= 50)
     || (sessionState?.checkin_outcome === 'partial' && commitmentScore === null);
