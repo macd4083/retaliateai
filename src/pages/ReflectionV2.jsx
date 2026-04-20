@@ -334,7 +334,9 @@ export default function ReflectionV2() {
 
   const timeContext = getTimeContext();
 
-  const stages = BASE_STAGES;
+  const stages = sessionState.yesterday_commitment
+    ? BASE_STAGES
+    : BASE_STAGES.filter((s) => s.id !== 'commitment_checkin');
 
   // Keep messagesRef in sync with messages state
   useEffect(() => {

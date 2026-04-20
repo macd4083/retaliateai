@@ -511,6 +511,10 @@ function deriveStageHint(sessionState, classifierChecklist, completedDirectives 
     return 'honest';
   }
 
+  if (stage === 'wins' && !sessionState.commitment_checkin_done && sessionState.yesterday_commitment && messageCount >= 1) {
+    return 'commitment_checkin';
+  }
+
   // wins stage done — determine what comes next
   if (stage === 'wins' && cl.wins && sessionState.wins_asked_for_more === true) {
     // if honest is already completed (wins came after honest), advance to tomorrow
@@ -1750,8 +1754,10 @@ function buildDirectiveQueue({
   }
 
   // ── commitment_checkin ─────────────────────────────────────────────────
-  if (currentStage === 'commitment_checkin' && !sessionState.commitment_checkin_done) {
-    const yc = sessionState.yesterday_commitment || yesterdayCommitment;
+  const yc = sessionState.yesterday_commitment || yesterdayCommitment;
+  const isCheckinNeeded = !sessionState.commitment_checkin_done && !!yc;
+  const isTransitioningToCheckin = currentStage === 'wins' && isCheckinNeeded && messageCount >= 1;
+  if ((currentStage === 'commitment_checkin' || isTransitioningToCheckin) && !sessionState.commitment_checkin_done) {
     if (yc) {
       const minimumText = yesterdayMinimum ? `\n- Yesterday's MINIMUM floor: "${yesterdayMinimum}"` : '';
       const stretchText = yesterdayStretch ? `\n- Yesterday's STRETCH target: "${yesterdayStretch}"` : '';
@@ -1777,7 +1783,7 @@ function buildDirectiveQueue({
       }
       allDirectives.push({
         id: 'commitment_checkin',
-        instruction: `## STAGE: COMMITMENT CHECK-IN\nYou are here only when session.current_stage === 'commitment_checkin'.\n- Reference yesterday's exact commitment text: "${yc}"${minimumText}${stretchText}${checklistText}\n- If doing free-text fallback (no checklist), ask exactly ONE question about how it went. Use their words, not generic language.\n- Before asking, you can briefly frame why the check-in matters: e.g. "I want to start there — because what happened with yesterday's plan tells us a lot about what to focus on tonight" or "Starting here because following through on what we said matters more than what we plan next." One sentence max. Then ask.\n- Never ask twice. One exchange only. Always set commitment_checkin_done: true after their response, regardless of outcome.${checkinTone}`,
+        instruction: `## STAGE: COMMITMENT CHECK-IN\nYou are here when session.current_stage === 'commitment_checkin' or when transitioning from 'wins' into this check-in.\n- Reference yesterday's exact commitment text: "${yc}"${minimumText}${stretchText}${checklistText}\n- If doing free-text fallback (no checklist), ask exactly ONE question about how it went.\n- In free-text fallback, the FIRST sentence MUST name the specific commitment explicitly (e.g. "You said you'd [exact commitment]..."). Do not open with vague framing.\n- If checklist fragments are available, you MUST show the checklist (show_commitment_checklist: true) and MUST NOT ask a free-text question.\n- Optional framing sentence is one sentence max and must stay practical (e.g. "Before we get into wins — I want to check in on what you said you'd do."). Do NOT use philosophical or identity-focused framing.\n- Generic or identity questions are not allowed here (for example: "what does how you showed up say about who you're becoming").\n- Never ask twice. One exchange only. Always set commitment_checkin_done: true after their response, regardless of outcome.${checkinTone}`,
         priority: 1,
         preferred_stage: 'commitment_checkin',
         fire_next_session: false,
