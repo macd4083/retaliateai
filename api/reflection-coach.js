@@ -3036,26 +3036,30 @@ Only link when genuinely relevant. Do not force links. Multiple items can have t
     // Write wins to session row atomically (avoids read-then-write race condition)
     if (session_id && result.extracted_data?.win_text) {
       dbPromises.push(
-        supabase.rpc('append_jsonb_array_item', {
-          p_table: 'reflection_sessions',
-          p_column: 'wins',
-          p_id: session_id,
-          p_item: { text: result.extracted_data.win_text },
-          p_dedup_key: 'text',
-        }).catch((e) => console.error('Failed to persist win to session:', e))
+        Promise.resolve(
+          supabase.rpc('append_jsonb_array_item', {
+            p_table: 'reflection_sessions',
+            p_column: 'wins',
+            p_id: session_id,
+            p_item: { text: result.extracted_data.win_text },
+            p_dedup_key: 'text',
+          })
+        ).catch((e) => console.error('Failed to persist win to session:', e))
       );
     }
 
     // Write misses to session row atomically (avoids read-then-write race condition)
     if (session_id && result.extracted_data?.miss_text) {
       dbPromises.push(
-        supabase.rpc('append_jsonb_array_item', {
-          p_table: 'reflection_sessions',
-          p_column: 'misses',
-          p_id: session_id,
-          p_item: { text: result.extracted_data.miss_text },
-          p_dedup_key: 'text',
-        }).catch((e) => console.error('Failed to persist miss to session:', e))
+        Promise.resolve(
+          supabase.rpc('append_jsonb_array_item', {
+            p_table: 'reflection_sessions',
+            p_column: 'misses',
+            p_id: session_id,
+            p_item: { text: result.extracted_data.miss_text },
+            p_dedup_key: 'text',
+          })
+        ).catch((e) => console.error('Failed to persist miss to session:', e))
       );
     }
 
