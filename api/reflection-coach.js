@@ -1831,7 +1831,7 @@ function buildDirectiveQueue({
     if (rate !== null && rate < 50) {
       minimumFraming = `Name the data directly: "You've hit ${rate}% of your commitments recently. So let's get the floor right — what do you absolutely know you can get done tomorrow, no matter what?" Say the number first. Framing is certainty over ambition.`;
     } else if (avgScore !== null && avgScore < 55 && scoreTrajectory === 'declining') {
-      minimumFraming = `Their commitment confidence has been scoring ${Math.round(avgScore)}/100 and declining — they keep setting bars too high and missing them. Ask: "What are all the core things you'd stake your reputation on finishing tomorrow to make it a productive day?" Bet-your-life framing forces real commitment, not hopeful thinking.`;
+      minimumFraming = `Their commitment confidence has been scoring ${Math.round(avgScore)}/100 and declining — they keep setting bars too high and missing them. Ask: "What are all the core things you'd stake your reputation on finishing tomorrow to make it a productive day?" High-stakes framing forces real commitment, not hopeful thinking.`;
     } else if (trajectory === 'improving' && rate !== null && rate >= 60) {
       minimumFraming = `They're trending up (${rate}%, improving). Ask: "You're on a roll — what's the floor that protects tomorrow's streak no matter what comes up?" Frame it as protecting momentum.`;
     } else if (avgScore !== null && avgScore >= 80 && rate !== null && rate >= 70) {
@@ -1844,7 +1844,7 @@ function buildDirectiveQueue({
     allDirectives.push({
       id: 'tomorrow_commitment_structure',
       instruction: `TOMORROW COMMITMENT STRUCTURE: In this stage, your first job is to help the user map out ALL the minimum steps that would make tomorrow a genuinely productive day — not just one commitment. Capture TWO commitments in sequence — never both at once.
-- First capture the full floor commitment with this opening framing (you may paraphrase while keeping intent): "Let's build out tomorrow. What are all the things that, if you got them done, would make tomorrow a real win — the floor you wouldn't fall below?" Store it in extracted_data.commitment_minimum.
+- First capture the complete set of floor commitments with this opening framing (you may paraphrase while keeping intent): "Let's build out tomorrow. What are all the things that, if you got them done, would make tomorrow a real win — the floor you wouldn't fall below?" Store it in extracted_data.commitment_minimum.
 - Minimum framing guidance: ${minimumFraming}
 - On the turn you ask/capture minimum, do NOT set extracted_data.commitment_stretch and do NOT set extracted_data.tomorrow_commitment. Wait for the next user reply.
 - Only AFTER minimum is captured and the specificity directive is completed, ask the stretch question: "Now push it — if tomorrow went as well as it possibly could, what would you have gotten done on top of that?" Store it in extracted_data.commitment_stretch.
