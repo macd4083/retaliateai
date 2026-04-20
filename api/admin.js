@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { getAuthenticatedUserId } from '../src/lib/auth.js';
 
 const ALLOWED_TABLES = [
   'reflection_sessions',
@@ -32,7 +33,21 @@ export default async function handler(req, res) {
     delete_all,
   } = req.body || {};
 
-  if (!admin_secret || admin_secret !== process.env.ADMIN_SECRET) {
+  let isAuthorized = false;
+  if (admin_secret && admin_secret === process.env.ADMIN_SECRET) {
+    isAuthorized = true;
+  } else {
+    try {
+      const authedId = await getAuthenticatedUserId(req);
+      const { data: profileData } = await supabase
+        .from('user_profiles')
+        .select('role')
+        .eq('id', authedId)
+        .maybeSingle();
+      if (profileData?.role === 'admin') isAuthorized = true;
+    } catch (_e) {}
+  }
+  if (!isAuthorized) {
     return res.status(403).json({ error: 'Forbidden' });
   }
   if (!user_id) {

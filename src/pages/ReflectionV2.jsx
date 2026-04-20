@@ -935,7 +935,6 @@ export default function ReflectionV2() {
         body: JSON.stringify({
           action: 'reset',
           user_id: user.id,
-          admin_secret: import.meta.env.VITE_ADMIN_SECRET,
         }),
       });
       const data = await res.json();
@@ -979,7 +978,9 @@ export default function ReflectionV2() {
         setIsInitializing(true);
         initSession();
       }
-    } catch (_e) {}
+    } catch (err) {
+      console.error('[handleAdminReset] failed:', err);
+    }
   }
 
   // ── Handle goal suggestion acceptance ────────────────────────────────────
