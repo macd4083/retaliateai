@@ -322,15 +322,12 @@ export default function InsightsV2() {
   return (
     <AppShellV2 title="Insights">
       <div className="h-full overflow-y-auto">
-        <div className="max-w-2xl mx-auto px-4 md:px-6 py-6 space-y-6">
+        <div className="max-w-4xl mx-auto px-4 md:px-6 py-6 space-y-6">
 
           {/* ── ZONE 1: Momentum ──────────────────────────────────────────── */}
 
-          {/* Responsive row: stacks on mobile, side-by-side on md+ */}
-          <div className="flex flex-col md:flex-row md:gap-6 md:items-start gap-6">
-
           {/* Section 1: Consistency Tracker */}
-          <div className="md:flex-1 bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
             <p className="text-white font-semibold text-lg mb-4">Consistency Tracker</p>
 
             {weeklyData.length > 0 ? (() => {
@@ -509,7 +506,7 @@ export default function InsightsV2() {
           </div>
 
           {/* Right: Commitment list */}
-          <div className="md:w-72 md:flex-shrink-0">
+          <div>
             <h2 className="text-white font-semibold text-base mb-3">Commitments</h2>
             <div className="space-y-2">
               {displayedCommitments.length === 0 ? (
@@ -571,8 +568,6 @@ export default function InsightsV2() {
               )}
             </div>
           </div>
-
-          </div>{/* end responsive Zone 1 row */}
 
           {/* Section 2: Streak */}
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 flex items-center gap-4">
