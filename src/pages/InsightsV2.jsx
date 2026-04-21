@@ -328,7 +328,7 @@ export default function InsightsV2() {
 
           {/* Section 1: Consistency Tracker */}
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
-            <p className="text-white font-semibold text-lg mb-4">Consistency Tracker</p>
+            <p className="text-white font-semibold text-sm mb-4">Consistency Tracker</p>
 
             {weeklyData.length > 0 ? (() => {
               // ── Sparkline: Y-axis is 0–7 (kept count, not rate) ───────
@@ -571,9 +571,9 @@ export default function InsightsV2() {
 
           {/* Section 2: Streak */}
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 flex items-center gap-4">
-            <span className="text-3xl">🔥</span>
+            <span className="text-2xl">🔥</span>
             <div>
-              <p className="text-white font-semibold text-lg">{streak} night streak</p>
+              <p className="text-white font-semibold text-base">{streak} night streak</p>
               <p className="text-zinc-500 text-sm">Keep showing up.</p>
             </div>
           </div>
@@ -901,7 +901,7 @@ export default function InsightsV2() {
           {livingProfile?.identity_statement && (
             <div className="bg-gradient-to-br from-red-950/40 to-zinc-900 border border-red-900/50 rounded-2xl p-5">
               <p className="text-zinc-500 text-xs uppercase tracking-widest mb-2">Who You're Becoming</p>
-              <p className="text-white text-base font-medium leading-relaxed">
+              <p className="text-white text-sm font-medium leading-relaxed">
                 "{livingProfile.identity_statement}"
               </p>
 
