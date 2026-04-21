@@ -19,6 +19,7 @@ import OpenAI from 'openai';
 import { createClient } from '@supabase/supabase-js';
 import { classifyIntent, DEFAULT_CLASSIFICATION } from '../src/lib/classifier.js';
 import { getAuthenticatedUserId } from '../src/lib/auth.js';
+import { practices } from '../src/lib/practiceLibrary.js';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -36,6 +37,8 @@ const supabase = createClient(
  * ALTER TABLE reflection_sessions ADD COLUMN IF NOT EXISTS embedding vector(1536);
  * ALTER TABLE reflection_sessions ADD COLUMN IF NOT EXISTS commitment_checkin_done boolean DEFAULT false;
  * ALTER TABLE reflection_sessions ADD COLUMN IF NOT EXISTS checkin_outcome text CHECK (checkin_outcome IN ('kept', 'missed', 'partial'));
+ * ALTER TABLE reflection_sessions ADD COLUMN IF NOT EXISTS checkin_opener text;
+ * ALTER TABLE follow_up_queue ADD COLUMN IF NOT EXISTS type text;
  *
  * -- Goal-linked commitment tracking
  * CREATE TABLE IF NOT EXISTS goal_commitment_log (
@@ -111,6 +114,13 @@ const supabase = createClient(
 const DEFAULT_CHECKLIST = { wins: false, honest: false, plan: false, identity: false };
 const MIN_DEEP_SESSION_MESSAGE_COUNT = 6;
 const MAX_DEPTH_INSIGHTS_RETAINED = 4;
+const MIN_INSIGHT_KEYWORD_OVERLAP = 2;
+const MIN_INSIGHT_OVERLAP_SCORE = 0.2;
+const MAX_DEPTH_PROBES_PER_SESSION = 2;
+const MIN_DEPTH_PROBE_MESSAGE_SPACING = 3;
+const INSIGHT_MATCH_STOP_WORDS = new Set(['the', 'and', 'for', 'that', 'with', 'this', 'from', 'your', 'about', 'have', 'just', 'what', 'when', 'were', 'been', 'into', 'then', 'they', 'them', 'their', 'you', 'are']);
+const EXERCISE_IDS = practices.map((practice) => practice.id);
+const EXERCISE_ENUM = ['none', ...EXERCISE_IDS].join('|');
 
 // ── Motivation signal thresholds ──────────────────────────────────────────────
 const MOTIVATION_STRONG_THRESHOLD = 0.7;   // ≥70% follow-through → strong
@@ -403,7 +413,7 @@ RETURN JSON EXACTLY (no markdown, no extra keys):
     "goal_suggestion": null,
     "goal_commitment_why": false
   },
-  "exercise_run": "none|gratitude_anchor|why_reconnect|evidence_audit|implementation_intention|values_clarification|future_self_bridge|ownership_reframe|triage_one_thing|identity_reinforcement|depth_probe",
+  "exercise_run": "${EXERCISE_ENUM}",
   "checklist_updates": {"wins": false, "honest": false, "plan": false, "identity": false},
   "wins_asked_for_more": false,
   "honest_depth": false,
@@ -422,22 +432,112 @@ Set "directive_completed" to the id of the directive you executed this message (
 
 // ── Per-exercise coach instructions (injected only when that exercise is selected) ──
 
-const EXERCISE_PROMPTS = {
-  gratitude_anchor: `gratitude_anchor: Before the question, explain what you noticed (low energy, a rough patch, something they said) that made this the right moment, what naming something still-working tends to unlock, and to go with the first honest thing that comes up — not the "right" answer. "Name one thing from today that's still working, even if it's small." → Reflect back + connect to identity. Chips: ["Still has momentum 💪","Small but real ✅","Hard to find one 😔"]`,
-  why_reconnect: `why_reconnect: Before the question, explain what you noticed about their energy or follow-through on this goal that made you want to test whether the original reason still holds, what reconnecting to a why tends to do when motivation is drifting, and to answer honestly even if the why has changed. "You told me this matters because [actual why]. Does that still feel true?" → If yes: "So what's getting between you and that?" If no: "What changed?"`,
-  evidence_audit: `evidence_audit: Before the question, explain what you noticed (self-doubt, a miss, them being hard on themselves) that made this the right moment, that this tends to surface proof they're further along than they feel, and to name things that actually happened — not what they wished had happened. "Name three things you've done in the last 30 days that the version of you who's failing wouldn't have done."`,
-  implementation_intention: `implementation_intention: Before the question, explain what you noticed about the vagueness or ambiguity in their commitment that made you go here, that specificity on when/how is usually what separates follow-through from drift, and to be as precise as possible — not aspirational. "Not what you want to do — when exactly, day and time, and what's the first 2-minute action." Push back if vague. Store as tomorrow_commitment. STOP once specific.`,
-  values_clarification: `values_clarification: Before the question, explain what you noticed (a conflict, something feeling off, a decision they're wrestling with) that made this useful right now, that this tends to surface what actually matters vs. what they think should matter, and to answer as if no one is watching. "If no one was watching and there were no consequences — what would you actually spend your time on?" → "What does that tell you about what actually matters?"`,
-  future_self_bridge: `future_self_bridge: Before the question, explain what you noticed (a win, a doubt, a moment of meaning) that made connecting to their future self useful right now, that this tends to reframe daily friction as intentional progress, and to describe it specifically — not vaguely. "You told me in a year you want to be [actual future_self]. What would that version of you say about tonight?" → "What's one decision right now that moves toward that?"`,
-  ownership_reframe: `ownership_reframe: Before the question, explain what you noticed (an excuse pattern, external blame) that made this the right move, that naming what was in their control is usually where the useful work lives, and to stay honest even if the controllable part is small. "What was the part that was in your control?" → If ownership: "That's the only part that matters. So what do you do with that?"`,
-  triage_one_thing: `triage_one_thing: Before the question, explain what you noticed (overwhelm, scattered priorities) that made this the right moment, that clarity on one thing tends to cut through the noise more than prioritizing everything, and to go with gut — not the "most responsible" answer. "Out of everything you're carrying — what's the ONE thing that actually matters most?" → "What's one move on that one thing?"`,
-  identity_reinforcement: `identity_reinforcement: Before the question, explain what you noticed (a specific win or pattern) that made this the right moment to name it as identity, that calling something a pattern rather than a one-off is usually what makes it stick, and to sit with the answer rather than deflect. Fill in their ACTUAL win/action (never use placeholders). "That's a pattern, not a one-off. What does [their specific action] say about who you're becoming?" Then: "You told me you're someone who [their actual identity_statement]. Tonight proves it." Run ONCE per session only.`,
-  depth_probe: `depth_probe (use naturally mid-conversation, not as a named exercise):
-  Before the question, explain what you noticed (a surface answer, a pattern, something they glossed over) that made you want to go underneath it, that the real insight is usually one layer below what was just said, and to not rush the answer — sit with it.
-  Triggered when: user gives a surface answer to a meaningful question, or a pattern appears
-  Question intent examples: probe recurring loops, uncover the story/belief underneath behavior, and surface the core assumption keeping the pattern alive. Use fresh phrasing grounded in the user's exact language.
-  After a depth answer: sit with it. Reflect back what you heard. Then one forward question.`,
-};
+const EXERCISE_PROMPTS = Object.fromEntries(practices.map((practice) => [practice.id, practice.coach_prompt]));
+const EXERCISE_FIRST_TIME_INTROS = Object.fromEntries(
+  practices.map((practice) => [practice.id, practice.first_time_intro]).filter(([, intro]) => intro)
+);
+
+/**
+ * Tokenize free text into lowercase keyword terms for lightweight overlap scoring.
+ * @param {string} text
+ * @returns {Set<string>}
+ */
+function tokenizeKeywords(text) {
+  if (!text || typeof text !== 'string') return new Set();
+  return new Set(
+    text
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter((word) => word.length > 2 && !INSIGHT_MATCH_STOP_WORDS.has(word))
+  );
+}
+
+/**
+ * Finds the best unlocked-practice insight match for the current user message.
+ * Match score = overlap_count / insight_keyword_count, gated by minimum overlap constants.
+ * @param {object} params
+ * @returns {{insightId:string, exerciseId:string, insightContext:string, score:number}|null}
+ */
+function findInsightTriggeredExercise({
+  userMessage,
+  userInsights = [],
+  sessionState = {},
+  sessionExercisesRun = [],
+  suggestedExercise = 'none',
+}) {
+  const currentStage = sessionState.current_stage || 'wins';
+  if (!userMessage || currentStage === 'commitment_checkin') return null;
+  if (suggestedExercise && suggestedExercise !== 'none') return null;
+  const triggeredInsights = Array.isArray(sessionState.insight_exercises_triggered)
+    ? sessionState.insight_exercises_triggered
+    : [];
+  const messageKeywords = tokenizeKeywords(userMessage);
+  if (messageKeywords.size === 0) return null;
+
+  let bestMatch = null;
+
+  for (const insight of userInsights) {
+    if (!insight?.id || triggeredInsights.includes(insight.id)) continue;
+    const practicesForInsight = Array.isArray(insight.unlocked_practices) ? insight.unlocked_practices : [];
+    const availablePractice = practicesForInsight.find((id) => EXERCISE_PROMPTS[id] && !sessionExercisesRun.includes(id));
+    if (!availablePractice) continue;
+
+    const insightKeywords = tokenizeKeywords(`${insight.pattern_narrative || ''} ${insight.pattern_label || ''}`);
+    if (insightKeywords.size === 0) continue;
+    let overlapCount = 0;
+    for (const keyword of messageKeywords) {
+      if (insightKeywords.has(keyword)) overlapCount += 1;
+    }
+    const score = overlapCount / Math.max(insightKeywords.size, 1);
+    if (overlapCount >= MIN_INSIGHT_KEYWORD_OVERLAP && score >= MIN_INSIGHT_OVERLAP_SCORE && (!bestMatch || score > bestMatch.score)) {
+      bestMatch = {
+        insightId: insight.id,
+        exerciseId: availablePractice,
+        insightContext: insight.pattern_narrative || insight.pattern_label || '',
+        score,
+      };
+    }
+  }
+
+  return bestMatch;
+}
+
+/**
+ * Gate depth_probe routing with session caps and message spacing.
+ * @param {object} sessionState
+ * @param {number} messageCount
+ * @returns {boolean}
+ */
+function shouldAllowDepthProbe(sessionState, messageCount) {
+  const depthProbeCount = Number(sessionState?.depth_probe_count || 0);
+  const lastDepthProbeMessageIndex = Number(sessionState?.last_depth_probe_message_index);
+  if (depthProbeCount >= MAX_DEPTH_PROBES_PER_SESSION) return false;
+  if (Number.isFinite(lastDepthProbeMessageIndex) && messageCount - lastDepthProbeMessageIndex < MIN_DEPTH_PROBE_MESSAGE_SPACING) return false;
+  return true;
+}
+
+/**
+ * Normalizes checklist fragment display text with minimum/stretch labels.
+ * @param {{type?: string, commitment_text?: string}} fragment
+ * @returns {string}
+ */
+function formatChecklistFragmentText(fragment) {
+  if (fragment?.type === 'minimum') return `Minimum: ${fragment.commitment_text}`;
+  if (fragment?.type === 'stretch') return `Stretch: ${fragment.commitment_text}`;
+  return fragment?.commitment_text || '';
+}
+
+/**
+ * Maps deferred directive ids to follow-up queue types.
+ * @param {string} directiveId
+ * @returns {'depth_followup'|'commitment_followup'|'exercise_followup'}
+ */
+function getFollowUpTypeForDirective(directiveId = '') {
+  if (directiveId.includes('depth')) return 'depth_followup';
+  if (directiveId.includes('commitment') || directiveId.includes('tomorrow')) return 'commitment_followup';
+  return 'exercise_followup';
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -547,17 +647,18 @@ async function loadFollowUpQueue(userId, currentSignals = [], clientDate) {
   try {
     const { data } = await supabase
       .from('follow_up_queue')
-      .select('id, context, question, trigger_condition, check_back_after')
+      .select('id, context, question, trigger_condition, check_back_after, type')
       .eq('user_id', userId)
       .eq('triggered', false)
-      .is('resolved_at', null);
+      .is('resolved_at', null)
+      .order('check_back_after', { ascending: true });
     if (!data || data.length === 0) return [];
     const todayStr = today(clientDate);
     return data.filter((item) => {
       if (item.check_back_after <= todayStr) return true;
       if (item.trigger_condition && currentSignals.includes(item.trigger_condition)) return true;
       return false;
-    });
+    }).map((item) => ({ ...item, type: item.type || 'exercise_followup' }));
   } catch (_e) { return []; }
 }
 
@@ -762,7 +863,7 @@ async function loadRecentSessionsSummary(userId) {
   try {
     const { data } = await supabase
       .from('reflection_sessions')
-      .select('date, wins, misses, tomorrow_commitment, current_stage, checklist, mood_end_of_day, summary, blocker_tags')
+      .select('date, wins, misses, tomorrow_commitment, current_stage, checklist, mood_end_of_day, summary, blocker_tags, exercises_run')
       .eq('user_id', userId)
       .eq('is_complete', true)
       .order('date', { ascending: false })
@@ -787,16 +888,17 @@ async function loadYesterdayCommitmentDetails(userId, clientToday) {
   try {
     const { data } = await supabase
       .from('reflection_sessions')
-      .select('commitment_minimum, commitment_stretch')
+      .select('commitment_minimum, commitment_stretch, checkin_opener')
       .eq('user_id', userId)
       .eq('date', localDate(-1, clientToday))
       .maybeSingle();
     return {
       commitment_minimum: data?.commitment_minimum || null,
       commitment_stretch: data?.commitment_stretch || null,
+      checkin_opener: data?.checkin_opener || null,
     };
   } catch (_e) {
-    return { commitment_minimum: null, commitment_stretch: null };
+    return { commitment_minimum: null, commitment_stretch: null, checkin_opener: null };
   }
 }
 
@@ -1015,20 +1117,14 @@ async function updateSessionExercise(sessionId, exerciseName, consecutiveExcuses
   } catch (_e) {}
 }
 
-async function markExerciseExplained(userId, exerciseName, currentExplained = []) {
+async function queueFollowUp(userId, sessionId, { context, question, check_back_after, trigger_condition, type }, clientDate) {
   try {
-    if (currentExplained.includes(exerciseName)) return;
-    await supabase.from('user_profiles')
-      .update({ exercises_explained: [...currentExplained, exerciseName] }).eq('id', userId);
-  } catch (_e) {}
-}
-
-async function queueFollowUp(userId, sessionId, { context, question, check_back_after, trigger_condition }, clientDate) {
-  try {
+    // SUPABASE MIGRATION NOTE: follow_up_queue requires a nullable `type` TEXT column.
     await supabase.from('follow_up_queue').insert({
       user_id: userId, session_id: sessionId, context, question,
       check_back_after: check_back_after || daysFromNow(3, clientDate),
       trigger_condition: trigger_condition || null,
+      type: type || null,
     });
   } catch (_e) {}
 }
@@ -1495,19 +1591,18 @@ Return valid JSON only:
 function buildDirectiveQueue({
   preSessionState, isMemoryMode, followUpQueue, growthMarkers,
   intentData, suggestedPractice, depthProbeNeeded, sessionState,
-  profile, commitmentStats, yesterdayCommitment, yesterdayMinimum, yesterdayStretch,
+  profile, commitmentStats, yesterdayCommitment, yesterdayMinimum, yesterdayStretch, yesterdayCheckinOpener,
   commitmentRate7Context, commitmentTrajectoryContext, avgCommitmentScoreContext, scoreTrajectoryContext,
   yesterdayFragments,
   goalMissingWhy, messageCount, sessionReadyToClose, forceClose,
   identityMissing, honestMissing, suggestedNextStage, sessionExercisesRun,
   history,
+  insightTriggeredExercise,
   userInsights, recentSessions, effectiveConsecutiveExcuses,
   currentDirectiveQueue, completedDirectives,
 }) {
   const currentStage = sessionState.current_stage || 'commitment_checkin';
   const allDirectives = [];
-  const exercisesExplained = Array.isArray(profile?.exercises_explained) ? profile.exercises_explained : [];
-  const isFirstTimeExercise = suggestedPractice !== 'none' && !exercisesExplained.includes(suggestedPractice);
   const derivedRate7 = commitmentStats?.rate7 != null ? Math.round(commitmentStats.rate7 * 100) : null;
   const rate = commitmentRate7Context !== null ? commitmentRate7Context : derivedRate7;
   const trajectory = commitmentTrajectoryContext ?? commitmentStats?.trajectory ?? null;
@@ -1647,6 +1742,22 @@ function buildDirectiveQueue({
     });
   }
 
+  if (insightTriggeredExercise) {
+    allDirectives.push({
+      id: 'insight_triggered_exercise',
+      exercise_id: insightTriggeredExercise.exerciseId,
+      insight_context: insightTriggeredExercise.insightContext,
+      insight_match_context: insightTriggeredExercise.insightContext,
+      insight_id: insightTriggeredExercise.insightId,
+      instruction: `INSIGHT-MATCHED EXERCISE: The user just said something that matches a known pattern: "${insightTriggeredExercise.insightContext}". Consider opening with: "${EXERCISE_FIRST_TIME_INTROS[insightTriggeredExercise.exerciseId] || 'I want to try something here.'}" then run "${insightTriggeredExercise.exerciseId}" now. Set exercise_run="${insightTriggeredExercise.exerciseId}". Include chips: [{"label":"Let's go there","value":"exercise_accept"},{"label":"Keep going","value":"exercise_skip"}].`,
+      priority: 1.5,
+      preferred_stage: sessionState?.insight_exercise_skipped ? 'close' : 'any',
+      fire_next_session: true,
+      followup_question: `I want to come back to something we touched — ${insightTriggeredExercise.insightContext}`,
+      energy_type: 'depth',
+    });
+  }
+
   // ── depth_probe ────────────────────────────────────────────────────────
   if (depthProbeNeeded) {
     allDirectives.push({
@@ -1772,9 +1883,7 @@ function buildDirectiveQueue({
         ? yesterdayFragments.map((f) => ({
             id: f.id,
             type: f.type || null,
-            text: f.type === 'minimum'
-              ? `Minimum: ${f.commitment_text}`
-              : (f.type === 'stretch' ? `Stretch: ${f.commitment_text}` : f.commitment_text),
+            text: formatChecklistFragmentText(f),
           }))
         : [];
       const checklistText = checklistFragments.length > 0
@@ -1790,7 +1899,7 @@ function buildDirectiveQueue({
       }
       allDirectives.push({
         id: 'commitment_checkin',
-        instruction: `## COMMITMENT CHECK-IN\nYou are pivoting directly from their mood response into checking in on yesterday before wins.\n- THEIR EXACT COMMITMENT: "${yc}"${minimumText}${stretchText}${checklistText}\n- This is the FIRST thing you address after mood. Use one short framing sentence max, then ask the specific check-in question. Example framing: "Before we get into wins — you said you'd [exact commitment]. What actually happened?"\n- Use their exact words from the commitment. Never ask a generic or identity-style question.\n- If doing free-text fallback (no checklist), ask exactly ONE specific question and then wait.\n- If checklist fragments are available, you MUST show the checklist (show_commitment_checklist: true) and MUST NOT ask a free-text question.\n- On this transition turn from wins, set stage_advance:true and new_stage:"commitment_checkin" so the UI reflects the check-in stage immediately.\n- Never ask twice. One exchange only. Always set commitment_checkin_done: true after their response, regardless of outcome.\n- ROUTING AFTER CHECK-IN: if commitment_score >= 50, set stage_advance:true and new_stage:"wins". If commitment_score < 50 (or score is unknown), set stage_advance:true and new_stage:"honest".${checkinTone}`,
+        instruction: `## COMMITMENT CHECK-IN\nYou are pivoting directly from their mood response into checking in on yesterday before wins.\n- THEIR EXACT COMMITMENT: "${yc}"${minimumText}${stretchText}${checklistText}\n- This is the FIRST thing you address after mood. Use one short framing sentence max, then ask the specific check-in question. Example framing: "Before we get into wins — you said you'd [exact commitment]. What actually happened?"\n- If yesterday has a custom opener, use it exactly once before your question: ${yesterdayCheckinOpener ? `"${yesterdayCheckinOpener}"` : '(none available)'}\n- Use their exact words from the commitment. Never ask a generic or identity-style question.\n- If doing free-text fallback (no checklist), ask exactly ONE specific question and then wait.\n- If checklist fragments are available, you MUST show the checklist (show_commitment_checklist: true) and MUST NOT ask a free-text question.\n- On this transition turn from wins, set stage_advance:true and new_stage:"commitment_checkin" so the UI reflects the check-in stage immediately.\n- Never ask twice. One exchange only. Always set commitment_checkin_done: true after their response, regardless of outcome.\n- ROUTING AFTER CHECK-IN: if commitment_score >= 50, set stage_advance:true and new_stage:"wins". If commitment_score < 50 (or score is unknown), set stage_advance:true and new_stage:"honest".${checkinTone}`,
         priority: 1,
         preferred_stage: isTransitioningToCheckin ? 'wins' : 'commitment_checkin',
         fire_next_session: false,
@@ -2049,7 +2158,7 @@ function buildDirectiveQueue({
  * Prefers highest-priority, stage-matching directives.
  * Uses intentEmotionalState as a tiebreaker when multiple candidates tie at the same level.
  */
-function dispatchNextDirective(directiveQueue, currentStage, intentEmotionalState) {
+function dispatchNextDirective(directiveQueue, currentStage, intentEmotionalState, messageCount = 0, sessionExercisesRun = []) {
   if (!directiveQueue || directiveQueue.length === 0) return null;
 
   const EMOTIONAL_ENERGY_PREFERENCE = {
@@ -2096,6 +2205,31 @@ function dispatchNextDirective(directiveQueue, currentStage, intentEmotionalStat
   // Priority 1, any stage
   const p1Any = directiveQueue.filter(d => d.priority === 1);
   if (p1Any.length > 0) return pickBest(p1Any);
+
+  const shouldPromoteExerciseDirective = (
+    (currentStage === 'honest' || currentStage === 'close')
+    && messageCount >= 4
+    && Array.isArray(sessionExercisesRun)
+    && sessionExercisesRun.length === 0
+  );
+  if (shouldPromoteExerciseDirective) {
+    const firstQueuedExerciseDirective = directiveQueue.find(
+      (directive) =>
+        (directive.id === 'run_exercise' || directive.id === 'insight_triggered_exercise')
+        && (directive.preferred_stage === currentStage || directive.preferred_stage === 'any')
+    );
+    if (firstQueuedExerciseDirective) {
+      return { ...firstQueuedExerciseDirective, effective_priority: 0.5 };
+    }
+  }
+
+  const p15Stage = directiveQueue.filter(
+    d => d.priority > 1 && d.priority < 2 && (d.preferred_stage === currentStage || d.preferred_stage === 'any')
+  );
+  if (p15Stage.length > 0) return pickBest(p15Stage);
+
+  const p15Any = directiveQueue.filter(d => d.priority > 1 && d.priority < 2);
+  if (p15Any.length > 0) return pickBest(p15Any);
 
   // Priority 2, stage match
   const p2Stage = directiveQueue.filter(
@@ -2162,7 +2296,7 @@ function buildSessionContext({
   const identityMissing = !mergedChecklist.identity && messageCount >= 6;
   const sessionReadyToClose = tomorrowFilled && mergedChecklist.wins && (mergedChecklist.identity || messageCount >= 10);
   const forceClose = messageCount >= 14 && tomorrowFilled && mergedChecklist.wins;
-  const depthProbeNeeded = !!(intentData?.depth_opportunity && !sessionExercisesRun.includes('depth_probe') && (sessionState?.depth_opportunity_count_so_far ?? 0) >= 2);
+  const depthProbeNeeded = !!(intentData?.depth_opportunity && (sessionState?.depth_opportunity_count ?? 0) >= 2 && shouldAllowDepthProbe(sessionState, messageCount));
   const isMemoryMode = ['question', 'advice_request', 'memory_query'].includes(intentData?.intent);
   const goalMissingWhy = goalsNeedWhyBuilding.find(g => !Array.isArray(g.whys) || g.whys.length === 0) ?? null;
 
@@ -2281,6 +2415,10 @@ function buildSessionContext({
         : [],
       session_blockers_captured: sessionState.blocker_tags || [],
       depth_insight_captured: sessionState.depth_insight || null,
+      depth_probe_count: sessionState.depth_probe_count || 0,
+      last_depth_probe_message_index: sessionState.last_depth_probe_message_index ?? null,
+      insight_exercises_triggered: Array.isArray(sessionState.insight_exercises_triggered) ? sessionState.insight_exercises_triggered : [],
+      insight_exercise_skipped: sessionState.insight_exercise_skipped === true,
     },
     intent: {
       type: intentData.intent,
@@ -2365,6 +2503,7 @@ export default async function handler(req, res) {
 
     const isInit = originalUserMessage === '__INIT__';
     const isChecklistSubmission = originalUserMessage === '__CHECKLIST_SUBMITTED__';
+    const isExerciseSkipSignal = originalUserMessage === '__EXERCISE_SKIP__' || context?.exercise_action === 'skip';
     let displayMessage = originalUserMessage;
     let precomputedScore = null;
     if (isChecklistSubmission) {
@@ -2372,6 +2511,8 @@ export default async function handler(req, res) {
       const keptCount = checklist.filter((i) => i?.kept === true).length;
       const total = checklist.length;
       displayMessage = `I completed ${keptCount} out of ${total} things I committed to.`;
+    } else if (isExerciseSkipSignal) {
+      displayMessage = 'Keep going.';
     }
 
     // If checklist result submitted, evaluate fragments and inject score
@@ -2399,6 +2540,12 @@ export default async function handler(req, res) {
         const total = context.checklist_result.length;
         precomputedScore = total > 0 ? Math.round((kept / total) * 100) : 0;
       } catch (_e) {}
+    }
+    let checklistResultContextInstruction = '';
+    if (Array.isArray(context?.checklist_result) && context.checklist_result.length > 0) {
+      const kept = context.checklist_result.filter((item) => item.kept).length;
+      const total = context.checklist_result.length;
+      checklistResultContextInstruction = `\n\nCHECKLIST RESULT: The user submitted yesterday's checklist and marked ${kept}/${total} complete. Acknowledge this directly and naturally before moving forward.`;
     }
 
     // ── 1. Classify intent ────────────────────────────────────────────────
@@ -2443,7 +2590,9 @@ export default async function handler(req, res) {
     let followUpQueue = (loadedFollowUpQueue || []).filter(
       f => normalizeFollowUpQuestion(f.question) !== deprecatedIdentityFollowUpQuestion
     );
-    const sessionInitFollowUpQueue = yesterdayCommitment ? [] : followUpQueue;
+    const sessionInitFollowUpQueue = yesterdayCommitment
+      ? followUpQueue.filter((item) => item.type !== 'commitment_followup')
+      : followUpQueue;
 
     // Attach motivation signal to each goal
     const activeGoals = activeGoalsRaw.map((g) => {
@@ -2514,7 +2663,6 @@ export default async function handler(req, res) {
       future_self: context.future_self || userProfile?.future_self || null,
       life_areas: context.life_areas || userProfile?.life_areas || [],
       blockers: context.blockers || userProfile?.blockers || [],
-      exercises_explained: userProfile?.exercises_explained || [],
       values: userProfile?.values || [],
       short_term_state: userProfile?.short_term_state || null,
       long_term_patterns: userProfile?.long_term_patterns || [],
@@ -2523,6 +2671,11 @@ export default async function handler(req, res) {
       consecutive_excuse_sessions: userProfile?.consecutive_excuse_sessions || 0,
       last_session_completed_at: userProfile?.last_session_completed_at || null,
     };
+    const historicalExplainedExercises = new Set(
+      (recentSessions || [])
+        .flatMap((session) => (Array.isArray(session.exercises_run) ? session.exercises_run : []))
+        .filter(Boolean)
+    );
 
     // ── 3b. Days since last session ───────────────────────────────────────
     let daysSinceLastSession = null;
@@ -2559,7 +2712,7 @@ export default async function handler(req, res) {
     let dueFollowUp = followUpQueue.length > 0 ? followUpQueue[0] : null;
     // Suppress follow-up queue items when there's a commitment check-in pending —
     // the check-in must always come first
-    if (yesterdayCommitment && dueFollowUp) {
+    if (yesterdayCommitment && dueFollowUp?.type === 'commitment_followup') {
       dueFollowUp = null;
     }
     const dueGrowthMarker = growthMarkers.length > 0 ? growthMarkers[0] : null;
@@ -2574,7 +2727,9 @@ export default async function handler(req, res) {
 
     // ── 6. Exercise cooldown + smart blocks ───────────────────────────────
     const sessionExercisesRun = Array.isArray(session_state.exercises_run) ? session_state.exercises_run : [];
+    const messageCount = history.length;
     let suggestedExercise = intentData?.suggested_exercise || 'none';
+    const depthProbeAllowed = shouldAllowDepthProbe(session_state, messageCount);
 
     if (suggestedExercise !== 'none' && sessionExercisesRun.includes(suggestedExercise)) {
       suggestedExercise = 'none';
@@ -2587,13 +2742,22 @@ export default async function handler(req, res) {
     if (suggestedExercise === 'implementation_intention' && session_state.current_stage !== 'tomorrow') {
       suggestedExercise = 'none';
     }
-    // depth_probe: allow once per session naturally; block if already run
-    if (suggestedExercise === 'depth_probe' && sessionExercisesRun.includes('depth_probe')) {
+    if (suggestedExercise === 'depth_probe' && !depthProbeAllowed) {
       suggestedExercise = 'none';
     }
+    const exerciseAlreadyQueuedThisTurn = Array.isArray(session_state.directive_queue)
+      && session_state.directive_queue.some((directive) => ['run_exercise', 'insight_triggered_exercise', 'depth_probe'].includes(directive.id));
+    const insightTriggeredExercise = exerciseAlreadyQueuedThisTurn
+      ? null
+      : findInsightTriggeredExercise({
+        userMessage: displayMessage,
+        userInsights,
+        sessionState: session_state,
+        sessionExercisesRun,
+        suggestedExercise,
+      });
 
     // ── 6b. Stage hint ─────────────────────────────────────────────────
-    const messageCount = history.length;
     const completedDirectives = Array.isArray(session_state.completed_directives) ? session_state.completed_directives : [];
     // Server-side fallback: detect wins_asked_for_more from last coach message
     // (GPT sometimes asks the follow-up question but forgets to set the flag)
@@ -2617,8 +2781,9 @@ export default async function handler(req, res) {
     const suggestedNextStage = deriveStageHint(session_state, intentData?.checklist_content, completedDirectives, messageCount);
 
     // ── 8. Build compact context block ───────────────────────────────────
-    const exercisesExplained = Array.isArray(profile.exercises_explained) ? profile.exercises_explained : [];
-    const isFirstTimeExercise = suggestedExercise !== 'none' && !exercisesExplained.includes(suggestedExercise);
+    const exercisesExplained = Array.from(historicalExplainedExercises);
+    const effectiveSuggestedExercise = insightTriggeredExercise?.exerciseId || suggestedExercise;
+    const isFirstTimeExercise = effectiveSuggestedExercise !== 'none' && !historicalExplainedExercises.has(effectiveSuggestedExercise);
 
     // ── 8b. Memory search for question/advice/memory_query/reflective intents ────────
     const isMemoryMode = ['question', 'advice_request', 'memory_query'].includes(intentData?.intent);
@@ -2674,7 +2839,15 @@ export default async function handler(req, res) {
     });
 
     // ── Directive Queue ───────────────────────────────────────────────────
-    const currentDirectiveQueue = Array.isArray(session_state.directive_queue) ? session_state.directive_queue : [];
+    let currentDirectiveQueue = Array.isArray(session_state.directive_queue) ? session_state.directive_queue : [];
+    if (isExerciseSkipSignal) {
+      currentDirectiveQueue = currentDirectiveQueue.map((directive) => (
+        directive.id === 'insight_triggered_exercise'
+          ? { ...directive, preferred_stage: 'close', priority: 2, fire_next_session: true }
+          : directive
+      ));
+      session_state.insight_exercise_skipped = true;
+    }
 
     // Derive values needed for directive conditions
     const mergedChecklist = { ...(session_state.checklist || {}), ...(intentData?.checklist_content || {}) };
@@ -2687,7 +2860,7 @@ export default async function handler(req, res) {
     const forceCloseThreshold = hasCheckin ? 16 : 14;
     const sessionReadyToClose = tomorrowFilled && mergedChecklist.wins && (mergedChecklist.identity || messageCount >= sessionReadyThreshold);
     const forceClose = messageCount >= forceCloseThreshold && tomorrowFilled && mergedChecklist.wins;
-    const depthProbeNeeded = !!(intentData?.depth_opportunity && !sessionExercisesRun.includes('depth_probe') && (session_state?.depth_opportunity_count_so_far ?? 0) >= 2);
+    const depthProbeNeeded = !!(intentData?.depth_opportunity && (session_state?.depth_opportunity_count ?? 0) >= 2 && depthProbeAllowed);
     const goalMissingWhy = goalsNeedWhyBuilding.find(g => !Array.isArray(g.whys) || g.whys.length === 0) ?? null;
 
     const newDirectives = buildDirectiveQueue({
@@ -2708,6 +2881,7 @@ export default async function handler(req, res) {
       yesterdayCommitment,
       yesterdayMinimum: yesterdayCommitmentDetails?.commitment_minimum || null,
       yesterdayStretch: yesterdayCommitmentDetails?.commitment_stretch || null,
+      yesterdayCheckinOpener: yesterdayCommitmentDetails?.checkin_opener || null,
       yesterdayFragments,
       goalMissingWhy,
       messageCount,
@@ -2718,6 +2892,7 @@ export default async function handler(req, res) {
       suggestedNextStage,
       sessionExercisesRun,
       history,
+      insightTriggeredExercise,
       userInsights,
       recentSessions,
       effectiveConsecutiveExcuses,
@@ -2734,7 +2909,9 @@ export default async function handler(req, res) {
 
     const currentStage = session_state.current_stage || 'commitment_checkin';
     // isInit messages skip directive dispatch — init has its own fixed opener logic
-    const activeDirective = isInit ? null : dispatchNextDirective(combinedDirectiveQueue, currentStage, intentData?.emotional_state);
+    const activeDirective = isInit
+      ? null
+      : dispatchNextDirective(combinedDirectiveQueue, currentStage, intentData?.emotional_state, messageCount, sessionExercisesRun);
 
     const contextBlock = buildSessionContext({
       profile,
@@ -2745,7 +2922,7 @@ export default async function handler(req, res) {
       commitmentStats,
       followUpQueue: dueFollowUp,
       growthMarkers: dueGrowthMarker,
-      suggestedPractice: suggestedExercise,
+      suggestedPractice: effectiveSuggestedExercise,
       isFirstTimeExercise,
       exercisesExplained,
       intentData,
@@ -2773,10 +2950,13 @@ export default async function handler(req, res) {
     });
 
     // ── 9. Build messages ─────────────────────────────────────────────────
-    const exerciseInstruction = suggestedExercise !== 'none' && EXERCISE_PROMPTS[suggestedExercise]
-      ? `\n\nEXERCISE WORKFLOW:\n${EXERCISE_PROMPTS[suggestedExercise]}`
+    const exerciseInstruction = effectiveSuggestedExercise !== 'none' && EXERCISE_PROMPTS[effectiveSuggestedExercise]
+      ? `\n\nEXERCISE WORKFLOW:\n${isFirstTimeExercise && EXERCISE_FIRST_TIME_INTROS[effectiveSuggestedExercise] ? `${EXERCISE_FIRST_TIME_INTROS[effectiveSuggestedExercise]}\n` : ''}${EXERCISE_PROMPTS[effectiveSuggestedExercise]}`
       : '';
-    const effectiveSystemPrompt = SYSTEM_PROMPT + followUpInstruction + growthMarkerInstruction + exerciseInstruction;
+    const insightMatchInstruction = insightTriggeredExercise
+      ? `\n\nINSIGHT MATCH: The user just said something that matches a known pattern: "${insightTriggeredExercise.insightContext}". Consider opening with: "${EXERCISE_FIRST_TIME_INTROS[insightTriggeredExercise.exerciseId] || 'I want to try something here.'}" then running "${insightTriggeredExercise.exerciseId}".`
+      : '';
+    const effectiveSystemPrompt = SYSTEM_PROMPT + followUpInstruction + growthMarkerInstruction + exerciseInstruction + insightMatchInstruction + checklistResultContextInstruction;
     const messages = [{ role: 'system', content: effectiveSystemPrompt }, contextBlock, ...history.slice(-18)];
 
     if (!isInit) {
@@ -2858,6 +3038,27 @@ export default async function handler(req, res) {
     result.show_commitment_checklist = result.show_commitment_checklist === true;
     result.checklist_fragments = Array.isArray(result.checklist_fragments) ? result.checklist_fragments : null;
     result.show_goal_chips = result.show_goal_chips === true;
+    result.insight_exercise_skipped = session_state.insight_exercise_skipped === true || isExerciseSkipSignal;
+    if (activeDirective?.id === 'insight_triggered_exercise' && result.exercise_run === activeDirective.exercise_id) {
+      result.insight_exercise_skipped = false;
+    }
+
+    if (isInit && Array.isArray(yesterdayFragments) && yesterdayFragments.length > 0 && !session_state.commitment_checkin_done) {
+      result.show_commitment_checklist = true;
+      result.checklist_fragments = yesterdayFragments.map((fragment) => ({
+        id: fragment.id,
+        type: fragment.type || null,
+        text: formatChecklistFragmentText(fragment),
+      }));
+    }
+
+    const hasInsightDirectiveQueued = combinedDirectiveQueue.some((directive) => directive.id === 'insight_triggered_exercise');
+    if (hasInsightDirectiveQueued && !isExerciseSkipSignal) {
+      result.chips = [
+        { label: "Let's go there", value: 'exercise_accept' },
+        { label: 'Keep going', value: 'exercise_skip' },
+      ];
+    }
     if (result.extracted_data?.commitment_score != null) {
       const parsedScore = Number.parseFloat(result.extracted_data.commitment_score);
       result.extracted_data.commitment_score = Number.isFinite(parsedScore)
@@ -2876,6 +3077,23 @@ export default async function handler(req, res) {
       else result.extracted_data.checkin_outcome = 'partial';
     }
     result.checkin_outcome = result.extracted_data?.checkin_outcome || null;
+    let depthProbeCount = Number(session_state.depth_probe_count || 0);
+    let lastDepthProbeMessageIndex = Number.isFinite(Number(session_state.last_depth_probe_message_index))
+      ? Number(session_state.last_depth_probe_message_index)
+      : null;
+    if (result.exercise_run === 'depth_probe') {
+      depthProbeCount += 1;
+      lastDepthProbeMessageIndex = messageCount;
+    }
+    result.depth_probe_count = depthProbeCount;
+    result.last_depth_probe_message_index = lastDepthProbeMessageIndex;
+    const insightExercisesTriggered = Array.isArray(session_state.insight_exercises_triggered)
+      ? [...session_state.insight_exercises_triggered]
+      : [];
+    if (activeDirective?.id === 'insight_triggered_exercise' && activeDirective?.insight_id && !insightExercisesTriggered.includes(activeDirective.insight_id)) {
+      insightExercisesTriggered.push(activeDirective.insight_id);
+    }
+    result.insight_exercises_triggered = insightExercisesTriggered;
 
     // Mark a progress event as surfaced if the AI referenced it
     if (result.progress_event_surfaced && typeof result.progress_event_surfaced === 'string') {
@@ -2890,7 +3108,7 @@ export default async function handler(req, res) {
     }
 
     // Safety strip — never re-run a blocked exercise
-    if (result.exercise_run !== 'none' && sessionExercisesRun.includes(result.exercise_run)) {
+    if (result.exercise_run !== 'none' && result.exercise_run !== 'depth_probe' && sessionExercisesRun.includes(result.exercise_run)) {
       result.exercise_run = 'none';
     }
 
@@ -2933,9 +3151,6 @@ export default async function handler(req, res) {
     }
     if (session_id) {
       dbPromises.push(updateSessionExercise(session_id, result.exercise_run, consecutiveExcuses));
-    }
-    if (result.exercise_run && result.exercise_run !== 'none' && isFirstTimeExercise) {
-      dbPromises.push(markExerciseExplained(authenticatedUserId, result.exercise_run, exercisesExplained));
     }
     if (dueFollowUp && result.follow_up_triggered === true) {
       dbPromises.push(markFollowUpTriggered(dueFollowUp.id));
@@ -2997,6 +3212,7 @@ Return ONLY valid JSON: { "question": "..." }`,
             question: followUpQuestion,
             check_back_after: daysFromNow(3, client_local_date),
             trigger_condition: intentData?.emotional_state,
+            type: 'exercise_followup',
           }, client_local_date);
         })()
       );
@@ -3033,6 +3249,10 @@ Return ONLY valid JSON: { "question": "..." }`,
       if (result.extracted_data?.self_hype_message) updates.self_hype_message = result.extracted_data.self_hype_message;
       if (result.commitment_checkin_done) updates.commitment_checkin_done = true;
       if (result.extracted_data?.checkin_outcome) updates.checkin_outcome = result.extracted_data.checkin_outcome;
+      if (result.depth_probe_count != null) updates.depth_probe_count = result.depth_probe_count;
+      if (result.last_depth_probe_message_index != null) updates.last_depth_probe_message_index = result.last_depth_probe_message_index;
+      if (Array.isArray(result.insight_exercises_triggered)) updates.insight_exercises_triggered = result.insight_exercises_triggered;
+      if (result.insight_exercise_skipped === true) updates.insight_exercise_skipped = true;
       if (result.is_session_complete) {
         updates.is_complete = true;
         updates.completed_at = new Date().toISOString();
@@ -3424,6 +3644,7 @@ Only return a goal_id that exists in the list.`,
             : `You mentioned wanting to work on "${goalTitle}". Before we dive in — what makes that actually matter to you? Not the goal itself, but what's underneath it?`,
           check_back_after: 1,
           trigger_condition: 'always',
+          type: 'commitment_followup',
         }, client_local_date).catch(() => {});
       }
     }
@@ -3445,6 +3666,46 @@ Only return a goal_id that exists in the list.`,
           const summaryText = generateSessionSummary(session_state, result, profile, today(client_local_date));
           const embedding = await generateEmbedding(summaryText);
           const sessionUpdates = { summary: summaryText };
+          const resolvedCommitmentMinimum = result.extracted_data?.commitment_minimum || session_state.commitment_minimum || null;
+          const resolvedCommitmentStretch = result.extracted_data?.commitment_stretch || session_state.commitment_stretch || null;
+          const resolvedMood = result.extracted_data?.mood || session_state.mood_end_of_day || null;
+          const latestWin = result.extracted_data?.win_text || session_state?.wins?.slice?.(-1)?.[0]?.text || null;
+          const latestMiss = result.extracted_data?.miss_text || session_state?.misses?.slice?.(-1)?.[0]?.text || null;
+          const keySessionSignal = latestWin || latestMiss || 'no single highlight captured';
+
+          // SUPABASE MIGRATION NOTE: reflection_sessions requires a nullable `checkin_opener` TEXT column.
+          if (resolvedCommitmentMinimum || resolvedCommitmentStretch) {
+            try {
+              const openerCompletion = await openai.chat.completions.create({
+                model: 'gpt-4o-mini',
+                messages: [
+                  {
+                    role: 'system',
+                    content: `Generate one warm, specific opener sentence for tomorrow's commitment check-in.
+Return ONLY valid JSON: { "checkin_opener": "..." }.
+The sentence should reference yesterday's commitment naturally and sound conversational.`,
+                  },
+                  {
+                    role: 'user',
+                    content: JSON.stringify({
+                      commitment_minimum: resolvedCommitmentMinimum,
+                      commitment_stretch: resolvedCommitmentStretch,
+                      mood_end_of_day: resolvedMood,
+                      key_win_or_miss: keySessionSignal,
+                      identity_statement: profile.identity_statement || null,
+                    }),
+                  },
+                ],
+                response_format: { type: 'json_object' },
+                max_tokens: 120,
+                temperature: 0.7,
+              });
+              const openerData = JSON.parse(openerCompletion.choices?.[0]?.message?.content || '{}');
+              if (typeof openerData.checkin_opener === 'string' && openerData.checkin_opener.trim()) {
+                sessionUpdates.checkin_opener = openerData.checkin_opener.trim();
+              }
+            } catch (_e) { /* fail silently */ }
+          }
           if (embedding) sessionUpdates.embedding = embedding;
           await supabase.from('reflection_sessions').update(sessionUpdates).eq('id', session_id);
           await evolveUserProfile(authenticatedUserId, summaryText, userProfile, recentSessions, session_id);
@@ -3488,6 +3749,7 @@ Return ONLY valid JSON: { "question": "...", "context": "brief context on why th
                   question: followUpData.question,
                   check_back_after: daysFromNow(1, client_local_date),
                   trigger_condition: null,
+                  type: 'depth_followup',
                 }, client_local_date);
               }
             } catch (_e) { /* fail silently */ }
@@ -3502,6 +3764,7 @@ Return ONLY valid JSON: { "question": "...", "context": "brief context on why th
                 question: directive.followup_question || `Following up on something we didn't get to last session — ${directive.id.replace(/_/g, ' ')}.`,
                 check_back_after: daysFromNow(1, client_local_date),
                 trigger_condition: null,
+                type: getFollowUpTypeForDirective(directive.id),
               }, client_local_date).catch(() => {});
             }
           } catch (_e) { /* fail silently */ }
