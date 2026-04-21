@@ -84,6 +84,39 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, data: data || [] });
     }
 
+    if (action === 'upsert') {
+      const UPSERT_ALLOWED = {
+        reflection_sessions: ['tomorrow_commitment', 'commitment_minimum', 'commitment_stretch', 'commitment_score', 'is_complete', 'date'],
+      };
+
+      const { row_id, updates } = req.body || {};
+      if (!row_id || !table || !updates || typeof updates !== 'object' || Array.isArray(updates)) {
+        return res.status(400).json({ error: 'row_id, table, and updates are required' });
+      }
+      const allowedFields = UPSERT_ALLOWED[table];
+      if (!allowedFields) {
+        return res.status(400).json({ error: `upsert not supported for table: ${table}` });
+      }
+
+      const safeUpdates = {};
+      for (const key of allowedFields) {
+        if (Object.prototype.hasOwnProperty.call(updates, key)) {
+          safeUpdates[key] = updates[key];
+        }
+      }
+      if (Object.keys(safeUpdates).length === 0) {
+        return res.status(400).json({ error: 'No valid fields to update' });
+      }
+
+      const { error: upsertError } = await supabase
+        .from(table)
+        .update(safeUpdates)
+        .eq('id', row_id)
+        .eq('user_id', user_id);
+      if (upsertError) throw upsertError;
+      return res.status(200).json({ ok: true });
+    }
+
     if (action === 'reset') {
       if (delete_all) {
         const { data: sessions } = await supabase
@@ -126,7 +159,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, deleted_session_id: session.id, date, user_id });
     }
 
-    return res.status(400).json({ error: "action must be 'data' or 'reset'" });
+    return res.status(400).json({ error: "action must be 'data', 'upsert', or 'reset'" });
   } catch (error) {
     console.error('admin error:', error);
     return res.status(500).json({ error: 'Internal server error' });
