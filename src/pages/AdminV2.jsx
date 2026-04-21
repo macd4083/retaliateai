@@ -10,16 +10,18 @@ import AdminToolsNav from '../components/admin/AdminToolsNav';
 const ADMIN_SECRET = import.meta.env.VITE_ADMIN_SECRET;
 
 async function adminFetch(body) {
-  const sessionResult = await supabase.auth.getSession();
-  if (sessionResult?.error) {
-    throw new Error(`Failed to retrieve auth session: ${sessionResult.error.message}`);
-  }
-  const session = sessionResult?.data?.session;
+  let accessToken = null;
+  try {
+    const sessionResult = await supabase.auth.getSession();
+    if (!sessionResult?.error) {
+      accessToken = sessionResult?.data?.session?.access_token || null;
+    }
+  } catch (_e) {}
   return fetch('/api/admin', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
     },
     body: JSON.stringify({ ...body, admin_secret: ADMIN_SECRET }),
   });
