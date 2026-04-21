@@ -383,9 +383,9 @@ export default function InsightsV2() {
                   {/* Sparkline SVG */}
                   <svg viewBox="0 0 320 100" className="w-full mb-1">
                     {/* Y-axis labels: 7, 3, 0 */}
-                    <text x={padX - 4} y={chartTop + 4} textAnchor="end" fill="#71717a" fontSize={8} fontFamily="sans-serif">7</text>
-                    <text x={padX - 4} y={(chartTop + baseline) / 2 + 3} textAnchor="end" fill="#71717a" fontSize={8} fontFamily="sans-serif">3</text>
-                    <text x={padX - 4} y={baseline} textAnchor="end" fill="#71717a" fontSize={8} fontFamily="sans-serif">0</text>
+                    <text x={padX - 4} y={chartTop + 4} textAnchor="end" fill="#71717a" fontSize={5} fontFamily="sans-serif">7</text>
+                    <text x={padX - 4} y={(chartTop + baseline) / 2 + 3} textAnchor="end" fill="#71717a" fontSize={5} fontFamily="sans-serif">3</text>
+                    <text x={padX - 4} y={baseline} textAnchor="end" fill="#71717a" fontSize={5} fontFamily="sans-serif">0</text>
                     {/* Dashed baseline */}
                     <line x1={padX} y1={baseline} x2={totalW - padX} y2={baseline}
                       stroke="#3f3f46" strokeWidth={1} strokeDasharray="3 3" />
@@ -408,7 +408,7 @@ export default function InsightsV2() {
                               <rect x={x - 14} y={y - 22} width={28} height={16} rx={7}
                                 fill="#27272a" stroke="#3f3f46" strokeWidth={1} />
                               <text x={x} y={y - 10} textAnchor="middle"
-                                fill="white" fontSize={9} fontWeight="bold" fontFamily="sans-serif">
+                                fill="white" fontSize={6} fontWeight="bold" fontFamily="sans-serif">
                                 {w.kept}/7
                               </text>
                             </>
@@ -418,7 +418,7 @@ export default function InsightsV2() {
                             fill={isSelected ? '#ef4444' : hasWkData ? '#71717a' : '#27272a'}
                           />
                           <text x={x} y={95} textAnchor="middle"
-                            fill={isSelected ? '#ef4444' : '#52525b'} fontSize={8} fontFamily="sans-serif">
+                            fill={isSelected ? '#ef4444' : '#52525b'} fontSize={5} fontFamily="sans-serif">
                             {w.weekLabel}
                           </text>
                         </g>
