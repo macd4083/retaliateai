@@ -21,8 +21,8 @@ function getTimeContext() {
 }
 
 const BASE_STAGES = [
-  { id: 'wins', label: 'Wins' },
   { id: 'commitment_checkin', label: 'Check-in' },
+  { id: 'wins', label: 'Wins' },
   { id: 'honest', label: 'Honest' },
   { id: 'tomorrow', label: 'Tomorrow' },
   { id: 'close', label: 'Close' },
@@ -298,7 +298,7 @@ export default function ReflectionV2() {
   const [streak, setStreak] = useState(0);
   const [userProfile, setUserProfile] = useState(null);
   const [sessionState, setSessionState] = useState({
-    current_stage: 'wins',
+    current_stage: 'commitment_checkin',
     mood_end_of_day: null,
     steps_completed: [],
     wins: [],
@@ -326,6 +326,7 @@ export default function ReflectionV2() {
     insight_exercise_skipped: false,
     directive_queue: [],
     completed_directives: [],
+    stage_order_swapped: false,
   });
   const [summaryCardData, setSummaryCardData] = useState({});
   const [followThroughStats, setFollowThroughStats] = useState(null);
@@ -341,10 +342,15 @@ export default function ReflectionV2() {
 
   const timeContext = getTimeContext();
 
-  const hasCheckinStage = !!(sessionState.yesterday_commitment || sessionState.commitment_checkin_done);
-  const stages = hasCheckinStage
-    ? BASE_STAGES
-    : BASE_STAGES.filter((s) => s.id !== 'commitment_checkin');
+  const stages = sessionState.stage_order_swapped
+    ? [
+        { id: 'commitment_checkin', label: 'Check-in' },
+        { id: 'honest', label: 'Honest' },
+        { id: 'wins', label: 'Wins' },
+        { id: 'tomorrow', label: 'Tomorrow' },
+        { id: 'close', label: 'Close' },
+      ]
+    : BASE_STAGES;
 
   // Keep messagesRef in sync with messages state
   useEffect(() => {
@@ -424,7 +430,7 @@ export default function ReflectionV2() {
       } catch (_e) {}
 
       const restoredState = {
-        current_stage: session.current_stage || 'wins',
+        current_stage: session.current_stage || 'commitment_checkin',
         mood_end_of_day: session.mood_end_of_day || null,
         steps_completed: [],
         wins: session.wins || [],
@@ -452,6 +458,7 @@ export default function ReflectionV2() {
         insight_exercise_skipped: session.insight_exercise_skipped === true,
         directive_queue: Array.isArray(session.directive_queue) ? session.directive_queue : [],
         completed_directives: Array.isArray(session.completed_directives) ? session.completed_directives : [],
+        stage_order_swapped: session.stage_order_swapped === true,
       };
       setSessionState(restoredState);
 
@@ -692,6 +699,7 @@ export default function ReflectionV2() {
               yesterday_commitment_in_state: !!state.yesterday_commitment,
               consecutive_excuses: state.consecutive_excuses || 0,
               checklist: state.checklist || { ...DEFAULT_CHECKLIST },
+              stage_order_swapped: state.stage_order_swapped === true,
             },
             history: isInit ? [] : buildHistory(currentMsgs),
             user_message: userText,
@@ -847,6 +855,9 @@ export default function ReflectionV2() {
         if (data.extracted_data?.yesterday_commitment && !newState.yesterday_commitment) {
           newState.yesterday_commitment = data.extracted_data.yesterday_commitment;
         }
+        if (data.stage_order_swapped === true) {
+          newState.stage_order_swapped = true;
+        }
         newState.directive_queue = data.directive_queue || [];
         newState.completed_directives = data.completed_directives || [];
         setSessionState(newState);
@@ -874,6 +885,9 @@ export default function ReflectionV2() {
         }
         if (data.checkin_outcome && !state.checkin_outcome) {
           dbUpdates.checkin_outcome = data.checkin_outcome;
+        }
+        if (data.stage_order_swapped === true && !state.stage_order_swapped) {
+          dbUpdates.stage_order_swapped = true;
         }
         if (data.depth_probe_count != null) dbUpdates.depth_probe_count = data.depth_probe_count;
         if (data.last_depth_probe_message_index != null) dbUpdates.last_depth_probe_message_index = data.last_depth_probe_message_index;
@@ -987,7 +1001,7 @@ export default function ReflectionV2() {
         setCommitmentStatsCache(null);
         commitmentStatsCacheRef.current = null;
         setSessionState({
-          current_stage: 'wins',
+          current_stage: 'commitment_checkin',
           mood_end_of_day: null,
           steps_completed: [],
           wins: [],
@@ -1015,6 +1029,7 @@ export default function ReflectionV2() {
           insight_exercise_skipped: false,
           directive_queue: [],
           completed_directives: [],
+          stage_order_swapped: false,
         });
         initCalledRef.current = false;
         initSentRef.current = false;

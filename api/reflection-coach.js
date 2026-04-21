@@ -418,6 +418,7 @@ RETURN JSON EXACTLY (no markdown, no extra keys):
   "wins_asked_for_more": false,
   "honest_depth": false,
   "commitment_checkin_done": false,
+  "stage_order_swapped": false,
   "show_commitment_checklist": false, // true when presenting fragment checklist to user
   "checklist_fragments": null, // array of {id, text, type?} fragments to check off
   "show_goal_chips": false,
@@ -561,10 +562,10 @@ function getTimeOfDay(tzOffset) {
 
 function getTimeGreeting(tzOffset) {
   const map = {
-    morning: "Good morning — let's start with where you're at.",
-    afternoon: 'Hey, taking a moment this afternoon to reflect.',
-    evening: "Good evening — let's talk about today.",
-    night: "Hey, it's getting late. Let's do a quick reflection before you sleep.",
+    morning: 'Hey, good morning.',
+    afternoon: 'Hey, good afternoon.',
+    evening: 'Hey, good evening.',
+    night: "Hey, it's getting late.",
   };
   return map[getTimeOfDay(tzOffset)];
 }
@@ -594,16 +595,49 @@ function daysFromNow(n, clientDate) {
 
 // ── Stage advancement heuristic ───────────────────────────────────────────────
 
-function deriveStageHint(sessionState, classifierChecklist, completedDirectives = [], messageCount = 0) {
+const LOW_CHECKIN_EMOTIONAL_STATES = new Set(['low', 'stressed', 'anxious', 'frustrated', 'stuck', 'flat', 'overwhelmed']);
+const LOW_CHECKIN_SIGNAL_PATTERNS = [
+  /\bstressed\b/i,
+  /\banxious\b/i,
+  /\bfrustrated\b/i,
+  /\bstuck\b/i,
+  /\boverwhelmed\b/i,
+  /\bdrained\b/i,
+  /\bexhausted\b/i,
+  /\bburn(?:ed|t)\s*out\b/i,
+  /\bheavy\b/i,
+  /\brough\b/i,
+  /\bhard\b/i,
+  /\bnot\s+great\b/i,
+  /\bnot\s+good\b/i,
+  /\bflat\b/i,
+  /\boff\b/i,
+];
+
+function hasLowCheckinSignal(message = '') {
+  if (!message || typeof message !== 'string') return false;
+  return LOW_CHECKIN_SIGNAL_PATTERNS.some((pattern) => pattern.test(message));
+}
+
+function deriveStageHint(sessionState, classifierChecklist, completedDirectives = [], messageCount = 0, intentData = null, lastUserMessage = '') {
   const stage = sessionState.current_stage || 'commitment_checkin';
   const cl = { ...(sessionState.checklist || {}), ...(classifierChecklist || {}) };
   const hasPlan = !!sessionState.tomorrow_commitment;
+  const stageOrderSwapped = sessionState.stage_order_swapped === true;
+  const hasYesterdayCommitment = !!(sessionState.yesterday_commitment || sessionState.yesterday_commitment_in_state);
   const completed = Array.isArray(completedDirectives)
     ? completedDirectives
     : (Array.isArray(sessionState.completed_directives) ? sessionState.completed_directives : []);
 
-  // commitment_checkin done — route based on score
+  // commitment_checkin done — route based on opener state (no yesterday) or score (yesterday exists)
   if (stage === 'commitment_checkin' && sessionState.commitment_checkin_done === true) {
+    if (!hasYesterdayCommitment) {
+      const emotionalState = typeof intentData?.emotional_state === 'string' ? intentData.emotional_state.toLowerCase() : '';
+      const intent = typeof intentData?.intent === 'string' ? intentData.intent.toLowerCase() : '';
+      const heavySignal = LOW_CHECKIN_EMOTIONAL_STATES.has(emotionalState) || intent === 'stuck' || hasLowCheckinSignal(lastUserMessage);
+      if (stageOrderSwapped || heavySignal) return 'honest';
+      return 'wins';
+    }
     const parsedScore = Number(sessionState.commitment_score);
     const score = Number.isFinite(parsedScore) ? parsedScore : null;
     // score >= 50 (mostly kept) → wins next, celebrate first
@@ -619,7 +653,7 @@ function deriveStageHint(sessionState, classifierChecklist, completedDirectives 
   // wins stage done — determine what comes next
   if (stage === 'wins' && cl.wins && sessionState.wins_asked_for_more === true) {
     // if honest is already completed (wins came after honest), advance to tomorrow
-    if (cl.honest) return 'tomorrow';
+    if (cl.honest || stageOrderSwapped) return 'tomorrow';
     // honest hasn't happened yet, go to honest next
     return 'honest';
   }
@@ -1910,7 +1944,7 @@ function buildDirectiveQueue({
   if (currentStage === 'commitment_checkin' && !sessionState.commitment_checkin_done && !yc) {
     allDirectives.push({
       id: 'commitment_checkin',
-      instruction: `## STAGE: COMMITMENT CHECK-IN\nNo yesterday commitment is available. Briefly acknowledge that there is nothing to check in on from yesterday and set commitment_checkin_done: true so the session can continue.`,
+      instruction: `## STAGE: COMMITMENT CHECK-IN\nNo yesterday commitment is available. This stage is still a real check-in.\n- Respond directly to what they just shared about how they are feeling right now.\n- Ask one specific follow-up only if needed to clarify what is most present for them.\n- Do NOT mention that there is "nothing to check in on" and do NOT use generic form language.\n- Once you've captured their current state, set commitment_checkin_done: true.\n- The server will route to honest-first when their state sounds heavy/stuck/stressed, otherwise wins-first. Focus on the quality of the check-in message.`,
       priority: 1,
       preferred_stage: 'commitment_checkin',
       fire_next_session: false,
@@ -2398,6 +2432,7 @@ function buildSessionContext({
       : undefined,
     session: {
       stage: sessionState.current_stage || 'commitment_checkin',
+      stage_order_swapped: sessionState.stage_order_swapped === true,
       checklist: mergedChecklist,
       tomorrow_commitment: sessionState.tomorrow_commitment || null,
       exercises_run: sessionExercisesRun,
@@ -2442,6 +2477,9 @@ function buildSessionContext({
     instructions: [
       // ── Active directive — one queued coaching action dispatched this message ─
       activeDirective ? activeDirective.instruction : null,
+      sessionState.stage_order_swapped === true
+        ? 'STAGE ORDER FOR THIS SESSION: commitment_checkin → honest → wins → tomorrow → close. Keep this order unless safety requires otherwise.'
+        : null,
       // ── Guard rails — always permanent context ────────────────────────────
       sessionExercisesRun.length > 0 ? `ALREADY RUN: ${sessionExercisesRun.join(', ')}. Do NOT repeat.` : null,
       forceClose
@@ -2778,7 +2816,14 @@ export default async function handler(req, res) {
         }
       }
     }
-    const suggestedNextStage = deriveStageHint(session_state, intentData?.checklist_content, completedDirectives, messageCount);
+    const suggestedNextStage = deriveStageHint(
+      session_state,
+      intentData?.checklist_content,
+      completedDirectives,
+      messageCount,
+      intentData,
+      displayMessage
+    );
 
     // ── 8. Build compact context block ───────────────────────────────────
     const exercisesExplained = Array.from(historicalExplainedExercises);
@@ -2962,7 +3007,7 @@ export default async function handler(req, res) {
     if (!isInit) {
       messages.push({ role: 'user', content: displayMessage });
     } else {
-      const stage = session_state?.current_stage || 'commitment_checkin';
+      const stage = 'commitment_checkin';
       const streak = context.reflection_streak || context.streak || 0;
       const rate = resolvedCommitmentRate7;
       const trajectory = resolvedCommitmentTrajectory;
@@ -2973,13 +3018,24 @@ export default async function handler(req, res) {
       } else if (rate !== null && rate >= 70 && trajectory === 'improving') {
         commitmentContextNote = `NOTE: User is on a strong run — ${rate}% follow-through, improving trajectory. Acknowledge momentum when wins come up tonight.`;
       }
+      const returningContext = preSessionState?.returning_user_context
+        ? `If it feels natural, you may lightly reference this from last session: "${preSessionState.returning_user_context}".`
+        : '';
       messages.push({
         role: 'user',
-        content: `Open the ${stage} stage of tonight's reflection. Greeting: "${getTimeGreeting(client_tz_offset)}". ${
+        content: `Open the ${stage} stage of tonight's reflection. Start with a warm, direct greeting that fits this time of day: "${getTimeGreeting(client_tz_offset)}". Ask one real question about what feels most present for them right now. Keep it conversational and human.
+
+Do NOT mention stages, process, forms, or instructions.
+Do NOT tell them to pick a mood.
+Do NOT use the phrase "what's underneath that."
+Return mood chips in the JSON "chips" field only — don't call attention to them in assistant_message.
+${returningContext}
+${
           sameDayCommitment
-            ? `This morning they committed to: "${sameDayCommitment.commitment}". Open by checking in on how that went today before starting the reflection. Include mood chips in the response.`
-            : 'Open with a warm, personal greeting. Include mood chips in the response.'
-        } ${streak > 1 ? `${streak}-night streak — acknowledge briefly.` : ''} ${commitmentContextNote} Start with mood chips: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful 🙏","value":"grateful"},{"label":"Motivated 💪","value":"motivated"},{"label":"Okay 😐","value":"okay"},{"label":"Tired 😴","value":"tired"},{"label":"Stressed 😤","value":"stressed"}]`,
+            ? `Optional context: they made this same-day commitment this morning — "${sameDayCommitment.commitment}". If relevant, fold that in naturally while still asking about how they're doing right now.`
+            : ''
+        } ${streak > 1 ? `${streak}-night streak — acknowledge briefly.` : ''} ${commitmentContextNote}
+Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful 🙏","value":"grateful"},{"label":"Motivated 💪","value":"motivated"},{"label":"Okay 😐","value":"okay"},{"label":"Tired 😴","value":"tired"},{"label":"Stressed 😤","value":"stressed"}]`,
       });
     }
 
@@ -3001,6 +3057,7 @@ export default async function handler(req, res) {
         chips: null, stage_advance: false, new_stage: null,
         extracted_data: {}, exercise_run: 'none',
         checklist_updates: { ...DEFAULT_CHECKLIST },
+        stage_order_swapped: session_state.stage_order_swapped === true,
         follow_up_queued: false, is_session_complete: false,
       };
     }
@@ -3035,6 +3092,7 @@ export default async function handler(req, res) {
     result.wins_asked_for_more = result.wins_asked_for_more === true;
     result.honest_depth = result.honest_depth === true;
     result.commitment_checkin_done = result.commitment_checkin_done === true;
+    result.stage_order_swapped = result.stage_order_swapped === true || session_state.stage_order_swapped === true;
     result.show_commitment_checklist = result.show_commitment_checklist === true;
     result.checklist_fragments = Array.isArray(result.checklist_fragments) ? result.checklist_fragments : null;
     result.show_goal_chips = result.show_goal_chips === true;
@@ -3094,6 +3152,39 @@ export default async function handler(req, res) {
       insightExercisesTriggered.push(activeDirective.insight_id);
     }
     result.insight_exercises_triggered = insightExercisesTriggered;
+
+    if (isInit) {
+      result.stage_advance = true;
+      result.new_stage = 'commitment_checkin';
+    }
+
+    const hasYesterdayCommitmentForCheckin = !!(session_state.yesterday_commitment || yesterdayCommitment);
+    const shouldDecideOrderFromOpener = (
+      !hasYesterdayCommitmentForCheckin
+      && (session_state.current_stage || 'commitment_checkin') === 'commitment_checkin'
+      && result.commitment_checkin_done === true
+    );
+    if (shouldDecideOrderFromOpener) {
+      const openerDecision = deriveStageHint(
+        {
+          ...session_state,
+          current_stage: 'commitment_checkin',
+          commitment_checkin_done: true,
+          stage_order_swapped: result.stage_order_swapped,
+          yesterday_commitment: null,
+        },
+        intentData?.checklist_content,
+        completedDirectives,
+        messageCount,
+        intentData,
+        displayMessage
+      );
+      if (openerDecision === 'honest' || openerDecision === 'wins') {
+        result.stage_order_swapped = openerDecision === 'honest';
+        result.stage_advance = true;
+        result.new_stage = openerDecision;
+      }
+    }
 
     // Mark a progress event as surfaced if the AI referenced it
     if (result.progress_event_surfaced && typeof result.progress_event_surfaced === 'string') {
@@ -3224,7 +3315,7 @@ Return ONLY valid JSON: { "question": "..." }`,
       );
     }
 
-    if (session_id && (result.stage_advance || result.extracted_data || result.is_session_complete || result.commitment_checkin_done)) {
+    if (session_id && (result.stage_advance || result.extracted_data || result.is_session_complete || result.commitment_checkin_done || result.stage_order_swapped)) {
       const updates = {};
       if (result.stage_advance && result.new_stage) updates.current_stage = result.new_stage;
       if (result.extracted_data?.mood) updates.mood_end_of_day = result.extracted_data.mood;
@@ -3248,6 +3339,7 @@ Return ONLY valid JSON: { "question": "..." }`,
       }
       if (result.extracted_data?.self_hype_message) updates.self_hype_message = result.extracted_data.self_hype_message;
       if (result.commitment_checkin_done) updates.commitment_checkin_done = true;
+      if (result.stage_order_swapped === true) updates.stage_order_swapped = true;
       if (result.extracted_data?.checkin_outcome) updates.checkin_outcome = result.extracted_data.checkin_outcome;
       if (result.depth_probe_count != null) updates.depth_probe_count = result.depth_probe_count;
       if (result.last_depth_probe_message_index != null) updates.last_depth_probe_message_index = result.last_depth_probe_message_index;
@@ -3812,6 +3904,7 @@ Return ONLY valid JSON: { "question": "...", "context": "brief context on why th
       chips: null, stage_advance: false, new_stage: null,
       extracted_data: {}, exercise_run: 'none',
       checklist_updates: { ...DEFAULT_CHECKLIST },
+      stage_order_swapped: false,
       follow_up_queued: false, is_session_complete: false,
       consecutive_excuses: 0,
     });
