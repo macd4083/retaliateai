@@ -108,13 +108,47 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'No valid fields to update' });
       }
 
-      const { error: upsertError } = await supabase
+      const { data: updatedRows, error: upsertError } = await supabase
         .from(table)
         .update(safeUpdates)
         .eq('id', row_id)
-        .eq('user_id', user_id);
+        .eq('user_id', user_id)
+        .select();
       if (upsertError) throw upsertError;
+      if (!updatedRows || updatedRows.length === 0) {
+        return res.status(400).json({ error: 'No row found with that id + user_id. Nothing was updated.' });
+      }
       return res.status(200).json({ ok: true });
+    }
+
+    if (action === 'insert') {
+      const INSERT_ALLOWED = {
+        reflection_sessions: [
+          'date', 'tomorrow_commitment', 'commitment_minimum', 'commitment_stretch',
+          'commitment_score', 'is_complete', 'current_stage', 'summary',
+        ],
+      };
+
+      const { row } = req.body || {};
+      if (!row || typeof row !== 'object' || Array.isArray(row)) {
+        return res.status(400).json({ error: 'row is required' });
+      }
+      const allowedFields = INSERT_ALLOWED[table];
+      if (!allowedFields) {
+        return res.status(400).json({ error: `insert not supported for table: ${table}` });
+      }
+      const safeRow = { user_id };
+      for (const key of allowedFields) {
+        if (Object.prototype.hasOwnProperty.call(row, key)) {
+          safeRow[key] = row[key];
+        }
+      }
+      const { data: insertedRows, error: insertError } = await supabase
+        .from(table)
+        .insert(safeRow)
+        .select();
+      if (insertError) throw insertError;
+      return res.status(200).json({ ok: true, data: insertedRows });
     }
 
     if (action === 'reset') {
@@ -159,7 +193,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, deleted_session_id: session.id, date, user_id });
     }
 
-    return res.status(400).json({ error: "action must be 'data', 'upsert', or 'reset'" });
+    return res.status(400).json({ error: "action must be 'data', 'insert', 'upsert', or 'reset'" });
   } catch (error) {
     console.error('admin error:', error);
     return res.status(500).json({ error: 'Internal server error' });
