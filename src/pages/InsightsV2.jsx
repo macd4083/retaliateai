@@ -55,6 +55,10 @@ export default function InsightsV2() {
   const [allCommitments, setAllCommitments]       = useState([]);
   const [visibleCount, setVisibleCount]           = useState(5);
   const [selectedWeekIndex, setSelectedWeekIndex] = useState(null);
+  const [selectedDayIndex, setSelectedDayIndex]   = useState(null);
+  const [slideDir, setSlideDir]                   = useState(null);
+  const [chartOffset, setChartOffset]             = useState(0);
+  const [gaugeAnimatedFrac, setGaugeAnimatedFrac] = useState(0);
   const [wins, setWins]                           = useState([]);
   const [narratives, setNarratives]               = useState([]);
   const [streak, setStreak]                       = useState(0);
@@ -67,11 +71,25 @@ export default function InsightsV2() {
   const [newGoalBaseline, setNewGoalBaseline]     = useState('');
   const [savingGoal, setSavingGoal]               = useState(false);
   const [progressEvents, setProgressEvents]       = useState([]);
+  const weeklyDataForGauge                         = commitmentStats?.weeklyData || [];
+  const activeGaugeWeekIndex                      = selectedWeekIndex !== null
+    ? selectedWeekIndex
+    : Math.max(0, weeklyDataForGauge.length - 1);
+  const gScoreForEffect                            = weeklyDataForGauge[activeGaugeWeekIndex]?.avgScore ?? null;
 
   useEffect(() => {
     if (!user?.id) return;
     loadData();
   }, [user?.id]);
+
+  useEffect(() => {
+    const targetFillFrac = gScoreForEffect != null ? Math.max(0, Math.min(gScoreForEffect / 100, 1)) : 0;
+    setGaugeAnimatedFrac(0);
+    const timeout = setTimeout(() => {
+      setGaugeAnimatedFrac(targetFillFrac);
+    }, 50);
+    return () => clearTimeout(timeout);
+  }, [activeGaugeWeekIndex, gScoreForEffect]);
 
   async function loadData() {
     setLoading(true);
@@ -283,8 +301,7 @@ export default function InsightsV2() {
 
   // ── Derived values ────────────────────────────────────────────────────────
 
-  const ft       = commitmentStats?.followThrough7;
-  const ftPrior  = commitmentStats?.followThroughPrior7;
+  const avgScore7 = commitmentStats?.avgScore7 ?? null;
   const trajectory = commitmentStats?.trajectory;
   const weeklyData = commitmentStats?.weeklyData || [];
 
@@ -293,15 +310,25 @@ export default function InsightsV2() {
   const selectedWeek         = weeklyData[activeWeekIndex] ?? null;
   const isCurrentWeekSelected = weeklyData.length === 0 || activeWeekIndex === weeklyData.length - 1;
 
-  const priorKept = ftPrior?.kept ?? 0;
-
   function trajectoryLine() {
-    if (!ft || ft.total < 3) return 'Keep showing up — more data coming.';
-    if (trajectory === 'improving')
-      return `Up from ${priorKept} last week — you're building momentum.`;
-    if (trajectory === 'declining')
-      return `Down from ${priorKept} last week. Worth paying attention to.`;
+    if (avgScore7 == null) return 'Keep showing up — more data coming.';
+    if (trajectory === 'improving') return 'Score trending up — keep building.';
+    if (trajectory === 'declining') return 'Score trending down. Worth paying attention to.';
     return 'Consistent with last week.';
+  }
+
+  function goToWeek(newIndex) {
+    if (newIndex < 0 || newIndex >= weeklyData.length || newIndex === activeWeekIndex) return;
+    const dir = newIndex > activeWeekIndex ? -1 : 1;
+    setSlideDir(dir < 0 ? 'left' : 'right');
+    setChartOffset(dir * 100);
+    setSelectedWeekIndex(newIndex);
+    setSelectedDayIndex(null);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        setChartOffset(0);
+      });
+    });
   }
 
   // Commitment list: filter to selected week for non-current weeks
@@ -331,100 +358,183 @@ export default function InsightsV2() {
             <p className="text-white font-semibold text-lg mb-4">Consistency Tracker</p>
 
             {weeklyData.length > 0 ? (() => {
-              // ── Sparkline: Y-axis is 0–7 (kept count, not rate) ───────
-              const MAX_KEPT = 7;
+              const dayLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
               const padX     = 20;
               const baseline = 70;
               const chartTop = 10;
               const chartH   = baseline - chartTop;
               const totalW   = 320;
-              const n        = weeklyData.length;
-              const xStep    = n > 1 ? (totalW - 2 * padX) / (n - 1) : 0;
+              const xStep    = (totalW - 2 * padX) / 6;
 
               function getX(i) { return padX + i * xStep; }
-              // Map kept (0–7) to Y coordinate; null = no data = baseline
-              function getY(kept) {
-                return kept === null ? baseline : baseline - (kept / MAX_KEPT) * chartH;
+              function getY(score) {
+                return score === null ? baseline : baseline - (score / 100) * chartH;
               }
 
-              const lineParts = weeklyData.map((w, i) => {
+              const thisMonday = getMondayOf(localDateStr(0));
+              const weeksBack = weeklyData.length - 1 - activeWeekIndex;
+              const wStart = addDays(thisMonday, -weeksBack * 7);
+              const weekDays = Array.from({ length: 7 }, (_, d) => {
+                const date = addDays(wStart, d);
+                const commitment = allCommitments.find((c) => c.date === date) || null;
+                return {
+                  date,
+                  label: dayLabels[d],
+                  score: commitment?.score ?? null,
+                  status: commitment?.status ?? null,
+                  hasCommitment: commitment !== null,
+                };
+              });
+
+              const lineParts = weekDays.map((d, i) => {
                 const x = getX(i).toFixed(1);
-                const y = getY(w.kept > 0 || w.total > 0 ? w.kept : null).toFixed(1);
+                const y = getY(d.score).toFixed(1);
                 return i === 0 ? `M ${x} ${y}` : `L ${x} ${y}`;
               });
 
-              // ── Half-circle gauge: kept / 7 (hard max) ────────────────
+              const todayDate = new Date();
+              const todayWeekdayIndex = todayDate.getDay() === 0 ? 6 : todayDate.getDay() - 1;
+              const lastDayWithCommitment = (() => {
+                for (let i = 6; i >= 0; i -= 1) {
+                  if (weekDays[i].hasCommitment) return i;
+                }
+                return -1;
+              })();
+              const resolvedDayIndex = selectedDayIndex !== null
+                ? Math.max(0, Math.min(6, selectedDayIndex))
+                : isCurrentWeekSelected
+                  ? todayWeekdayIndex
+                  : (lastDayWithCommitment !== -1 ? lastDayWithCommitment : 6);
+
+              function dotColor(day, isSelected) {
+                if (!day.hasCommitment) return '#27272a';
+                if (day.status === 'missed') return '#52525b';
+                if (day.status === 'pending') return '#f97316';
+                if (day.status === 'kept') {
+                  if (isSelected) return '#ef4444';
+                  if (day.score != null && day.score >= 80) return '#fb7185';
+                  if (day.score != null && day.score >= 60) return '#fdba74';
+                  return '#fca5a5';
+                }
+                return '#71717a';
+              }
+
+              // ── Half-circle gauge: avg score / 100 ─────────────────────
               const cx       = 100;
               const cy       = 108;
               const r        = 78;
               const halfCirc = Math.PI * r;
               const fullCirc = 2 * Math.PI * r;
 
-              // This week's kept (integer 0–7)
-              const gKept    = selectedWeek?.kept ?? 0;
-              // Total is always 7; we use it only for display text
-              const hasData  = selectedWeek !== null && selectedWeek.total > 0;
-              const fillFrac = hasData ? Math.min(gKept / MAX_KEPT, 1) : 0;
-              const fillLen  = fillFrac * halfCirc;
-              const fillColor = !hasData ? '#52525b' : gKept >= 5 ? '#dc2626' : gKept >= 3 ? '#f97316' : '#71717a';
+              const gScore = selectedWeek?.avgScore ?? null;
+              const fillLen = gaugeAnimatedFrac * halfCirc;
+              const fillColor = gScore == null ? '#52525b' : gScore >= 80 ? '#dc2626' : gScore >= 60 ? '#f97316' : '#71717a';
 
-              const weekDescText = !hasData
-                ? 'No commitments tracked this week.'
-                : gKept >= 6
-                  ? `Strong week — ${gKept}/7 commitments followed through.`
-                  : gKept >= 4
-                    ? `Solid week — ${gKept}/7 commitments followed through.`
-                    : gKept >= 2
-                      ? `${gKept}/7 commitments followed through this week.`
-                      : `Tough week — ${gKept}/7 commitments this week.`;
+              const weekDescText = gScore == null
+                ? 'No scored commitments this week.'
+                : gScore >= 80
+                  ? `Strong week — avg score ${Math.round(gScore)}/100.`
+                  : gScore >= 60
+                    ? `Solid week — avg score ${Math.round(gScore)}/100.`
+                    : gScore >= 40
+                      ? `Avg score ${Math.round(gScore)}/100 this week.`
+                      : `Tough week — avg score ${Math.round(gScore)}/100.`;
 
               return (
                 <>
-                  {/* Sparkline SVG */}
-                  <svg viewBox="0 0 320 100" className="w-full mb-1">
-                    {/* Y-axis labels: 7, 3, 0 */}
-                    <text x={padX - 4} y={chartTop + 4} textAnchor="end" fill="#71717a" fontSize={5} fontFamily="sans-serif">7</text>
-                    <text x={padX - 4} y={(chartTop + baseline) / 2 + 3} textAnchor="end" fill="#71717a" fontSize={5} fontFamily="sans-serif">3</text>
-                    <text x={padX - 4} y={baseline} textAnchor="end" fill="#71717a" fontSize={5} fontFamily="sans-serif">0</text>
-                    {/* Dashed baseline */}
-                    <line x1={padX} y1={baseline} x2={totalW - padX} y2={baseline}
-                      stroke="#3f3f46" strokeWidth={1} strokeDasharray="3 3" />
-                    {/* Mid-line at 3/7 */}
-                    <line x1={padX} y1={getY(3)} x2={totalW - padX} y2={getY(3)}
-                      stroke="#27272a" strokeWidth={1} strokeDasharray="2 4" />
-                    {/* Connecting line */}
-                    <path d={lineParts.join(' ')} fill="none" stroke="#52525b" strokeWidth={1.5} />
-                    {/* Dots, tooltips, week labels */}
-                    {weeklyData.map((w, i) => {
-                      const hasWkData  = w.kept > 0 || w.total > 0;
-                      const keptVal    = hasWkData ? w.kept : null;
-                      const x          = getX(i);
-                      const y          = getY(keptVal);
-                      const isSelected = i === activeWeekIndex;
-                      return (
-                        <g key={i} onClick={() => setSelectedWeekIndex(i)} style={{ cursor: 'pointer' }}>
-                          {isSelected && hasWkData && (
-                            <>
-                              <rect x={x - 14} y={y - 22} width={28} height={16} rx={7}
-                                fill="#27272a" stroke="#3f3f46" strokeWidth={1} />
-                              <text x={x} y={y - 10} textAnchor="middle"
-                                fill="white" fontSize={6} fontWeight="bold" fontFamily="sans-serif">
-                                {w.kept}/7
-                              </text>
-                            </>
-                          )}
-                          <circle
-                            cx={x} cy={y} r={isSelected ? 5.5 : 4}
-                            fill={isSelected ? '#ef4444' : hasWkData ? '#71717a' : '#27272a'}
-                          />
-                          <text x={x} y={95} textAnchor="middle"
-                            fill={isSelected ? '#ef4444' : '#52525b'} fontSize={5} fontFamily="sans-serif">
-                            {w.weekLabel}
-                          </text>
-                        </g>
-                      );
-                    })}
-                  </svg>
+                  <p className="text-center text-zinc-500 text-xs mb-1">{selectedWeek?.weekLabel} week</p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => goToWeek(Math.max(0, activeWeekIndex - 1))}
+                      disabled={activeWeekIndex === 0}
+                      className="flex-shrink-0 w-6 h-6 flex items-center justify-center text-zinc-500 hover:text-white disabled:opacity-20 disabled:cursor-not-allowed transition-colors text-lg"
+                    >
+                      ‹
+                    </button>
+
+                    <div className="flex-1 overflow-hidden">
+                      <div
+                        key={activeWeekIndex}
+                        data-slide-dir={slideDir || 'none'}
+                        onTransitionEnd={() => setSlideDir(null)}
+                        style={{
+                          transform: `translateX(${chartOffset}%)`,
+                          transition: chartOffset === 0 && slideDir ? 'transform 0.3s ease' : 'none',
+                        }}
+                      >
+                        <svg viewBox="0 0 320 100" className="w-full mb-1">
+                          <text x={padX - 4} y={chartTop + 4} textAnchor="end" fill="#71717a" fontSize={5} fontFamily="sans-serif">100</text>
+                          <text x={padX - 4} y={getY(50) + 3} textAnchor="end" fill="#71717a" fontSize={5} fontFamily="sans-serif">50</text>
+                          <text x={padX - 4} y={baseline} textAnchor="end" fill="#71717a" fontSize={5} fontFamily="sans-serif">0</text>
+                          <line x1={padX} y1={baseline} x2={totalW - padX} y2={baseline}
+                            stroke="#3f3f46" strokeWidth={1} strokeDasharray="3 3" />
+                          <line x1={padX} y1={getY(50)} x2={totalW - padX} y2={getY(50)}
+                            stroke="#27272a" strokeWidth={1} strokeDasharray="2 4" />
+                          <line x1={padX} y1={chartTop} x2={totalW - padX} y2={chartTop}
+                            stroke="#27272a" strokeWidth={1} strokeDasharray="2 4" />
+                          <path d={lineParts.join(' ')} fill="none" stroke="#52525b" strokeWidth={0.8} />
+                          {weekDays.map((d, i) => {
+                            const x = getX(i);
+                            const y = getY(d.score);
+                            const isSelected = i === resolvedDayIndex;
+                            return (
+                              <g
+                                key={d.date}
+                                onClick={() => setSelectedDayIndex(i)}
+                                onMouseEnter={() => setSelectedDayIndex(i)}
+                                style={{ cursor: 'pointer' }}
+                              >
+                                {isSelected && (
+                                  <>
+                                    <rect
+                                      x={x - 12}
+                                      y={y - 17}
+                                      width={24}
+                                      height={13}
+                                      rx={6}
+                                      fill="#27272a"
+                                      stroke="#3f3f46"
+                                      strokeWidth={1}
+                                    />
+                                    <text
+                                      x={x}
+                                      y={y - 8}
+                                      textAnchor="middle"
+                                      fill="white"
+                                      fontSize={6}
+                                      fontWeight="bold"
+                                      fontFamily="sans-serif"
+                                    >
+                                      {d.score != null ? Math.round(d.score) : '–'}
+                                    </text>
+                                  </>
+                                )}
+                                <circle cx={x} cy={y} r={isSelected ? 3 : 2} fill={dotColor(d, isSelected)} />
+                                <text
+                                  x={x}
+                                  y={95}
+                                  textAnchor="middle"
+                                  fill={isSelected ? '#ef4444' : '#52525b'}
+                                  fontSize={5}
+                                  fontFamily="sans-serif"
+                                >
+                                  {d.label}
+                                </text>
+                              </g>
+                            );
+                          })}
+                        </svg>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => goToWeek(Math.min(weeklyData.length - 1, activeWeekIndex + 1))}
+                      disabled={activeWeekIndex === weeklyData.length - 1}
+                      className="flex-shrink-0 w-6 h-6 flex items-center justify-center text-zinc-500 hover:text-white disabled:opacity-20 disabled:cursor-not-allowed transition-colors text-lg"
+                    >
+                      ›
+                    </button>
+                  </div>
 
                   {/* Half-circle gauge */}
                   <div className="flex justify-center mt-2">
@@ -443,28 +553,23 @@ export default function InsightsV2() {
                         strokeDasharray={`${fillLen} ${fullCirc}`}
                         strokeDashoffset={0}
                         strokeLinecap="round"
+                        style={{ transition: 'stroke-dasharray 0.6s ease' }}
                         transform={`rotate(180 ${cx} ${cy})`}
                       />
                       {/* Centre label */}
                       <text x={cx} y={cy - 14} textAnchor="middle"
                         fill="white" fontSize={26} fontWeight="bold" fontFamily="sans-serif">
-                        {gKept}
-                      </text>
-                      <text x={cx} y={cy + 6} textAnchor="middle"
-                        fill="#71717a" fontSize={11} fontFamily="sans-serif">
-                        of 7
+                        {gScore != null ? Math.round(gScore) : '–'}
                       </text>
                       <text x={cx} y={cy + 22} textAnchor="middle"
                         fill="#52525b" fontSize={9} fontFamily="sans-serif">
-                        this week
+                        {selectedWeek?.weekLabel ?? 'this week'}
                       </text>
                     </svg>
                   </div>
 
                   {/* Trajectory line */}
-                  {ft && ft.total >= 3 && (
-                    <p className="text-zinc-500 text-xs mt-3">{trajectoryLine()}</p>
-                  )}
+                  <p className="text-zinc-500 text-xs mt-3">{trajectoryLine()}</p>
 
                   {commitmentStats?.avgScore7 != null && (
                     <div className="mt-3 pt-3 border-t border-zinc-800">
