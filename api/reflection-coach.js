@@ -2412,12 +2412,13 @@ export default async function handler(req, res) {
 
     // Filter out stale identity_missing follow-ups that were queued with the generic placeholder text
     const DEPRECATED_IDENTITY_FOLLOWUP_QUESTION = "I want to end on something important — what does how you showed up last time say about who you're becoming?";
+    // Normalize punctuation/whitespace so we can reliably match historical variants of the same text.
     const normalizeFollowUpQuestion = (text = '') => text.replace(/[’‘]/g, "'").replace(/\s+/g, ' ').trim();
     const deprecatedIdentityFollowUpQuestion = normalizeFollowUpQuestion(DEPRECATED_IDENTITY_FOLLOWUP_QUESTION);
     let followUpQueue = (loadedFollowUpQueue || []).filter(
       f => normalizeFollowUpQuestion(f.question) !== deprecatedIdentityFollowUpQuestion
     );
-    const followUpQueueForSessionInit = yesterdayCommitment ? [] : followUpQueue;
+    const sessionInitFollowUpQueue = yesterdayCommitment ? [] : followUpQueue;
 
     // Attach motivation signal to each goal
     const activeGoals = activeGoalsRaw.map((g) => {
@@ -2476,7 +2477,7 @@ export default async function handler(req, res) {
 
     // ── 2b. Pre-session state (init only, zero extra DB queries) ─────────
     const preSessionState = isInit
-      ? computePreSessionState(client_local_date, { recentSessions, followUpQueue: followUpQueueForSessionInit, growthMarkers, userInsights })
+      ? computePreSessionState(client_local_date, { recentSessions, followUpQueue: sessionInitFollowUpQueue, growthMarkers, userInsights })
       : null;
 
     // ── 3. Merge profile ──────────────────────────────────────────────────
