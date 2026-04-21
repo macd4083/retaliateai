@@ -474,6 +474,35 @@ export default function AdminV2() {
       setCommitmentMsg('Date is required');
       return;
     }
+    const dateParts = newSession.date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!dateParts) {
+      setCommitmentMsg('Date must be a valid YYYY-MM-DD value');
+      return;
+    }
+    const year = Number(dateParts[1]);
+    const month = Number(dateParts[2]);
+    const day = Number(dateParts[3]);
+    const validatedDate = new Date(Date.UTC(year, month - 1, day));
+    const isValidDate = (
+      validatedDate.getUTCFullYear() === year &&
+      validatedDate.getUTCMonth() === month - 1 &&
+      validatedDate.getUTCDate() === day
+    );
+    if (!isValidDate) {
+      setCommitmentMsg('Date must be a real calendar date');
+      return;
+    }
+
+    const scoreInput = String(newSession.commitment_score ?? '').trim();
+    if (scoreInput !== '' && !/^\d+(\.\d+)?$/.test(scoreInput)) {
+      setCommitmentMsg('Score must be numeric');
+      return;
+    }
+    const parsedScore = scoreInput !== '' ? Number(scoreInput) : null;
+    if (parsedScore !== null && (!Number.isFinite(parsedScore) || parsedScore < 0 || parsedScore > 100)) {
+      setCommitmentMsg('Score must be a number between 0 and 100');
+      return;
+    }
     setInsertingSession(true);
     setCommitmentMsg('');
     try {
@@ -482,7 +511,7 @@ export default function AdminV2() {
         tomorrow_commitment: newSession.tomorrow_commitment || null,
         commitment_minimum: newSession.commitment_minimum || null,
         commitment_stretch: newSession.commitment_stretch || null,
-        commitment_score: newSession.commitment_score !== '' ? Number(newSession.commitment_score) : null,
+        commitment_score: parsedScore,
         is_complete: newSession.is_complete,
         current_stage: 'complete',
       };

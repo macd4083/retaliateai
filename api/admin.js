@@ -116,7 +116,7 @@ export default async function handler(req, res) {
         .select();
       if (upsertError) throw upsertError;
       if (!updatedRows || updatedRows.length === 0) {
-        return res.status(400).json({ error: 'No row found with that id + user_id. Nothing was updated.' });
+        return res.status(400).json({ error: 'No row found with that id and user_id. Nothing was updated.' });
       }
       return res.status(200).json({ ok: true });
     }
