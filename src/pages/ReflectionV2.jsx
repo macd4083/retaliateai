@@ -320,6 +320,10 @@ export default function ReflectionV2() {
     checklist_fragments: [],
     fragments_submitted: false,
     depth_opportunity_count: 0,
+    depth_probe_count: 0,
+    last_depth_probe_message_index: null,
+    insight_exercises_triggered: [],
+    insight_exercise_skipped: false,
     directive_queue: [],
     completed_directives: [],
   });
@@ -442,6 +446,10 @@ export default function ReflectionV2() {
         checklist_fragments: [],
         fragments_submitted: !!(session.commitment_checkin_done && session.commitment_score != null),
         depth_opportunity_count: session.depth_opportunity_count || 0,
+        depth_probe_count: session.depth_probe_count || 0,
+        last_depth_probe_message_index: session.last_depth_probe_message_index ?? null,
+        insight_exercises_triggered: Array.isArray(session.insight_exercises_triggered) ? session.insight_exercises_triggered : [],
+        insight_exercise_skipped: session.insight_exercise_skipped === true,
         directive_queue: Array.isArray(session.directive_queue) ? session.directive_queue : [],
         completed_directives: Array.isArray(session.completed_directives) ? session.completed_directives : [],
       };
@@ -582,10 +590,11 @@ export default function ReflectionV2() {
 
     const isInit = userText === '__INIT__';
     const isChecklistSubmission = userText === '__CHECKLIST_SUBMITTED__';
+    const isExerciseSkipSignal = userText === '__EXERCISE_SKIP__';
 
     let currentMsgs = messagesRef.current;
 
-    if (!isInit && !isChecklistSubmission) {
+    if (!isInit && !isChecklistSubmission && !isExerciseSkipSignal) {
       const userMsg = {
         id: `user-${Date.now()}`,
         role: 'user',
@@ -676,6 +685,10 @@ export default function ReflectionV2() {
               checkin_outcome: state.checkin_outcome,
               commitment_score: state.commitment_score,
               depth_opportunity_count: state.depth_opportunity_count || 0,
+              depth_probe_count: state.depth_probe_count || 0,
+              last_depth_probe_message_index: state.last_depth_probe_message_index ?? null,
+              insight_exercises_triggered: Array.isArray(state.insight_exercises_triggered) ? state.insight_exercises_triggered : [],
+              insight_exercise_skipped: state.insight_exercise_skipped === true,
               yesterday_commitment_in_state: !!state.yesterday_commitment,
               consecutive_excuses: state.consecutive_excuses || 0,
               checklist: state.checklist || { ...DEFAULT_CHECKLIST },
@@ -797,6 +810,15 @@ export default function ReflectionV2() {
         if (data.exercise_run && data.exercise_run !== 'none') {
           newState.exercises_run = [...new Set([...(newState.exercises_run || []), data.exercise_run])];
         }
+        if (data.depth_probe_count != null) newState.depth_probe_count = data.depth_probe_count;
+        if (data.last_depth_probe_message_index != null) {
+          newState.last_depth_probe_message_index = data.last_depth_probe_message_index;
+        }
+        if (Array.isArray(data.insight_exercises_triggered)) {
+          newState.insight_exercises_triggered = data.insight_exercises_triggered;
+        }
+        if (data.insight_exercise_skipped === true) newState.insight_exercise_skipped = true;
+        if (data.exercise_run && data.exercise_run !== 'none') newState.insight_exercise_skipped = false;
         if (data.consecutive_excuses !== undefined) {
           newState.consecutive_excuses = data.consecutive_excuses;
         }
@@ -853,6 +875,10 @@ export default function ReflectionV2() {
         if (data.checkin_outcome && !state.checkin_outcome) {
           dbUpdates.checkin_outcome = data.checkin_outcome;
         }
+        if (data.depth_probe_count != null) dbUpdates.depth_probe_count = data.depth_probe_count;
+        if (data.last_depth_probe_message_index != null) dbUpdates.last_depth_probe_message_index = data.last_depth_probe_message_index;
+        if (Array.isArray(data.insight_exercises_triggered)) dbUpdates.insight_exercises_triggered = data.insight_exercises_triggered;
+        if (data.insight_exercise_skipped === true) dbUpdates.insight_exercise_skipped = true;
         if (Object.keys(dbUpdates).length > 0)
           reflectionHelpers.updateSession(sid, dbUpdates).catch(() => {});
       }
@@ -983,6 +1009,10 @@ export default function ReflectionV2() {
           checklist_fragments: [],
           fragments_submitted: false,
           depth_opportunity_count: 0,
+          depth_probe_count: 0,
+          last_depth_probe_message_index: null,
+          insight_exercises_triggered: [],
+          insight_exercise_skipped: false,
           directive_queue: [],
           completed_directives: [],
         });
@@ -1038,6 +1068,10 @@ export default function ReflectionV2() {
     if (isLoading) return;
     setChatFocused(true);
     setUsedChipMessageIds((prev) => new Set([...prev, messageId]));
+    if (chip.value === 'exercise_skip') {
+      sendMessage('__EXERCISE_SKIP__', undefined, undefined, { exercise_action: 'skip' });
+      return;
+    }
     sendMessage(chip.label);
   }
 
@@ -1222,7 +1256,7 @@ export default function ReflectionV2() {
               ))}
               {sessionState.checklist_fragments.length > 0 && !sessionState.fragments_submitted && (
                 <div className="mx-4 mb-3 bg-zinc-900 border border-zinc-700 rounded-xl p-4">
-                  <p className="text-sm text-zinc-400 mb-3">Check off what you completed:</p>
+                  <p className="text-sm text-zinc-400 mb-3">Before we dive in — check off what you actually did:</p>
                   {sessionState.checklist_fragments.map((frag) => (
                     <label key={frag.id} className="flex items-start gap-3 mb-2 cursor-pointer">
                       <input
