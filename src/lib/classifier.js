@@ -13,8 +13,10 @@
  */
 
 import OpenAI from 'openai';
+import { practices } from './practiceLibrary.js';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const EXERCISE_ENUM = ['none', ...practices.map((practice) => practice.id)].join('|');
 
 export const CLASSIFIER_SYSTEM = `You are a message intent classifier for a nightly reflection coaching app.
 Return ONLY valid JSON:
@@ -25,7 +27,7 @@ Return ONLY valid JSON:
   "emotional_state": "<frustrated|proud|anxious|flat|motivated|overwhelmed|reflective>",
   "depth_opportunity": <true|false>,
   "checklist_content": {"wins": false, "honest": false, "plan": false, "identity": false},
-  "suggested_exercise": "<none|gratitude_anchor|why_reconnect|evidence_audit|implementation_intention|values_clarification|future_self_bridge|ownership_reframe|triage_one_thing|identity_reinforcement|depth_probe>",
+  "suggested_exercise": "<${EXERCISE_ENUM}>",
   "energy_type": "<momentum|depth|reflective|planning|identity>",
   "depth_opportunity_count": <0-3>
 }
@@ -92,11 +94,11 @@ export const DEFAULT_CLASSIFICATION = {
  * Classify a user message.
  *
  * @param {string} userMessage
- * @param {object} sessionContext  - { current_stage, tomorrow_commitment, exercises_run, depth_opportunity_count_so_far }
+ * @param {object} sessionContext  - { current_stage, tomorrow_commitment, exercises_run, depth_opportunity_count }
  * @returns {Promise<object>}
  */
 export async function classifyIntent(userMessage, sessionContext = {}) {
-  const { depth_opportunity_count_so_far = 0 } = sessionContext;
+  const { depth_opportunity_count = 0 } = sessionContext;
   try {
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
@@ -104,7 +106,7 @@ export async function classifyIntent(userMessage, sessionContext = {}) {
         { role: 'system', content: CLASSIFIER_SYSTEM },
         {
           role: 'user',
-          content: `[Stage: ${sessionContext.current_stage || 'wins'}]\n[tomorrow_commitment: ${sessionContext.tomorrow_commitment || 'none'}]\n[exercises_run: ${(sessionContext.exercises_run || []).join(', ') || 'none'}]\n[depth_opportunity_count_so_far: ${depth_opportunity_count_so_far}]\n\n${userMessage}`,
+           content: `[Stage: ${sessionContext.current_stage || 'wins'}]\n[tomorrow_commitment: ${sessionContext.tomorrow_commitment || 'none'}]\n[exercises_run: ${(sessionContext.exercises_run || []).join(', ') || 'none'}]\n[depth_opportunity_count: ${depth_opportunity_count}]\n\n${userMessage}`,
         },
       ],
       response_format: { type: 'json_object' },

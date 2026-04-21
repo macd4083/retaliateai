@@ -295,6 +295,8 @@ export const PRACTICES = [
   },
 ];
 
+export const practices = PRACTICES;
+
 /** Look up a single practice by id. Returns undefined if not found. */
 export function getPractice(id) {
   return PRACTICES.find((p) => p.id === id);
