@@ -1997,8 +1997,19 @@ function buildDirectiveQueue({
       ? [...history].reverse().find(m => m.role === 'user')
       : null;
     const lastUserText = (lastUserMsg?.content || '').trim().toLowerCase();
-    const userSignaledDone = lastUserText.length < 20 ||
-      ['nah', 'nope', 'no', "that's it", 'nothing', 'nothing else', 'i think that\'s it', 'thats it', 'done', 'not really'].some(p => lastUserText.includes(p));
+    const doneWithWinsPatterns = [
+      /^nah\b/,
+      /^nope\b/,
+      /^no\b/,
+      /\bthat'?s it\b/,
+      /\bnothing else\b/,
+      /\bnothing\b/,
+      /\bi think that'?s it\b/,
+      /\bdone\b/,
+      /\bnot really\b/,
+    ];
+    const userSignaledDone = lastUserText.length < 15
+      || doneWithWinsPatterns.some((pattern) => pattern.test(lastUserText));
 
     const isWinsToHonest = sessionState.current_stage === 'wins' && suggestedNextStage === 'honest';
     const stageHintInstruction = (isWinsToHonest && userSignaledDone)
@@ -2586,7 +2597,7 @@ export default async function handler(req, res) {
     const completedDirectives = Array.isArray(session_state.completed_directives) ? session_state.completed_directives : [];
     // Server-side fallback: detect wins_asked_for_more from last coach message
     // (GPT sometimes asks the follow-up question but forgets to set the flag)
-    if (!session_state.wins_asked_for_more && Array.isArray(history) && history.length > 0) {
+    if (session_state.current_stage === 'wins' && !session_state.wins_asked_for_more && Array.isArray(history) && history.length > 0) {
       const lastCoachMsg = [...history].reverse().find(m => m.role === 'assistant');
       if (lastCoachMsg?.content) {
         const txt = lastCoachMsg.content.toLowerCase();
