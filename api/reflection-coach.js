@@ -2413,9 +2413,7 @@ export default async function handler(req, res) {
     // Filter out stale identity_missing follow-ups that were queued with the generic placeholder text
     const STALE_IDENTITY_FOLLOWUP = "I want to end on something important — what does how you showed up last time say about who you're becoming?";
     let followUpQueue = (loadedFollowUpQueue || []).filter(f => f.question !== STALE_IDENTITY_FOLLOWUP);
-    if (yesterdayCommitment && followUpQueue.length > 0) {
-      followUpQueue = [];
-    }
+    const followUpQueueForSessionInit = yesterdayCommitment ? [] : followUpQueue;
 
     // Attach motivation signal to each goal
     const activeGoals = activeGoalsRaw.map((g) => {
@@ -2474,7 +2472,7 @@ export default async function handler(req, res) {
 
     // ── 2b. Pre-session state (init only, zero extra DB queries) ─────────
     const preSessionState = isInit
-      ? computePreSessionState(client_local_date, { recentSessions, followUpQueue, growthMarkers, userInsights })
+      ? computePreSessionState(client_local_date, { recentSessions, followUpQueue: followUpQueueForSessionInit, growthMarkers, userInsights })
       : null;
 
     // ── 3. Merge profile ──────────────────────────────────────────────────
