@@ -60,6 +60,7 @@ export default async function handler(req, res) {
       fbc,
       fbp,
       subscriptionId,
+      subscription_id,
     } = body;
 
     if (!eventName || !eventId) {
@@ -102,8 +103,9 @@ export default async function handler(req, res) {
       user_data: userData,
     };
 
-    if (eventName === 'Subscribe' && subscriptionId) {
-      event.custom_data = { subscription_id: String(subscriptionId) };
+    const resolvedSubscriptionId = subscriptionId || subscription_id;
+    if (eventName === 'Subscribe' && resolvedSubscriptionId) {
+      event.custom_data = { subscription_id: String(resolvedSubscriptionId) };
     }
 
     const metaResponse = await fetch(

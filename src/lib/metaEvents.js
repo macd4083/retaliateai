@@ -77,7 +77,7 @@ export function trackSubscribe(user = {}, subscriptionId) {
     const safeSubscriptionId = subscriptionId ? String(subscriptionId) : '';
 
     trackBrowserPixel('Subscribe', eventId, {
-      subscription_id: safeSubscriptionId || undefined,
+      subscription_id: safeSubscriptionId,
     });
     sendServerEvent({
       eventName: 'Subscribe',
@@ -87,7 +87,7 @@ export function trackSubscribe(user = {}, subscriptionId) {
       user: normalizedUser,
       fbc: getCookieValue('_fbc'),
       fbp: getCookieValue('_fbp'),
-      subscriptionId: safeSubscriptionId,
+      subscription_id: safeSubscriptionId,
     });
   } catch (_e) {}
 }
