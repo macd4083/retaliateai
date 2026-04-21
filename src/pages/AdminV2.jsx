@@ -9,6 +9,18 @@ import AdminToolsNav from '../components/admin/AdminToolsNav';
 
 const ADMIN_SECRET = import.meta.env.VITE_ADMIN_SECRET;
 
+async function adminFetch(body) {
+  const { data: { session } } = await supabase.auth.getSession();
+  return fetch('/api/admin', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+    },
+    body: JSON.stringify({ ...body, admin_secret: ADMIN_SECRET }),
+  });
+}
+
 const DATA_TABS = [
   { id: 'sessions', label: 'Sessions' },
   { id: 'user_profiles', label: 'User Profile' },
@@ -142,16 +154,11 @@ function SessionCard({ session, userId, onDelete, isToday }) {
     if (messages.length > 0) return;
     setLoadingMsgs(true);
     try {
-      const res = await fetch('/api/admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'data',
-          user_id: userId,
-          admin_secret: ADMIN_SECRET,
-          table: 'reflection_messages',
-          session_id: session.id,
-        }),
+      const res = await adminFetch({
+        action: 'data',
+        user_id: userId,
+        table: 'reflection_messages',
+        session_id: session.id,
       });
       const json = await res.json();
       setMessages(json.data || []);
@@ -161,16 +168,11 @@ function SessionCard({ session, userId, onDelete, isToday }) {
 
   async function deleteMessage(msgId) {
     try {
-      await fetch('/api/admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'data',
-          user_id: userId,
-          admin_secret: ADMIN_SECRET,
-          table: 'reflection_messages',
-          delete_id: msgId,
-        }),
+      await adminFetch({
+        action: 'data',
+        user_id: userId,
+        table: 'reflection_messages',
+        delete_id: msgId,
       });
       setMessages((prev) => prev.filter((m) => m.id !== msgId));
     } catch (_e) {}
@@ -179,17 +181,12 @@ function SessionCard({ session, userId, onDelete, isToday }) {
   async function deleteAllMessages() {
     if (!confirm('Delete ALL messages for this session?')) return;
     try {
-      await fetch('/api/admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'data',
-          user_id: userId,
-          admin_secret: ADMIN_SECRET,
-          table: 'reflection_messages',
-          delete_session_messages: true,
-          session_id: session.id,
-        }),
+      await adminFetch({
+        action: 'data',
+        user_id: userId,
+        table: 'reflection_messages',
+        delete_session_messages: true,
+        session_id: session.id,
       });
       setMessages([]);
     } catch (_e) {}
@@ -367,15 +364,10 @@ export default function AdminV2() {
   async function loadSessions() {
     setLoading(true);
     try {
-      const res = await fetch('/api/admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'data',
-          user_id: user.id,
-          admin_secret: ADMIN_SECRET,
-          table: 'reflection_sessions',
-        }),
+      const res = await adminFetch({
+        action: 'data',
+        user_id: user.id,
+        table: 'reflection_sessions',
       });
       const json = await res.json();
       setSessions(json.data || []);
@@ -387,15 +379,10 @@ export default function AdminV2() {
     setLoading(true);
     setTabData([]);
     try {
-      const res = await fetch('/api/admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'data',
-          user_id: user.id,
-          admin_secret: ADMIN_SECRET,
-          table: tab,
-        }),
+      const res = await adminFetch({
+        action: 'data',
+        user_id: user.id,
+        table: tab,
       });
       const json = await res.json();
       setTabData(json.data || []);
@@ -407,15 +394,10 @@ export default function AdminV2() {
     setCommitmentLoading(true);
     setCommitmentMsg('');
     try {
-      const res = await fetch('/api/admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'data',
-          user_id: user.id,
-          admin_secret: ADMIN_SECRET,
-          table: 'reflection_sessions',
-        }),
+      const res = await adminFetch({
+        action: 'data',
+        user_id: user.id,
+        table: 'reflection_sessions',
       });
       const json = await res.json();
       const rows = (json.data || []).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
@@ -453,17 +435,12 @@ export default function AdminV2() {
         is_complete: edits.is_complete,
         date: edits.date,
       };
-      const res = await fetch('/api/admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'upsert',
-          user_id: user.id,
-          admin_secret: ADMIN_SECRET,
-          table: 'reflection_sessions',
-          row_id: rowId,
-          updates,
-        }),
+      const res = await adminFetch({
+        action: 'upsert',
+        user_id: user.id,
+        table: 'reflection_sessions',
+        row_id: rowId,
+        updates,
       });
       const json = await res.json();
       if (!json.ok) throw new Error(json.error || 'Save failed');
@@ -480,16 +457,11 @@ export default function AdminV2() {
   async function deleteTabRow(id) {
     if (!confirm('Delete this row?')) return;
     try {
-      await fetch('/api/admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'data',
-          user_id: user.id,
-          admin_secret: ADMIN_SECRET,
-          table: activeTab,
-          delete_id: id,
-        }),
+      await adminFetch({
+        action: 'data',
+        user_id: user.id,
+        table: activeTab,
+        delete_id: id,
       });
       setTabData((prev) => prev.filter((r) => r.id !== id));
     } catch (_e) {}
@@ -498,16 +470,11 @@ export default function AdminV2() {
   async function deleteSession(id) {
     if (!confirm('Delete this session and its messages?')) return;
     try {
-      await fetch('/api/admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'data',
-          user_id: user.id,
-          admin_secret: ADMIN_SECRET,
-          table: 'reflection_sessions',
-          delete_id: id,
-        }),
+      await adminFetch({
+        action: 'data',
+        user_id: user.id,
+        table: 'reflection_sessions',
+        delete_id: id,
       });
       setSessions((prev) => prev.filter((s) => s.id !== id));
     } catch (_e) {}
@@ -519,11 +486,7 @@ export default function AdminV2() {
     if (!confirm("Reset today's reflection session? This deletes it and all its messages.")) return;
     setResultMsg('');
     try {
-      const res = await fetch('/api/admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'reset', user_id: user.id, admin_secret: ADMIN_SECRET, target_date: localDateStr() }),
-      });
+      const res = await adminFetch({ action: 'reset', user_id: user.id, target_date: localDateStr() });
       const json = await res.json();
       if (json.ok) {
         setResultMsg(`✅ Deleted session ${json.deleted_session_id || '(none found)'} for ${json.date}`);
@@ -543,11 +506,7 @@ export default function AdminV2() {
     if (!confirm('⚠️ SECOND CONFIRM: Nuke all sessions, messages, follow-up queue, growth markers, and patterns? This cannot be undone.')) return;
     setResultMsg('');
     try {
-      const res = await fetch('/api/admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'reset', user_id: user.id, admin_secret: ADMIN_SECRET, delete_all: true }),
-      });
+      const res = await adminFetch({ action: 'reset', user_id: user.id, delete_all: true });
       const json = await res.json();
       if (json.ok) {
         setResultMsg('✅ All data deleted');
