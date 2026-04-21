@@ -41,7 +41,10 @@ const DEFAULT_CHECKLIST = { wins: false, commitment_checkin: false, honest: fals
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function ProgressBar({ currentStage, stages }) {
-  const stageIndex = stages.findIndex((s) => s.id === currentStage);
+  const rawStageIndex = stages.findIndex((s) => s.id === currentStage);
+  const stageIndex = rawStageIndex === -1 && currentStage === 'complete'
+    ? stages.length
+    : rawStageIndex;
   return (
     <div className="flex items-center justify-center gap-3 py-3">
       {stages.map((stage, i) => {
@@ -334,7 +337,8 @@ export default function ReflectionV2() {
 
   const timeContext = getTimeContext();
 
-  const stages = sessionState.yesterday_commitment
+  const hasCheckinStage = !!(sessionState.yesterday_commitment || sessionState.commitment_checkin_done);
+  const stages = hasCheckinStage
     ? BASE_STAGES
     : BASE_STAGES.filter((s) => s.id !== 'commitment_checkin');
 
