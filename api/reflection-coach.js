@@ -2411,8 +2411,12 @@ export default async function handler(req, res) {
       ]);
 
     // Filter out stale identity_missing follow-ups that were queued with the generic placeholder text
-    const STALE_IDENTITY_FOLLOWUP = "I want to end on something important — what does how you showed up last time say about who you're becoming?";
-    let followUpQueue = (loadedFollowUpQueue || []).filter(f => f.question !== STALE_IDENTITY_FOLLOWUP);
+    const DEPRECATED_IDENTITY_FOLLOWUP_QUESTION = "I want to end on something important — what does how you showed up last time say about who you're becoming?";
+    const normalizeFollowUpQuestion = (text = '') => text.replace(/[’‘]/g, "'").replace(/\s+/g, ' ').trim();
+    const deprecatedIdentityFollowUpQuestion = normalizeFollowUpQuestion(DEPRECATED_IDENTITY_FOLLOWUP_QUESTION);
+    let followUpQueue = (loadedFollowUpQueue || []).filter(
+      f => normalizeFollowUpQuestion(f.question) !== deprecatedIdentityFollowUpQuestion
+    );
     const followUpQueueForSessionInit = yesterdayCommitment ? [] : followUpQueue;
 
     // Attach motivation signal to each goal
