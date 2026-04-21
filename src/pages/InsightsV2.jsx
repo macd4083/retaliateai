@@ -30,6 +30,12 @@ function getMondayOf(dateStr) {
   return `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')}`;
 }
 
+function weekdayIndexFromDateStr(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const day = new Date(y, m - 1, d).getDay();
+  return day === 0 ? 6 : day - 1;
+}
+
 function formatInsightDate(dateStr) {
   if (!dateStr) return '';
   const [y, m] = dateStr.split('-').map(Number);
@@ -392,8 +398,7 @@ export default function InsightsV2() {
                 return i === 0 ? `M ${x} ${y}` : `L ${x} ${y}`;
               });
 
-              const todayDate = new Date();
-              const todayWeekdayIndex = todayDate.getDay() === 0 ? 6 : todayDate.getDay() - 1;
+              const todayWeekdayIndex = weekdayIndexFromDateStr(localDateStr(0));
               const lastDayWithCommitment = (() => {
                 for (let i = 6; i >= 0; i -= 1) {
                   if (weekDays[i].hasCommitment) return i;
@@ -481,7 +486,14 @@ export default function InsightsV2() {
                               <g
                                 key={d.date}
                                 onClick={() => setSelectedDayIndex(i)}
-                                onMouseEnter={() => setSelectedDayIndex(i)}
+                                tabIndex={0}
+                                onFocus={() => setSelectedDayIndex(i)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    setSelectedDayIndex(i);
+                                  }
+                                }}
                                 style={{ cursor: 'pointer' }}
                               >
                                 {isSelected && (
