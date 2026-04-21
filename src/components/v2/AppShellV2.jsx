@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Settings, Moon, BarChart2, X, Database, Video } from 'lucide-react';
+import { Settings, Moon, BarChart2, X, Database, Video, Download, Share } from 'lucide-react';
 import { useAuth } from '../../lib/AuthContext';
 import { supabase } from '../../lib/supabase/client';
+import { usePWAInstall } from '../../hooks/usePWAInstall';
+import PWAInstallBanner from '../pwa/PWAInstallBanner';
 
 const NAV_LINKS = [
   { label: 'Reflection', path: '/reflection', icon: Moon },
@@ -16,6 +18,8 @@ export default function AppShellV2({ title, children, adminAction = null }) {
   const { user, signOut } = useAuth();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [showIosTooltip, setShowIosTooltip] = useState(false);
+  const { isInstallable, isIos, isStandalone, promptInstall } = usePWAInstall();
 
   const displayName =
     user?.user_metadata?.display_name ||
@@ -41,6 +45,21 @@ export default function AppShellV2({ title, children, adminAction = null }) {
     navigate('/login');
   };
 
+  const handleDownloadClick = async () => {
+    if (isIos) {
+      setShowIosTooltip((v) => !v);
+      return;
+    }
+    await promptInstall();
+  };
+
+  useEffect(() => {
+    if (!showIosTooltip) return;
+    const handler = () => setShowIosTooltip(false);
+    window.addEventListener('click', handler, { once: true });
+    return () => window.removeEventListener('click', handler);
+  }, [showIosTooltip]);
+
   return (
     <div className="flex flex-col h-screen bg-zinc-950 text-white overflow-hidden">
       {/* ── Top Bar ──────────────────────────────────────────────────── */}
@@ -64,6 +83,30 @@ export default function AppShellV2({ title, children, adminAction = null }) {
         {/* Right side actions */}
         <div className="flex-1 flex items-center justify-end gap-1">
           {adminAction && adminAction}
+          {isInstallable && !isStandalone && (
+            <div className="relative">
+              <button
+                onClick={handleDownloadClick}
+                className="w-9 h-9 flex items-center justify-center rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+                aria-label="Install app"
+              >
+                <Download className="w-4 h-4" />
+              </button>
+              {showIosTooltip && (
+                <div
+                  className="absolute right-0 top-11 w-64 bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl p-3 z-50 text-xs text-zinc-300 leading-relaxed"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <p className="font-semibold text-white mb-1">Install Retaliate AI</p>
+                  <p>
+                    Tap <Share className="inline w-3 h-3" /> <strong className="text-white">"Share"</strong> in
+                    your browser, then <strong className="text-white">"Add to Home Screen"</strong>.
+                  </p>
+                  <div className="absolute -top-1.5 right-3 w-3 h-3 bg-zinc-900 border-l border-t border-zinc-700 rotate-45" />
+                </div>
+              )}
+            </div>
+          )}
           <button
             onClick={() => navigate('/settings')}
             className="w-9 h-9 flex items-center justify-center rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
@@ -73,6 +116,8 @@ export default function AppShellV2({ title, children, adminAction = null }) {
           </button>
         </div>
       </div>
+
+      <PWAInstallBanner />
 
       {/* ── Content ──────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-hidden">{children}</div>

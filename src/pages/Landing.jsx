@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
-import { Sparkles, Heart, Target, TrendingUp, ArrowRight, CheckCircle, Brain, Shield } from 'lucide-react';
+import { Sparkles, Heart, Target, TrendingUp, ArrowRight, CheckCircle, Brain, Shield, Download, Smartphone, Share } from 'lucide-react';
+import { usePWAInstall } from '@/hooks/usePWAInstall';
 
 export default function Landing() {
   const navigate = useNavigate();
@@ -53,6 +54,7 @@ export default function Landing() {
                 >
                   Sign In
                 </button>
+                <PWALandingBadge />
               </div>
             </div>
           </header>
@@ -135,6 +137,11 @@ export default function Landing() {
                 </button>
               </div>
             </div>
+          </div>
+
+          {/* ── 3b. PWA INSTALL ── */}
+          <div className="pb-20">
+            <PWALandingSection />
           </div>
 
           {/* ── 4. GUIDE SECTION ── */}
@@ -415,6 +422,65 @@ export default function Landing() {
             </div>
           </footer>
 
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PWALandingBadge() {
+  const { isInstallable, isStandalone, promptInstall } = usePWAInstall();
+  if (isStandalone || !isInstallable) return null;
+
+  return (
+    <button
+      onClick={() => promptInstall()}
+      className="hidden sm:flex items-center gap-2 px-4 py-2 bg-zinc-900 border border-zinc-700 hover:border-red-700 text-zinc-300 hover:text-white rounded-lg text-sm font-medium transition-all"
+    >
+      <Download className="w-4 h-4" />
+      Install App
+    </button>
+  );
+}
+
+function PWALandingSection() {
+  const { isInstallable, isIos, isStandalone, promptInstall } = usePWAInstall();
+
+  if (isStandalone || !isInstallable) return null;
+
+  return (
+    <div className="border border-zinc-800 rounded-2xl p-8 md:p-12 bg-zinc-950/80 backdrop-blur flex flex-col md:flex-row items-center gap-8">
+      <div className="w-20 h-20 rounded-2xl bg-red-900/40 border border-red-800 flex items-center justify-center flex-shrink-0">
+        <Smartphone className="w-10 h-10 text-red-500" />
+      </div>
+
+      <div className="flex-1 text-center md:text-left">
+        <h3 className="text-2xl font-bold text-white mb-2 uppercase tracking-wide">Add to Your Home Screen</h3>
+        <p className="text-gray-400 leading-relaxed max-w-xl">
+          Install Retaliate AI as an app — no App Store needed. Loads instantly, works offline, and
+          feels native on every device. One tap to open, every night.
+        </p>
+        <div className="flex flex-wrap gap-3 mt-5 justify-center md:justify-start">
+          {isIos ? (
+            <div className="flex items-center gap-2 px-4 py-2.5 bg-zinc-900 border border-zinc-700 rounded-lg text-sm text-zinc-300">
+              <Share className="w-4 h-4 text-zinc-400" />
+              <span>
+                Tap <strong className="text-white">Share</strong> →{' '}
+                <strong className="text-white">Add to Home Screen</strong>
+              </span>
+            </div>
+          ) : (
+            <button
+              onClick={() => promptInstall()}
+              className="flex items-center gap-2 px-6 py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg transition-all shadow-lg shadow-red-900/40 text-sm uppercase tracking-wide"
+            >
+              <Download className="w-4 h-4" />
+              Install Free App
+            </button>
+          )}
+          <div className="flex items-center gap-2 px-4 py-2.5 bg-zinc-900/50 rounded-lg text-xs text-zinc-500">
+            ✓ No App Store &nbsp;·&nbsp; ✓ Free &nbsp;·&nbsp; ✓ All devices
+          </div>
         </div>
       </div>
     </div>
