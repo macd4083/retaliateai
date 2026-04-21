@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Database, Trash2, ChevronDown, ChevronRight, RefreshCw, Play, Video, WandSparkles } from 'lucide-react';
+import { Database, Trash2, ChevronDown, ChevronRight, RefreshCw, Play, Video, WandSparkles, Pencil } from 'lucide-react';
 import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase/client';
 import { localDateStr } from '../lib/dateUtils';
@@ -313,6 +313,11 @@ export default function AdminV2() {
   const [tabData, setTabData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [resultMsg, setResultMsg] = useState('');
+  const [commitmentRows, setCommitmentRows] = useState([]);
+  const [commitmentLoading, setCommitmentLoading] = useState(false);
+  const [commitmentEdits, setCommitmentEdits] = useState({});
+  const [commitmentSaving, setCommitmentSaving] = useState({});
+  const [commitmentMsg, setCommitmentMsg] = useState('');
 
   // todayStr uses local time getters (not UTC) so the date matches the user's timezone.
   const todayStr = localDateStr();
@@ -344,6 +349,12 @@ export default function AdminV2() {
 
   useEffect(() => {
     if (isAdmin) loadSessions();
+  }, [isAdmin]);
+
+  useEffect(() => {
+    if (isAdmin) {
+      loadCommitmentRows();
+    }
   }, [isAdmin]);
 
   // ── Load tab data when tab changes ────────────────────────────────────────
@@ -390,6 +401,80 @@ export default function AdminV2() {
       setTabData(json.data || []);
     } catch (_e) {}
     setLoading(false);
+  }
+
+  async function loadCommitmentRows() {
+    setCommitmentLoading(true);
+    setCommitmentMsg('');
+    try {
+      const res = await fetch('/api/admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'data',
+          user_id: user.id,
+          admin_secret: ADMIN_SECRET,
+          table: 'reflection_sessions',
+        }),
+      });
+      const json = await res.json();
+      const rows = (json.data || []).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+      setCommitmentRows(rows);
+
+      const initialEdits = {};
+      for (const row of rows) {
+        initialEdits[row.id] = {
+          tomorrow_commitment: row.tomorrow_commitment || '',
+          commitment_minimum: row.commitment_minimum || '',
+          commitment_stretch: row.commitment_stretch || '',
+          commitment_score: row.commitment_score ?? '',
+          is_complete: row.is_complete ?? false,
+          date: row.date || '',
+        };
+      }
+      setCommitmentEdits(initialEdits);
+    } catch (_e) {
+      setCommitmentMsg('Failed to load sessions');
+    }
+    setCommitmentLoading(false);
+  }
+
+  async function saveCommitmentRow(rowId) {
+    const edits = commitmentEdits[rowId];
+    if (!edits) return;
+    setCommitmentSaving((s) => ({ ...s, [rowId]: true }));
+    setCommitmentMsg('');
+    try {
+      const updates = {
+        tomorrow_commitment: edits.tomorrow_commitment || null,
+        commitment_minimum: edits.commitment_minimum || null,
+        commitment_stretch: edits.commitment_stretch || null,
+        commitment_score: edits.commitment_score !== '' ? Number(edits.commitment_score) : null,
+        is_complete: edits.is_complete,
+        date: edits.date,
+      };
+      const res = await fetch('/api/admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'upsert',
+          user_id: user.id,
+          admin_secret: ADMIN_SECRET,
+          table: 'reflection_sessions',
+          row_id: rowId,
+          updates,
+        }),
+      });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.error || 'Save failed');
+      setCommitmentMsg(`✓ Saved row ${rowId.slice(0, 8)}…`);
+      setCommitmentRows((rows) =>
+        rows.map((r) => (r.id === rowId ? { ...r, ...updates } : r))
+      );
+    } catch (e) {
+      setCommitmentMsg(`Error: ${e.message}`);
+    }
+    setCommitmentSaving((s) => ({ ...s, [rowId]: false }));
   }
 
   async function deleteTabRow(id) {
@@ -602,6 +687,175 @@ export default function AdminV2() {
             tabData.map((row) => (
               <ExpandableRow key={row.id} row={row} onDelete={deleteTabRow} />
             ))
+          )}
+        </div>
+
+        <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 sm:p-6 space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Pencil className="w-4 h-4 text-red-400" />
+              <h3 className="text-white font-semibold text-base">Commitment Editor</h3>
+            </div>
+            <button
+              onClick={loadCommitmentRows}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 hover:text-white text-sm transition-colors"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              Reload
+            </button>
+          </div>
+
+          {commitmentMsg && (
+            <div className="px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-sm text-zinc-300">
+              {commitmentMsg}
+            </div>
+          )}
+
+          {commitmentLoading ? (
+            <div className="flex items-center gap-3 py-6 justify-center">
+              <div className="w-5 h-5 border-2 border-zinc-700 border-t-red-500 rounded-full animate-spin" />
+              <span className="text-zinc-500 text-sm">Loading...</span>
+            </div>
+          ) : commitmentRows.length === 0 ? (
+            <p className="text-zinc-600 text-sm text-center py-6">No sessions found</p>
+          ) : (
+            <div className="space-y-3">
+              {commitmentRows.map((row) => {
+                const rowEdits = commitmentEdits[row.id] || {};
+                return (
+                  <div key={row.id} className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-3">
+                    <div className="text-xs text-zinc-500 font-mono">#{row.id}</div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <label className="space-y-1">
+                        <span className="text-xs text-zinc-400">Date</span>
+                        <input
+                          type="date"
+                          value={rowEdits.date || ''}
+                          onChange={(e) => {
+                            const rowId = row.id;
+                            const field = 'date';
+                            const value = e.target.value;
+                            setCommitmentEdits((prev) => ({
+                              ...prev,
+                              [rowId]: { ...prev[rowId], [field]: value },
+                            }));
+                          }}
+                          className="bg-zinc-800 border border-zinc-700 text-white text-sm rounded-lg px-2 py-1.5 w-full focus:outline-none focus:border-red-500"
+                        />
+                      </label>
+                      <label className="space-y-1">
+                        <span className="text-xs text-zinc-400">Score</span>
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          value={rowEdits.commitment_score ?? ''}
+                          onChange={(e) => {
+                            const rowId = row.id;
+                            const field = 'commitment_score';
+                            const value = e.target.value;
+                            setCommitmentEdits((prev) => ({
+                              ...prev,
+                              [rowId]: { ...prev[rowId], [field]: value },
+                            }));
+                          }}
+                          className="bg-zinc-800 border border-zinc-700 text-white text-sm rounded-lg px-2 py-1.5 w-full sm:max-w-[120px] focus:outline-none focus:border-red-500"
+                        />
+                      </label>
+                    </div>
+
+                    <label className="space-y-1 block">
+                      <span className="text-xs text-zinc-400">Commitment</span>
+                      <input
+                        type="text"
+                        value={rowEdits.tomorrow_commitment || ''}
+                        onChange={(e) => {
+                          const rowId = row.id;
+                          const field = 'tomorrow_commitment';
+                          const value = e.target.value;
+                          setCommitmentEdits((prev) => ({
+                            ...prev,
+                            [rowId]: { ...prev[rowId], [field]: value },
+                          }));
+                        }}
+                        className="bg-zinc-800 border border-zinc-700 text-white text-sm rounded-lg px-2 py-1.5 w-full focus:outline-none focus:border-red-500"
+                      />
+                    </label>
+
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <label className="space-y-1">
+                        <span className="text-xs text-zinc-400">Minimum</span>
+                        <input
+                          type="text"
+                          value={rowEdits.commitment_minimum || ''}
+                          onChange={(e) => {
+                            const rowId = row.id;
+                            const field = 'commitment_minimum';
+                            const value = e.target.value;
+                            setCommitmentEdits((prev) => ({
+                              ...prev,
+                              [rowId]: { ...prev[rowId], [field]: value },
+                            }));
+                          }}
+                          className="bg-zinc-800 border border-zinc-700 text-white text-sm rounded-lg px-2 py-1.5 w-full focus:outline-none focus:border-red-500"
+                        />
+                      </label>
+                      <label className="space-y-1">
+                        <span className="text-xs text-zinc-400">Stretch</span>
+                        <input
+                          type="text"
+                          value={rowEdits.commitment_stretch || ''}
+                          onChange={(e) => {
+                            const rowId = row.id;
+                            const field = 'commitment_stretch';
+                            const value = e.target.value;
+                            setCommitmentEdits((prev) => ({
+                              ...prev,
+                              [rowId]: { ...prev[rowId], [field]: value },
+                            }));
+                          }}
+                          className="bg-zinc-800 border border-zinc-700 text-white text-sm rounded-lg px-2 py-1.5 w-full focus:outline-none focus:border-red-500"
+                        />
+                      </label>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1">
+                      <label className="flex items-center gap-2 text-sm text-zinc-300">
+                        <input
+                          type="checkbox"
+                          checked={!!rowEdits.is_complete}
+                          onChange={(e) => {
+                            const rowId = row.id;
+                            const field = 'is_complete';
+                            const value = e.target.checked;
+                            setCommitmentEdits((prev) => ({
+                              ...prev,
+                              [rowId]: { ...prev[rowId], [field]: value },
+                            }));
+                          }}
+                          className="h-4 w-4 rounded border-zinc-700 bg-zinc-800 text-red-600"
+                        />
+                        Done
+                      </label>
+                      <button
+                        onClick={() => saveCommitmentRow(row.id)}
+                        disabled={!!commitmentSaving[row.id]}
+                        className="bg-red-600 hover:bg-red-700 disabled:opacity-60 disabled:cursor-not-allowed text-white text-sm px-3 py-1.5 rounded-lg transition-colors"
+                      >
+                        {commitmentSaving[row.id] ? (
+                          <span className="inline-flex items-center gap-2">
+                            <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                            Saving
+                          </span>
+                        ) : (
+                          'Save'
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
       </div>
