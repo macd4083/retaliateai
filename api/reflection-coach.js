@@ -1876,8 +1876,7 @@ function buildDirectiveQueue({
       instruction: `IDENTITY MISSING: Find a natural moment to ask what their actions say about who they're becoming. When you ask it, you can briefly frame why: e.g. "I always want to end here — because the actions matter less than what they say about who you are" or "This is the part I care most about." One short phrase, then ask: "What does [their action] say about who you're becoming?"`,
       priority: 2,
       preferred_stage: 'close',
-      fire_next_session: true,
-      followup_question: 'I want to end on something important — what does how you showed up last time say about who you\'re becoming?',
+      fire_next_session: false,
       energy_type: 'identity',
       close_order: 2,
     });
@@ -2394,7 +2393,7 @@ export default async function handler(req, res) {
     // ── 2. Load context in parallel ───────────────────────────────────────
     const currentSignals = [intentData?.intent, intentData?.emotional_state, intentData?.accountability_signal].filter(Boolean);
 
-    const [followUpQueue, growthMarkers, recentSessions, yesterdayCommitment, yesterdayCommitmentDetails, yesterdayFragments, userProfile, activeGoalsRaw, commitmentStats, todayEarlyCommitment, goalCommitmentStats, userInsights, progressEvents] =
+    const [loadedFollowUpQueue, growthMarkers, recentSessions, yesterdayCommitment, yesterdayCommitmentDetails, yesterdayFragments, userProfile, activeGoalsRaw, commitmentStats, todayEarlyCommitment, goalCommitmentStats, userInsights, progressEvents] =
       await Promise.all([
         loadFollowUpQueue(authenticatedUserId, currentSignals, client_local_date),
         loadGrowthMarkers(authenticatedUserId, client_local_date),
@@ -2410,6 +2409,13 @@ export default async function handler(req, res) {
         loadUserInsights(authenticatedUserId),
         loadProgressEvents(authenticatedUserId),
       ]);
+
+    // Filter out stale identity_missing follow-ups that were queued with the generic placeholder text
+    const STALE_IDENTITY_FOLLOWUP = "I want to end on something important — what does how you showed up last time say about who you're becoming?";
+    let followUpQueue = (loadedFollowUpQueue || []).filter(f => f.question !== STALE_IDENTITY_FOLLOWUP);
+    if (yesterdayCommitment && followUpQueue.length > 0) {
+      followUpQueue = [];
+    }
 
     // Attach motivation signal to each goal
     const activeGoals = activeGoalsRaw.map((g) => {
@@ -2522,7 +2528,12 @@ export default async function handler(req, res) {
     }
 
     // ── 5. Follow-ups & growth markers ───────────────────────────────────
-    const dueFollowUp = followUpQueue.length > 0 ? followUpQueue[0] : null;
+    let dueFollowUp = followUpQueue.length > 0 ? followUpQueue[0] : null;
+    // Suppress follow-up queue items when there's a commitment check-in pending —
+    // the check-in must always come first
+    if (yesterdayCommitment && dueFollowUp) {
+      dueFollowUp = null;
+    }
     const dueGrowthMarker = growthMarkers.length > 0 ? growthMarkers[0] : null;
 
     const followUpInstruction = dueFollowUp
