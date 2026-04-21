@@ -42,14 +42,14 @@ const DEFAULT_CHECKLIST = { wins: false, commitment_checkin: false, honest: fals
 
 function ProgressBar({ currentStage, stages }) {
   const rawStageIndex = stages.findIndex((s) => s.id === currentStage);
-  const stageIndex = rawStageIndex === -1 && currentStage === 'complete'
-    ? stages.length
+  const stageIndex = rawStageIndex === -1
+    ? (currentStage === 'complete' ? stages.length : null)
     : rawStageIndex;
   return (
     <div className="flex items-center justify-center gap-3 py-3">
       {stages.map((stage, i) => {
-        const isComplete = i < stageIndex;
-        const isActive = i === stageIndex;
+        const isComplete = stageIndex !== null && i < stageIndex;
+        const isActive = stageIndex !== null && i === stageIndex;
         return (
           <div key={stage.id} className="flex items-center gap-3">
             <div className="flex flex-col items-center gap-1">
@@ -71,7 +71,7 @@ function ProgressBar({ currentStage, stages }) {
               </span>
             </div>
             {i < stages.length - 1 && (
-              <div className={`w-8 h-px mb-4 ${i < stageIndex ? 'bg-red-700' : 'bg-zinc-700'}`} />
+              <div className={`w-8 h-px mb-4 ${stageIndex !== null && i < stageIndex ? 'bg-red-700' : 'bg-zinc-700'}`} />
             )}
           </div>
         );
