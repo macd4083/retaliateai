@@ -4,6 +4,7 @@ import { ArrowRight, ArrowLeft, Check } from 'lucide-react';
 import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase/client';
 import { subscribeToPush, isMobile, isStandalone } from '../lib/pushNotifications';
+import { trackCompleteRegistration } from '../lib/metaEvents';
 
 const DEFAULT_LIFE_AREA_OPTIONS = [
   { emoji: '💼', label: 'Career & Business' },
@@ -369,10 +370,11 @@ export default function OnboardingV2({ onOnboardingComplete } = {}) {
     setSaving(true);
     try {
       await saveProfile({ onboarding_completed: true, onboarding_step: 8 });
-      // Fire Meta Pixel conversion event
-      if (typeof window !== 'undefined' && window.fbq) {
-        window.fbq('track', 'CompleteRegistration');
-      }
+      trackCompleteRegistration({
+        id: user?.id,
+        email: user?.email,
+        display_name: fullName?.trim() || user?.user_metadata?.full_name || user?.user_metadata?.name || '',
+      });
       // Signal parent (AuthGuardV2) that onboarding is done — avoids stale cache issue
       if (onOnboardingComplete) onOnboardingComplete();
       else navigate('/reflection');
