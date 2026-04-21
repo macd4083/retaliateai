@@ -843,7 +843,7 @@ export default function OnboardingV2({ onOnboardingComplete } = {}) {
 
         {/* ── Step 8 ── Identity Commitment + Complete ── */}
         {step === 8 && (
-          <Step7Summary
+          <Step8Summary
             fullName={fullName}
             futureSelf={futureSelf}
             bigGoal={bigGoal}
@@ -859,7 +859,7 @@ export default function OnboardingV2({ onOnboardingComplete } = {}) {
   );
 }
 
-function Step7Summary({ fullName, futureSelf, bigGoal, why, selectedLifeAreas, lifeAreaMap = {}, onComplete, saving }) {
+function Step8Summary({ fullName, futureSelf, bigGoal, why, selectedLifeAreas, lifeAreaMap = {}, onComplete, saving }) {
   const truncate = (text, len = 120) =>
     text && text.length > len ? text.slice(0, len) + '...' : text;
 
