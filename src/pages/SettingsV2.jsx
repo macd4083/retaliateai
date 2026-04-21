@@ -161,6 +161,9 @@ export default function SettingsV2() {
   }
 
   const displayName = profile?.display_name || profile?.full_name || 'You';
+  // TODO(payment): On successful paid checkout, call:
+  // trackSubscribe({ id: user?.id, email: user?.email, display_name: profile?.display_name || profile?.full_name }, subscriptionId)
+  // from src/lib/metaEvents.js so Pixel + CAPI share a deduplication event_id.
 
   return (
     <AppShellV2 title="Settings">
