@@ -1764,8 +1764,7 @@ function buildDirectiveQueue({
   const yc = sessionState.yesterday_commitment || yesterdayCommitment;
   const isCheckinNeeded = !sessionState.commitment_checkin_done && !!yc;
   const isTransitioningToCheckin = currentStage === 'wins' && isCheckinNeeded && messageCount >= 1;
-  if ((currentStage === 'commitment_checkin' || isTransitioningToCheckin) && !sessionState.commitment_checkin_done) {
-    if (yc) {
+  if ((currentStage === 'commitment_checkin' || isTransitioningToCheckin) && !sessionState.commitment_checkin_done && yc) {
       const minimumText = yesterdayMinimum ? `\n- Yesterday's MINIMUM floor: "${yesterdayMinimum}"` : '';
       const stretchText = yesterdayStretch ? `\n- Yesterday's STRETCH target: "${yesterdayStretch}"` : '';
       const checklistFragments = Array.isArray(yesterdayFragments)
@@ -1790,22 +1789,23 @@ function buildDirectiveQueue({
       }
       allDirectives.push({
         id: 'commitment_checkin',
-        instruction: `## STAGE: COMMITMENT CHECK-IN\nYou are here when session.current_stage === 'commitment_checkin' or when transitioning from 'wins' into this check-in.\n- Reference yesterday's exact commitment text: "${yc}"${minimumText}${stretchText}${checklistText}\n- If doing free-text fallback (no checklist), ask exactly ONE question about how it went.\n- In free-text fallback, the FIRST sentence MUST name the specific commitment explicitly (e.g. "You said you'd [exact commitment]..."). Do not open with vague framing.\n- If checklist fragments are available, you MUST show the checklist (show_commitment_checklist: true) and MUST NOT ask a free-text question.\n- Optional framing sentence is one sentence max and must stay practical (e.g. "Before we get into wins — I want to check in on what you said you'd do."). Do NOT use philosophical or identity-focused framing.\n- Generic or identity questions are not allowed here (for example: "what does how you showed up say about who you're becoming").\n- Never ask twice. One exchange only. Always set commitment_checkin_done: true after their response, regardless of outcome.\n- ROUTING AFTER CHECK-IN: if commitment_score >= 50, set stage_advance:true and new_stage:"wins". If commitment_score < 50 (or score is unknown), set stage_advance:true and new_stage:"honest".${checkinTone}`,
+        instruction: `## COMMITMENT CHECK-IN\nYou are pivoting directly from their mood response into checking in on yesterday before wins.\n- THEIR EXACT COMMITMENT: "${yc}"${minimumText}${stretchText}${checklistText}\n- This is the FIRST thing you address after mood. Use one short framing sentence max, then ask the specific check-in question. Example framing: "Before we get into wins — you said you'd [exact commitment]. What actually happened?"\n- Use their exact words from the commitment. Never ask a generic or identity-style question.\n- If doing free-text fallback (no checklist), ask exactly ONE specific question and then wait.\n- If checklist fragments are available, you MUST show the checklist (show_commitment_checklist: true) and MUST NOT ask a free-text question.\n- On this transition turn from wins, set stage_advance:true and new_stage:"commitment_checkin" so the UI reflects the check-in stage immediately.\n- Never ask twice. One exchange only. Always set commitment_checkin_done: true after their response, regardless of outcome.\n- ROUTING AFTER CHECK-IN: if commitment_score >= 50, set stage_advance:true and new_stage:"wins". If commitment_score < 50 (or score is unknown), set stage_advance:true and new_stage:"honest".${checkinTone}`,
         priority: 1,
-        preferred_stage: 'commitment_checkin',
+        preferred_stage: isTransitioningToCheckin ? 'wins' : 'commitment_checkin',
         fire_next_session: false,
         energy_type: 'momentum',
       });
-    } else {
-      allDirectives.push({
-        id: 'commitment_checkin',
-        instruction: `## STAGE: COMMITMENT CHECK-IN\nNo yesterday commitment is available. Briefly acknowledge that there is nothing to check in on from yesterday and set commitment_checkin_done: true so the session can continue.`,
-        priority: 1,
-        preferred_stage: 'commitment_checkin',
-        fire_next_session: false,
-        energy_type: 'momentum',
-      });
-    }
+  }
+
+  if (currentStage === 'commitment_checkin' && !sessionState.commitment_checkin_done && !yc) {
+    allDirectives.push({
+      id: 'commitment_checkin',
+      instruction: `## STAGE: COMMITMENT CHECK-IN\nNo yesterday commitment is available. Briefly acknowledge that there is nothing to check in on from yesterday and set commitment_checkin_done: true so the session can continue.`,
+      priority: 1,
+      preferred_stage: 'commitment_checkin',
+      fire_next_session: false,
+      energy_type: 'momentum',
+    });
   }
 
   // ── commitment_specificity ────────────────────────────────────────────
