@@ -1596,6 +1596,7 @@ function buildDirectiveQueue({
   yesterdayFragments,
   goalMissingWhy, messageCount, sessionReadyToClose, forceClose,
   identityMissing, honestMissing, suggestedNextStage, sessionExercisesRun,
+  history,
   insightTriggeredExercise,
   userInsights, recentSessions, effectiveConsecutiveExcuses,
   currentDirectiveQueue, completedDirectives,
@@ -2100,9 +2101,33 @@ function buildDirectiveQueue({
 
   // ── stage_hint ─────────────────────────────────────────────────────────
   if (suggestedNextStage && !isMemoryMode) {
+    // Determine if the user's last message signals they're done with wins
+    const lastUserMsg = Array.isArray(history) && history.length > 0
+      ? [...history].reverse().find(m => m.role === 'user')
+      : null;
+    const lastUserText = (lastUserMsg?.content || '').trim().toLowerCase();
+    const doneWithWinsPatterns = [
+      /^nah\b/,
+      /^nope\b/,
+      /^no\b/,
+      /\bthat'?s it\b/,
+      /\bnothing else\b/,
+      /\bnothing\b/,
+      /\bi think that'?s it\b/,
+      /\bdone\b/,
+      /\bnot really\b/,
+    ];
+    const userSignaledDone = lastUserText.length < 15
+      || doneWithWinsPatterns.some((pattern) => pattern.test(lastUserText));
+
+    const isWinsToHonest = sessionState.current_stage === 'wins' && suggestedNextStage === 'honest';
+    const stageHintInstruction = (isWinsToHonest && userSignaledDone)
+      ? 'STAGE HINT: You MUST set stage_advance:true, new_stage:"honest" on this response. Do not wait — the user has signaled they are done with wins. Transition with a soft pivot phrase (e.g. "Okay — I want to shift for a second.") and ask the honest question. Never announce the stage name.'
+      : `STAGE HINT: Ready to move to "${suggestedNextStage}". Transition naturally if conversation supports it — use a soft bridging phrase that signals the shift without announcing it. E.g. for wins→honest: "Okay — I want to shift for a second." For honest→tomorrow: "Alright, I've got a good picture of today. Let's talk about tomorrow." For tomorrow→close: "Good — before I let you go..." For close→complete: "That's what I needed. Tonight you..." Never announce the stage name. Set stage_advance:true, new_stage:"${suggestedNextStage}".`;
+
     allDirectives.push({
       id: 'stage_hint',
-      instruction: `STAGE HINT: Ready to move to "${suggestedNextStage}". Transition naturally if conversation supports it — use a soft bridging phrase that signals the shift without announcing it. E.g. for wins→honest: "Okay — I want to shift for a second." For honest→tomorrow: "Alright, I've got a good picture of today. Let's talk about tomorrow." For tomorrow→close: "Good — before I let you go..." For close→complete: "That's what I needed. Tonight you..." Never announce the stage name. Set stage_advance:true, new_stage:"${suggestedNextStage}".`,
+      instruction: stageHintInstruction,
       priority: 2,
       preferred_stage: 'any',
       fire_next_session: false,
@@ -2734,6 +2759,25 @@ export default async function handler(req, res) {
 
     // ── 6b. Stage hint ─────────────────────────────────────────────────
     const completedDirectives = Array.isArray(session_state.completed_directives) ? session_state.completed_directives : [];
+    // Server-side fallback: detect wins_asked_for_more from last coach message
+    // (GPT sometimes asks the follow-up question but forgets to set the flag)
+    if (session_state.current_stage === 'wins' && !session_state.wins_asked_for_more && Array.isArray(history) && history.length > 0) {
+      const lastCoachMsg = [...history].reverse().find(m => m.role === 'assistant');
+      if (lastCoachMsg?.content) {
+        const txt = lastCoachMsg.content.toLowerCase();
+        if (
+          txt.includes('what else went well') ||
+          txt.includes('anything else') ||
+          txt.includes("what's another") ||
+          txt.includes('any other wins') ||
+          txt.includes('anything else you want to celebrate') ||
+          txt.includes('what else are you proud') ||
+          txt.includes('share more')
+        ) {
+          session_state = { ...session_state, wins_asked_for_more: true };
+        }
+      }
+    }
     const suggestedNextStage = deriveStageHint(session_state, intentData?.checklist_content, completedDirectives, messageCount);
 
     // ── 8. Build compact context block ───────────────────────────────────
@@ -2847,6 +2891,7 @@ export default async function handler(req, res) {
       honestMissing,
       suggestedNextStage,
       sessionExercisesRun,
+      history,
       insightTriggeredExercise,
       userInsights,
       recentSessions,
