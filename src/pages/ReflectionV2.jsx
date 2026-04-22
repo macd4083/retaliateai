@@ -339,8 +339,25 @@ export default function ReflectionV2() {
   const [selectedGoalChips, setSelectedGoalChips] = useState([]);
   const [checkedFragments, setCheckedFragments] = useState({});
   const [chatFocused, setChatFocused] = useState(false);
+  const [timeOverride, setTimeOverride] = useState(() => (
+    typeof window !== 'undefined' ? window.localStorage.getItem('admin_time_override') : null
+  ));
 
-  const timeContext = getTimeContext();
+  const rawTimeContext = getTimeContext();
+  const timeContext = (isAdmin && timeOverride === 'afternoon')
+    ? { period: 'afternoon', greeting: 'Good afternoon' }
+    : rawTimeContext;
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const syncTimeOverride = () => setTimeOverride(window.localStorage.getItem('admin_time_override'));
+    window.addEventListener('storage', syncTimeOverride);
+    window.addEventListener('admin-time-override-changed', syncTimeOverride);
+    return () => {
+      window.removeEventListener('storage', syncTimeOverride);
+      window.removeEventListener('admin-time-override-changed', syncTimeOverride);
+    };
+  }, []);
 
   const stages = sessionState.stage_order_swapped
     ? [
@@ -715,7 +732,9 @@ export default function ReflectionV2() {
               blockers: profile?.blockers || [],
               display_name: profile?.display_name || profile?.full_name || null,
               client_local_date: localDateStr(),
-              client_tz_offset: new Date().getTimezoneOffset(),
+              client_tz_offset: (isAdmin && timeOverride === 'afternoon')
+                ? new Date().getUTCHours() * 60 - 14 * 60
+                : new Date().getTimezoneOffset(),
               commitment_rate_7: commitmentStats?.followThrough7?.total >= 3
                 ? Math.round((commitmentStats.followThrough7.kept / commitmentStats.followThrough7.total) * 100)
                 : null,

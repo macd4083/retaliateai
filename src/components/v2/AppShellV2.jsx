@@ -18,6 +18,7 @@ export default function AppShellV2({ title, children, adminAction = null }) {
   const { user, signOut } = useAuth();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [adminTimeOverride, setAdminTimeOverride] = useState(null);
   const [showIosTooltip, setShowIosTooltip] = useState(false);
   const { isInstallable, isIos, isStandalone, promptInstall } = usePWAInstall();
 
@@ -39,6 +40,11 @@ export default function AppShellV2({ title, children, adminAction = null }) {
       })
       .catch(() => {});
   }, [user?.id]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    setAdminTimeOverride(window.localStorage.getItem('admin_time_override'));
+  }, []);
 
   const handleSignOut = async () => {
     await signOut();
@@ -210,6 +216,42 @@ export default function AppShellV2({ title, children, adminAction = null }) {
             </button>
           )}
         </nav>
+
+        {isAdmin && (
+          <div className="px-3 pb-3">
+            <p className="text-zinc-600 text-xs px-1 mb-1.5">Time Override</p>
+            <div className="flex gap-1.5">
+              <button
+                onClick={() => {
+                  window.localStorage.setItem('admin_time_override', 'afternoon');
+                  setAdminTimeOverride('afternoon');
+                  window.dispatchEvent(new Event('admin-time-override-changed'));
+                }}
+                className={`flex-1 px-2 py-1.5 rounded-lg text-xs border transition-colors ${
+                  adminTimeOverride === 'afternoon'
+                    ? 'bg-amber-900/40 border-amber-700 text-amber-300'
+                    : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                ☀️ Afternoon
+              </button>
+              <button
+                onClick={() => {
+                  window.localStorage.removeItem('admin_time_override');
+                  setAdminTimeOverride(null);
+                  window.dispatchEvent(new Event('admin-time-override-changed'));
+                }}
+                className={`flex-1 px-2 py-1.5 rounded-lg text-xs border transition-colors ${
+                  !adminTimeOverride
+                    ? 'bg-zinc-700 border-zinc-600 text-zinc-200'
+                    : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                🌙 Real time
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Sign out */}
         <div className="px-3 py-4 border-t border-zinc-800">
