@@ -1169,6 +1169,9 @@ export default function ReflectionV2() {
     : isComplete
     ? 'Anything else on your mind...'
     : STAGE_PLACEHOLDERS[sessionState.current_stage] || 'Tell me more...';
+  const displayStage = sessionState.current_stage === 'wins' && !sessionState.commitment_checkin_done
+    ? 'commitment_checkin'
+    : sessionState.current_stage;
 
   return (
     <AppShellV2
@@ -1187,7 +1190,7 @@ export default function ReflectionV2() {
     >
       <div className="flex flex-col h-full">
         <div className="flex-shrink-0 border-b border-zinc-800 bg-zinc-950">
-          <ProgressBar currentStage={isComplete ? 'complete' : sessionState.current_stage} stages={stages} />
+          <ProgressBar currentStage={isComplete ? 'complete' : displayStage} stages={stages} />
         </div>
 
         <AnimatePresence mode="wait">
