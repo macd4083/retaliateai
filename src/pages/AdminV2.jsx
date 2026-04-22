@@ -321,6 +321,7 @@ export default function AdminV2() {
   const [commitmentEdits, setCommitmentEdits] = useState({});
   const [commitmentSaving, setCommitmentSaving] = useState({});
   const [commitmentMsg, setCommitmentMsg] = useState('');
+  const [highlightedRowId, setHighlightedRowId] = useState(null);
   const [newSession, setNewSession] = useState({
     date: '',
     tomorrow_commitment: '',
@@ -469,6 +470,16 @@ export default function AdminV2() {
     setCommitmentSaving((s) => ({ ...s, [rowId]: false }));
   }
 
+  function updateCommitmentEdit(rowId, field, value) {
+    setCommitmentEdits((prev) => ({
+      ...prev,
+      [rowId]: { ...prev[rowId], [field]: value },
+    }));
+    if (highlightedRowId === rowId) {
+      setHighlightedRowId(null);
+    }
+  }
+
   async function insertFakeSession() {
     if (!newSession.date) {
       setCommitmentMsg('Date is required');
@@ -522,6 +533,21 @@ export default function AdminV2() {
         row,
       });
       const json = await res.json();
+      if (res.status === 409 && json.code === 'DUPLICATE_DATE') {
+        const conflictingRow = commitmentRows.find((existingRow) => existingRow.date === newSession.date);
+        setCommitmentMsg('A session already exists for that date. Scroll down to edit it instead.');
+        if (conflictingRow?.id) {
+          setHighlightedRowId(conflictingRow.id);
+          window.setTimeout(() => {
+            setHighlightedRowId((currentId) => (currentId === conflictingRow.id ? null : currentId));
+          }, 4000);
+          window.requestAnimationFrame(() => {
+            const targetRow = document.getElementById(`commitment-row-${conflictingRow.id}`);
+            targetRow?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          });
+        }
+        return;
+      }
       if (!json.ok) throw new Error(json.error || 'Insert failed');
       setCommitmentMsg('✓ Session inserted');
       setNewSession({
@@ -838,7 +864,13 @@ export default function AdminV2() {
               {commitmentRows.map((row) => {
                 const rowEdits = commitmentEdits[row.id] || {};
                 return (
-                  <div key={row.id} className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-3">
+                  <div
+                    key={row.id}
+                    id={`commitment-row-${row.id}`}
+                    className={`bg-zinc-900 border rounded-xl p-4 space-y-3 transition-colors ${
+                      row.id === highlightedRowId ? 'border-yellow-500' : 'border-zinc-800'
+                    }`}
+                  >
                     <div className="text-xs text-zinc-500 font-mono">#{row.id}</div>
                     <div className="grid gap-3 sm:grid-cols-2">
                       <label className="space-y-1">
@@ -847,13 +879,7 @@ export default function AdminV2() {
                           type="date"
                           value={rowEdits.date || ''}
                           onChange={(e) => {
-                            const rowId = row.id;
-                            const field = 'date';
-                            const value = e.target.value;
-                            setCommitmentEdits((prev) => ({
-                              ...prev,
-                              [rowId]: { ...prev[rowId], [field]: value },
-                            }));
+                            updateCommitmentEdit(row.id, 'date', e.target.value);
                           }}
                           className="bg-zinc-800 border border-zinc-700 text-white text-sm rounded-lg px-2 py-1.5 w-full focus:outline-none focus:border-red-500"
                         />
@@ -866,13 +892,7 @@ export default function AdminV2() {
                           max="100"
                           value={rowEdits.commitment_score ?? ''}
                           onChange={(e) => {
-                            const rowId = row.id;
-                            const field = 'commitment_score';
-                            const value = e.target.value;
-                            setCommitmentEdits((prev) => ({
-                              ...prev,
-                              [rowId]: { ...prev[rowId], [field]: value },
-                            }));
+                            updateCommitmentEdit(row.id, 'commitment_score', e.target.value);
                           }}
                           className="bg-zinc-800 border border-zinc-700 text-white text-sm rounded-lg px-2 py-1.5 w-full sm:max-w-[120px] focus:outline-none focus:border-red-500"
                         />
@@ -885,13 +905,7 @@ export default function AdminV2() {
                         type="text"
                         value={rowEdits.tomorrow_commitment || ''}
                         onChange={(e) => {
-                          const rowId = row.id;
-                          const field = 'tomorrow_commitment';
-                          const value = e.target.value;
-                          setCommitmentEdits((prev) => ({
-                            ...prev,
-                            [rowId]: { ...prev[rowId], [field]: value },
-                          }));
+                          updateCommitmentEdit(row.id, 'tomorrow_commitment', e.target.value);
                         }}
                         className="bg-zinc-800 border border-zinc-700 text-white text-sm rounded-lg px-2 py-1.5 w-full focus:outline-none focus:border-red-500"
                       />
@@ -904,13 +918,7 @@ export default function AdminV2() {
                           type="text"
                           value={rowEdits.commitment_minimum || ''}
                           onChange={(e) => {
-                            const rowId = row.id;
-                            const field = 'commitment_minimum';
-                            const value = e.target.value;
-                            setCommitmentEdits((prev) => ({
-                              ...prev,
-                              [rowId]: { ...prev[rowId], [field]: value },
-                            }));
+                            updateCommitmentEdit(row.id, 'commitment_minimum', e.target.value);
                           }}
                           className="bg-zinc-800 border border-zinc-700 text-white text-sm rounded-lg px-2 py-1.5 w-full focus:outline-none focus:border-red-500"
                         />
@@ -921,13 +929,7 @@ export default function AdminV2() {
                           type="text"
                           value={rowEdits.commitment_stretch || ''}
                           onChange={(e) => {
-                            const rowId = row.id;
-                            const field = 'commitment_stretch';
-                            const value = e.target.value;
-                            setCommitmentEdits((prev) => ({
-                              ...prev,
-                              [rowId]: { ...prev[rowId], [field]: value },
-                            }));
+                            updateCommitmentEdit(row.id, 'commitment_stretch', e.target.value);
                           }}
                           className="bg-zinc-800 border border-zinc-700 text-white text-sm rounded-lg px-2 py-1.5 w-full focus:outline-none focus:border-red-500"
                         />
@@ -940,13 +942,7 @@ export default function AdminV2() {
                           type="checkbox"
                           checked={!!rowEdits.is_complete}
                           onChange={(e) => {
-                            const rowId = row.id;
-                            const field = 'is_complete';
-                            const value = e.target.checked;
-                            setCommitmentEdits((prev) => ({
-                              ...prev,
-                              [rowId]: { ...prev[rowId], [field]: value },
-                            }));
+                            updateCommitmentEdit(row.id, 'is_complete', e.target.checked);
                           }}
                           className="h-4 w-4 rounded border-zinc-700 bg-zinc-800 text-red-600"
                         />

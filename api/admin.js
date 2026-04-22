@@ -147,7 +147,15 @@ export default async function handler(req, res) {
         .from(table)
         .insert(safeRow)
         .select();
-      if (insertError) throw insertError;
+      if (insertError) {
+        if (insertError.code === '23505') {
+          return res.status(409).json({
+            error: 'A session already exists for that date.',
+            code: 'DUPLICATE_DATE',
+          });
+        }
+        throw insertError;
+      }
       return res.status(200).json({ ok: true, data: insertedRows });
     }
 
