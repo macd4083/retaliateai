@@ -756,6 +756,8 @@ export default function ReflectionV2() {
       const data = await response.json();
       const stageAtTurnStart = state.current_stage || 'commitment_checkin';
       const canCaptureTomorrowCommitment = stageAtTurnStart === 'tomorrow';
+      let resolvedMinimumCommitment = state.commitment_minimum;
+      let resolvedStretchCommitment = state.commitment_stretch;
       if (data.extracted_data && typeof data.extracted_data === 'object') {
         const sanitizedExtractedData = { ...data.extracted_data };
         if (!canCaptureTomorrowCommitment) {
@@ -763,8 +765,8 @@ export default function ReflectionV2() {
           sanitizedExtractedData.commitment_stretch = null;
           sanitizedExtractedData.tomorrow_commitment = null;
         }
-        const resolvedMinimumCommitment = sanitizedExtractedData.commitment_minimum || state.commitment_minimum;
-        const resolvedStretchCommitment = sanitizedExtractedData.commitment_stretch || state.commitment_stretch;
+        resolvedMinimumCommitment = sanitizedExtractedData.commitment_minimum || state.commitment_minimum;
+        resolvedStretchCommitment = sanitizedExtractedData.commitment_stretch || state.commitment_stretch;
         if (!resolvedMinimumCommitment || !resolvedStretchCommitment) {
           sanitizedExtractedData.tomorrow_commitment = null;
         }
@@ -900,8 +902,6 @@ export default function ReflectionV2() {
         const dbUpdates = {};
         if (data.extracted_data?.mood) dbUpdates.mood_end_of_day = data.extracted_data.mood;
         if (data.extracted_data?.tomorrow_commitment) {
-          const resolvedMinimumCommitment = data.extracted_data?.commitment_minimum || state.commitment_minimum;
-          const resolvedStretchCommitment = data.extracted_data?.commitment_stretch || state.commitment_stretch;
           if (resolvedMinimumCommitment && resolvedStretchCommitment) {
             dbUpdates.tomorrow_commitment = data.extracted_data.tomorrow_commitment;
             // Set commitment_made_at when saving for the first time
