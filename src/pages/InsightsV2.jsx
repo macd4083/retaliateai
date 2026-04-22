@@ -178,7 +178,7 @@ export default function InsightsV2() {
 
     // Include if it has a score, or if complete, or if date is before today
     const eligibleCommitments = (allWithCommitment || []).filter(
-      (s) => s.commitment_score != null || s.is_complete || s.date < today
+      (s) => s.commitment_score !== null || s.is_complete || s.date < today
     );
 
     if (eligibleCommitments.length > 0) {
@@ -200,10 +200,10 @@ export default function InsightsV2() {
       }
 
       const computed = eligibleCommitments.map((s, idx) => {
-        const hasCommitment = s.tomorrow_commitment != null;
+        const hasCommitmentText = s.tomorrow_commitment !== null;
         const nextDay = addDays(s.date, 1);
         const isNewest = idx === 0;
-        const status = !hasCommitment
+        const status = !hasCommitmentText
           ? 'pending'
           : isNewest
             ? (sessionsByDate[nextDay]?.is_complete ? 'kept' : 'pending')
@@ -352,9 +352,9 @@ export default function InsightsV2() {
     const wEnd       = addDays(wStart, 6);
     return allCommitments.filter((c) => c.date >= wStart && c.date <= wEnd);
   })();
-  const displayedCommitmentRows = displayedCommitments.filter((c) => c.commitment != null);
+  const commitmentsWithTextOnly = displayedCommitments.filter((c) => c.commitment !== null);
 
-  const showLoadMore = isCurrentWeekSelected && displayedCommitmentRows.length > visibleCount;
+  const showLoadMore = isCurrentWeekSelected && commitmentsWithTextOnly.length > visibleCount;
 
   return (
     <AppShellV2 title="Insights">
@@ -630,14 +630,14 @@ export default function InsightsV2() {
           <div>
             <h2 className="text-white font-semibold text-base mb-3">Commitments</h2>
             <div className="space-y-2">
-              {displayedCommitmentRows.length === 0 ? (
+              {commitmentsWithTextOnly.length === 0 ? (
                 <p className="text-zinc-500 text-sm">
                   {isCurrentWeekSelected
                     ? 'No commitments yet. Start a reflection tonight.'
                     : 'No commitments this week.'}
                 </p>
               ) : (
-                displayedCommitmentRows.map((c, i) => (
+                commitmentsWithTextOnly.map((c, i) => (
                     <div key={i} className="bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2.5">
                       <div className="flex items-start gap-2">
                         <span className="flex-shrink-0 mt-0.5">
