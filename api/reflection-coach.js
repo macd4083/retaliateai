@@ -3095,6 +3095,21 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
     if (activeDirective?.id === 'insight_triggered_exercise' && result.exercise_run === activeDirective.exercise_id) {
       result.insight_exercise_skipped = false;
     }
+    result.extracted_data = result.extracted_data || {};
+
+    const stageAtTurnStart = session_state.current_stage || 'commitment_checkin';
+    const canCaptureTomorrowCommitment = stageAtTurnStart === 'tomorrow';
+    if (!canCaptureTomorrowCommitment) {
+      result.extracted_data.commitment_minimum = null;
+      result.extracted_data.commitment_stretch = null;
+      result.extracted_data.tomorrow_commitment = null;
+    }
+
+    const resolvedMinimumCommitmentForOutput = result.extracted_data.commitment_minimum || session_state.commitment_minimum;
+    const resolvedStretchCommitmentForOutput = result.extracted_data.commitment_stretch || session_state.commitment_stretch;
+    if (!resolvedMinimumCommitmentForOutput || !resolvedStretchCommitmentForOutput) {
+      result.extracted_data.tomorrow_commitment = null;
+    }
 
     if (isInit && Array.isArray(yesterdayFragments) && yesterdayFragments.length > 0 && !session_state.commitment_checkin_done) {
       result.show_commitment_checklist = true;
