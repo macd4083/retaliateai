@@ -754,6 +754,22 @@ export default function ReflectionV2() {
       if (!response || !response.ok) throw new Error('API error');
 
       const data = await response.json();
+      const stageAtTurnStart = state.current_stage || 'commitment_checkin';
+      const canCaptureTomorrowCommitment = stageAtTurnStart === 'tomorrow';
+      if (data.extracted_data && typeof data.extracted_data === 'object') {
+        const sanitizedExtractedData = { ...data.extracted_data };
+        if (!canCaptureTomorrowCommitment) {
+          sanitizedExtractedData.commitment_minimum = null;
+          sanitizedExtractedData.commitment_stretch = null;
+          sanitizedExtractedData.tomorrow_commitment = null;
+        }
+        const resolvedMinimumCommitment = sanitizedExtractedData.commitment_minimum || state.commitment_minimum;
+        const resolvedStretchCommitment = sanitizedExtractedData.commitment_stretch || state.commitment_stretch;
+        if (!resolvedMinimumCommitment || !resolvedStretchCommitment) {
+          sanitizedExtractedData.tomorrow_commitment = null;
+        }
+        data.extracted_data = sanitizedExtractedData;
+      }
 
       // Client-side guard: if assistant_message is a raw JSON string, unwrap and merge fields
       if (data.assistant_message && typeof data.assistant_message === 'string' && data.assistant_message.trimStart().startsWith('{')) {
@@ -884,10 +900,14 @@ export default function ReflectionV2() {
         const dbUpdates = {};
         if (data.extracted_data?.mood) dbUpdates.mood_end_of_day = data.extracted_data.mood;
         if (data.extracted_data?.tomorrow_commitment) {
-          dbUpdates.tomorrow_commitment = data.extracted_data.tomorrow_commitment;
-          // Set commitment_made_at when saving for the first time
-          if (!state.tomorrow_commitment) {
-            dbUpdates.commitment_made_at = new Date().toISOString();
+          const resolvedMinimumCommitment = data.extracted_data?.commitment_minimum || state.commitment_minimum;
+          const resolvedStretchCommitment = data.extracted_data?.commitment_stretch || state.commitment_stretch;
+          if (resolvedMinimumCommitment && resolvedStretchCommitment) {
+            dbUpdates.tomorrow_commitment = data.extracted_data.tomorrow_commitment;
+            // Set commitment_made_at when saving for the first time
+            if (!state.tomorrow_commitment) {
+              dbUpdates.commitment_made_at = new Date().toISOString();
+            }
           }
         }
         if (data.extracted_data?.commitment_minimum && !state.commitment_minimum)
