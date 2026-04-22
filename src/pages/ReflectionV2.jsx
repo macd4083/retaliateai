@@ -339,12 +339,25 @@ export default function ReflectionV2() {
   const [selectedGoalChips, setSelectedGoalChips] = useState([]);
   const [checkedFragments, setCheckedFragments] = useState({});
   const [chatFocused, setChatFocused] = useState(false);
+  const [timeOverride, setTimeOverride] = useState(() => (
+    typeof window !== 'undefined' ? window.localStorage.getItem('admin_time_override') : null
+  ));
 
-  const timeOverride = typeof window !== 'undefined' ? window.localStorage.getItem('admin_time_override') : null;
   const rawTimeContext = getTimeContext();
   const timeContext = (isAdmin && timeOverride === 'afternoon')
     ? { period: 'afternoon', greeting: 'Good afternoon' }
     : rawTimeContext;
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const syncTimeOverride = () => setTimeOverride(window.localStorage.getItem('admin_time_override'));
+    window.addEventListener('storage', syncTimeOverride);
+    window.addEventListener('admin-time-override-changed', syncTimeOverride);
+    return () => {
+      window.removeEventListener('storage', syncTimeOverride);
+      window.removeEventListener('admin-time-override-changed', syncTimeOverride);
+    };
+  }, []);
 
   const stages = sessionState.stage_order_swapped
     ? [

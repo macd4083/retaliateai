@@ -225,6 +225,7 @@ export default function AppShellV2({ title, children, adminAction = null }) {
                 onClick={() => {
                   window.localStorage.setItem('admin_time_override', 'afternoon');
                   setAdminTimeOverride('afternoon');
+                  window.dispatchEvent(new Event('admin-time-override-changed'));
                 }}
                 className={`flex-1 px-2 py-1.5 rounded-lg text-xs border transition-colors ${
                   adminTimeOverride === 'afternoon'
@@ -238,6 +239,7 @@ export default function AppShellV2({ title, children, adminAction = null }) {
                 onClick={() => {
                   window.localStorage.removeItem('admin_time_override');
                   setAdminTimeOverride(null);
+                  window.dispatchEvent(new Event('admin-time-override-changed'));
                 }}
                 className={`flex-1 px-2 py-1.5 rounded-lg text-xs border transition-colors ${
                   !adminTimeOverride
