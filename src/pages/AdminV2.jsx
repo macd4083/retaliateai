@@ -321,6 +321,15 @@ export default function AdminV2() {
   const [commitmentEdits, setCommitmentEdits] = useState({});
   const [commitmentSaving, setCommitmentSaving] = useState({});
   const [commitmentMsg, setCommitmentMsg] = useState('');
+  const [newSession, setNewSession] = useState({
+    date: '',
+    tomorrow_commitment: '',
+    commitment_minimum: '',
+    commitment_stretch: '',
+    commitment_score: '',
+    is_complete: true,
+  });
+  const [insertingSession, setInsertingSession] = useState(false);
 
   // todayStr uses local time getters (not UTC) so the date matches the user's timezone.
   const todayStr = localDateStr();
@@ -458,6 +467,76 @@ export default function AdminV2() {
       setCommitmentMsg(`Error: ${e.message}`);
     }
     setCommitmentSaving((s) => ({ ...s, [rowId]: false }));
+  }
+
+  async function insertFakeSession() {
+    if (!newSession.date) {
+      setCommitmentMsg('Date is required');
+      return;
+    }
+    const dateParts = newSession.date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!dateParts) {
+      setCommitmentMsg('Date must be a valid YYYY-MM-DD value');
+      return;
+    }
+    const year = Number(dateParts[1]);
+    const month = Number(dateParts[2]);
+    const day = Number(dateParts[3]);
+    const validatedDate = new Date(Date.UTC(year, month - 1, day));
+    const isValidDate = (
+      validatedDate.getUTCFullYear() === year &&
+      validatedDate.getUTCMonth() === month - 1 &&
+      validatedDate.getUTCDate() === day
+    );
+    if (!isValidDate) {
+      setCommitmentMsg('Date must be a real calendar date');
+      return;
+    }
+
+    const scoreInput = String(newSession.commitment_score ?? '').trim();
+    if (scoreInput !== '' && !/^\d+(\.\d+)?$/.test(scoreInput)) {
+      setCommitmentMsg('Score must be numeric');
+      return;
+    }
+    const parsedScore = scoreInput !== '' ? Number(scoreInput) : null;
+    if (parsedScore !== null && (!Number.isFinite(parsedScore) || parsedScore < 0 || parsedScore > 100)) {
+      setCommitmentMsg('Score must be a number between 0 and 100');
+      return;
+    }
+    setInsertingSession(true);
+    setCommitmentMsg('');
+    try {
+      const row = {
+        date: newSession.date,
+        tomorrow_commitment: newSession.tomorrow_commitment || null,
+        commitment_minimum: newSession.commitment_minimum || null,
+        commitment_stretch: newSession.commitment_stretch || null,
+        commitment_score: parsedScore,
+        is_complete: newSession.is_complete,
+        current_stage: 'complete',
+      };
+      const res = await adminFetch({
+        action: 'insert',
+        user_id: user.id,
+        table: 'reflection_sessions',
+        row,
+      });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.error || 'Insert failed');
+      setCommitmentMsg('✓ Session inserted');
+      setNewSession({
+        date: '',
+        tomorrow_commitment: '',
+        commitment_minimum: '',
+        commitment_stretch: '',
+        commitment_score: '',
+        is_complete: true,
+      });
+      await loadCommitmentRows();
+    } catch (e) {
+      setCommitmentMsg(`Error: ${e.message}`);
+    }
+    setInsertingSession(false);
   }
 
   async function deleteTabRow(id) {
@@ -675,6 +754,77 @@ export default function AdminV2() {
               {commitmentMsg}
             </div>
           )}
+
+          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-3">
+            <p className="text-zinc-300 text-sm font-medium">Add Fake Session</p>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <label className="space-y-1">
+                <span className="text-xs text-zinc-400">Date *</span>
+                <input
+                  type="date"
+                  value={newSession.date}
+                  onChange={(e) => setNewSession((s) => ({ ...s, date: e.target.value }))}
+                  className="bg-zinc-800 border border-zinc-700 text-white text-sm rounded-lg px-2 py-1.5 w-full focus:outline-none focus:border-red-500"
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="text-xs text-zinc-400">Score (0–100)</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={newSession.commitment_score}
+                  onChange={(e) => setNewSession((s) => ({ ...s, commitment_score: e.target.value }))}
+                  className="bg-zinc-800 border border-zinc-700 text-white text-sm rounded-lg px-2 py-1.5 w-full focus:outline-none focus:border-red-500"
+                />
+              </label>
+              <label className="flex items-center gap-2 pt-5">
+                <input
+                  type="checkbox"
+                  checked={newSession.is_complete}
+                  onChange={(e) => setNewSession((s) => ({ ...s, is_complete: e.target.checked }))}
+                  className="h-4 w-4 rounded border-zinc-700 bg-zinc-800 text-red-600"
+                />
+                <span className="text-sm text-zinc-300">Is Complete</span>
+              </label>
+            </div>
+            <label className="space-y-1 block">
+              <span className="text-xs text-zinc-400">Commitment</span>
+              <input
+                type="text"
+                value={newSession.tomorrow_commitment}
+                onChange={(e) => setNewSession((s) => ({ ...s, tomorrow_commitment: e.target.value }))}
+                className="bg-zinc-800 border border-zinc-700 text-white text-sm rounded-lg px-2 py-1.5 w-full focus:outline-none focus:border-red-500"
+              />
+            </label>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="space-y-1">
+                <span className="text-xs text-zinc-400">Minimum</span>
+                <input
+                  type="text"
+                  value={newSession.commitment_minimum}
+                  onChange={(e) => setNewSession((s) => ({ ...s, commitment_minimum: e.target.value }))}
+                  className="bg-zinc-800 border border-zinc-700 text-white text-sm rounded-lg px-2 py-1.5 w-full focus:outline-none focus:border-red-500"
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="text-xs text-zinc-400">Stretch</span>
+                <input
+                  type="text"
+                  value={newSession.commitment_stretch}
+                  onChange={(e) => setNewSession((s) => ({ ...s, commitment_stretch: e.target.value }))}
+                  className="bg-zinc-800 border border-zinc-700 text-white text-sm rounded-lg px-2 py-1.5 w-full focus:outline-none focus:border-red-500"
+                />
+              </label>
+            </div>
+            <button
+              onClick={insertFakeSession}
+              disabled={insertingSession}
+              className="bg-red-600 hover:bg-red-700 disabled:opacity-60 disabled:cursor-not-allowed text-white text-sm px-3 py-1.5 rounded-lg transition-colors"
+            >
+              {insertingSession ? 'Inserting...' : '+ Insert Session'}
+            </button>
+          </div>
 
           {commitmentLoading ? (
             <div className="flex items-center gap-3 py-6 justify-center">
