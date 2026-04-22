@@ -27,10 +27,10 @@ async function adminFetch(body) {
   });
 }
 
-function buildCommitmentFragments({ tomorrow_commitment, commitment_minimum, commitment_stretch }) {
-  const minimum = String(commitment_minimum || '').trim();
-  const stretch = String(commitment_stretch || '').trim();
-  const commitment = String(tomorrow_commitment || '').trim();
+function buildCommitmentFragments({ tomorrowCommitment, commitmentMinimum, commitmentStretch }) {
+  const minimum = String(commitmentMinimum || '').trim();
+  const stretch = String(commitmentStretch || '').trim();
+  const commitment = String(tomorrowCommitment || '').trim();
 
   const fragments = [];
   if (minimum) {
@@ -527,53 +527,93 @@ export default function AdminV2() {
     commitmentMinimum,
     commitmentStretch,
   }) {
-    if (!sessionId || !sessionDate) return;
+    if (!sessionId || !sessionDate) {
+      throw new Error('Cannot sync commitment fragments without a session id and date');
+    }
 
-    const datesToClear = [...new Set([sessionDate, previousSessionDate].filter(Boolean))];
-    const fragments = buildCommitmentFragments({
-      tomorrow_commitment: tomorrowCommitment,
-      commitment_minimum: commitmentMinimum,
-      commitment_stretch: commitmentStretch,
-    });
+    try {
+      const datesToQuery = [...new Set([sessionDate, previousSessionDate].filter(Boolean))];
+      const fragments = buildCommitmentFragments({
+        tomorrowCommitment,
+        commitmentMinimum,
+        commitmentStretch,
+      });
 
-    const existingRes = await adminFetch({
-      action: 'data',
-      user_id: user.id,
-      table: 'goal_commitment_log',
-    });
-    const existingJson = await existingRes.json();
-    const existingRows = Array.isArray(existingJson.data) ? existingJson.data : [];
+      let existingRows = [];
+      if (datesToQuery.length > 0) {
+        const { data } = await supabase
+          .from('goal_commitment_log')
+          .select('id, session_id, date, commitment_type, fragment_index')
+          .eq('user_id', user.id)
+          .in('date', datesToQuery);
+        existingRows = Array.isArray(data) ? data : [];
+      }
 
-    const rowsToDelete = existingRows.filter((row) => (
-      row.session_id === sessionId || datesToClear.includes(row.date)
-    ));
+      const rowsToDelete = existingRows.filter((row) => {
+        if (row.session_id === sessionId) return true;
+        if (previousSessionDate && row.date === previousSessionDate) return true;
+        // Clean up old, session-less fallback fragments for this date to avoid duplicates.
+        if (row.date === sessionDate && !row.session_id) {
+          return row.commitment_type === 'minimum'
+            || row.commitment_type === 'stretch'
+            || row.fragment_index === 0
+            || row.fragment_index === 1;
+        }
+        return false;
+      });
 
-    await Promise.all(
-      rowsToDelete.map((row) => adminFetch({
-        action: 'data',
-        user_id: user.id,
-        table: 'goal_commitment_log',
-        delete_id: row.id,
-      }))
-    );
+      const deleteResults = await Promise.all(
+        rowsToDelete.map((row) => adminFetch({
+          // Deletions are handled by admin API `data` action with `delete_id`.
+          action: 'data',
+          user_id: user.id,
+          table: 'goal_commitment_log',
+          delete_id: row.id,
+        }))
+      );
+      const deletePayloads = await Promise.all(
+        deleteResults.map(async (response) => ({
+          ok: response.ok,
+          json: await response.json(),
+        }))
+      );
+      for (const payload of deletePayloads) {
+        if (!payload.ok || payload.json.ok !== true) {
+          throw new Error(payload.json.error || 'Failed to delete existing commitment fragments');
+        }
+      }
 
-    if (fragments.length === 0) return;
+      if (fragments.length === 0) return;
 
-    await Promise.all(
-      fragments.map((fragment) => adminFetch({
-        action: 'insert',
-        user_id: user.id,
-        table: 'goal_commitment_log',
-        row: {
-          session_id: sessionId,
-          date: sessionDate,
-          commitment_text: fragment.commitment_text,
-          fragment_index: fragment.fragment_index,
-          commitment_type: fragment.commitment_type,
-          kept: null,
-        },
-      }))
-    );
+      const insertResults = await Promise.all(
+        fragments.map((fragment) => adminFetch({
+          action: 'insert',
+          user_id: user.id,
+          table: 'goal_commitment_log',
+          row: {
+            session_id: sessionId,
+            date: sessionDate,
+            commitment_text: fragment.commitment_text,
+            fragment_index: fragment.fragment_index,
+            commitment_type: fragment.commitment_type,
+            kept: null,
+          },
+        }))
+      );
+      const insertPayloads = await Promise.all(
+        insertResults.map(async (response) => ({
+          ok: response.ok,
+          json: await response.json(),
+        }))
+      );
+      for (const payload of insertPayloads) {
+        if (!payload.ok || payload.json.ok !== true) {
+          throw new Error(payload.json.error || 'Failed to insert commitment fragments');
+        }
+      }
+    } catch (error) {
+      throw new Error(`Commitment fragment sync failed: ${error.message || 'unknown error'}`);
+    }
   }
 
   async function insertFakeSession() {
