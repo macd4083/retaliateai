@@ -3160,6 +3160,7 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
 
     const hasYesterdayCommitmentForCheckin = !!(session_state.yesterday_commitment || yesterdayCommitment);
     const shouldDecideOrderFromOpener = (
+      !isInit &&
       !hasYesterdayCommitmentForCheckin
       && (session_state.current_stage || 'commitment_checkin') === 'commitment_checkin'
       && result.commitment_checkin_done === true
