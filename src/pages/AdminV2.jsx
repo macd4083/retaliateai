@@ -27,6 +27,36 @@ async function adminFetch(body) {
   });
 }
 
+function buildCommitmentFragments({ tomorrowCommitment, commitmentMinimum, commitmentStretch }) {
+  const minimum = String(commitmentMinimum || '').trim();
+  const stretch = String(commitmentStretch || '').trim();
+  const commitment = String(tomorrowCommitment || '').trim();
+
+  const fragments = [];
+  if (minimum) {
+    fragments.push({
+      commitment_text: minimum,
+      fragment_index: 0,
+      commitment_type: 'minimum',
+    });
+  }
+  if (stretch) {
+    fragments.push({
+      commitment_text: stretch,
+      fragment_index: 1,
+      commitment_type: 'stretch',
+    });
+  }
+  if (!minimum && !stretch && commitment) {
+    fragments.push({
+      commitment_text: commitment,
+      fragment_index: 0,
+      commitment_type: null,
+    });
+  }
+  return fragments;
+}
+
 const DATA_TABS = [
   { id: 'sessions', label: 'Sessions' },
   { id: 'user_profiles', label: 'User Profile' },
@@ -443,6 +473,7 @@ export default function AdminV2() {
     setCommitmentSaving((s) => ({ ...s, [rowId]: true }));
     setCommitmentMsg('');
     try {
+      const originalRow = commitmentRows.find((row) => row.id === rowId) || null;
       const updates = {
         tomorrow_commitment: edits.tomorrow_commitment || null,
         commitment_minimum: edits.commitment_minimum || null,
@@ -460,6 +491,14 @@ export default function AdminV2() {
       });
       const json = await res.json();
       if (!json.ok) throw new Error(json.error || 'Save failed');
+      await syncCommitmentFragments({
+        sessionId: rowId,
+        sessionDate: updates.date,
+        previousSessionDate: originalRow?.date || null,
+        tomorrowCommitment: updates.tomorrow_commitment,
+        commitmentMinimum: updates.commitment_minimum,
+        commitmentStretch: updates.commitment_stretch,
+      });
       setCommitmentMsg(`✓ Saved row ${rowId.slice(0, 8)}…`);
       setCommitmentRows((rows) =>
         rows.map((r) => (r.id === rowId ? { ...r, ...updates } : r))
@@ -477,6 +516,103 @@ export default function AdminV2() {
     }));
     if (highlightedRowId === rowId) {
       setHighlightedRowId(null);
+    }
+  }
+
+  async function syncCommitmentFragments({
+    sessionId,
+    sessionDate,
+    previousSessionDate = null,
+    tomorrowCommitment,
+    commitmentMinimum,
+    commitmentStretch,
+  }) {
+    if (!sessionId || !sessionDate) {
+      throw new Error('Cannot sync commitment fragments without a session id and date');
+    }
+
+    try {
+      const datesToQuery = [...new Set([sessionDate, previousSessionDate].filter(Boolean))];
+      const fragments = buildCommitmentFragments({
+        tomorrowCommitment,
+        commitmentMinimum,
+        commitmentStretch,
+      });
+
+      let existingRows = [];
+      if (datesToQuery.length > 0) {
+        const { data } = await supabase
+          .from('goal_commitment_log')
+          .select('id, session_id, date, commitment_type, fragment_index')
+          .eq('user_id', user.id)
+          .in('date', datesToQuery);
+        existingRows = Array.isArray(data) ? data : [];
+      }
+
+      const rowsToDelete = existingRows.filter((row) => {
+        if (row.session_id === sessionId) return true;
+        if (previousSessionDate && row.date === previousSessionDate) return true;
+        // Clean up old, session-less fallback fragments for this date to avoid duplicates.
+        if (row.date === sessionDate && !row.session_id) {
+          return row.commitment_type === 'minimum'
+            || row.commitment_type === 'stretch'
+            || row.fragment_index === 0
+            || row.fragment_index === 1;
+        }
+        return false;
+      });
+
+      const deleteResults = await Promise.all(
+        rowsToDelete.map((row) => adminFetch({
+          // Deletions are handled by admin API `data` action with `delete_id`.
+          action: 'data',
+          user_id: user.id,
+          table: 'goal_commitment_log',
+          delete_id: row.id,
+        }))
+      );
+      const deletePayloads = await Promise.all(
+        deleteResults.map(async (response) => ({
+          ok: response.ok,
+          json: await response.json(),
+        }))
+      );
+      for (const payload of deletePayloads) {
+        if (!payload.ok || payload.json.ok !== true) {
+          throw new Error(payload.json.error || 'Failed to delete existing commitment fragments');
+        }
+      }
+
+      if (fragments.length === 0) return;
+
+      const insertResults = await Promise.all(
+        fragments.map((fragment) => adminFetch({
+          action: 'insert',
+          user_id: user.id,
+          table: 'goal_commitment_log',
+          row: {
+            session_id: sessionId,
+            date: sessionDate,
+            commitment_text: fragment.commitment_text,
+            fragment_index: fragment.fragment_index,
+            commitment_type: fragment.commitment_type,
+            kept: null,
+          },
+        }))
+      );
+      const insertPayloads = await Promise.all(
+        insertResults.map(async (response) => ({
+          ok: response.ok,
+          json: await response.json(),
+        }))
+      );
+      for (const payload of insertPayloads) {
+        if (!payload.ok || payload.json.ok !== true) {
+          throw new Error(payload.json.error || 'Failed to insert commitment fragments');
+        }
+      }
+    } catch (error) {
+      throw new Error(`Commitment fragment sync failed: ${error.message || 'unknown error'}`);
     }
   }
 
@@ -549,6 +685,16 @@ export default function AdminV2() {
         return;
       }
       if (!json.ok) throw new Error(json.error || 'Insert failed');
+      const insertedRow = Array.isArray(json.data) ? json.data[0] : null;
+      if (insertedRow?.id) {
+        await syncCommitmentFragments({
+          sessionId: insertedRow.id,
+          sessionDate: row.date,
+          tomorrowCommitment: row.tomorrow_commitment,
+          commitmentMinimum: row.commitment_minimum,
+          commitmentStretch: row.commitment_stretch,
+        });
+      }
       setCommitmentMsg('✓ Session inserted');
       setNewSession({
         date: '',
