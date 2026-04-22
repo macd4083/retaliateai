@@ -261,7 +261,6 @@ ON EXERCISES:
 - NEVER name the exercise out loud (no "I want to try a gratitude anchor"). Show the intent, don't label it.
 - Draw on: user_insights[n].trigger, user_insights[n].user_quote, goals[n].whys, recent_sessions, session wins/misses already captured this session — whatever is most relevant to WHY this exercise is the right one right now.
 - After exercise: connect result back to identity, goals, or future self
-- NEVER repeat an exercise in exercises_run for this session
 - implementation_intention: STOP once a specific plan is stated — one follow-up max
 
 ANTI-EXCUSE SYSTEM (when accountability_signal === "excuse"):
@@ -464,7 +463,6 @@ function findInsightTriggeredExercise({
   userMessage,
   userInsights = [],
   sessionState = {},
-  sessionExercisesRun = [],
   suggestedExercise = 'none',
 }) {
   const currentStage = sessionState.current_stage || 'wins';
@@ -481,7 +479,7 @@ function findInsightTriggeredExercise({
   for (const insight of userInsights) {
     if (!insight?.id || triggeredInsights.includes(insight.id)) continue;
     const practicesForInsight = Array.isArray(insight.unlocked_practices) ? insight.unlocked_practices : [];
-    const availablePractice = practicesForInsight.find((id) => EXERCISE_PROMPTS[id] && !sessionExercisesRun.includes(id));
+    const availablePractice = practicesForInsight.find((id) => EXERCISE_PROMPTS[id]);
     if (!availablePractice) continue;
 
     const insightKeywords = tokenizeKeywords(`${insight.pattern_narrative || ''} ${insight.pattern_label || ''}`);
@@ -1629,7 +1627,7 @@ function buildDirectiveQueue({
   commitmentRate7Context, commitmentTrajectoryContext, avgCommitmentScoreContext, scoreTrajectoryContext,
   yesterdayFragments,
   goalMissingWhy, messageCount, sessionReadyToClose, forceClose,
-  identityMissing, honestMissing, suggestedNextStage, sessionExercisesRun,
+  identityMissing, honestMissing, suggestedNextStage,
   history,
   insightTriggeredExercise,
   userInsights, recentSessions, effectiveConsecutiveExcuses,
@@ -1925,7 +1923,7 @@ function buildDirectiveQueue({
         : '\n- No fragment checklist is available for yesterday, so use the normal free-text check-in question flow.';
       let checkinTone = '';
       if (rate !== null && rate < 40) {
-        checkinTone = `\n\nTONE: They've followed through on only ${rate}% of commitments lately. Don't assume they did it. Ask: "You said you'd [commitment]. What actually happened?" — the word 'actually' signals you want honesty, not the polished version. If they missed it, ask "What specifically got in the way?" before advancing — get the real blocker named.`;
+        checkinTone = `\n\nTONE: Their follow-through has been inconsistent lately (${rate}%). Ask how it went with genuine curiosity, no assumption either way. If they missed it, go there with them and get specific about what got in the way. If they did it, celebrate it. Don't lead with skepticism.`;
       } else if (rate !== null && rate >= 70) {
         checkinTone = `\n\nTONE: They've been strong at ${rate}% follow-through. Open from belief — "How did [commitment] go?" is enough. Let them tell you.`;
       } else if (trajectory === 'declining') {
@@ -1933,7 +1931,7 @@ function buildDirectiveQueue({
       }
       allDirectives.push({
         id: 'commitment_checkin',
-        instruction: `## COMMITMENT CHECK-IN\nYou are pivoting directly from their mood response into checking in on yesterday before wins.\n- THEIR EXACT COMMITMENT: "${yc}"${minimumText}${stretchText}${checklistText}\n- This is the FIRST thing you address after mood. Use one short framing sentence max, then ask the specific check-in question. Example framing: "Before we get into wins — you said you'd [exact commitment]. What actually happened?"\n- If yesterday has a custom opener, use it exactly once before your question: ${yesterdayCheckinOpener ? `"${yesterdayCheckinOpener}"` : '(none available)'}\n- Use their exact words from the commitment. Never ask a generic or identity-style question.\n- If doing free-text fallback (no checklist), ask exactly ONE specific question and then wait.\n- If checklist fragments are available, you MUST show the checklist (show_commitment_checklist: true) and MUST NOT ask a free-text question.\n- On this transition turn from wins, set stage_advance:true and new_stage:"commitment_checkin" so the UI reflects the check-in stage immediately.\n- Never ask twice. One exchange only. Always set commitment_checkin_done: true after their response, regardless of outcome.\n- ROUTING AFTER CHECK-IN: if commitment_score >= 50, set stage_advance:true and new_stage:"wins". If commitment_score < 50 (or score is unknown), set stage_advance:true and new_stage:"honest".${checkinTone}`,
+        instruction: `## COMMITMENT CHECK-IN\nYou are checking in on yesterday right after their mood response.\n- Yesterday's commitment to reference naturally: "${yc}"${minimumText}${stretchText}${checklistText}\n- This is the FIRST thing you address after mood. Ask how it went in a natural, direct way that feels like catching up — not evaluating performance.\n- Reference what they committed to, but do NOT open with a formal template like "you said you'd [X]". Keep it conversational and human.\n- If yesterday has a custom opener, use it exactly once before your question: ${yesterdayCheckinOpener ? `"${yesterdayCheckinOpener}"` : '(none available)'}\n- Use their exact words from the commitment. Never ask a generic or identity-style question.\n- If doing free-text fallback (no checklist), ask exactly ONE specific question and then wait.\n- If checklist fragments are available, you MUST show the checklist (show_commitment_checklist: true) and MUST NOT ask a free-text question.\n- On this transition turn from wins, set stage_advance:true and new_stage:"commitment_checkin" so the UI reflects the check-in stage immediately.\n- Never ask twice. One exchange only. Always set commitment_checkin_done: true after their response, regardless of outcome.\n- ROUTING AFTER CHECK-IN: if commitment_score >= 50, set stage_advance:true and new_stage:"wins". If commitment_score < 50 (or score is unknown), set stage_advance:true and new_stage:"honest".${checkinTone}`,
         priority: 1,
         preferred_stage: isTransitioningToCheckin ? 'wins' : 'commitment_checkin',
         fire_next_session: false,
@@ -1944,7 +1942,7 @@ function buildDirectiveQueue({
   if (currentStage === 'commitment_checkin' && !sessionState.commitment_checkin_done && !yc) {
     allDirectives.push({
       id: 'commitment_checkin',
-      instruction: `## STAGE: COMMITMENT CHECK-IN\nNo yesterday commitment is available. This stage is still a real check-in.\n- Respond directly to what they just shared about how they are feeling right now.\n- Ask one specific follow-up only if needed to clarify what is most present for them.\n- Do NOT mention that there is "nothing to check in on" and do NOT use generic form language.\n- Once you've captured their current state, set commitment_checkin_done: true.\n- The server will route to honest-first when their state sounds heavy/stuck/stressed, otherwise wins-first. Focus on the quality of the check-in message.`,
+      instruction: `## STAGE: COMMITMENT CHECK-IN\nNo yesterday commitment is available. This stage is still a real check-in.\n- Respond directly to what they just shared about how they are feeling right now.\n- Ask one specific follow-up only if needed to clarify what is most present for them.\n- Use plain human language. Ask how they're doing, what's going on, or what kind of day it has been.\n- Do NOT use coaching-speak templates like "what feels most present for you," "what's coming up for you," or "where are you at energetically."\n- Do NOT mention that there is "nothing to check in on" and do NOT use generic form language.\n- Once you've captured their current state, set commitment_checkin_done: true.\n- The server will route to honest-first when their state sounds heavy/stuck/stressed, otherwise wins-first. Focus on the quality of the check-in message.`,
       priority: 1,
       preferred_stage: 'commitment_checkin',
       fire_next_session: false,
@@ -2474,17 +2472,16 @@ function buildSessionContext({
     days_since_last_session: daysSinceLastSession,
     precomputed_commitment_score: precomputedCommitmentScore,
     pre_session_state: preSessionState || undefined,
-    instructions: [
-      // ── Active directive — one queued coaching action dispatched this message ─
-      activeDirective ? activeDirective.instruction : null,
-      sessionState.stage_order_swapped === true
-        ? 'STAGE ORDER FOR THIS SESSION: commitment_checkin → honest → wins → tomorrow → close. Keep this order unless safety requires otherwise.'
-        : null,
-      // ── Guard rails — always permanent context ────────────────────────────
-      sessionExercisesRun.length > 0 ? `ALREADY RUN: ${sessionExercisesRun.join(', ')}. Do NOT repeat.` : null,
-      forceClose
-        ? 'FORCE CLOSE: Session has gone long. Wins + plan covered. Wrap up NOW with a warm identity statement. Set is_session_complete:true. No more questions.'
-        : sessionReadyToClose
+      instructions: [
+        // ── Active directive — one queued coaching action dispatched this message ─
+        activeDirective ? activeDirective.instruction : null,
+        sessionState.stage_order_swapped === true
+          ? 'STAGE ORDER FOR THIS SESSION: commitment_checkin → honest → wins → tomorrow → close. Keep this order unless safety requires otherwise.'
+          : null,
+        // ── Guard rails — always permanent context ────────────────────────────
+        forceClose
+          ? 'FORCE CLOSE: Session has gone long. Wins + plan covered. Wrap up NOW with a warm identity statement. Set is_session_complete:true. No more questions.'
+          : sessionReadyToClose
           ? `READY TO CLOSE: wins + plan covered. If tone is resolved, wrap warmly. End with an identity statement. Set is_session_complete:true. Do NOT keep drilling.`
           : null,
       // ── Base rules — always ───────────────────────────────────────────────
@@ -2769,9 +2766,6 @@ export default async function handler(req, res) {
     let suggestedExercise = intentData?.suggested_exercise || 'none';
     const depthProbeAllowed = shouldAllowDepthProbe(session_state, messageCount);
 
-    if (suggestedExercise !== 'none' && sessionExercisesRun.includes(suggestedExercise)) {
-      suggestedExercise = 'none';
-    }
     // Block implementation_intention if plan already captured
     if (suggestedExercise === 'implementation_intention' && session_state.tomorrow_commitment) {
       suggestedExercise = 'none';
@@ -2935,7 +2929,6 @@ export default async function handler(req, res) {
       identityMissing,
       honestMissing,
       suggestedNextStage,
-      sessionExercisesRun,
       history,
       insightTriggeredExercise,
       userInsights,
@@ -3023,10 +3016,12 @@ export default async function handler(req, res) {
         : '';
       messages.push({
         role: 'user',
-        content: `Open the ${stage} stage of tonight's reflection. Start with a warm, direct greeting that fits this time of day: "${getTimeGreeting(client_tz_offset)}". Ask one real question about what feels most present for them right now. Keep it conversational and human.
+        content: `Open the ${stage} stage of tonight's reflection. Start with a warm, direct greeting that fits this time of day: "${getTimeGreeting(client_tz_offset)}". Ask how they're doing right now in plain language. Keep it conversational and human.
 
 Do NOT mention stages, process, forms, or instructions.
 Do NOT tell them to pick a mood.
+Do NOT say "what feels most present for you" or any variant of that phrasing.
+Do NOT use coaching-speak openers (like "what's coming up for you" or "where are you at energetically"). Ask like a friend who actually cares.
 Do NOT use the phrase "what's underneath that."
 Return mood chips in the JSON "chips" field only — don't call attention to them in assistant_message.
 ${returningContext}
@@ -3197,11 +3192,6 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
     if (result.new_stage && !VALID_STAGES.includes(result.new_stage)) {
       result.new_stage = null;
       result.stage_advance = false;
-    }
-
-    // Safety strip — never re-run a blocked exercise
-    if (result.exercise_run !== 'none' && result.exercise_run !== 'depth_probe' && sessionExercisesRun.includes(result.exercise_run)) {
-      result.exercise_run = 'none';
     }
 
     // Merge classifier checklist detections

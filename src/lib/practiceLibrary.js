@@ -151,7 +151,7 @@ export const PRACTICES = [
     cold_start_compatible: false,
     energy_type: 'identity',
     description: 'Anchors a real win to identity rather than letting it pass as luck.',
-    coach_prompt: `identity_reinforcement: Fill in their ACTUAL win/action (never use placeholders). "That's a pattern, not a one-off. What does [their specific action] say about who you're becoming?" Then: "You told me you're someone who [their actual identity_statement]. Tonight proves it." Run ONCE per session only.`,
+    coach_prompt: `identity_reinforcement: Fill in their ACTUAL win/action (never use placeholders). "That's a pattern, not a one-off. What does [their specific action] say about who you're becoming?" Then: "You told me you're someone who [their actual identity_statement]. Tonight proves it."`,
     first_time_intro: `What you just did says something about who you are — let's name it.`,
     estimated_turns: 2,
   },
