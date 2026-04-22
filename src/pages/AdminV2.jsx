@@ -27,6 +27,36 @@ async function adminFetch(body) {
   });
 }
 
+function buildCommitmentFragments({ tomorrow_commitment, commitment_minimum, commitment_stretch }) {
+  const minimum = String(commitment_minimum || '').trim();
+  const stretch = String(commitment_stretch || '').trim();
+  const commitment = String(tomorrow_commitment || '').trim();
+
+  const fragments = [];
+  if (minimum) {
+    fragments.push({
+      commitment_text: minimum,
+      fragment_index: 0,
+      commitment_type: 'minimum',
+    });
+  }
+  if (stretch) {
+    fragments.push({
+      commitment_text: stretch,
+      fragment_index: 1,
+      commitment_type: 'stretch',
+    });
+  }
+  if (!minimum && !stretch && commitment) {
+    fragments.push({
+      commitment_text: commitment,
+      fragment_index: 0,
+      commitment_type: null,
+    });
+  }
+  return fragments;
+}
+
 const DATA_TABS = [
   { id: 'sessions', label: 'Sessions' },
   { id: 'user_profiles', label: 'User Profile' },
@@ -443,6 +473,7 @@ export default function AdminV2() {
     setCommitmentSaving((s) => ({ ...s, [rowId]: true }));
     setCommitmentMsg('');
     try {
+      const originalRow = commitmentRows.find((row) => row.id === rowId) || null;
       const updates = {
         tomorrow_commitment: edits.tomorrow_commitment || null,
         commitment_minimum: edits.commitment_minimum || null,
@@ -460,6 +491,14 @@ export default function AdminV2() {
       });
       const json = await res.json();
       if (!json.ok) throw new Error(json.error || 'Save failed');
+      await syncCommitmentFragments({
+        sessionId: rowId,
+        sessionDate: updates.date,
+        previousSessionDate: originalRow?.date || null,
+        tomorrowCommitment: updates.tomorrow_commitment,
+        commitmentMinimum: updates.commitment_minimum,
+        commitmentStretch: updates.commitment_stretch,
+      });
       setCommitmentMsg(`✓ Saved row ${rowId.slice(0, 8)}…`);
       setCommitmentRows((rows) =>
         rows.map((r) => (r.id === rowId ? { ...r, ...updates } : r))
@@ -478,6 +517,63 @@ export default function AdminV2() {
     if (highlightedRowId === rowId) {
       setHighlightedRowId(null);
     }
+  }
+
+  async function syncCommitmentFragments({
+    sessionId,
+    sessionDate,
+    previousSessionDate = null,
+    tomorrowCommitment,
+    commitmentMinimum,
+    commitmentStretch,
+  }) {
+    if (!sessionId || !sessionDate) return;
+
+    const datesToClear = [...new Set([sessionDate, previousSessionDate].filter(Boolean))];
+    const fragments = buildCommitmentFragments({
+      tomorrow_commitment: tomorrowCommitment,
+      commitment_minimum: commitmentMinimum,
+      commitment_stretch: commitmentStretch,
+    });
+
+    const existingRes = await adminFetch({
+      action: 'data',
+      user_id: user.id,
+      table: 'goal_commitment_log',
+    });
+    const existingJson = await existingRes.json();
+    const existingRows = Array.isArray(existingJson.data) ? existingJson.data : [];
+
+    const rowsToDelete = existingRows.filter((row) => (
+      row.session_id === sessionId || datesToClear.includes(row.date)
+    ));
+
+    await Promise.all(
+      rowsToDelete.map((row) => adminFetch({
+        action: 'data',
+        user_id: user.id,
+        table: 'goal_commitment_log',
+        delete_id: row.id,
+      }))
+    );
+
+    if (fragments.length === 0) return;
+
+    await Promise.all(
+      fragments.map((fragment) => adminFetch({
+        action: 'insert',
+        user_id: user.id,
+        table: 'goal_commitment_log',
+        row: {
+          session_id: sessionId,
+          date: sessionDate,
+          commitment_text: fragment.commitment_text,
+          fragment_index: fragment.fragment_index,
+          commitment_type: fragment.commitment_type,
+          kept: null,
+        },
+      }))
+    );
   }
 
   async function insertFakeSession() {
@@ -549,6 +645,16 @@ export default function AdminV2() {
         return;
       }
       if (!json.ok) throw new Error(json.error || 'Insert failed');
+      const insertedRow = Array.isArray(json.data) ? json.data[0] : null;
+      if (insertedRow?.id) {
+        await syncCommitmentFragments({
+          sessionId: insertedRow.id,
+          sessionDate: row.date,
+          tomorrowCommitment: row.tomorrow_commitment,
+          commitmentMinimum: row.commitment_minimum,
+          commitmentStretch: row.commitment_stretch,
+        });
+      }
       setCommitmentMsg('✓ Session inserted');
       setNewSession({
         date: '',

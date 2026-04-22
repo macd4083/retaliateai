@@ -9,6 +9,7 @@ const ALLOWED_TABLES = [
   'growth_markers',
   'goals',
   'user_progress_events',
+  'goal_commitment_log',
 ];
 
 const supabase = createClient(
@@ -87,6 +88,7 @@ export default async function handler(req, res) {
     if (action === 'upsert') {
       const UPSERT_ALLOWED = {
         reflection_sessions: ['tomorrow_commitment', 'commitment_minimum', 'commitment_stretch', 'commitment_score', 'is_complete', 'date'],
+        goal_commitment_log: ['session_id', 'goal_id', 'commitment_text', 'date', 'kept', 'evaluated_at', 'checkin_outcome', 'fragment_index', 'commitment_type'],
       };
 
       const { row_id, updates } = req.body || {};
@@ -126,6 +128,10 @@ export default async function handler(req, res) {
         reflection_sessions: [
           'date', 'tomorrow_commitment', 'commitment_minimum', 'commitment_stretch',
           'commitment_score', 'is_complete', 'current_stage', 'summary',
+        ],
+        goal_commitment_log: [
+          'session_id', 'goal_id', 'commitment_text', 'date', 'kept', 'evaluated_at',
+          'checkin_outcome', 'fragment_index', 'commitment_type',
         ],
       };
 
