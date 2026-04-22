@@ -167,18 +167,18 @@ export default function InsightsV2() {
   async function loadSessions() {
     const today = localDateStr(0);
 
-    // Fetch all sessions with a commitment (desc, up to 100)
+    // Fetch sessions with either a commitment or a commitment score (desc, up to 100)
     const { data: allWithCommitment } = await supabase
       .from('reflection_sessions')
       .select('date, tomorrow_commitment, commitment_minimum, commitment_stretch, commitment_score, is_complete')
       .eq('user_id', user.id)
-      .not('tomorrow_commitment', 'is', null)
+      .or('tomorrow_commitment.not.is.null,commitment_score.not.is.null')
       .order('date', { ascending: false })
       .limit(100);
 
-    // Include as a commitment row only if complete OR date is before today
+    // Include if it has a score, or if complete, or if date is before today
     const eligibleCommitments = (allWithCommitment || []).filter(
-      (s) => s.is_complete || s.date < today
+      (s) => s.commitment_score !== null || s.is_complete || s.date < today
     );
 
     if (eligibleCommitments.length > 0) {
@@ -200,14 +200,17 @@ export default function InsightsV2() {
       }
 
       const computed = eligibleCommitments.map((s, idx) => {
+        const hasCommitmentText = s.tomorrow_commitment !== null;
         const nextDay = addDays(s.date, 1);
         const isNewest = idx === 0;
-        const status = isNewest
-          ? (sessionsByDate[nextDay]?.is_complete ? 'kept' : 'pending')
-          : (sessionsByDate[nextDay]?.is_complete ? 'kept' : 'missed');
+        const status = !hasCommitmentText
+          ? 'pending'
+          : isNewest
+            ? (sessionsByDate[nextDay]?.is_complete ? 'kept' : 'pending')
+            : (sessionsByDate[nextDay]?.is_complete ? 'kept' : 'missed');
         return {
           date: s.date,
-          commitment: s.tomorrow_commitment,
+          commitment: s.tomorrow_commitment ?? null,
           minimum: s.commitment_minimum || null,
           stretch: s.commitment_stretch || null,
           score: s.commitment_score ?? null,
@@ -349,8 +352,9 @@ export default function InsightsV2() {
     const wEnd       = addDays(wStart, 6);
     return allCommitments.filter((c) => c.date >= wStart && c.date <= wEnd);
   })();
+  const commitmentsWithTextOnly = displayedCommitments.filter((c) => c.commitment !== null);
 
-  const showLoadMore = isCurrentWeekSelected && allCommitments.length > visibleCount;
+  const showLoadMore = isCurrentWeekSelected && commitmentsWithTextOnly.length > visibleCount;
 
   return (
     <AppShellV2 title="Insights">
@@ -626,14 +630,14 @@ export default function InsightsV2() {
           <div>
             <h2 className="text-white font-semibold text-base mb-3">Commitments</h2>
             <div className="space-y-2">
-              {displayedCommitments.length === 0 ? (
+              {commitmentsWithTextOnly.length === 0 ? (
                 <p className="text-zinc-500 text-sm">
                   {isCurrentWeekSelected
                     ? 'No commitments yet. Start a reflection tonight.'
                     : 'No commitments this week.'}
                 </p>
               ) : (
-                displayedCommitments.map((c, i) => (
+                commitmentsWithTextOnly.map((c, i) => (
                     <div key={i} className="bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2.5">
                       <div className="flex items-start gap-2">
                         <span className="flex-shrink-0 mt-0.5">
