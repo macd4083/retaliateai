@@ -2059,6 +2059,8 @@ Rules:
     completedDirectives.includes('commitment_goal_bridge') &&
     !completedDirectives.includes('commitment_goal_why_depth')
   ) {
+    // Use the first active goal as the primary context for why-depth questions.
+    // The LLM instruction asks the coach to reference the most relevant goal in its response.
     const relevantGoal = Array.isArray(activeGoals) && activeGoals.length > 0 ? activeGoals[0] : null;
     const existingWhys = relevantGoal && Array.isArray(relevantGoal.whys) ? relevantGoal.whys : [];
     const latestWhy = existingWhys.length > 0 ? existingWhys[existingWhys.length - 1] : null;
@@ -2084,7 +2086,7 @@ ${whyDepthInstruction}
 
 Rules:
 - ONE question. Do not validate their previous answer extensively — one brief acknowledgment at most, then the question.
-- Extract their answer as goal_why_insight and set goal_id_referenced to the matching goal id. Use the existing goal_why_action logic (add/replace). Set goal_commitment_why: true so the write-back tags source as "commitment_planning".
+- Extract their answer as goal_why_insight and set goal_id_referenced to the single most relevant goal id from the goals array (the one their commitment most clearly connects to). Use the existing goal_why_action logic (add/replace). Set goal_commitment_why: true so the write-back tags source as "commitment_planning".
 - If their answer reveals a realization about the goal, also set goal_depth_insight.
 - After this question is asked AND answered, set directive_completed: "commitment_goal_why_depth".
 - Once directive_completed is set to "commitment_goal_why_depth", the server will set commitment_goal_bridge_done: true and route to complete.
