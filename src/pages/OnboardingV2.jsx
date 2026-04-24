@@ -106,9 +106,7 @@ export default function OnboardingV2({ onOnboardingComplete } = {}) {
   // Step 3
   const [bigGoal, setBigGoal] = useState('');
   const [why1, setWhy1] = useState('');
-  const [why2, setWhy2] = useState('');
-  const [why3, setWhy3] = useState('');
-  const [whySubStep, setWhySubStep] = useState(1); // 1=bigGoal, 2=why1, 3=why2, 4=why3
+  const [whySubStep, setWhySubStep] = useState(1); // 1=bigGoal, 2=why1
 
   // Step 4
   const [selectedBlockers, setSelectedBlockers] = useState([]);
@@ -131,31 +129,6 @@ export default function OnboardingV2({ onOnboardingComplete } = {}) {
   // Step 6
   const [reflectionTime, setReflectionTime] = useState('21:00');
   const [timezone, setTimezone] = useState('America/New_York');
-
-  const why3Question = (() => {
-    const w = (why1 || '').toLowerCase();
-    if (w.includes('money') || w.includes('financial') || w.includes('income')) {
-      return 'And beyond the financial side — what does that security actually give you?';
-    }
-    if (w.includes('family') || w.includes('kids') || w.includes('children') || w.includes('parent')) {
-      return 'And what does this mean for the people you care about — at the deepest level?';
-    }
-    if (w.includes('free') || w.includes('freedom') || w.includes('independent')) {
-      return 'And what would that freedom actually let you do or become?';
-    }
-    return 'And why does that matter?';
-  })();
-
-  const why4Question = (() => {
-    const w = (why2 || '').toLowerCase();
-    if (w.includes('prove') || w.includes('worth') || w.includes('enough')) {
-      return 'What would it mean to finally feel like enough — what changes?';
-    }
-    if (w.includes('legacy') || w.includes('remembered') || w.includes('impact')) {
-      return 'What legacy do you actually want to leave — in one sentence?';
-    }
-    return 'And at the deepest level — why?';
-  })();
 
   const likelyBlockers = [...new Set(
     selectedLifeAreas.flatMap(area => AREA_TO_LIKELY_BLOCKERS[area] || [])
@@ -215,31 +188,19 @@ export default function OnboardingV2({ onOnboardingComplete } = {}) {
       setWhySubStep(2);
       return;
     }
-    if (whySubStep === 2) {
-      if (!why1.trim()) return;
-      setWhySubStep(3);
-      return;
-    }
-    if (whySubStep === 3) {
-      if (!why2.trim()) return;
-      setWhySubStep(4);
-      return;
-    }
-    // whySubStep === 4 — final why
-    if (!why3.trim()) return;
+    // whySubStep === 2 — final why
+    if (!why1.trim()) return;
     setSaving(true);
     try {
-      const combinedWhy = [why1.trim(), why2.trim(), why3.trim()].filter(Boolean).join(' → ');
       const shortGoal = bigGoal.trim().split(' ').slice(0, 6).join(' ');
       const identityStatement = `I am someone who ${shortGoal.toLowerCase()}`;
       await saveProfile({
         big_goal: bigGoal.trim(),
-        why: combinedWhy,
+        why: why1.trim(),
         identity_statement: identityStatement,
         onboarding_step: 4,
       });
       setStep(4);
-      setWhySubStep(1);
     } catch (_e) {
       alert('Failed to save. Please try again.');
     } finally {
@@ -516,56 +477,16 @@ export default function OnboardingV2({ onOnboardingComplete } = {}) {
                 />
               </>
             )}
-            {whySubStep === 3 && (
-              <>
-                <h2 className="text-2xl font-bold text-white mb-2">
-                  {why3Question}
-                </h2>
-                <p className="text-zinc-400 text-sm mb-2 italic">"{why1}"</p>
-                <p className="text-zinc-500 text-sm mb-8">Keep going.</p>
-                <input
-                  type="text"
-                  value={why2}
-                  onChange={(e) => setWhy2(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleStep3()}
-                  placeholder="Because..."
-                  autoFocus
-                  className="bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-white placeholder-zinc-500 text-sm focus:outline-none focus:border-red-600 transition-colors mb-auto"
-                />
-              </>
-            )}
-            {whySubStep === 4 && (
-              <>
-                <h2 className="text-2xl font-bold text-white mb-2">
-                  {why4Question}
-                </h2>
-                <p className="text-zinc-400 text-sm mb-2 italic">"{why2}"</p>
-                <p className="text-zinc-500 text-sm mb-8">
-                  This is your real why. Make it count.
-                </p>
-                <input
-                  type="text"
-                  value={why3}
-                  onChange={(e) => setWhy3(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleStep3()}
-                  placeholder="Because..."
-                  autoFocus
-                  className="bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-white placeholder-zinc-500 text-sm focus:outline-none focus:border-red-600 transition-colors mb-auto"
-                />
-              </>
-            )}
             <button
               onClick={handleStep3}
               disabled={
                 (whySubStep === 1 && !bigGoal.trim()) ||
                 (whySubStep === 2 && !why1.trim()) ||
-                (whySubStep === 3 && !why2.trim()) ||
-                (whySubStep === 4 && !why3.trim()) ||
                 saving
               }
               className="w-full flex items-center justify-center gap-2 bg-red-600 hover:bg-red-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold py-3.5 rounded-xl transition-colors mt-8"
             >
-              {saving ? 'Saving...' : whySubStep === 4 ? 'Save My Why' : 'Next'}{' '}
+              {saving ? 'Saving...' : whySubStep === 2 ? 'Save My Why' : 'Next'}{' '}
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>
@@ -849,7 +770,7 @@ export default function OnboardingV2({ onOnboardingComplete } = {}) {
             fullName={fullName}
             futureSelf={futureSelf}
             bigGoal={bigGoal}
-            why={[why1, why2, why3].filter(Boolean).join(' → ')}
+            why={why1}
             selectedLifeAreas={selectedLifeAreas}
             lifeAreaMap={Object.fromEntries(lifeAreaOptions.map(({ emoji, label }) => [label, emoji]))}
             onComplete={handleComplete}
