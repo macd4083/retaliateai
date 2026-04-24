@@ -444,6 +444,22 @@ const EXERCISE_FIRST_TIME_INTROS = Object.fromEntries(
 );
 
 /**
+ * Sanitize user-provided text before interpolating into AI prompts.
+ * Strips characters that could be used for prompt injection while preserving readability.
+ * @param {string} text
+ * @param {number} maxLen
+ * @returns {string}
+ */
+function sanitizeForPrompt(text, maxLen = 200) {
+  if (!text || typeof text !== 'string') return '';
+  return text
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '') // strip control characters
+    .replace(/`/g, "'")                                   // neutralize backtick template literals
+    .slice(0, maxLen)
+    .trim();
+}
+
+/**
  * Tokenize free text into lowercase keyword terms for lightweight overlap scoring.
  * @param {string} text
  * @returns {Set<string>}
@@ -1641,7 +1657,7 @@ async function synthesizeGoalWhySummary(userId, goalId, goalTitle) {
       messages: [
         {
           role: 'system',
-          content: `Given these reasons a user has articulated for pursuing their goal '${goalTitle}', write a single 2-3 sentence synthesis of their core motivation. Use their actual words where possible. Be specific, not generic. Return ONLY valid JSON: { "why_summary": "..." }`,
+          content: `Given these reasons a user has articulated for pursuing their goal '${sanitizeForPrompt(goalTitle, 100)}', write a single 2-3 sentence synthesis of their core motivation. Use their actual words where possible. Be specific, not generic. Return ONLY valid JSON: { "why_summary": "..." }`,
         },
         { role: 'user', content: JSON.stringify(whys.map(w => w.text)) },
       ],
@@ -1929,7 +1945,10 @@ function buildDirectiveQueue({
       const linkedFragments = (enrichedYesterdayFragments || []).filter(f => f.goal_id && f.goal_why_context);
       if (linkedFragments.length === 0) return '';
       const top = linkedFragments[0];
-      return `\n\nFRAGMENT MISS CONTEXT: Yesterday they committed to "${top.commitment_text}" as part of their goal "${top.goal_title}". They said this was about "${(top.goal_why_context || '').slice(0, 120)}". They ${sessionState.checkin_outcome === 'missed' ? 'fully missed it' : 'partially completed it'}. Use this as the honest anchor — e.g. "You said working on [commitment] was about [why]. What got in the way of that?" This is your sharpest honest probe tool right now.`;
+      const safeCommitment = sanitizeForPrompt(top.commitment_text, 120);
+      const safeGoalTitle = sanitizeForPrompt(top.goal_title, 80);
+      const safeWhy = sanitizeForPrompt(top.goal_why_context, 120);
+      return `\n\nFRAGMENT MISS CONTEXT: Yesterday they committed to "${safeCommitment}" as part of their goal "${safeGoalTitle}". They said this was about "${safeWhy}". They ${sessionState.checkin_outcome === 'missed' ? 'fully missed it' : 'partially completed it'}. Use this as the honest anchor — e.g. "You said working on [commitment] was about [why]. What got in the way of that?" This is your sharpest honest probe tool right now.`;
     })();
     allDirectives.push({
       id: 'honest_missing',
@@ -1954,7 +1973,10 @@ function buildDirectiveQueue({
       const linkedFragments = (enrichedYesterdayFragments || []).filter(f => f.goal_id && f.goal_why_context);
       if (linkedFragments.length === 0) return '';
       const top = linkedFragments[0];
-      return `\n\nFRAGMENT WIN CONTEXT: They fully kept their commitment to "${top.commitment_text}" (goal: "${top.goal_title}"). They said it was about "${(top.goal_why_context || '').slice(0, 120)}". When you celebrate, connect it to the why: "You said this was about [why] — you actually showed up for that. What's that worth to you?" Use only if tone supports it.`;
+      const safeCommitment = sanitizeForPrompt(top.commitment_text, 120);
+      const safeGoalTitle = sanitizeForPrompt(top.goal_title, 80);
+      const safeWhy = sanitizeForPrompt(top.goal_why_context, 120);
+      return `\n\nFRAGMENT WIN CONTEXT: They fully kept their commitment to "${safeCommitment}" (goal: "${safeGoalTitle}"). They said it was about "${safeWhy}". When you celebrate, connect it to the why: "You said this was about [why] — you actually showed up for that. What's that worth to you?" Use only if tone supports it.`;
     })();
     allDirectives.push({
       id: 'honest_kept_expansion',
@@ -1986,7 +2008,7 @@ function buildDirectiveQueue({
             const fragmentsWithGoals = checklistFragments.map((f) => {
               const enriched = effectiveEnrichedFragments.find(ef => ef.id === f.id);
               if (enriched?.goal_title && enriched?.goal_why_context) {
-                return `${JSON.stringify(f)} → goal: "${enriched.goal_title}", why: "${enriched.goal_why_context.slice(0, 100)}"`;
+                return `${JSON.stringify(f)} → goal: "${sanitizeForPrompt(enriched.goal_title, 80)}", why: "${sanitizeForPrompt(enriched.goal_why_context, 100)}"`;
               }
               return JSON.stringify(f);
             });
@@ -2256,7 +2278,7 @@ Rules:
     !completedDirectives.includes('wins_goal_callback')
   ) {
     const fragmentContextStr = fragmentsWithGoalLinks.map(f =>
-      `"${f.commitment_text}" → goal: "${f.goal_title || 'unknown'}", why they said: "${(f.goal_why_context || '').slice(0, 100)}"`
+      `"${sanitizeForPrompt(f.commitment_text, 120)}" → goal: "${sanitizeForPrompt(f.goal_title, 80) || 'unknown'}", why they said: "${sanitizeForPrompt(f.goal_why_context, 100)}"`
     ).join(' | ');
     allDirectives.push({
       id: 'wins_goal_callback',
