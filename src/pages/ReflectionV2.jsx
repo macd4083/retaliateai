@@ -25,7 +25,6 @@ const BASE_STAGES = [
   { id: 'wins', label: 'Wins' },
   { id: 'honest', label: 'Honest' },
   { id: 'tomorrow', label: 'Tomorrow' },
-  { id: 'close', label: 'Close' },
 ];
 
 const STAGE_PLACEHOLDERS = {
@@ -33,10 +32,9 @@ const STAGE_PLACEHOLDERS = {
   commitment_checkin: 'How did it go?',
   honest: 'Tell me more...',
   tomorrow: 'What will you commit to?',
-  close: 'Write yourself a message...',
 };
 
-const DEFAULT_CHECKLIST = { wins: false, commitment_checkin: false, honest: false, plan: false, identity: false };
+const DEFAULT_CHECKLIST = { wins: false, commitment_checkin: false, honest: false, plan: false };
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -335,8 +333,6 @@ export default function ReflectionV2() {
   const [pendingGoalSuggestion, setPendingGoalSuggestion] = useState(null);
   const [pendingWhyCapture, setPendingWhyCapture] = useState(null); // { goalId, title }
   const [activeGoals, setActiveGoals] = useState([]);
-  const [showGoalChips, setShowGoalChips] = useState(false);
-  const [selectedGoalChips, setSelectedGoalChips] = useState([]);
   const [checkedFragments, setCheckedFragments] = useState({});
   const [chatFocused, setChatFocused] = useState(false);
   const [timeOverride, setTimeOverride] = useState(() => (
@@ -365,7 +361,6 @@ export default function ReflectionV2() {
         { id: 'honest', label: 'Honest' },
         { id: 'wins', label: 'Wins' },
         { id: 'tomorrow', label: 'Tomorrow' },
-        { id: 'close', label: 'Close' },
       ]
     : BASE_STAGES;
 
@@ -464,6 +459,7 @@ export default function ReflectionV2() {
         honest_depth: false,
         yesterday_commitment: session.yesterday_commitment || fetchedYesterdayCommitment || null,
         commitment_checkin_done: session.commitment_checkin_done === true,
+        commitment_goal_bridge_done: session.commitment_goal_bridge_done === true,
         checkin_outcome: session.checkin_outcome || null,
         commitment_score: session.commitment_score ?? null,
         checklist_fragments: [],
@@ -897,6 +893,9 @@ export default function ReflectionV2() {
         }
         newState.directive_queue = data.directive_queue || [];
         newState.completed_directives = data.completed_directives || [];
+        if (data.commitment_goal_bridge_done === true && !state.commitment_goal_bridge_done) {
+          newState.commitment_goal_bridge_done = true;
+        }
         setSessionState(newState);
 
         const dbUpdates = {};
@@ -932,6 +931,9 @@ export default function ReflectionV2() {
         if (data.last_depth_probe_message_index != null) dbUpdates.last_depth_probe_message_index = data.last_depth_probe_message_index;
         if (Array.isArray(data.insight_exercises_triggered)) dbUpdates.insight_exercises_triggered = data.insight_exercises_triggered;
         if (data.insight_exercise_skipped === true) dbUpdates.insight_exercise_skipped = true;
+        if (data.commitment_goal_bridge_done === true && !state.commitment_goal_bridge_done) {
+          dbUpdates.commitment_goal_bridge_done = true;
+        }
         if (Object.keys(dbUpdates).length > 0)
           reflectionHelpers.updateSession(sid, dbUpdates).catch(() => {});
       }
@@ -939,12 +941,6 @@ export default function ReflectionV2() {
       // Handle new goal suggestion from coach
       if (data.goal_suggestion_pending?.action === 'new_goal' && data.goal_suggestion_pending?.title) {
         setPendingGoalSuggestion(data.goal_suggestion_pending);
-      }
-
-      // Show goal chips composer when coach asks the tomorrow commitment question
-      if (data.show_goal_chips === true) {
-        setShowGoalChips(true);
-        setSelectedGoalChips([]);
       }
 
       if (isSessionComplete) {
@@ -1069,6 +1065,7 @@ export default function ReflectionV2() {
           directive_queue: [],
           completed_directives: [],
           stage_order_swapped: false,
+          commitment_goal_bridge_done: false,
         });
         initCalledRef.current = false;
         initSentRef.current = false;
@@ -1156,23 +1153,12 @@ export default function ReflectionV2() {
 
   function handleSend() {
     const text = inputValue.trim();
-    const hasNoContent = !text && selectedGoalChips.length === 0;
+    const hasNoContent = !text;
     if (hasNoContent || isLoading) return;
     setInputValue('');
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
 
-    let fullMessage = text;
-    if (showGoalChips && selectedGoalChips.length > 0) {
-      const chipText = selectedGoalChips.join(' + ');
-      if (chipText && text) {
-        fullMessage = `${chipText}. ${text}`;
-      } else {
-        fullMessage = chipText || text;
-      }
-    }
-
-    setShowGoalChips(false);
-    setSelectedGoalChips([]);
+    const fullMessage = text;
 
     sendMessage(fullMessage);
     textareaRef.current?.focus();
@@ -1386,45 +1372,6 @@ export default function ReflectionV2() {
               <p className="text-xs text-zinc-500">Complete the check-in above to continue</p>
             )}
             <div className="flex items-end gap-3">
-            {showGoalChips && activeGoals.length > 0 ? (
-              <div className="flex-1 border border-zinc-700 rounded-2xl bg-zinc-900 overflow-hidden">
-                <div className="flex flex-wrap gap-2 p-3 border-b border-zinc-700">
-                  {activeGoals.map((goal) => {
-                    const isSelected = selectedGoalChips.includes(goal.title);
-                    return (
-                      <button
-                        key={goal.id}
-                        onClick={() => {
-                          setSelectedGoalChips((prev) =>
-                            isSelected ? prev.filter((t) => t !== goal.title) : [...prev, goal.title]
-                          );
-                        }}
-                        disabled={isLoading || isInitializing}
-                        className={`rounded-full px-3 py-1.5 text-sm transition-colors ${
-                          isSelected
-                            ? 'bg-red-600 border border-red-600 text-white'
-                            : 'border border-zinc-600 text-zinc-300 bg-transparent'
-                        }`}
-                      >
-                        {goal.title}
-                      </button>
-                    );
-                  })}
-                </div>
-                <textarea
-                  ref={textareaRef}
-                  value={inputValue}
-                  onChange={handleTextareaChange}
-                  onKeyDown={handleKeyDown}
-                  onFocus={() => setChatFocused(true)}
-                  disabled={isInitializing || isChecklistBlocking}
-                  placeholder="Anything else on your mind..."
-                  rows={1}
-                  className="w-full bg-transparent px-4 py-3 text-sm text-white placeholder-zinc-500 resize-none focus:outline-none"
-                  style={{ minHeight: '44px', maxHeight: '120px' }}
-                />
-              </div>
-            ) : (
               <div className="flex-1">
                 <textarea
                   ref={textareaRef}
@@ -1439,14 +1386,10 @@ export default function ReflectionV2() {
                   style={{ minHeight: '44px', maxHeight: '120px' }}
                 />
               </div>
-            )}
             <button
               onClick={handleSend}
               disabled={
-                (showGoalChips
-                  ? selectedGoalChips.length === 0 && !inputValue.trim()
-                  : !inputValue.trim()
-                ) || isLoading || isInitializing
+                !inputValue.trim() || isLoading || isInitializing
                   || isChecklistBlocking
               }
               className="w-10 h-10 rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center flex-shrink-0"

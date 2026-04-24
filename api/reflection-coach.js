@@ -83,6 +83,9 @@ const supabase = createClient(
  *   LIMIT match_count;
  * $$;
  *
+ * -- Commitment-goal bridge tracking
+ * ALTER TABLE reflection_sessions ADD COLUMN IF NOT EXISTS commitment_goal_bridge_done boolean DEFAULT false;
+ *
  * -- Atomic JSONB array append with deduplication (run once in SQL editor):
  * -- CREATE OR REPLACE FUNCTION append_jsonb_array_item(
  * --   p_table text,
@@ -111,7 +114,7 @@ const supabase = createClient(
  * -- $$;
  */
 
-const DEFAULT_CHECKLIST = { wins: false, honest: false, plan: false, identity: false };
+const DEFAULT_CHECKLIST = { wins: false, honest: false, plan: false };
 const MIN_DEEP_SESSION_MESSAGE_COUNT = 6;
 const MAX_DEPTH_INSIGHTS_RETAINED = 4;
 const MIN_INSIGHT_KEYWORD_OVERLAP = 2;
@@ -225,24 +228,22 @@ METACOGNITIVE QUESTIONING PRINCIPLES:
 
 DEPTH CONVERSATION: When the user is in a reflective back-and-forth ("what do you think" style exchange), allow the chain to continue naturally. Multiple consecutive "what do you think" exchanges are GOOD — do not prematurely pivot to action or next stage. Only close a depth thread when the user has reached an insight or naturally signals they want to move on. When the user answers a reflective/opinion question with their own reflection, the coach IS ALLOWED to follow up with another reflective question — do not count this as "drilling a topic".
 
-ON THE CHECKLIST (wins / honest / plan / identity):
+ON THE CHECKLIST (wins / honest / plan):
 - These are background goals — track silently from conversation
 - wins: a real win or effort was mentioned. After the FIRST win is mentioned, always follow up with an open invitation to share more: e.g. "What else went well today?" or "What's another one?" — do NOT advance to the honest stage after just one win exchange. Let the user share as many wins as they want before moving on. Set wins_asked_for_more: true in the response only after you have asked this "what else?" question at least once. If the user responds with a list of wins (e.g. "sleep, app work, boxing"), you MAY ask about multiple items from that list in the same response — this is the ONE exception to the one-question rule. Only transition to honest after the user clearly signals they are done sharing wins.
 - commitment_checkin: when checklist_fragments are provided, show the checklist UI by setting show_commitment_checklist: true and checklist_fragments. Do NOT ask a free-text check-in question in that case. After checklist submission, set checkin_outcome in extracted_data: "kept" if all were done, "missed" if none, "partial" otherwise. Set commitment_checkin_done: true once answered. ROUTING: after check-in is done, if commitment_score >= 50 route to wins next; if commitment_score < 50 or unknown route to honest next (set stage_advance/new_stage accordingly).
-- honest: they acknowledged something they're struggling with or could improve. When a miss or honest moment is named, do NOT immediately close the honest stage or set honest_depth: true. Ask the one question that goes underneath it — not "what would you do differently" (that belongs in tomorrow) but something like "what was actually going on for you underneath that?" or "what do you think was really happening?" One question at a time — evaluate the answer before deciding whether to go deeper or close. Evaluate qualitatively: has the user answered what was actually happening underneath the surface behavior? A surface miss ("I didn't get to it", "I got distracted", "I forgot") is NOT enough. You need a genuine answer to the underneath layer — the real reason, the emotional truth, the internal conflict. Once you have a real answer to that underneath question, THEN you may set honest_depth: true. Do NOT count exchanges or use a fixed sequence — evaluate the quality of what they've said. If the answer is still surface-level, ask the one next question that goes deeper.
+- honest: they named something they struggled with, avoided, or were dishonest with themselves about TODAY. Self-awareness about the past only — NOT plans, improvements, or future actions. Future-oriented language belongs in tomorrow stage. Do NOT set honest: true if the user is describing what they will do tomorrow or how they will improve. When a miss or honest moment is named, do NOT immediately close the honest stage or set honest_depth: true. Ask the one question that goes underneath it — not "what would you do differently" (that belongs in tomorrow) but something like "what was actually going on for you underneath that?" or "what do you think was really happening?" One question at a time — evaluate the answer before deciding whether to go deeper or close. Evaluate qualitatively: has the user answered what was actually happening underneath the surface behavior? A surface miss ("I didn't get to it", "I got distracted", "I forgot") is NOT enough. You need a genuine answer to the underneath layer — the real reason, the emotional truth, the internal conflict. Once you have a real answer to that underneath question, THEN you may set honest_depth: true. Do NOT count exchanges or use a fixed sequence — evaluate the quality of what they've said. If the answer is still surface-level, ask the one next question that goes deeper.
 - plan: a concrete tomorrow commitment was stated
-- identity: they made a statement about who they are or are becoming
 - After ~8 messages, if items are still empty, weave them in naturally
 - Never say "you haven't completed X" — natural human transitions only
 - If honest is missing after wins are covered, gently probe with self-awareness questions like: "Where did you feel like you weren't fully showing up today?" or "Is there a moment from today that's still sitting with you?" or "What part of today are you least proud of — not what you'd fix, just what happened?" The goal of the honest stage is self-awareness and honest naming of who they were TODAY — NOT planning or action. Do NOT ask "what would you do differently" or any future-action questions during the honest stage — those belong in the tomorrow stage.
-- If identity is missing near the end, ask: "What does [their actions/plan] say about who you're becoming?"
 
 ON KNOWING WHEN TO CLOSE:
-- When tomorrow_commitment is filled AND the user's tone is resolved/satisfied → wrap
+- When tomorrow_commitment is filled AND the commitment-goal bridge is complete or the session has enough messages → wrap
 - Do NOT keep drilling a topic that's already been answered
 - If they've stated a clear plan and responded positively, that thread is CLOSED
-- A good close is a warm send-off with a final identity statement, not an interrogation
-- Set is_session_complete: true when wins + plan are covered and conversation has natural resolution
+- A good close ties together what they committed to and why it matters — in their own words — then sets is_session_complete: true
+- Set is_session_complete: true when wins + plan are covered and the bridge directives are complete (or message threshold is met)
 - If the user has clearly answered a question, even informally ("I'll just know", "I'm not worried about it", "I'll figure it out"), that topic is CLOSED. Do not follow up on it.
 - A closed topic means: move forward or wrap up. Never re-ask what was just answered.
 
@@ -369,12 +370,6 @@ When a miss or stuck moment is mentioned during the honest stage, scan the avail
    → After suggesting, tell the user you'll add it — they'll confirm in the UI
    → Only one new goal suggestion per session
 
-7. LIGHTWEIGHT WHY — COMMITMENT PLANNING:
-   When the user states their tomorrow commitment and it connects to a goal you're tracking, ask ONE lightweight question: "What's making that the priority tomorrow?" — only if their message doesn't already contain a motivation signal (i.e. they didn't say "because...", "I need to...", or volunteer a reason inline). This is NOT a full why-building exercise — one question only, no follow-up drilling. If they answer with a motivation, set goal_why_action: "add", goal_why_insight to their actual words, goal_id_referenced to the matching goal, and goal_commitment_why: true so the write-back uses source "commitment_planning". Skip entirely if: the commitment message already contains a motivation signal (words like "because", "I need to", "so that", "want to", "trying to", or the user volunteers a reason inline), no goal match is clear, or a full why-building moment already happened this session for this goal.
-
-8. TOMORROW STAGE — GOAL CHIPS:
-   When you are in the 'tomorrow' stage and you ask the user what they are committing to tomorrow (the first question in that stage asking for their commitment), include '"show_goal_chips": true' in your JSON response. This signals the UI to show the user's active goals as selectable chips above the text input so they can quickly pick which goals they're committing to. Only set show_goal_chips: true on that one question — do NOT set it on follow-up probing questions about specifics within the tomorrow stage, and do not set it on any other stage.
-
 WHAT NOT TO DO:
 - Never announce you're doing a "goal check-in"
 - Never redirect a conversation that's already going somewhere real just to fit in a goal
@@ -390,7 +385,7 @@ RETURN JSON EXACTLY (no markdown, no extra keys):
   "assistant_message": "your message (2-3 sentences, one question)",
   "chips": [{"label": "string", "value": "string"}] | null,
   "stage_advance": false,
-  "new_stage": "wins|commitment_checkin|honest|tomorrow|close|complete" | null,
+  "new_stage": "wins|commitment_checkin|honest|tomorrow|complete" | null,
   "extracted_data": {
     "checkin_outcome": null,
     "mood": null,
@@ -413,14 +408,13 @@ RETURN JSON EXACTLY (no markdown, no extra keys):
     "goal_commitment_why": false
   },
   "exercise_run": "${EXERCISE_ENUM}",
-  "checklist_updates": {"wins": false, "honest": false, "plan": false, "identity": false},
+  "checklist_updates": {"wins": false, "honest": false, "plan": false},
   "wins_asked_for_more": false,
   "honest_depth": false,
   "commitment_checkin_done": false,
   "stage_order_swapped": false,
   "show_commitment_checklist": false, // true when presenting fragment checklist to user
   "checklist_fragments": null, // array of {id, text, type?} fragments to check off
-  "show_goal_chips": false,
   "follow_up_queued": false,
   "follow_up_triggered": false,
   "is_session_complete": false,
@@ -666,10 +660,9 @@ function deriveStageHint(sessionState, classifierChecklist, completedDirectives 
     return 'wins';
   }
 
-  // tomorrow → close
-  if (stage === 'tomorrow' && hasPlan && (sessionState.commitment_minimum || completed.includes('tomorrow_commitment_structure'))) return 'close';
-  // close → complete
-  if (stage === 'close' && cl.identity && hasPlan) return 'complete';
+  // tomorrow → complete: gate purely on real checklist signals, no message counters
+  const bridgeDone = sessionState.commitment_goal_bridge_done === true;
+  if (stage === 'tomorrow' && hasPlan && sessionState.commitment_minimum && bridgeDone) return 'complete';
   return null;
 }
 
@@ -1627,11 +1620,12 @@ function buildDirectiveQueue({
   commitmentRate7Context, commitmentTrajectoryContext, avgCommitmentScoreContext, scoreTrajectoryContext,
   yesterdayFragments,
   goalMissingWhy, messageCount, sessionReadyToClose, forceClose,
-  identityMissing, honestMissing, suggestedNextStage,
+  honestMissing, suggestedNextStage,
   history,
   insightTriggeredExercise,
   userInsights, recentSessions, effectiveConsecutiveExcuses,
   currentDirectiveQueue, completedDirectives,
+  activeGoals = [],
 }) {
   const currentStage = sessionState.current_stage || 'commitment_checkin';
   const allDirectives = [];
@@ -1987,8 +1981,8 @@ function buildDirectiveQueue({
       minimumFraming = `They've been hitting ${rate}% with avg confidence ${Math.round(avgScore)}/100. Don't make the minimum too easy. Ask: "Given you've been nailing your commitments, what would make tomorrow a genuinely hard win?" Raise the standard.`;
     } else {
       minimumFraming = honestMoment
-        ? `They just admitted "${honestMoment.slice(0, 60)}...". Use it: "Given what you just shared — what are all the minimum steps you're committing to tomorrow that you won't let yourself off the hook on?" Reference the honest moment explicitly.`
-        : `Ask: "Let's map out tomorrow — what are all the things that would make it a real productive day for you? Start with the floor, everything you know needs to happen."`;
+        ? `They just admitted "${honestMoment.slice(0, 60)}...". Use it: "Okay — what are the specific tasks you're actually doing tomorrow? Walk me through the list." Reference the honest moment once as framing, then ask for concrete tasks, not themes.`
+        : `Ask: "What are the specific things you're actually doing tomorrow — walk me through the list. Start with everything you know needs to happen." Emphasize tasks and actions, not themes or intentions.`;
     }
     allDirectives.push({
       id: 'tomorrow_commitment_structure',
@@ -2003,6 +1997,8 @@ function buildDirectiveQueue({
 - Do not ask both questions in one message.
 - IMPORTANT: Do NOT ask the stretch question until 'commitment_specificity' is in completed_directives. The specificity check runs first.${lowScoreNudge
   ? `\n- IMPORTANT: We've noticed you haven't been able to meet the minimum viable commitment a couple times now. What can you absolutely guarantee you'll get done tomorrow — not what you want to do, what you WILL do no matter what? Push them for something smaller and more guaranteed.`
+  : ''}${(Array.isArray(activeGoals) && activeGoals.length === 0) && !profile?.future_self
+  ? `\n- If activeGoals is empty AND profile.future_self is null, after capturing the stretch commitment add one closing question: "What does committing to that say about where you're trying to get?" Then set is_session_complete:true on that same response.`
   : ''}`,
       priority: 1,
       preferred_stage: 'tomorrow',
@@ -2011,18 +2007,97 @@ function buildDirectiveQueue({
     });
   }
 
-  // ── identity_missing ───────────────────────────────────────────────────
-  if (identityMissing && !sessionReadyToClose) {
+  // ── commitment_goal_bridge ─────────────────────────────────────────────
+  const hasBothCommitments = !!sessionState.commitment_minimum && !!sessionState.commitment_stretch;
+  const hasGoalsOrVision = (Array.isArray(activeGoals) && activeGoals.length > 0) || !!profile?.future_self;
+  if (
+    currentStage === 'tomorrow' &&
+    hasBothCommitments &&
+    hasGoalsOrVision &&
+    !completedDirectives.includes('commitment_goal_bridge') &&
+    !completedDirectives.includes('commitment_goal_why_depth')
+  ) {
+    const goalContext = Array.isArray(activeGoals) && activeGoals.length > 0
+      ? activeGoals.map(g => {
+          const latestWhy = Array.isArray(g.whys) && g.whys.length > 0
+            ? g.whys[g.whys.length - 1].text
+            : null;
+          return `"${g.title}"${latestWhy ? ` (previously said: "${latestWhy.slice(0, 80)}")` : ' (no why captured yet)'}`;
+        }).join(', ')
+      : null;
+    const futureContext = profile?.future_self || null;
+
     allDirectives.push({
-      id: 'identity_missing',
-      instruction: `IDENTITY MISSING: Find a natural moment to ask what their actions say about who they're becoming. When you ask it, you can briefly frame why: e.g. "I always want to end here — because the actions matter less than what they say about who you are" or "This is the part I care most about." One short phrase, then ask: "What does [their action] say about who you're becoming?"`,
-      priority: 2,
-      preferred_stage: 'close',
+      id: 'commitment_goal_bridge',
+      instruction: `COMMITMENT-GOAL BRIDGE (Question 1 of 2): The user has now stated both their minimum and stretch commitment for tomorrow. Ask them why those specific tasks matter — not "is this good" or "does this connect to a goal" — ask directly: why is it important that they work on those specific things tomorrow? How do they connect to a long-term goal or vision they're working toward?
+
+Available context to make this feel personal (do NOT recite this, use it to shape the question):
+- Their active goals: ${goalContext || 'none'}
+- Their stated future self vision: ${futureContext || 'not set'}
+
+Rules:
+- ONE question only. Do not validate the commitment first. Do not transition stages. Stay in tomorrow stage.
+- Do NOT say "before we wrap" or any closing phrase — this is not the end, there is one more question after their answer.
+- Do NOT use "before we close out tomorrow" or any variant.
+- If they have a goal with a prior why, reference their own words back naturally: "You said once this was about [why] — is working on [commitment] a step toward that?"
+- If they have goals but no whys yet, ask openly: "Why is it important that you work on those things tomorrow specifically — what's the bigger thing they're connected to?"
+- If their future_self is set and no goals exist, frame against vision: "You said you want to be [future_self] — how does [commitment] move toward that?"
+- Set directive_completed: "commitment_goal_bridge" once you have asked this question and received an answer. Do NOT set is_session_complete.`,
+      priority: 1,
+      preferred_stage: 'tomorrow',
       fire_next_session: false,
       energy_type: 'identity',
-      close_order: 2,
     });
   }
+
+  // ── commitment_goal_why_depth ──────────────────────────────────────────
+  if (
+    currentStage === 'tomorrow' &&
+    hasBothCommitments &&
+    hasGoalsOrVision &&
+    completedDirectives.includes('commitment_goal_bridge') &&
+    !completedDirectives.includes('commitment_goal_why_depth')
+  ) {
+    // Use the first active goal as the primary context for why-depth questions.
+    // The LLM instruction asks the coach to reference the most relevant goal in its response.
+    const relevantGoal = Array.isArray(activeGoals) && activeGoals.length > 0 ? activeGoals[0] : null;
+    const existingWhys = relevantGoal && Array.isArray(relevantGoal.whys) ? relevantGoal.whys : [];
+    const latestWhy = existingWhys.length > 0 ? existingWhys[existingWhys.length - 1] : null;
+    const priorWhySource = latestWhy?.source || null;
+    const priorWhyText = latestWhy?.text || null;
+
+    let whyDepthInstruction;
+    if (existingWhys.length === 0) {
+      whyDepthInstruction = `This goal has never had a why captured. Ask openly: "And why does [goal/vision] actually matter to you — not the surface answer, what's underneath it?"`;
+    } else if (priorWhySource === 'commitment_planning') {
+      whyDepthInstruction = `You asked this in a planning context before. They said: "${priorWhyText?.slice(0, 100)}". Ask if it's evolved: "Last time you said this was about [prior why] — is that still the core of it, or has something shifted?"`;
+    } else if (priorWhySource === 'reflection_session') {
+      whyDepthInstruction = `They articulated this during a reflection session (in the context of a specific day). They said: "${priorWhyText?.slice(0, 100)}". Ask if it still holds: "You've talked about this before — [prior why]. Does that still hold, or is there something deeper now?"`;
+    } else {
+      whyDepthInstruction = `They have an existing why: "${priorWhyText?.slice(0, 100)}". Push underneath it: "You said it's about [prior why] — what's underneath even that? What would be lost if you never achieved [goal]?"`;
+    }
+
+    allDirectives.push({
+      id: 'commitment_goal_why_depth',
+      instruction: `COMMITMENT-GOAL BRIDGE (Question 2 of 2): The user just answered why their commitment connects to a long-term goal. Now ask why that goal or vision actually matters to them. This is the second and final question of the bridge sequence.
+
+${whyDepthInstruction}
+
+Rules:
+- ONE question. Do not validate their previous answer extensively — one brief acknowledgment at most, then the question.
+- Extract their answer as goal_why_insight and set goal_id_referenced to the single most relevant goal id from the goals array (the one their commitment most clearly connects to). Use the existing goal_why_action logic (add/replace). Set goal_commitment_why: true so the write-back tags source as "commitment_planning".
+- If their answer reveals a realization about the goal, also set goal_depth_insight.
+- After this question is asked AND answered, set directive_completed: "commitment_goal_why_depth".
+- Once directive_completed is set to "commitment_goal_why_depth", the server will set commitment_goal_bridge_done: true and route to complete.
+- On the SAME response where you set directive_completed: "commitment_goal_why_depth", also set is_session_complete: true and deliver a warm, specific closing message (2-3 sentences) that ties together their commitment AND what they just said about why it matters. Use their actual words. Do NOT say "before we close out tomorrow." Do NOT announce a stage transition.`,
+      priority: 1,
+      preferred_stage: 'tomorrow',
+      fire_next_session: false,
+      energy_type: 'identity',
+    });
+  }
+
+  // ── identity_missing block removed — replaced by commitment_goal_bridge / commitment_goal_why_depth directives
 
   // ── commitment_quality ─────────────────────────────────────────────────
   if (commitmentStats) {
@@ -2155,7 +2230,7 @@ function buildDirectiveQueue({
     const isWinsToHonest = sessionState.current_stage === 'wins' && suggestedNextStage === 'honest';
     const stageHintInstruction = (isWinsToHonest && userSignaledDone)
       ? 'STAGE HINT: You MUST set stage_advance:true, new_stage:"honest" on this response. Do not wait — the user has signaled they are done with wins. Transition with a soft pivot phrase (e.g. "Okay — I want to shift for a second.") and ask the honest question. Never announce the stage name.'
-      : `STAGE HINT: Ready to move to "${suggestedNextStage}". Transition naturally if conversation supports it — use a soft bridging phrase that signals the shift without announcing it. E.g. for wins→honest: "Okay — I want to shift for a second." For honest→tomorrow: "Alright, I've got a good picture of today. Let's talk about tomorrow." For tomorrow→close: "Good — before I let you go..." For close→complete: "That's what I needed. Tonight you..." Never announce the stage name. Set stage_advance:true, new_stage:"${suggestedNextStage}".`;
+      : `STAGE HINT: Ready to move to "${suggestedNextStage}". Transition naturally if conversation supports it — use a soft bridging phrase that signals the shift without announcing it. E.g. for wins→honest: "Okay — I want to shift for a second." For honest→tomorrow: "Alright, I've got a good picture of today. Let's talk about tomorrow." For tomorrow→complete: Do not announce a stage shift. Name the arc — what they committed to and the why behind it — in one sentence. Then set is_session_complete:true and deliver a warm specific closing message using their actual words. Never announce the stage name. Set stage_advance:true, new_stage:"${suggestedNextStage}".`;
 
     allDirectives.push({
       id: 'stage_hint',
@@ -2325,9 +2400,10 @@ function buildSessionContext({
   const tomorrowFilled = !!sessionState.tomorrow_commitment;
   const hasMissInSession = Array.isArray(sessionState.misses) && sessionState.misses.length > 0;
   const honestMissing = !mergedChecklist.honest && !hasMissInSession && messageCount >= 4;
-  const identityMissing = !mergedChecklist.identity && messageCount >= 6;
-  const sessionReadyToClose = tomorrowFilled && mergedChecklist.wins && (mergedChecklist.identity || messageCount >= 10);
-  const forceClose = messageCount >= 14 && tomorrowFilled && mergedChecklist.wins;
+  const bridgeDone = sessionState.commitment_goal_bridge_done === true;
+  const sessionReadyToClose = tomorrowFilled && !!sessionState.commitment_minimum && bridgeDone;
+  const EMERGENCY_CLOSE_THRESHOLD = 20;
+  const forceClose = messageCount >= EMERGENCY_CLOSE_THRESHOLD && tomorrowFilled;
   const depthProbeNeeded = !!(intentData?.depth_opportunity && (sessionState?.depth_opportunity_count ?? 0) >= 2 && shouldAllowDepthProbe(sessionState, messageCount));
   const isMemoryMode = ['question', 'advice_request', 'memory_query'].includes(intentData?.intent);
   const goalMissingWhy = goalsNeedWhyBuilding.find(g => !Array.isArray(g.whys) || g.whys.length === 0) ?? null;
@@ -2439,6 +2515,7 @@ function buildSessionContext({
       wins_asked_for_more: sessionState.wins_asked_for_more === true,
       honest_depth: sessionState.honest_depth === true,
       commitment_checkin_done: sessionState.commitment_checkin_done === true,
+      commitment_goal_bridge_done: sessionState.commitment_goal_bridge_done === true,
       yesterday_commitment_in_state: !!(sessionState.yesterday_commitment || yesterdayCommitment),
       session_wins_captured: Array.isArray(sessionState.wins)
         ? sessionState.wins.map(w => typeof w === 'string' ? w : w?.text).filter(Boolean)
@@ -2480,7 +2557,7 @@ function buildSessionContext({
           : null,
         // ── Guard rails — always permanent context ────────────────────────────
         forceClose
-          ? 'FORCE CLOSE: Session has gone long. Wins + plan covered. Wrap up NOW with a warm identity statement. Set is_session_complete:true. No more questions.'
+          ? 'EMERGENCY CLOSE: Session has gone unusually long. Something likely went wrong with normal stage progression. Wrap up NOW with a warm closing message. Set is_session_complete:true. No more questions.'
           : sessionReadyToClose
           ? `READY TO CLOSE: wins + plan covered. If tone is resolved, wrap warmly. End with an identity statement. Set is_session_complete:true. Do NOT keep drilling.`
           : null,
@@ -2893,12 +2970,10 @@ export default async function handler(req, res) {
     const tomorrowFilled = !!session_state.tomorrow_commitment;
     const hasMissInSession = Array.isArray(session_state.misses) && session_state.misses.length > 0;
     const honestMissing = !mergedChecklist.honest && !hasMissInSession && messageCount >= 4;
-    const identityMissing = !mergedChecklist.identity && messageCount >= 6;
-    const hasCheckin = session_state?.commitment_checkin_done === true;
-    const sessionReadyThreshold = hasCheckin ? 12 : 10;
-    const forceCloseThreshold = hasCheckin ? 16 : 14;
-    const sessionReadyToClose = tomorrowFilled && mergedChecklist.wins && (mergedChecklist.identity || messageCount >= sessionReadyThreshold);
-    const forceClose = messageCount >= forceCloseThreshold && tomorrowFilled && mergedChecklist.wins;
+    const bridgeDone = session_state.commitment_goal_bridge_done === true;
+    const sessionReadyToClose = tomorrowFilled && !!session_state.commitment_minimum && bridgeDone;
+    const EMERGENCY_CLOSE_THRESHOLD = 20;
+    const forceClose = messageCount >= EMERGENCY_CLOSE_THRESHOLD && tomorrowFilled;
     const depthProbeNeeded = !!(intentData?.depth_opportunity && (session_state?.depth_opportunity_count ?? 0) >= 2 && depthProbeAllowed);
     const goalMissingWhy = goalsNeedWhyBuilding.find(g => !Array.isArray(g.whys) || g.whys.length === 0) ?? null;
 
@@ -2926,7 +3001,6 @@ export default async function handler(req, res) {
       messageCount,
       sessionReadyToClose,
       forceClose,
-      identityMissing,
       honestMissing,
       suggestedNextStage,
       history,
@@ -2936,6 +3010,7 @@ export default async function handler(req, res) {
       effectiveConsecutiveExcuses,
       currentDirectiveQueue,
       completedDirectives,
+      activeGoals,
     });
 
     // Combined queue: existing pending + newly generated (no duplicates)
@@ -3090,7 +3165,6 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
     result.stage_order_swapped = result.stage_order_swapped === true || session_state.stage_order_swapped === true;
     result.show_commitment_checklist = result.show_commitment_checklist === true;
     result.checklist_fragments = Array.isArray(result.checklist_fragments) ? result.checklist_fragments : null;
-    result.show_goal_chips = result.show_goal_chips === true;
     result.insight_exercise_skipped = session_state.insight_exercise_skipped === true || isExerciseSkipSignal;
     if (activeDirective?.id === 'insight_triggered_exercise' && result.exercise_run === activeDirective.exercise_id) {
       result.insight_exercise_skipped = false;
@@ -3203,7 +3277,7 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
     }
 
     // Safety guard — prevent hallucinated stage values from GPT
-    const VALID_STAGES = ['wins', 'commitment_checkin', 'honest', 'tomorrow', 'close', 'complete'];
+    const VALID_STAGES = ['wins', 'commitment_checkin', 'honest', 'tomorrow', 'complete'];
     if (result.new_stage && !VALID_STAGES.includes(result.new_stage)) {
       result.new_stage = null;
       result.stage_advance = false;
@@ -3239,6 +3313,17 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
 
     result.directive_queue = updatedDirectiveQueue;
     result.completed_directives = updatedCompletedDirectives;
+
+    // Set commitment_goal_bridge_done when commitment_goal_why_depth directive completes
+    if (firedDirectiveId === 'commitment_goal_why_depth' && session_id) {
+      supabase.from('reflection_sessions')
+        .update({ commitment_goal_bridge_done: true, updated_at: new Date().toISOString() })
+        .eq('id', session_id)
+        .then(() => {}).catch(() => {});
+    }
+    result.commitment_goal_bridge_done = firedDirectiveId === 'commitment_goal_why_depth'
+      ? true
+      : (session_state.commitment_goal_bridge_done === true);
 
     // ── 11. Post-response DB writes ───────────────────────────────────────
     const dbPromises = [];
