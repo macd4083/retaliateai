@@ -34,7 +34,7 @@ const STAGE_PLACEHOLDERS = {
   tomorrow: 'What will you commit to?',
 };
 
-const DEFAULT_CHECKLIST = { wins: false, honest: false, plan: false };
+const DEFAULT_CHECKLIST = { wins: false, commitment_checkin: false, honest: false, plan: false };
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -459,6 +459,7 @@ export default function ReflectionV2() {
         honest_depth: false,
         yesterday_commitment: session.yesterday_commitment || fetchedYesterdayCommitment || null,
         commitment_checkin_done: session.commitment_checkin_done === true,
+        commitment_goal_bridge_done: session.commitment_goal_bridge_done === true,
         checkin_outcome: session.checkin_outcome || null,
         commitment_score: session.commitment_score ?? null,
         checklist_fragments: [],

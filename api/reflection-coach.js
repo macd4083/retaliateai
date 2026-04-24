@@ -660,10 +660,9 @@ function deriveStageHint(sessionState, classifierChecklist, completedDirectives 
     return 'wins';
   }
 
-  // tomorrow → complete (direct, with bridge fallback)
+  // tomorrow → complete: gate purely on real checklist signals, no message counters
   const bridgeDone = sessionState.commitment_goal_bridge_done === true;
-  const BRIDGE_FALLBACK_THRESHOLD = 4; // messages after both commitments captured before allowing complete without bridge
-  if (stage === 'tomorrow' && hasPlan && sessionState.commitment_minimum && (bridgeDone || messageCount >= BRIDGE_FALLBACK_THRESHOLD)) return 'complete';
+  if (stage === 'tomorrow' && hasPlan && sessionState.commitment_minimum && bridgeDone) return 'complete';
   return null;
 }
 
@@ -2402,8 +2401,9 @@ function buildSessionContext({
   const hasMissInSession = Array.isArray(sessionState.misses) && sessionState.misses.length > 0;
   const honestMissing = !mergedChecklist.honest && !hasMissInSession && messageCount >= 4;
   const bridgeDone = sessionState.commitment_goal_bridge_done === true;
-  const sessionReadyToClose = tomorrowFilled && !!sessionState.commitment_minimum && (bridgeDone || messageCount >= 10);
-  const forceClose = messageCount >= 14 && tomorrowFilled && !!sessionState.commitment_minimum;
+  const sessionReadyToClose = tomorrowFilled && !!sessionState.commitment_minimum && bridgeDone;
+  const EMERGENCY_CLOSE_THRESHOLD = 20;
+  const forceClose = messageCount >= EMERGENCY_CLOSE_THRESHOLD && tomorrowFilled;
   const depthProbeNeeded = !!(intentData?.depth_opportunity && (sessionState?.depth_opportunity_count ?? 0) >= 2 && shouldAllowDepthProbe(sessionState, messageCount));
   const isMemoryMode = ['question', 'advice_request', 'memory_query'].includes(intentData?.intent);
   const goalMissingWhy = goalsNeedWhyBuilding.find(g => !Array.isArray(g.whys) || g.whys.length === 0) ?? null;
@@ -2557,7 +2557,7 @@ function buildSessionContext({
           : null,
         // ── Guard rails — always permanent context ────────────────────────────
         forceClose
-          ? 'FORCE CLOSE: Session has gone long. Wins + plan covered. Wrap up NOW with a warm identity statement. Set is_session_complete:true. No more questions.'
+          ? 'EMERGENCY CLOSE: Session has gone unusually long. Something likely went wrong with normal stage progression. Wrap up NOW with a warm closing message. Set is_session_complete:true. No more questions.'
           : sessionReadyToClose
           ? `READY TO CLOSE: wins + plan covered. If tone is resolved, wrap warmly. End with an identity statement. Set is_session_complete:true. Do NOT keep drilling.`
           : null,
@@ -2970,12 +2970,10 @@ export default async function handler(req, res) {
     const tomorrowFilled = !!session_state.tomorrow_commitment;
     const hasMissInSession = Array.isArray(session_state.misses) && session_state.misses.length > 0;
     const honestMissing = !mergedChecklist.honest && !hasMissInSession && messageCount >= 4;
-    const hasCheckin = session_state?.commitment_checkin_done === true;
-    const sessionReadyThreshold = hasCheckin ? 12 : 10;
-    const forceCloseThreshold = hasCheckin ? 16 : 14;
     const bridgeDone = session_state.commitment_goal_bridge_done === true;
-    const sessionReadyToClose = tomorrowFilled && !!session_state.commitment_minimum && (bridgeDone || messageCount >= sessionReadyThreshold);
-    const forceClose = messageCount >= forceCloseThreshold && tomorrowFilled && !!session_state.commitment_minimum;
+    const sessionReadyToClose = tomorrowFilled && !!session_state.commitment_minimum && bridgeDone;
+    const EMERGENCY_CLOSE_THRESHOLD = 20;
+    const forceClose = messageCount >= EMERGENCY_CLOSE_THRESHOLD && tomorrowFilled;
     const depthProbeNeeded = !!(intentData?.depth_opportunity && (session_state?.depth_opportunity_count ?? 0) >= 2 && depthProbeAllowed);
     const goalMissingWhy = goalsNeedWhyBuilding.find(g => !Array.isArray(g.whys) || g.whys.length === 0) ?? null;
 
