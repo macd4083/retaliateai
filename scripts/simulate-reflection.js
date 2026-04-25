@@ -24,8 +24,6 @@ import handler from '../api/reflection-coach.js';
 import commitmentStatsHandler from '../api/commitment-stats.js';
 import createGoalHandler from '../api/create-goal.js';
 import extractGoalCommitmentsHandler from '../api/extract-goal-commitments.js';
-import goalCommitmentStatsHandler from '../api/goal-commitment-stats.js';
-import evaluateGoalCommitmentsHandler from '../api/evaluate-goal-commitments.js';
 import { PERSONAS, DEFAULT_PERSONA } from './personas.js';
 import { generateUserResponse, scoreCoachMessage } from './generate-user-response.js';
 import { drawTraits } from './hidden-traits.js';
@@ -211,8 +209,8 @@ async function assertWhysContext(supabase, userId) {
 /**
  * Calls commitment-stats, queries user_insights, and optionally calls
  * generate-pattern-narrative to verify real data landed correctly.
- * Also calls generate-embedding, classify-intent, extract-goal-commitments,
- * goal-commitment-stats, and evaluate-goal-commitments when context is provided.
+ * Also calls generate-embedding, classify-intent, and extract-goal-commitments
+ * when context is provided.
  *
  * @param {object} supabase      - Supabase client
  * @param {string} userId        - The simulated user ID
@@ -389,7 +387,7 @@ async function validateBackend(supabase, userId, simulatedDate, prevGoalWhysCoun
 
   // 7. Goal commitment stats (always runs — needs only user_id)
   try {
-    const statsResult = await callHandler(goalCommitmentStatsHandler, {
+    const statsResult = await callHandler(commitmentStatsHandler, {
       user_id: userId,
       client_local_date: simulatedDate,
     });
@@ -401,19 +399,6 @@ async function validateBackend(supabase, userId, simulatedDate, prevGoalWhysCoun
     }
   } catch (err) {
     console.warn(`    ⚠️  goal-commitment-stats failed: ${err.message}`);
-  }
-
-  // 8. Evaluate goal commitments (always runs — marks pending commitments kept/missed)
-  try {
-    const evalResult = await callHandler(evaluateGoalCommitmentsHandler, {
-      user_id: userId,
-      session_date: simulatedDate,
-    });
-    if (evalResult.ok) {
-      backendState.evaluate_commitments_check = { passed: true };
-    }
-  } catch (err) {
-    console.warn(`    ⚠️  evaluate-goal-commitments failed: ${err.message}`);
   }
 
   return backendState;
