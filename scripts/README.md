@@ -235,7 +235,7 @@ Result: 30/38 assertions passed
 
 ### Assertions checked
 
-The run verifies assertions across 14 feature areas (plus 14 new assertions added in this update):
+The run verifies assertions across 21 feature areas:
 
 | Category | Assertions |
 |----------|------------|

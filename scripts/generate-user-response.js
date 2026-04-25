@@ -20,6 +20,45 @@ const MIN_MODE_C_MULTIPLIER = 0.3;
 // Reference day count for drift calculation (full drift at this day number)
 const DRIFT_REFERENCE_DAYS = 30;
 
+// ── Keyword lists for coach question detection (module-level constants) ────────
+const WHY_KEYWORDS = [
+  'why does this matter', "what's driving you", 'what drives you',
+  'why it matters', 'is that still motivating', 'still motivating you',
+  'what makes this real', 'what makes it real', 'why_reconnect',
+  "what's the real reason", "what's underneath", "what's actually underneath",
+  'why do you keep coming back', 'why are you doing this', "what's pulling you",
+  'motivation check', 'is this still', 'still the thing that makes',
+  "what's the thing that makes", 'why this goal', 'why that goal',
+  'what made you set this', 'still what drives',
+];
+const BRIDGE_Q1_KEYWORDS = [
+  'connect', 'tie to', 'ties to', 'longer-term', 'bigger picture',
+  'how does that connect', 'how does this connect', 'why is it important that you work on',
+  'why those specific', 'what are they connected to', "what's the bigger thing",
+  'how do they connect', 'move toward', 'working toward',
+];
+const BRIDGE_Q2_KEYWORDS = [
+  'why does that matter', 'why does that goal', 'why does that actually matter',
+  "what's underneath even that", 'what would be lost', "what's underneath it",
+  'why is that important', 'what would it mean', 'still the core of it',
+  'something shifted', 'does that still hold',
+];
+const PROGRESS_KEYWORDS = [
+  'getting closer', 'making progress', "feel like it's working",
+  'moving toward', 'feel like you\'re', 'do you feel like', 'making a dent',
+  'does it feel like', 'feel like this is working', 'feel any closer',
+];
+const WINS_GOAL_CALLBACK_KEYWORDS = [
+  'last night this was about', 'you said this was about', 'you committed to this because',
+  'you said that was connected to', 'tied to', 'you said it mattered because',
+  'the original why', 'what you said the goal was for',
+];
+const HONEST_MISS_GROUNDING_KEYWORDS = [
+  'you said that was the floor', 'the floor you wouldn\'t fall below',
+  'you committed to', 'it was tied to', 'you said it mattered because',
+  'what actually happened', 'connected to your goal',
+];
+
 /**
  * Pick a response mode based on weighted probabilities.
  * weights = [pA, pB, pC] where pA+pB+pC should equal 1.0
@@ -146,64 +185,27 @@ export async function generateUserResponse({
   }
 
   // Detect whether the coach is asking about motivation/why
-  const whyKeywords = [
-    'why does this matter', "what's driving you", 'what drives you',
-    'why it matters', 'is that still motivating', 'still motivating you',
-    'what makes this real', 'what makes it real', 'why_reconnect',
-    'what\'s the real reason', 'what\'s underneath', 'what\'s actually underneath',
-    'why do you keep coming back', 'why are you doing this', 'what\'s pulling you',
-    'motivation check', 'is this still', 'still the thing that makes',
-    'what\'s the thing that makes', 'why this goal', 'why that goal',
-    'what made you set this', 'still what drives',
-  ];
   const coachMsgLower = coachMessage.toLowerCase();
-  const isWhyQuestion = whyKeywords.some((kw) => coachMsgLower.includes(kw.toLowerCase()));
+  const isWhyQuestion = WHY_KEYWORDS.some((kw) => coachMsgLower.includes(kw.toLowerCase()));
 
   // Detect bridge Q1: coach asking how commitment connects to goal/vision (tomorrow stage)
-  const bridgeQ1Keywords = [
-    'connect', 'tie to', 'ties to', 'longer-term', 'bigger picture',
-    'how does that connect', 'how does this connect', 'why is it important that you work on',
-    'why those specific', 'what are they connected to', 'what\'s the bigger thing',
-    'how do they connect', 'move toward', 'working toward',
-  ];
   const isBridgeQ1 = currentStage === 'tomorrow' &&
-    bridgeQ1Keywords.some((kw) => coachMsgLower.includes(kw.toLowerCase()));
+    BRIDGE_Q1_KEYWORDS.some((kw) => coachMsgLower.includes(kw.toLowerCase()));
 
   // Detect bridge Q2: coach pushing underneath the connection (why does the goal matter)
-  const bridgeQ2Keywords = [
-    'why does that matter', 'why does that goal', 'why does that actually matter',
-    'what\'s underneath even that', 'what would be lost', 'what\'s underneath it',
-    'why is that important', 'what would it mean', 'still the core of it',
-    'something shifted', 'does that still hold',
-  ];
   const isBridgeQ2 = currentStage === 'tomorrow' &&
-    bridgeQ2Keywords.some((kw) => coachMsgLower.includes(kw.toLowerCase()));
+    BRIDGE_Q2_KEYWORDS.some((kw) => coachMsgLower.includes(kw.toLowerCase()));
 
   // Detect progress feeling: coach asking about momentum/getting closer
-  const progressKeywords = [
-    'getting closer', 'making progress', 'feel like it\'s working',
-    'moving toward', 'feel like you\'re', 'do you feel like', 'making a dent',
-    'does it feel like', 'feel like this is working', 'feel any closer',
-  ];
-  const isProgressFeeling = progressKeywords.some((kw) => coachMsgLower.includes(kw.toLowerCase()));
+  const isProgressFeeling = PROGRESS_KEYWORDS.some((kw) => coachMsgLower.includes(kw.toLowerCase()));
 
   // Detect wins-goal callback: coach connecting a win to a goal in wins stage
-  const winsGoalCallbackKeywords = [
-    'last night this was about', 'you said this was about', 'you committed to this because',
-    'you said that was connected to', 'tied to', 'you said it mattered because',
-    'the original why', 'what you said the goal was for',
-  ];
   const isWinsGoalCallback = currentStage === 'wins' &&
-    winsGoalCallbackKeywords.some((kw) => coachMsgLower.includes(kw.toLowerCase()));
+    WINS_GOAL_CALLBACK_KEYWORDS.some((kw) => coachMsgLower.includes(kw.toLowerCase()));
 
   // Detect honest-miss grounding: coach referencing specific commitment + why in honest stage
-  const honestMissGroundingKeywords = [
-    'you said that was the floor', 'the floor you wouldn\'t fall below',
-    'you committed to', 'it was tied to', 'you said it mattered because',
-    'what actually happened', 'connected to your goal',
-  ];
   const isHonestMissGrounding = currentStage === 'honest' &&
-    honestMissGroundingKeywords.some((kw) => coachMsgLower.includes(kw.toLowerCase()));
+    HONEST_MISS_GROUNDING_KEYWORDS.some((kw) => coachMsgLower.includes(kw.toLowerCase()));
 
   // Build tiered why injection if coach is asking a why question and a whyPool is available
   let whyInjectionBlock = '';

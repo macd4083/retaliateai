@@ -1053,14 +1053,17 @@ async function runWhyBuildingTest({ personaKey, startDate, clean }) {
           .select('id, title, whys, why_summary')
           .eq('user_id', userId)
           .eq('status', 'active');
-        for (const g of goalsDay5 || []) {
-          if (g.why_summary != null) {
-            whyBuildingReport.assertions.day5_why_summary_populated = true;
-          }
-          const commitmentWhys = (Array.isArray(g.whys) ? g.whys : []).filter((w) => w.source === 'commitment_planning');
-          if (commitmentWhys.length <= 1) {
-            whyBuildingReport.assertions.day5_commitment_planning_whys_max_one = true;
-          }
+        const goals5 = goalsDay5 || [];
+        // why_summary: passes if at least one goal has it populated
+        if (goals5.some((g) => g.why_summary != null)) {
+          whyBuildingReport.assertions.day5_why_summary_populated = true;
+        }
+        // commitment_planning max 1: passes only if ALL goals satisfy the constraint
+        if (goals5.length > 0 && goals5.every((g) => {
+          const cWhys = (Array.isArray(g.whys) ? g.whys : []).filter((w) => w.source === 'commitment_planning');
+          return cWhys.length <= 1;
+        })) {
+          whyBuildingReport.assertions.day5_commitment_planning_whys_max_one = true;
         }
       } catch { /* non-fatal */ }
     }
@@ -1689,11 +1692,14 @@ async function runFullCoverageTest({ personaKey, startDate, clean }) {
         sessionCheckinOutcome = result.extracted_data.checkin_outcome;
       }
       // Detect plan set without real commitment (plan gating check)
-      if (result.checklist_updates?.plan === true && !result.extracted_data?.tomorrow_commitment && !sessionState.tomorrow_commitment) {
+      // sessionState.tomorrow_commitment is already updated above from result.extracted_data, so
+      // checking sessionState.tomorrow_commitment is sufficient to cover both current and prior turns
+      if (result.checklist_updates?.plan === true && !sessionState.tomorrow_commitment) {
         sessionPlanSetWithoutCommitment = true;
       }
       // Detect completion without bridge done (tomorrow routing check)
-      if (result.is_session_complete && sessionState.tomorrow_commitment && !sessionBridgeDone && !result.commitment_goal_bridge_done) {
+      // sessionBridgeDone already incorporates result.commitment_goal_bridge_done, so no need to check both
+      if (result.is_session_complete && sessionState.tomorrow_commitment && !sessionBridgeDone) {
         sessionCompletedWithoutBridgeDone = true;
       }
 
@@ -1817,7 +1823,7 @@ async function runFullCoverageTest({ personaKey, startDate, clean }) {
       if (a && !a.notes) {
         a.notes = `reached complete without bridge_done on day ${day}`;
       }
-    } else if (sessionBridgeDone && sessionState.is_complete) {
+    } else if (sessionState.is_complete && (!sessionState.tomorrow_commitment || sessionBridgeDone)) {
       passAssertion(assertions, 'tomorrow_complete_requires_bridge_done', day);
     }
 
