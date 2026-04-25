@@ -666,7 +666,7 @@ function deriveStageHint(sessionState, classifierChecklist, completedDirectives 
     return 'honest';
   }
 
-  if (stage === 'wins' && !sessionState.commitment_checkin_done && sessionState.yesterday_commitment && messageCount >= 1) {
+  if (stage === 'wins' && !sessionState.commitment_checkin_done && sessionState.yesterday_commitment) {
     return 'commitment_checkin';
   }
 
@@ -1867,6 +1867,22 @@ function buildDirectiveQueue({
     });
   }
 
+  // ── wins_invite_more ───────────────────────────────────────────────────
+  if (
+    currentStage === 'wins' &&
+    mergedChecklist.wins === true &&
+    !sessionState.wins_asked_for_more
+  ) {
+    allDirectives.push({
+      id: 'wins_invite_more',
+      instruction: `WINS — INVITE MORE: The user just shared a win. Do NOT ask an identity question, depth question, or stage-transition question yet. Your only job right now is to invite them to share more wins. Ask exactly one open question: something like "What else went well?" or "What's another one?" or "What else are you proud of today?" — keep it short and warm. Set wins_asked_for_more: true. Do NOT advance to the next stage until this is done.`,
+      priority: 1,
+      preferred_stage: 'wins',
+      fire_next_session: false,
+      energy_type: 'momentum',
+    });
+  }
+
   // ── wins_callback ──────────────────────────────────────────────────────
   if (Array.isArray(sessionState.wins) && sessionState.wins.length > 0 && currentStage !== 'wins' && currentStage !== 'close') {
     const winsText = sessionState.wins.map(w => typeof w === 'string' ? w : w?.text).filter(Boolean).join(', ');
@@ -1991,7 +2007,7 @@ function buildDirectiveQueue({
   // ── commitment_checkin ─────────────────────────────────────────────────
   const yc = sessionState.yesterday_commitment || yesterdayCommitment;
   const isCheckinNeeded = !sessionState.commitment_checkin_done && !!yc;
-  const isTransitioningToCheckin = currentStage === 'wins' && isCheckinNeeded && messageCount >= 1;
+  const isTransitioningToCheckin = currentStage === 'wins' && isCheckinNeeded;
   if ((currentStage === 'commitment_checkin' || isTransitioningToCheckin) && !sessionState.commitment_checkin_done && yc) {
       const minimumText = yesterdayMinimum ? `\n- Yesterday's MINIMUM floor: "${yesterdayMinimum}"` : '';
       const stretchText = yesterdayStretch ? `\n- Yesterday's STRETCH target: "${yesterdayStretch}"` : '';
@@ -2086,7 +2102,10 @@ function buildDirectiveQueue({
     }
     allDirectives.push({
       id: 'tomorrow_commitment_structure',
-      instruction: `TOMORROW COMMITMENT STRUCTURE: In this stage, your first job is to help the user map out ALL the minimum steps that would make tomorrow a genuinely productive day — not just one commitment. Capture TWO commitments in sequence — never both at once.
+      instruction: `TOMORROW COMMITMENT STRUCTURE: HARD RULE — You MUST NEVER set extracted_data.tomorrow_commitment until BOTH extracted_data.commitment_minimum AND extracted_data.commitment_stretch have been captured in separate exchanges. tomorrow_commitment is assembled server-side from both fields; do NOT set it directly before both exist.
+- If the user states anything hedged — "I'll try", "I'll aim to", "maybe", "sometime", "probably", "when I feel ready", "hopefully", "if I have time" — this is NOT a minimum. Push back once: "That's an intention, not a floor commitment. What's the one thing you WILL do — not might, will?"
+- commitment_minimum and commitment_stretch are separate fields. Never set tomorrow_commitment directly — only set commitment_minimum and commitment_stretch.
+- Capture TWO commitments in sequence — never both at once.
 - First capture the complete set of floor commitments with this opening framing (you may paraphrase while keeping intent): "Let's build out tomorrow. What are all the things that, if you got them done, would make tomorrow a real win — the floor you wouldn't fall below?" Store it in extracted_data.commitment_minimum.
 - Minimum framing guidance: ${minimumFraming}
 - On the turn you ask/capture minimum, do NOT set extracted_data.commitment_stretch and do NOT set extracted_data.tomorrow_commitment. Wait for the next user reply.
@@ -2684,7 +2703,12 @@ function buildSessionContext({
         forceClose
           ? 'EMERGENCY CLOSE: Session has gone unusually long. Something likely went wrong with normal stage progression. Wrap up NOW with a warm closing message. Set is_session_complete:true. No more questions.'
           : sessionReadyToClose
-          ? `READY TO CLOSE: wins + plan covered. If tone is resolved, wrap warmly. End with an identity statement. Set is_session_complete:true. Do NOT keep drilling.`
+          ? `READY TO CLOSE: The session is done. Set is_session_complete:true on this response. Do NOT ask any new questions — not even one. Write 2-3 sentences only:
+1. Name what they committed to, using their exact words from the commitment (not a paraphrase).
+2. Connect it to what they said about why it matters — pull from their actual words in this conversation.
+3. One short identity statement — use language they used about themselves, not coaching-speak like "you're becoming someone who..." or "that's a big shift."
+Do NOT use the words or phrases: "proud", "powerful", "shift", "journey", "lean into", "embrace", "growth mindset".
+Do NOT ask a follow-up question. Do NOT invite reflection. Just close.`
           : null,
       // ── Base rules — always ───────────────────────────────────────────────
       'Use their actual words — never be generic.',
@@ -2990,6 +3014,18 @@ export default async function handler(req, res) {
     // ── 6. Exercise cooldown + smart blocks ───────────────────────────────
     const sessionExercisesRun = Array.isArray(session_state.exercises_run) ? session_state.exercises_run : [];
     const messageCount = history.length;
+
+    // Force commitment_checkin as current stage on INIT when yesterday commitment exists
+    // so directives and context reflect the correct stage from the start of the session
+    if (
+      isInit &&
+      (session_state.current_stage === 'wins' || !session_state.current_stage) &&
+      yesterdayCommitment &&
+      session_state.commitment_checkin_done !== true
+    ) {
+      session_state = { ...session_state, current_stage: 'commitment_checkin' };
+    }
+
     let suggestedExercise = intentData?.suggested_exercise || 'none';
     const depthProbeAllowed = shouldAllowDepthProbe(session_state, messageCount);
 
@@ -3031,7 +3067,12 @@ export default async function handler(req, res) {
           txt.includes('any other wins') ||
           txt.includes('anything else you want to celebrate') ||
           txt.includes('what else are you proud') ||
-          txt.includes('share more')
+          txt.includes('share more') ||
+          txt.includes('what else') ||
+          txt.includes('tell me more') ||
+          txt.includes('keep going') ||
+          txt.includes('what other') ||
+          txt.includes('any other')
         ) {
           session_state = { ...session_state, wins_asked_for_more: true };
         }
@@ -3449,6 +3490,24 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
       Object.keys(intentData.checklist_content).forEach((key) => {
         if (intentData.checklist_content[key]) result.checklist_updates[key] = true;
       });
+    }
+
+    // Bug 3A: Block wins→honest advance when wins_asked_for_more is not yet set and a win was captured
+    const winsCapture = session_state.checklist?.wins === true || result.checklist_updates?.wins === true;
+    const askedForMore = session_state.wins_asked_for_more === true || result.wins_asked_for_more === true;
+    if (result.stage_advance === true && result.new_stage === 'honest' && winsCapture && !askedForMore) {
+      result.stage_advance = false;
+      result.new_stage = null;
+    }
+
+    // Bug 2D: Block tomorrow→complete advance when commitment_minimum or commitment_stretch is missing
+    if (result.stage_advance === true && result.new_stage === 'complete' && stageAtTurnStart === 'tomorrow') {
+      const hasMinimum = !!(result.extracted_data?.commitment_minimum || session_state.commitment_minimum);
+      const hasStretch = !!(result.extracted_data?.commitment_stretch || session_state.commitment_stretch);
+      if (!hasMinimum || !hasStretch) {
+        result.stage_advance = false;
+        result.new_stage = null;
+      }
     }
 
     // ── Update directive tracking ─────────────────────────────────────────
