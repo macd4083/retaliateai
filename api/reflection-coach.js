@@ -3288,7 +3288,7 @@ export default async function handler(req, res) {
 Do NOT mention stages, process, forms, or instructions.
 Do NOT tell them to pick a mood.
 Do NOT say "what feels most present for you" or any variant of that phrasing.
-Do NOT use coaching-speak openers (like "what's coming up for you" or "where are you at energetically"). Ask like a friend who actually cares.
+Do NOT use coaching-speak openers (like "what's coming up for you" or "where are you at energetically"). Ask in plain, direct language — warm but not performative.
 Do NOT use the phrase "what's underneath that."
 Return mood chips in the JSON "chips" field only — don't call attention to them in assistant_message.
 ${returningContext}
