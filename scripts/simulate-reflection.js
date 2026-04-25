@@ -12,6 +12,13 @@
  * Calls api/reflection-coach.js directly as a function (no HTTP server needed).
  * Simulates a full coaching session per day, scoring each coach message with GPT-4o-mini.
  * Writes simulation-report.json to the scripts/ folder on completion.
+ *
+ * Required in .env.simulation.local:
+ *   SIM_MODE=true           — bypasses JWT auth in reflection-coach.js
+ *   SIM_USER_ID=<uuid>      — the simulated user's UUID
+ *   SUPABASE_URL=...
+ *   SUPABASE_SERVICE_ROLE_KEY=...
+ *   OPENAI_API_KEY=...
  */
 
 import { createClient } from '@supabase/supabase-js';
@@ -127,7 +134,7 @@ function addDays(dateStr, n) {
 // ── Call any handler directly (generic helper) ────────────────────────────────
 function callHandler(handlerFn, body) {
   return new Promise((resolve) => {
-    const req = { method: 'POST', body };
+    const req = { method: 'POST', body, headers: {} };
     const res = {
       status: (code) => ({ json: (data) => resolve({ code, ...data }) }),
       json: (data) => resolve({ code: 200, ...data }),
