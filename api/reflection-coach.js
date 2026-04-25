@@ -2707,10 +2707,21 @@ export default async function handler(req, res) {
   }
 
   let authenticatedUserId;
-  try {
-    authenticatedUserId = await getAuthenticatedUserId(req);
-  } catch (err) {
-    return res.status(401).json({ error: err.message });
+  if (process.env.SIM_MODE === 'true' && process.env.NODE_ENV !== 'production') {
+    // Simulation bypass: skip JWT auth and use user_id from body directly.
+    // Only active when SIM_MODE=true (set in .env.simulation.local) and not in production.
+    const simUserId = req.body?.user_id;
+    const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!simUserId || !uuidPattern.test(simUserId)) {
+      return res.status(400).json({ error: 'SIM_MODE requires a valid UUID user_id in body' });
+    }
+    authenticatedUserId = simUserId;
+  } else {
+    try {
+      authenticatedUserId = await getAuthenticatedUserId(req);
+    } catch (err) {
+      return res.status(401).json({ error: err.message });
+    }
   }
 
   try {
