@@ -86,6 +86,9 @@ const supabase = createClient(
  * -- Commitment-goal bridge tracking
  * ALTER TABLE reflection_sessions ADD COLUMN IF NOT EXISTS commitment_goal_bridge_done boolean DEFAULT false;
  *
+ * -- Why summary for goal motivation synthesis
+ * ALTER TABLE goals ADD COLUMN IF NOT EXISTS why_summary text;
+ *
  * -- Atomic JSONB array append with deduplication (run once in SQL editor):
  * -- CREATE OR REPLACE FUNCTION append_jsonb_array_item(
  * --   p_table text,
@@ -117,6 +120,9 @@ const supabase = createClient(
 const DEFAULT_CHECKLIST = { wins: false, honest: false, plan: false };
 const MIN_DEEP_SESSION_MESSAGE_COUNT = 6;
 const MAX_DEPTH_INSIGHTS_RETAINED = 4;
+const MAX_COMMITMENT_WHYS = 1;   // max 1 active commitment_planning why per goal (always replace)
+const MAX_SESSION_WHYS = 3;      // max 3 reflection_session whys kept (oldest pruned)
+const MAX_WHYS_TOTAL = 5;        // absolute cap on whys[] length
 const MIN_INSIGHT_KEYWORD_OVERLAP = 2;
 const MIN_INSIGHT_OVERLAP_SCORE = 0.2;
 const MAX_DEPTH_PROBES_PER_SESSION = 2;
@@ -370,6 +376,11 @@ When a miss or stuck moment is mentioned during the honest stage, scan the avail
    → After suggesting, tell the user you'll add it — they'll confirm in the UI
    → Only one new goal suggestion per session
 
+7. User expresses how they feel about their progress toward a goal
+   → Set extracted_data.progress_feeling with their exact words about momentum or stagnation
+   → Set extracted_data.goal_id_referenced to the matching goal
+   → Use this when they say things like "I feel like I'm finally getting somewhere with this" or "I don't think I'm making any progress"
+
 WHAT NOT TO DO:
 - Never announce you're doing a "goal check-in"
 - Never redirect a conversation that's already going somewhere real just to fit in a goal
@@ -405,7 +416,8 @@ RETURN JSON EXACTLY (no markdown, no extra keys):
     "goal_vision_fragment": null,
     "goal_depth_insight": null,
     "goal_suggestion": null,
-    "goal_commitment_why": false
+    "goal_commitment_why": false,
+    "progress_feeling": null  // string: user's expressed feeling about progress toward a goal this session (their words). Set when they say something meaningful about momentum/stagnation on a goal. Null otherwise.
   },
   "exercise_run": "${EXERCISE_ENUM}",
   "checklist_updates": {"wins": false, "honest": false, "plan": false},
@@ -430,6 +442,22 @@ const EXERCISE_PROMPTS = Object.fromEntries(practices.map((practice) => [practic
 const EXERCISE_FIRST_TIME_INTROS = Object.fromEntries(
   practices.map((practice) => [practice.id, practice.first_time_intro]).filter(([, intro]) => intro)
 );
+
+/**
+ * Sanitize user-provided text before interpolating into AI prompts.
+ * Strips characters that could be used for prompt injection while preserving readability.
+ * @param {string} text
+ * @param {number} maxLen
+ * @returns {string}
+ */
+function sanitizeForPrompt(text, maxLen = 200) {
+  if (!text || typeof text !== 'string') return '';
+  return text
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '') // strip control characters
+    .replace(/`/g, "'")                                   // neutralize backtick template literals
+    .slice(0, maxLen)
+    .trim();
+}
 
 /**
  * Tokenize free text into lowercase keyword terms for lightweight overlap scoring.
@@ -973,7 +1001,7 @@ async function loadActiveGoals(userId) {
   try {
     const { data } = await supabase
       .from('goals')
-      .select('id, title, category, whys, vision_snapshot, depth_insights, last_mentioned_at, suggested_next_action, baseline_snapshot, baseline_date')
+      .select('id, title, category, whys, why_summary, vision_snapshot, depth_insights, last_mentioned_at, suggested_next_action, baseline_snapshot, baseline_date')
       .eq('user_id', userId)
       .eq('status', 'active')
       .limit(6);
@@ -1576,6 +1604,10 @@ Return valid JSON only:
               } else {
                 currentWhys.push(newWhy);
               }
+              // Enforce retention policy
+              const commitmentWhys = currentWhys.filter(w => w.source === 'commitment_planning').slice(-MAX_COMMITMENT_WHYS);
+              const sessionWhys = currentWhys.filter(w => w.source !== 'commitment_planning').slice(-MAX_SESSION_WHYS);
+              currentWhys = [...commitmentWhys, ...sessionWhys].slice(-MAX_WHYS_TOTAL);
               return supabase.from('goals').update({ ...goalUpdates, whys: currentWhys }).eq('id', gu.goal_id).eq('user_id', userId);
             })
             .then(() => {}).catch(() => {});
@@ -1606,6 +1638,44 @@ Return valid JSON only:
   } catch (_e) {}
 }
 
+/**
+ * Synthesizes a why_summary for a goal from its current whys array using gpt-4o-mini.
+ * Fire-and-forget — updates goals.why_summary.
+ */
+async function synthesizeGoalWhySummary(userId, goalId, goalTitle) {
+  try {
+    const { data } = await supabase
+      .from('goals')
+      .select('whys')
+      .eq('id', goalId)
+      .eq('user_id', userId)
+      .maybeSingle();
+    const whys = Array.isArray(data?.whys) ? data.whys : [];
+    if (whys.length === 0) return;
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        {
+          role: 'system',
+          content: `Given these reasons a user has articulated for pursuing their goal '${sanitizeForPrompt(goalTitle, 100)}', write a single 2-3 sentence synthesis of their core motivation. Use their actual words where possible. Be specific, not generic. Return ONLY valid JSON: { "why_summary": "..." }`,
+        },
+        { role: 'user', content: JSON.stringify(whys.map(w => w.text)) },
+      ],
+      response_format: { type: 'json_object' },
+      max_tokens: 200,
+      temperature: 0.5,
+    });
+    const parsed = JSON.parse(completion.choices?.[0]?.message?.content || '{}');
+    if (typeof parsed.why_summary === 'string' && parsed.why_summary.trim()) {
+      await supabase
+        .from('goals')
+        .update({ why_summary: parsed.why_summary.trim() })
+        .eq('id', goalId)
+        .eq('user_id', userId);
+    }
+  } catch (_e) { /* fail silently */ }
+}
+
 // ── Session Directive Queue ───────────────────────────────────────────────────
 
 /**
@@ -1618,7 +1688,7 @@ function buildDirectiveQueue({
   intentData, suggestedPractice, depthProbeNeeded, sessionState,
   profile, commitmentStats, yesterdayCommitment, yesterdayMinimum, yesterdayStretch, yesterdayCheckinOpener,
   commitmentRate7Context, commitmentTrajectoryContext, avgCommitmentScoreContext, scoreTrajectoryContext,
-  yesterdayFragments,
+  yesterdayFragments, enrichedYesterdayFragments,
   goalMissingWhy, messageCount, sessionReadyToClose, forceClose,
   honestMissing, suggestedNextStage,
   history,
@@ -1870,9 +1940,19 @@ function buildDirectiveQueue({
     if (topBlockerInsight) {
       patternContext = `\n\nPATTERN CONTEXT: Their top identified blocker pattern is "${topBlockerInsight.pattern_label}". Trigger: "${topBlockerInsight.trigger_context || 'unclear'}". If what they share tonight clearly connects to this pattern, name it explicitly: "That sounds like the ${topBlockerInsight.pattern_label} pattern coming up — is that what's happening?" Don't force it if the connection isn't clear. But when it is clear, say it.`;
     }
+    const missedFragmentContext = (() => {
+      if (!['missed', 'partial'].includes(sessionState?.checkin_outcome)) return '';
+      const linkedFragments = (enrichedYesterdayFragments || []).filter(f => f.goal_id && f.goal_why_context);
+      if (linkedFragments.length === 0) return '';
+      const top = linkedFragments[0];
+      const safeCommitment = sanitizeForPrompt(top.commitment_text, 120);
+      const safeGoalTitle = sanitizeForPrompt(top.goal_title, 80);
+      const safeWhy = sanitizeForPrompt(top.goal_why_context, 120);
+      return `\n\nFRAGMENT MISS CONTEXT: Yesterday they committed to "${safeCommitment}" as part of their goal "${safeGoalTitle}". They said this was about "${safeWhy}". They ${sessionState.checkin_outcome === 'missed' ? 'fully missed it' : 'partially completed it'}. Use this as the honest anchor — e.g. "You said working on [commitment] was about [why]. What got in the way of that?" This is your sharpest honest probe tool right now.`;
+    })();
     allDirectives.push({
       id: 'honest_missing',
-      instruction: `HONEST MISSING: Gently probe for a miss or honest moment with self-awareness questions. ${patternHint} Goal is self-awareness about TODAY, not action planning. Do NOT ask "what would you do differently" — that belongs in tomorrow. Weave it naturally. Once a miss is named, ask the one question that goes underneath it — what was actually happening underneath that surface behavior, not just what they did or didn't do. Do NOT set honest_depth: true until the user has genuinely answered the underneath layer. A surface answer is not enough. Evaluate qualitatively: is this a real answer about why it happened — the actual reason, the emotional truth, the internal conflict? If yes → set honest_depth: true. If no → ask the one question that goes there. When probing for the honest moment, you can briefly frame what this part of the session is for — e.g. "Before we talk about tomorrow, I want to make sure we've gone there — the part of today that's worth being honest about" or "This is the part most people skip, but it's usually the most useful." Keep it to one sentence — then ask.${patternContext}`,
+      instruction: `HONEST MISSING: Gently probe for a miss or honest moment with self-awareness questions. ${patternHint} Goal is self-awareness about TODAY, not action planning. Do NOT ask "what would you do differently" — that belongs in tomorrow. Weave it naturally. Once a miss is named, ask the one question that goes underneath it — what was actually happening underneath that surface behavior, not just what they did or didn't do. Do NOT set honest_depth: true until the user has genuinely answered the underneath layer. A surface answer is not enough. Evaluate qualitatively: is this a real answer about why it happened — the actual reason, the emotional truth, the internal conflict? If yes → set honest_depth: true. If no → ask the one question that goes there. When probing for the honest moment, you can briefly frame what this part of the session is for — e.g. "Before we talk about tomorrow, I want to make sure we've gone there — the part of today that's worth being honest about" or "This is the part most people skip, but it's usually the most useful." Keep it to one sentence — then ask.${patternContext}${missedFragmentContext}`,
       priority: 2,
       preferred_stage: 'honest',
       fire_next_session: true,
@@ -1888,9 +1968,19 @@ function buildDirectiveQueue({
     messageCount >= 4 &&
     !completedDirectives.includes('honest_kept_expansion')
   ) {
+    const keptFragmentContext = (() => {
+      if (sessionState?.checkin_outcome !== 'kept') return '';
+      const linkedFragments = (enrichedYesterdayFragments || []).filter(f => f.goal_id && f.goal_why_context);
+      if (linkedFragments.length === 0) return '';
+      const top = linkedFragments[0];
+      const safeCommitment = sanitizeForPrompt(top.commitment_text, 120);
+      const safeGoalTitle = sanitizeForPrompt(top.goal_title, 80);
+      const safeWhy = sanitizeForPrompt(top.goal_why_context, 120);
+      return `\n\nFRAGMENT WIN CONTEXT: They fully kept their commitment to "${safeCommitment}" (goal: "${safeGoalTitle}"). They said it was about "${safeWhy}". When you celebrate, connect it to the why: "You said this was about [why] — you actually showed up for that. What's that worth to you?" Use only if tone supports it.`;
+    })();
     allDirectives.push({
       id: 'honest_kept_expansion',
-      instruction: `HONEST (KEPT): They fully or mostly completed their commitment (score >= 50). Start by naming what they did complete. If score is 100 (fully completed), do NOT ask about misses — go deeper on what made the follow-through happen. If score is 50-99 (partial), acknowledge the follow-through first, then gently ask what broke on the unfinished part. Example: "You still followed through on a solid chunk — what helped you get that part done?" then "And what got in the way of the rest?" Extract a depth insight from the mechanism, not just the miss. Set honest_depth: true once you have a real answer.`,
+      instruction: `HONEST (KEPT): They fully or mostly completed their commitment (score >= 50). Start by naming what they did complete. If score is 100 (fully completed), do NOT ask about misses — go deeper on what made the follow-through happen. If score is 50-99 (partial), acknowledge the follow-through first, then gently ask what broke on the unfinished part. Example: "You still followed through on a solid chunk — what helped you get that part done?" then "And what got in the way of the rest?" Extract a depth insight from the mechanism, not just the miss. Set honest_depth: true once you have a real answer.${keptFragmentContext}`,
       priority: 2,
       preferred_stage: 'honest',
       fire_next_session: false,
@@ -1912,8 +2002,18 @@ function buildDirectiveQueue({
             text: formatChecklistFragmentText(f),
           }))
         : [];
+      const effectiveEnrichedFragments = enrichedYesterdayFragments || yesterdayFragments || [];
       const checklistText = checklistFragments.length > 0
-        ? `\n- Yesterday's fragment checklist to show in UI: ${JSON.stringify(checklistFragments)}\n- Present the checklist by returning show_commitment_checklist: true and checklist_fragments as an array of {id, text, type} objects from the fragments below.\n- When a fragment has type="minimum" or type="stretch", keep that type and label intact in checklist_fragments so the user can see exactly which is minimum vs stretch.\n- Do NOT ask a free-text question. Wait for the user to submit the checklist.\n- After the user submits the checklist, use the submitted results + precomputed_commitment_score from context to set extracted_data.checkin_outcome (kept/partial/missed), set extracted_data.commitment_score, set commitment_checkin_done: true, and continue naturally.`
+        ? (() => {
+            const fragmentsWithGoals = checklistFragments.map((f) => {
+              const enriched = effectiveEnrichedFragments.find(ef => ef.id === f.id);
+              if (enriched?.goal_title && enriched?.goal_why_context) {
+                return `${JSON.stringify(f)} → goal: "${sanitizeForPrompt(enriched.goal_title, 80)}", why: "${sanitizeForPrompt(enriched.goal_why_context, 100)}"`;
+              }
+              return JSON.stringify(f);
+            });
+            return `\n- Yesterday's fragment checklist to show in UI: ${JSON.stringify(checklistFragments)}\n- Present the checklist by returning show_commitment_checklist: true and checklist_fragments as an array of {id, text, type} objects from the fragments below.\n- When a fragment has type="minimum" or type="stretch", keep that type and label intact in checklist_fragments so the user can see exactly which is minimum vs stretch.\n- Do NOT ask a free-text question. Wait for the user to submit the checklist.\n- After the user submits the checklist, use the submitted results + precomputed_commitment_score from context to set extracted_data.checkin_outcome (kept/partial/missed), set extracted_data.commitment_score, set commitment_checkin_done: true, and continue naturally.\n- GOAL CONTEXT per fragment (use to personalize the check-in tone — do NOT recite this verbatim): ${fragmentsWithGoals.join(' | ')}\n- When a fragment has a goal+why attached: after the user marks checklist, your follow-up acknowledgment can reference the why — e.g. "You said this was about [why] — what happened with that?" Use this only if it flows naturally.\n- FRAGMENT-GOAL CONTEXT: If any fragment has goal+why context, after the checklist result comes in, use the why to ask a pointed follow-up. E.g. "You said yesterday that working on [commitment] was about [why] — does how today went change anything about that?" Do NOT ask this for every fragment — pick the most resonant one only.`;
+          })()
         : '\n- No fragment checklist is available for yesterday, so use the normal free-text check-in question flow.';
       let checkinTone = '';
       if (rate !== null && rate < 40) {
@@ -2168,6 +2268,31 @@ Rules:
         energy_type: 'planning',
       });
     }
+  }
+
+  // ── wins_goal_callback ─────────────────────────────────────────────────
+  const fragmentsWithGoalLinks = (enrichedYesterdayFragments || yesterdayFragments || []).filter(f => f.goal_id && f.goal_why_context);
+  if (
+    currentStage === 'wins' &&
+    fragmentsWithGoalLinks.length > 0 &&
+    !completedDirectives.includes('wins_goal_callback')
+  ) {
+    const fragmentContextStr = fragmentsWithGoalLinks.map(f =>
+      `"${sanitizeForPrompt(f.commitment_text, 120)}" → goal: "${sanitizeForPrompt(f.goal_title, 80) || 'unknown'}", why they said: "${sanitizeForPrompt(f.goal_why_context, 100)}"`
+    ).join(' | ');
+    allDirectives.push({
+      id: 'wins_goal_callback',
+      instruction: `WINS-GOAL CALLBACK: Yesterday's commitments were linked to goals with reasons the user stated. Context: ${fragmentContextStr}. Instructions:
+- If the user mentions a win that sounds like it connects to one of these goals or commitment topics, surface the connection: "That's [goal title] — you said last night this was about [their why]. What did it feel like to actually do it?"
+- Do NOT force this if the user's win doesn't connect. Only trigger when the topic naturally overlaps.
+- If you surface it, set goal_id_referenced to the matching goal's id.
+- ONE use only — pick the most relevant fragment/win overlap. Do not stack multiple references.
+- After using this, set directive_completed: "wins_goal_callback".`,
+      priority: 2,
+      preferred_stage: 'wins',
+      fire_next_session: false,
+      energy_type: 'momentum',
+    });
   }
 
   // ── pattern_awareness ──────────────────────────────────────────────────
@@ -2716,6 +2841,20 @@ export default async function handler(req, res) {
         _goalStats: gStats,
       };
     });
+
+    // Enrich yesterday fragments with goal title and why context (no extra DB query — use already-loaded goals)
+    const enrichedYesterdayFragments = (yesterdayFragments || []).map(f => {
+      const linkedGoal = activeGoals.find(g => g.id === f.goal_id);
+      return {
+        ...f,
+        goal_title: linkedGoal?.title || null,
+        // Prefer synthesized summary; fall back to most recent why text
+        goal_why_context: linkedGoal?.why_summary
+          || (Array.isArray(linkedGoal?.whys) && linkedGoal.whys.length > 0
+            ? linkedGoal.whys[linkedGoal.whys.length - 1].text
+            : null),
+      };
+    });
     const resolvedCommitmentRate7 = contextCommitmentRate7 !== null
       ? contextCommitmentRate7
       : (commitmentStats?.rate7 != null ? Math.round(commitmentStats.rate7 * 100) : null);
@@ -2997,6 +3136,7 @@ export default async function handler(req, res) {
       yesterdayStretch: yesterdayCommitmentDetails?.commitment_stretch || null,
       yesterdayCheckinOpener: yesterdayCommitmentDetails?.checkin_opener || null,
       yesterdayFragments,
+      enrichedYesterdayFragments,
       goalMissingWhy,
       messageCount,
       sessionReadyToClose,
@@ -3281,6 +3421,16 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
     if (result.new_stage && !VALID_STAGES.includes(result.new_stage)) {
       result.new_stage = null;
       result.stage_advance = false;
+    }
+
+    // Plan checklist correctness: cl.plan should only be true if tomorrow_commitment is actually captured
+    // Not set by theme/intention language — only by real extracted commitment
+    const planIsActuallyDone = !!(result.extracted_data?.tomorrow_commitment || session_state.tomorrow_commitment);
+    if (!planIsActuallyDone) {
+      result.checklist_updates.plan = false;
+      if (intentData?.checklist_content) {
+        intentData.checklist_content.plan = false;
+      }
     }
 
     // Merge classifier checklist detections
@@ -3750,25 +3900,40 @@ Only return a goal_id that exists in the list.`,
         try {
           const { data: goalData } = await supabase
             .from('goals')
-            .select('whys')
+            .select('whys, title')
             .eq('id', goalId)
             .eq('user_id', authenticatedUserId)
             .single();
 
           let currentWhys = Array.isArray(goalData?.whys) ? [...goalData.whys] : [];
 
-          if (action === 'replace' && typeof replaceIndex === 'number' && currentWhys[replaceIndex]) {
+          if (newWhy.source === 'commitment_planning') {
+            // Commitment-planning whys: always replace the single existing one, never accumulate
+            const existingIdx = currentWhys.findIndex(w => w.source === 'commitment_planning');
+            if (existingIdx >= 0) {
+              currentWhys[existingIdx] = newWhy;
+            } else {
+              currentWhys.push(newWhy);
+            }
+          } else if (action === 'replace' && typeof replaceIndex === 'number' && currentWhys[replaceIndex]) {
             currentWhys[replaceIndex] = newWhy;
           } else {
-            // add (or default if action is null/missing)
             currentWhys.push(newWhy);
           }
+
+          // Enforce retention policy
+          const commitmentWhys = currentWhys.filter(w => w.source === 'commitment_planning').slice(-MAX_COMMITMENT_WHYS);
+          const sessionWhys = currentWhys.filter(w => w.source !== 'commitment_planning').slice(-MAX_SESSION_WHYS);
+          currentWhys = [...commitmentWhys, ...sessionWhys].slice(-MAX_WHYS_TOTAL);
 
           await supabase
             .from('goals')
             .update({ whys: currentWhys, last_mentioned_at: clientToday })
             .eq('id', goalId)
             .eq('user_id', authenticatedUserId);
+
+          // Fire-and-forget why_summary synthesis
+          synthesizeGoalWhySummary(authenticatedUserId, goalId, goalData?.title || '').catch(() => {});
         } catch (_e) { /* fail silently */ }
       })();
     }
@@ -3801,6 +3966,30 @@ Only return a goal_id that exists in the list.`,
           const updated = [
             ...current.slice(-MAX_DEPTH_INSIGHTS_RETAINED), // keep last 4 max
             { date: clientToday, insight: result.extracted_data.goal_depth_insight },
+          ];
+          return supabase
+            .from('goals')
+            .update({ depth_insights: updated, last_mentioned_at: clientToday })
+            .eq('id', goalId)
+            .eq('user_id', authenticatedUserId);
+        })
+        .then(() => {}).catch(() => {});
+    }
+
+    // Progress feeling — append to goal's depth_insights as a tagged entry if meaningful
+    if (result.extracted_data?.progress_feeling && result.extracted_data?.goal_id_referenced) {
+      const goalId = result.extracted_data.goal_id_referenced;
+      supabase
+        .from('goals')
+        .select('depth_insights')
+        .eq('id', goalId)
+        .eq('user_id', authenticatedUserId)
+        .maybeSingle()
+        .then(({ data }) => {
+          const current = Array.isArray(data?.depth_insights) ? data.depth_insights : [];
+          const updated = [
+            ...current.slice(-MAX_DEPTH_INSIGHTS_RETAINED),
+            { date: clientToday, insight: result.extracted_data.progress_feeling, type: 'progress_feeling' },
           ];
           return supabase
             .from('goals')
