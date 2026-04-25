@@ -87,7 +87,7 @@ function parseArgs() {
   }
 
   // Validate scenario
-  const validScenarios = ['kept_streak', 'miss_streak', 'mixed', 'cold_start'];
+  const validScenarios = ['kept_streak', 'miss_streak', 'mixed', 'cold_start', 'bridge_kept_streak', 'bridge_miss_streak'];
   if (!validScenarios.includes(result.scenario)) {
     console.error(`❌  Invalid --scenario "${result.scenario}" — must be one of: ${validScenarios.join(', ')}`);
     process.exit(1);
@@ -739,6 +739,27 @@ function initCoverageAssertions() {
     make('day7_why_reconnect_fired',          'why_reconnect exercise fired at least once in the first 7 days'),
     make('day14_goals_populated',             'Day 14: goals with whys present, strengths and growth_areas populated'),
     make('day21_growth_and_grade',            'Day 21: ≥1 growth marker, narrative produced, trait grade not F'),
+    // ── New assertions — bridge directives ─────────────────────────────────────
+    make('commitment_goal_bridge_fired',      'commitment_goal_bridge directive fired at least once in the first 7 days'),
+    make('commitment_goal_why_depth_fired',   'commitment_goal_why_depth directive fired at least once in the first 7 days'),
+    make('commitment_goal_bridge_done_set',   'commitment_goal_bridge_done: true appears in session state by day 7'),
+    make('goal_why_commitment_planning_written', 'goal_why_insight with source:commitment_planning written to goals.whys by day 7'),
+    make('why_summary_synthesized',           'goals.why_summary populated for at least one goal by day 10'),
+    // ── New assertions — wins-goal callback ────────────────────────────────────
+    make('wins_goal_callback_fired',          'wins_goal_callback directive fired at least once in the first 14 days (requires goal_commitment_log rows with goal_id)'),
+    // ── New assertions — honest miss grounding ─────────────────────────────────
+    make('honest_commitment_miss_fired',      'honest_commitment_miss directive fired at least once in a session where checkin_outcome was missed or partial'),
+    // ── New assertions — progress feeling ─────────────────────────────────────
+    make('progress_feeling_extracted',        'progress_feeling extracted at least once in the first 14 days'),
+    make('progress_feeling_written_to_depth_insights', 'progress_feeling written to goals.depth_insights for at least one goal by day 14'),
+    // ── New assertions — plan checklist correctness ────────────────────────────
+    make('plan_checklist_gated_by_real_commitment', 'plan checklist flag never set true in a session without tomorrow_commitment in extracted_data'),
+    // ── New assertions — tomorrow routing correctness ──────────────────────────
+    make('tomorrow_complete_requires_bridge_done', 'session never advances tomorrow→complete without commitment_goal_bridge_done: true (no message counter bypass)'),
+    make('emergency_close_never_fired_in_normal_session', 'emergency close (messageCount >= 20) never fires in a normal well-functioning session'),
+    // ── New assertions — whys pruning ──────────────────────────────────────────
+    make('commitment_planning_whys_max_one',  'goals.whys never contains more than 1 entry with source:commitment_planning per goal'),
+    make('total_whys_max_five',               'goals.whys never exceeds 5 entries total for any goal'),
   ];
 }
 
@@ -838,8 +859,12 @@ async function runWhyBuildingTest({ personaKey, startDate, clean }) {
       day1_shallow_why_present: false,
       day3_why_reconnect_fired: false,
       day3_why_evolved: false,
+      day3_commitment_planning_why_written: false,
       day5_additive_why_detected: false,
+      day5_why_summary_populated: false,
+      day5_commitment_planning_whys_max_one: false,
       day7_specific_why_referenced: false,
+      day7_commitment_planning_whys_max_one: false,
     },
     summary: {
       total_why_evolution_events: 0,
@@ -1003,6 +1028,64 @@ async function runWhyBuildingTest({ personaKey, startDate, clean }) {
     dayRecord.exercises_run = sessionState.exercises_run;
     crossSessionState.yesterdayCommitment = sessionState.tomorrow_commitment ?? null;
 
+    // Check for commitment_goal_bridge_done after day 3
+    if (day === 3) {
+      try {
+        const { data: goalsDay3 } = await supabase
+          .from('goals')
+          .select('id, title, whys')
+          .eq('user_id', userId)
+          .eq('status', 'active');
+        const hasCommitmentPlanningWhy = (goalsDay3 || []).some((g) =>
+          Array.isArray(g.whys) && g.whys.some((w) => w.source === 'commitment_planning')
+        );
+        if (hasCommitmentPlanningWhy) {
+          whyBuildingReport.assertions.day3_commitment_planning_why_written = true;
+        }
+      } catch { /* non-fatal */ }
+    }
+
+    // Check why_summary and commitment_planning whys max 1 after day 5
+    if (day === 5) {
+      try {
+        const { data: goalsDay5 } = await supabase
+          .from('goals')
+          .select('id, title, whys, why_summary')
+          .eq('user_id', userId)
+          .eq('status', 'active');
+        const goals5 = goalsDay5 || [];
+        // why_summary: passes if at least one goal has it populated
+        if (goals5.some((g) => g.why_summary != null)) {
+          whyBuildingReport.assertions.day5_why_summary_populated = true;
+        }
+        // commitment_planning max 1: passes only if ALL goals satisfy the constraint
+        if (goals5.length > 0 && goals5.every((g) => {
+          const cWhys = (Array.isArray(g.whys) ? g.whys : []).filter((w) => w.source === 'commitment_planning');
+          return cWhys.length <= 1;
+        })) {
+          whyBuildingReport.assertions.day5_commitment_planning_whys_max_one = true;
+        }
+      } catch { /* non-fatal */ }
+    }
+
+    // Check commitment_planning whys still bounded at day 7
+    if (day === 7) {
+      try {
+        const { data: goalsDay7 } = await supabase
+          .from('goals')
+          .select('id, title, whys')
+          .eq('user_id', userId)
+          .eq('status', 'active');
+        const allBounded = (goalsDay7 || []).every((g) => {
+          const cWhys = (Array.isArray(g.whys) ? g.whys : []).filter((w) => w.source === 'commitment_planning');
+          return cWhys.length <= 1;
+        });
+        if (allBounded) {
+          whyBuildingReport.assertions.day7_commitment_planning_whys_max_one = true;
+        }
+      } catch { /* non-fatal */ }
+    }
+
     // Backend validation + why evolution detection
     const backendState = await validateBackend(supabase, userId, simulatedDate, crossSessionState.prevGoalWhysCounts);
 
@@ -1060,12 +1143,16 @@ async function runWhyBuildingTest({ personaKey, startDate, clean }) {
   // Print assertion results
   console.log('\n🔬  Why-Building Test Assertions:');
   const assertions = whyBuildingReport.assertions;
-  console.log(`    Day 1 — shallow why present:        ${assertions.day1_shallow_why_present ? '✅ PASS' : '⚠️  not yet (whys may not exist in DB yet)'}`);
-  console.log(`    Day 3 — why_reconnect exercise fired: ${assertions.day3_why_reconnect_fired ? '✅ PASS' : '❌ FAIL'}`);
-  console.log(`    Day 3 — why evolved (count changed): ${assertions.day3_why_evolved ? '✅ PASS' : '❌ FAIL'}`);
-  console.log(`    Day 5 — additive why detected:      ${assertions.day5_additive_why_detected ? '✅ PASS' : '❌ FAIL'}`);
-  console.log(`    Day 7 — coach used specific why:    ${assertions.day7_specific_why_referenced ? '✅ PASS' : '❌ FAIL'}`);
-  console.log(`    Total why evolution events:         ${whyBuildingReport.summary.total_why_evolution_events}`);
+  console.log(`    Day 1 — shallow why present:                   ${assertions.day1_shallow_why_present ? '✅ PASS' : '⚠️  not yet (whys may not exist in DB yet)'}`);
+  console.log(`    Day 3 — why_reconnect exercise fired:          ${assertions.day3_why_reconnect_fired ? '✅ PASS' : '❌ FAIL'}`);
+  console.log(`    Day 3 — why evolved (count changed):           ${assertions.day3_why_evolved ? '✅ PASS' : '❌ FAIL'}`);
+  console.log(`    Day 3 — commitment_planning why written:       ${assertions.day3_commitment_planning_why_written ? '✅ PASS' : '❌ FAIL (bridge may not have fired yet)'}`);
+  console.log(`    Day 5 — additive why detected:                 ${assertions.day5_additive_why_detected ? '✅ PASS' : '❌ FAIL'}`);
+  console.log(`    Day 5 — why_summary populated:                 ${assertions.day5_why_summary_populated ? '✅ PASS' : '❌ FAIL (may need synthesizeGoalWhySummary)'}`);
+  console.log(`    Day 5 — commitment_planning whys max 1:        ${assertions.day5_commitment_planning_whys_max_one ? '✅ PASS' : '❌ FAIL'}`);
+  console.log(`    Day 7 — coach used specific why:               ${assertions.day7_specific_why_referenced ? '✅ PASS' : '❌ FAIL'}`);
+  console.log(`    Day 7 — commitment_planning whys still max 1:  ${assertions.day7_commitment_planning_whys_max_one ? '✅ PASS' : '❌ FAIL'}`);
+  console.log(`    Total why evolution events:                    ${whyBuildingReport.summary.total_why_evolution_events}`);
 
   try {
     writeFileSync(WHY_BUILDING_REPORT_PATH, JSON.stringify(whyBuildingReport, null, 2), 'utf8');
@@ -1342,7 +1429,20 @@ async function runFullCoverageTest({ personaKey, startDate, clean }) {
     yesterdayCommitment: null,
     lastFollowedThrough: null,
     prevGoalWhysCounts: {},
+    goalIds: {}, // title → UUID, populated after --clean seeding
   };
+
+  // After clean: read back inserted goal IDs so goal_commitment_log assertions can verify goal_id
+  try {
+    const { data: seededGoals } = await supabase
+      .from('goals')
+      .select('id, title')
+      .eq('user_id', userId);
+    crossSessionState.goalIds = Object.fromEntries((seededGoals || []).map((g) => [g.title, g.id]));
+    if (Object.keys(crossSessionState.goalIds).length > 0) {
+      console.log(`    📌  Seeded goal IDs tracked: ${Object.keys(crossSessionState.goalIds).length} goal(s)\n`);
+    }
+  } catch { /* non-fatal */ }
 
   const traitPool = persona.hiddenTraitPool ?? [];
   const assignedTraits = drawTraits(traitPool, 2);
@@ -1420,9 +1520,19 @@ async function runFullCoverageTest({ personaKey, startDate, clean }) {
       consecutive_excuses: 0,
       is_complete: false,
       commitment_checkin_done: false,
+      commitment_goal_bridge_done: false,
     };
     const sessionContext = { sharedWins: null, sharedMisses: null, sharedTomorrow: null, sharedCheckin: null };
     const stageSequence = [sessionState.current_stage];
+
+    // Track new signals for this session
+    const firedDirectives = new Set();
+    let sessionBridgeDone = false;
+    let sessionProgressFeelingExtracted = false;
+    let sessionGoalWhyCommitmentPlanningWritten = false;
+    let sessionPlanSetWithoutCommitment = false;
+    let sessionCompletedWithoutBridgeDone = false;
+    let sessionCheckinOutcome = null; // 'kept' | 'missed' | 'partial' | null
 
     const sessionRecord = {
       day,
@@ -1437,6 +1547,10 @@ async function runFullCoverageTest({ personaKey, startDate, clean }) {
       stage_sequence: [],
       coach_referenced_specific_why: false,
       commitment_made: null,
+      directives_fired: [],
+      commitment_goal_bridge_done: false,
+      progress_feeling: null,
+      goal_why_committed: false,
       anomalies: [],
       conversation: [],
       backend_state: null,
@@ -1557,6 +1671,38 @@ async function runFullCoverageTest({ personaKey, startDate, clean }) {
       if (result.commitment_checkin_done === true) sessionState.commitment_checkin_done = true;
       if (result.is_session_complete) sessionState.is_complete = true;
 
+      // Track new signals
+      if (result.directive_queue) {
+        for (const d of result.directive_queue) {
+          if (d?.id) firedDirectives.add(d.id);
+        }
+      }
+      if (result.directive_completed) firedDirectives.add(result.directive_completed);
+      if (result.commitment_goal_bridge_done === true) {
+        sessionState.commitment_goal_bridge_done = true;
+        sessionBridgeDone = true;
+      }
+      if (result.extracted_data?.progress_feeling != null) {
+        sessionProgressFeelingExtracted = true;
+      }
+      if (result.extracted_data?.goal_commitment_why === true) {
+        sessionGoalWhyCommitmentPlanningWritten = true;
+      }
+      if (result.extracted_data?.checkin_outcome) {
+        sessionCheckinOutcome = result.extracted_data.checkin_outcome;
+      }
+      // Detect plan set without real commitment (plan gating check)
+      // sessionState.tomorrow_commitment is already updated above from result.extracted_data, so
+      // checking sessionState.tomorrow_commitment is sufficient to cover both current and prior turns
+      if (result.checklist_updates?.plan === true && !sessionState.tomorrow_commitment) {
+        sessionPlanSetWithoutCommitment = true;
+      }
+      // Detect completion without bridge done (tomorrow routing check)
+      // sessionBridgeDone already incorporates result.commitment_goal_bridge_done, so no need to check both
+      if (result.is_session_complete && sessionState.tomorrow_commitment && !sessionBridgeDone) {
+        sessionCompletedWithoutBridgeDone = true;
+      }
+
       // Track commitment_checkin stage appearances
       if (prevStage === 'commitment_checkin' || sessionState.current_stage === 'commitment_checkin') {
         sessionRecord.checkin_stage_fired = true;
@@ -1588,6 +1734,10 @@ async function runFullCoverageTest({ personaKey, startDate, clean }) {
     sessionRecord.checkin_stage_resolved = sessionState.commitment_checkin_done;
     sessionRecord.stage_sequence = [...stageSequence];
     sessionRecord.commitment_made = sessionState.tomorrow_commitment;
+    sessionRecord.directives_fired = [...firedDirectives];
+    sessionRecord.commitment_goal_bridge_done = sessionBridgeDone;
+    sessionRecord.progress_feeling = sessionProgressFeelingExtracted ? true : null;
+    sessionRecord.goal_why_committed = sessionGoalWhyCommitmentPlanningWritten;
 
     // ── Session-level assertions ─────────────────────────────────────────────
     if (sessionState.is_complete && turn < MAX_TURNS) {
@@ -1625,6 +1775,128 @@ async function runFullCoverageTest({ personaKey, startDate, clean }) {
 
     if (sessionState.is_complete) report.summary.sessions_completed++;
     else report.summary.sessions_incomplete++;
+
+    // ── New signal-based assertions ──────────────────────────────────────────
+    // Bridge directives (day 1–7)
+    if (day <= 7 && firedDirectives.has('commitment_goal_bridge')) {
+      passAssertion(assertions, 'commitment_goal_bridge_fired', day);
+    }
+    if (day <= 7 && firedDirectives.has('commitment_goal_why_depth')) {
+      passAssertion(assertions, 'commitment_goal_why_depth_fired', day);
+    }
+    if (day <= 7 && sessionBridgeDone) {
+      passAssertion(assertions, 'commitment_goal_bridge_done_set', day);
+    }
+    if (day <= 7 && sessionGoalWhyCommitmentPlanningWritten) {
+      passAssertion(assertions, 'goal_why_commitment_planning_written', day);
+    }
+
+    // Wins-goal callback (day 1–14)
+    if (day <= 14 && firedDirectives.has('wins_goal_callback')) {
+      passAssertion(assertions, 'wins_goal_callback_fired', day);
+    }
+
+    // Honest commitment miss (when checkin showed a miss)
+    if (firedDirectives.has('honest_commitment_miss') &&
+        (sessionCheckinOutcome === 'missed' || sessionCheckinOutcome === 'partial' || followedThroughToday === false)) {
+      passAssertion(assertions, 'honest_commitment_miss_fired', day);
+    }
+
+    // Progress feeling (day 1–14)
+    if (day <= 14 && sessionProgressFeelingExtracted) {
+      passAssertion(assertions, 'progress_feeling_extracted', day);
+    }
+
+    // Plan checklist gating: plan must not be set true without a real commitment
+    if (sessionPlanSetWithoutCommitment) {
+      const a = assertions.find((a) => a.id === 'plan_checklist_gated_by_real_commitment');
+      if (a && !a.notes) {
+        a.notes = `plan set true without tomorrow_commitment on day ${day}`;
+      }
+    } else {
+      passAssertion(assertions, 'plan_checklist_gated_by_real_commitment', day);
+    }
+
+    // Tomorrow routing: complete must not be reached without bridge_done when commitment was made
+    if (sessionCompletedWithoutBridgeDone) {
+      const a = assertions.find((a) => a.id === 'tomorrow_complete_requires_bridge_done');
+      if (a && !a.notes) {
+        a.notes = `reached complete without bridge_done on day ${day}`;
+      }
+    } else if (sessionState.is_complete && (!sessionState.tomorrow_commitment || sessionBridgeDone)) {
+      passAssertion(assertions, 'tomorrow_complete_requires_bridge_done', day);
+    }
+
+    // Emergency close check (turn count guard)
+    if (turn < 20) {
+      passAssertion(assertions, 'emergency_close_never_fired_in_normal_session', day);
+    } else {
+      const a = assertions.find((a) => a.id === 'emergency_close_never_fired_in_normal_session');
+      if (a && !a.notes) {
+        a.notes = `session reached ${turn} turns on day ${day}`;
+      }
+    }
+
+    // Whys pruning — verify after session
+    try {
+      const { data: goalsAfter } = await supabase
+        .from('goals')
+        .select('id, title, whys')
+        .eq('user_id', userId);
+      let whysPruningViolation = false;
+      for (const g of goalsAfter || []) {
+        const whysArr = Array.isArray(g.whys) ? g.whys : [];
+        const commitmentWhys = whysArr.filter((w) => w.source === 'commitment_planning');
+        if (commitmentWhys.length > 1) {
+          whysPruningViolation = true;
+          const a = assertions.find((a) => a.id === 'commitment_planning_whys_max_one');
+          if (a && !a.notes) {
+            a.notes = `Goal "${g.title}" has ${commitmentWhys.length} commitment_planning whys on day ${day}`;
+          }
+        }
+        if (whysArr.length > 5) {
+          whysPruningViolation = true;
+          const a = assertions.find((a) => a.id === 'total_whys_max_five');
+          if (a && !a.notes) {
+            a.notes = `Goal "${g.title}" has ${whysArr.length} total whys on day ${day}`;
+          }
+        }
+      }
+      if (!whysPruningViolation) {
+        passAssertion(assertions, 'commitment_planning_whys_max_one', day);
+        passAssertion(assertions, 'total_whys_max_five', day);
+      }
+    } catch { /* non-fatal */ }
+
+    // why_summary check (by day 10)
+    if (day >= 10) {
+      try {
+        const { data: goalsWithSummary } = await supabase
+          .from('goals')
+          .select('id, why_summary')
+          .eq('user_id', userId)
+          .not('why_summary', 'is', null);
+        if (goalsWithSummary && goalsWithSummary.length > 0) {
+          passAssertion(assertions, 'why_summary_synthesized', day, `${goalsWithSummary.length} goal(s) with why_summary`);
+        }
+      } catch { /* non-fatal */ }
+    }
+
+    // progress_feeling written to depth_insights (by day 14)
+    if (day >= 14 && sessionProgressFeelingExtracted) {
+      try {
+        const { data: goalsCheck } = await supabase
+          .from('goals')
+          .select('id, depth_insights')
+          .eq('user_id', userId);
+        const hasProgressInsight = (goalsCheck || []).some((g) =>
+          Array.isArray(g.depth_insights) && g.depth_insights.some((di) => di?.type === 'progress_feeling')
+        );
+        if (hasProgressInsight) {
+          passAssertion(assertions, 'progress_feeling_written_to_depth_insights', day);
+        }
+      } catch { /* non-fatal */ }
+    }
 
     // ── Update cross-session state ───────────────────────────────────────────
     crossSessionState.yesterdayCommitment = sessionState.tomorrow_commitment ?? null;
@@ -2115,6 +2387,7 @@ async function main() {
     yesterdayCommitment: null,
     lastFollowedThrough: null, // whether user followed through on the most recent commitment
     prevGoalWhysCounts: {}, // goalId → whys count from previous session
+    goalIds: {}, // title → UUID, populated after --clean seeding
   };
 
   // ── Graceful interrupt handler — write partial report ──
@@ -2145,6 +2418,18 @@ async function main() {
     // 3. Seed profile
     await seedUserProfile(supabase, userId, persona);
 
+    // 4. Read back inserted goal IDs for downstream goal_commitment_log tracking
+    try {
+      const { data: seededGoals } = await supabase
+        .from('goals')
+        .select('id, title')
+        .eq('user_id', userId);
+      crossSessionState.goalIds = Object.fromEntries((seededGoals || []).map((g) => [g.title, g.id]));
+      if (Object.keys(crossSessionState.goalIds).length > 0) {
+        console.log(`    📌  Seeded goal IDs tracked: ${Object.keys(crossSessionState.goalIds).length} goal(s)`);
+      }
+    } catch { /* non-fatal */ }
+
     console.log('✅  Clean complete. Starting fresh simulation.\n');
   }
 
@@ -2173,9 +2458,9 @@ async function main() {
     // Determine followedThrough for this day based on scenario
     let followedThroughToday = null;
     if (crossSessionState.yesterdayCommitment) {
-      if (scenario === 'kept_streak') {
+      if (scenario === 'kept_streak' || scenario === 'bridge_kept_streak') {
         followedThroughToday = true;
-      } else if (scenario === 'miss_streak') {
+      } else if (scenario === 'miss_streak' || scenario === 'bridge_miss_streak') {
         followedThroughToday = false;
       } else if (scenario === 'cold_start') {
         followedThroughToday = null;
