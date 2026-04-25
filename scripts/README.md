@@ -80,7 +80,7 @@ node --env-file=.env.simulation.local scripts/simulate-reflection.js \
 | `--start-date` | 30 days ago | Start date (YYYY-MM-DD) |
 | `--persona` | `ambitious_but_inconsistent` | Which persona to use |
 | `--clean` | `false` | **Recommended.** Wipes all previous sim data for `SIM_USER_ID` and resets the user profile to the persona definition before running. Without this, leftover patterns and profile data from prior runs will contaminate the coach's context. |
-| `--scenario` | `mixed` | Commitment follow-through arc. Options: `kept_streak`, `miss_streak`, `mixed`, `cold_start` (see below) |
+| `--scenario` | `mixed` | Commitment follow-through arc. Options: `kept_streak`, `miss_streak`, `mixed`, `cold_start`, `bridge_kept_streak`, `bridge_miss_streak` (see below) |
 | `--dry-run` | `false` | Run only 1 day, print the full conversation to stdout, and exit without writing the report JSON. Useful for fast sanity checks. |
 | `--report-path` | `scripts/simulation-report.json` | Custom output path for the report JSON |
 | `--test-why-building` | `false` | Runs a focused **7-day** simulation specifically testing why evolution (see below). |
@@ -96,6 +96,8 @@ node --env-file=.env.simulation.local scripts/simulate-reflection.js \
 | `miss_streak` | Biases every day toward missing commitments (`followedThrough: false`). Tests how the coach responds to repeated non-follow-through. |
 | `mixed` | Alternates realistically — after a kept commitment the user is more likely to miss the next, and vice versa. This is the default and most realistic arc. |
 | `cold_start` | Simulates a user who has never used the app before — no yesterday commitment, no streak. The `commitment_checkin` stage never fires. |
+| `bridge_kept_streak` | Like `kept_streak`, but persona events are biased toward goal-linked commitments that get kept. Designed to trigger `wins_goal_callback` regularly. Tests the bridge → wins feedback loop. |
+| `bridge_miss_streak` | Like `miss_streak`, but persona events are biased toward goal-linked commitments that get missed. Designed to trigger `honest_commitment_miss` frequently. Tests the accountability loop. |
 
 ### `--dry-run`
 
@@ -123,6 +125,8 @@ node --env-file=.env.simulation.local scripts/simulate-reflection.js \
 The reflection coach reads 7 Supabase tables before every response — including accumulated patterns, an AI-evolved user profile, and queued follow-up questions. If `SIM_USER_ID` has leftover data from a previous run, the coach starts Day 1 already "knowing" the user, which defeats the purpose of the simulation.
 
 Always use `--clean` when running a fresh test. A snapshot of your pre-run profile is saved to `report.meta.pre_run_profile_snapshot` so you can restore it if needed.
+
+**New `--clean` behavior (added in this update):** After seeding the persona's goals, `--clean` now reads back the inserted goal rows from the DB and stores their Supabase UUIDs in `crossSessionState.goalIds` (keyed by goal title). This enables `goal_commitment_log` assertions to verify that `goal_id` is correctly set when commitment fragments are logged.
 
 **Example:**
 ```bash
@@ -159,8 +163,12 @@ node --env-file=.env.simulation.local scripts/simulate-reflection.js \
 - Day 1 — shallow why present in DB
 - Day 3 — `why_reconnect` exercise fired
 - Day 3 — why evolved (count changed)
+- Day 3 — a `commitment_planning` why written to `goals.whys` (bridge fired and answer was captured)
 - Day 5 — additive why detected (goals has 2+ whys)
+- Day 5 — `why_summary` populated for at least one goal
+- Day 5 — `commitment_planning` whys still at most 1 per goal (pruning enforcement)
 - Day 7 — coach referenced a specific why text from the whys list
+- Day 7 — `commitment_planning` whys still bounded at max 1 after multiple sessions
 
 ---
 
@@ -227,7 +235,7 @@ Result: 30/38 assertions passed
 
 ### Assertions checked
 
-The run verifies **38 assertions** across 14 feature areas:
+The run verifies assertions across 14 feature areas (plus 14 new assertions added in this update):
 
 | Category | Assertions |
 |----------|------------|
@@ -245,6 +253,13 @@ The run verifies **38 assertions** across 14 feature areas:
 | **Week 1 (days 1–7)** | Patterns bounded (0–2 entries), why_reconnect fired |
 | **Week 2 (days 8–14)** | ≥1 repeating pattern, short_term_state populated, goals/strengths/growth_areas milestone |
 | **Week 3 (days 15–21)** | Coach references specific whys, growth marker + narrative + trait grade milestone |
+| **Bridge directives (new)** | `commitment_goal_bridge` fired by day 7, `commitment_goal_why_depth` fired by day 7, `commitment_goal_bridge_done: true` set by day 7, `goal_why_insight` with `source:commitment_planning` written by day 7, `why_summary` populated for ≥1 goal by day 10 |
+| **Wins-goal callback (new)** | `wins_goal_callback` directive fired at least once in the first 14 days |
+| **Honest miss grounding (new)** | `honest_commitment_miss` directive fired at least once in a session with a missed commitment |
+| **Progress feeling (new)** | `progress_feeling` extracted at least once by day 14, written to `goals.depth_insights` by day 14 |
+| **Plan checklist gating (new)** | `plan` checklist flag never set `true` without a real `tomorrow_commitment` in `extracted_data` |
+| **Tomorrow routing (new)** | `tomorrow → complete` never reached without `commitment_goal_bridge_done: true`; emergency close (≥20 turns) never fires in a normal session |
+| **Whys pruning (new)** | `goals.whys` never has >1 entry with `source:commitment_planning` per goal; `goals.whys` never exceeds 5 entries total for any goal |
 
 ### `full-coverage-report.json` structure
 
@@ -455,6 +470,10 @@ Copilot will look at the flag reasons, cross-reference with `api/reflection-coac
       "checkin_stage_fired": true,
       "checkin_stage_resolved": true,
       "stage_sequence": ["wins", "commitment_checkin", "honest", "tomorrow", "close"],
+      "directives_fired": ["commitment_goal_bridge", "commitment_goal_why_depth"],
+      "commitment_goal_bridge_done": true,
+      "progress_feeling": true,
+      "goal_why_committed": true,
       "anomalies": [],
       "goals_why_snapshot": [...],
       "conversation": [...]
@@ -471,6 +490,10 @@ Copilot will look at the flag reasons, cross-reference with `api/reflection-coac
 | `checkin_stage_fired` | `true` if `commitment_checkin` appeared in the stage sequence for this day |
 | `checkin_stage_resolved` | `true` if `commitment_checkin_done` became `true` by end of session |
 | `stage_sequence` | Array of stages visited in order, e.g. `["wins", "commitment_checkin", "honest", "tomorrow", "close"]` |
+| `directives_fired` | Array of directive IDs that fired this session (read from `directive_queue` and `directive_completed` responses) |
+| `commitment_goal_bridge_done` | `true` if `commitment_goal_bridge_done: true` appeared in the session response — means both bridge questions completed |
+| `progress_feeling` | `true` if `progress_feeling` was extracted from the user's response at any turn this session |
+| `goal_why_committed` | `true` if `goal_commitment_why: true` was set on any extracted_data response, meaning a `commitment_planning` source why was captured |
 | `anomalies` | Array of strings describing unexpected stage skips, e.g. `"commitment_checkin skipped despite yesterday commitment existing"` |
 
 ### `commitment_checkin_coverage` summary stat
@@ -529,8 +552,12 @@ When you run `--test-why-building`, a separate `scripts/why-building-report.json
     "day1_shallow_why_present": true,
     "day3_why_reconnect_fired": true,
     "day3_why_evolved": true,
+    "day3_commitment_planning_why_written": true,
     "day5_additive_why_detected": false,
-    "day7_specific_why_referenced": true
+    "day5_why_summary_populated": true,
+    "day5_commitment_planning_whys_max_one": true,
+    "day7_specific_why_referenced": true,
+    "day7_commitment_planning_whys_max_one": true
   },
   "why_evolution_history": [
     { "goal_id": "...", "goal_title": "...", "event": "added", "prev_count": 0, "new_count": 1, "date": "2026-03-16" }
@@ -572,6 +599,18 @@ CREATE INDEX IF NOT EXISTS reflection_sessions_user_date
 ```
 
 This is safe to run multiple times.
+
+### `goals.why_summary` column — required for bridge why synthesis
+
+The `commitment_goal_bridge` and `commitment_goal_why_depth` directives synthesize a `why_summary` from the goal's `whys[]` array. This requires a `why_summary` column on the `goals` table:
+
+```sql
+-- Add why_summary to goals (if not already present)
+ALTER TABLE goals
+  ADD COLUMN IF NOT EXISTS why_summary text DEFAULT null;
+```
+
+This is safe to run multiple times. Seeded personas now include `why_summary: null` in their goal objects, so the column will be populated by `synthesizeGoalWhySummary` when the bridge completes.
 
 ---
 

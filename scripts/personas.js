@@ -28,16 +28,19 @@ export const PERSONAS = {
         {
           title: 'Get Stackline to 20 paying customers by end of Q2',
           whys: [{ text: 'I want to prove I can build something real and stop talking about it', added_at: null, source: 'original', motivation_signal: null }],
+          why_summary: null,
           category: 'work',
         },
         {
           title: 'Restart a consistent gym habit — 3x per week',
           whys: [{ text: "I feel better when I move and I've let it slip for too long", added_at: null, source: 'original', motivation_signal: null }],
+          why_summary: null,
           category: 'fitness',
         },
         {
           title: 'Stop ghosting my friends — reach out to at least one person each week',
           whys: [{ text: "I've been so heads-down on Stackline that I'm losing touch with people who matter", added_at: null, source: 'original', motivation_signal: null }],
+          why_summary: null,
           category: 'relationships',
         },
       ],
@@ -77,6 +80,12 @@ export const PERSONAS = {
       "Ate lunch at my desk for the 7th day in a row — starting to feel the walls closing in",
       "Opened the analytics dashboard and the numbers are flatter than I expected — tried not to spiral",
       "Had a spontaneous brainstorm with Dom that actually produced two solid product ideas I want to explore",
+      // New events exercising commitment-goal bridge and related directives
+      "Committed to sending 5 cold emails tomorrow and when the coach asked why, realized it directly connects to the 20-customer goal — not just 'more work', but actually moving the number",
+      "Hit the gym for the second time this week — started to see the pattern: when I exercise, my focus on Stackline is sharper the next morning. Feels connected.",
+      "Missed the 3 cold email commitment today — had a call with Dom instead that felt productive but wasn't on the list",
+      "Got a Stackline beta user reply that made the goal feel real for the first time — told the coach it's finally starting to feel like it could actually work",
+      "Skipped gym again and committed to going tomorrow at 7am, but when asked why the gym connects to the Stackline goal, had to actually think about it — they're both about proving I can show up",
     ],
     tendencies: {
       wins: "Usually has 1-2 real wins but undersells them. Sometimes pivots to talking about what didn't work.",
@@ -86,6 +95,9 @@ export const PERSONAS = {
       follow_through_rate: 0.6,
       // Weighted probability for response modes: A=60%, B=25%, C=15%
       responseModeWeights: [0.60, 0.25, 0.15],
+      commitment_bridge: "Usually gives a vague connection at first — 'I guess it moves things forward'. Needs a follow-up to get specific. Sometimes surprises himself with a real answer.",
+      commitment_why_depth: "Goes to the proving-himself layer quickly once pushed. Often references the fear of not finishing or not being taken seriously.",
+      progress_feeling_tendency: "Usually says 'kind of' or 'I think so' — not fully committing to yes. Sometimes pivots to what's still not working instead of acknowledging momentum.",
     },
     // How ashamed Alex feels when missing a commitment (0-10): mid-range — a little embarrassed but not spiraling
     shameLevelOnMiss: 5,
@@ -136,16 +148,19 @@ export const PERSONAS = {
         {
           title: 'Get Fieldr to 50 beta users and quit the day job by December',
           whys: [{ text: "I've been saying I'll do this for 3 years — I need to know I can actually finish something", added_at: null, source: 'original', motivation_signal: null }],
+          why_summary: null,
           category: 'side project',
         },
         {
           title: 'Stop overworking on weekends — protect at least one full day off per week',
           whys: [{ text: "Chris is right that I'm burning out — I don't want to lose the relationship over this", added_at: null, source: 'original', motivation_signal: null }],
+          why_summary: null,
           category: 'health',
         },
         {
           title: 'Ship the onboarding email sequence for Fieldr',
           whys: [{ text: 'Beta users are dropping off and I know better onboarding would help — I just keep avoiding it', added_at: null, source: 'original', motivation_signal: null }],
+          why_summary: null,
           category: 'work',
         },
       ],
@@ -185,6 +200,12 @@ export const PERSONAS = {
       "Shipped a small UX improvement to Fieldr that nobody asked for but felt right — didn't tell anyone",
       "Went to bed without opening the laptop — first time in two weeks, felt strange",
       "Jordan realized the logging streak is about the streak now, not the reflection — logged that too",
+      // New events exercising commitment-goal bridge and related directives
+      "Shipped the contact import feature and when asked how it connects to the bigger goal, said 'it moves the needle on retention — beta users need this to stay' — felt surprisingly clear about it",
+      "Took a full Sunday off for the first time in a month — Chris noticed, said it felt different. Jordan logged it: rest day = goal progress for the health goal",
+      "Skipped the onboarding email sequence again — it was connected to the Fieldr goal but avoidance got in the way. Coach asked what that's really about.",
+      "Hit 25 beta users — exactly halfway to the goal. Felt like a real checkpoint, told the coach it's the first time the 50-user goal feels possible rather than abstract",
+      "Missed the user interview commitment — had the Fieldr goal in mind but the day job got in the way and it felt like the wrong tradeoff",
     ],
     tendencies: {
       wins: "Has consistent wins, reports them matter-of-factly. Not excited, just checking boxes.",
@@ -194,6 +215,9 @@ export const PERSONAS = {
       follow_through_rate: 0.85,
       // Weighted probability for response modes: A=70%, B=20%, C=10%
       responseModeWeights: [0.70, 0.20, 0.10],
+      commitment_bridge: "Gives a practical answer, not emotional. 'It moves the needle on X.' Very operational. Rarely names the emotional layer without being pushed.",
+      commitment_why_depth: "Goes to the proof-of-finishing layer when pressed. References the 3-year delay as the evidence that something is different now.",
+      progress_feeling_tendency: "Says yes but in a measured way — 'the numbers are moving'. Doesn't do emotion. Reports data. Needs to be pushed for what that actually means.",
     },
     // Jordan rarely feels shame about misses — treats them as data, not failures
     shameLevelOnMiss: 2,
@@ -244,16 +268,19 @@ export const PERSONAS = {
         {
           title: 'Land 3 retainer clients for Greyspace Studio and hit $6k/month by June',
           whys: [{ text: "I'm tired of working for people who don't care about craft — I want to do it on my own terms", added_at: null, source: 'original', motivation_signal: null }],
+          why_summary: null,
           category: 'business',
         },
         {
           title: 'Send proposals within 48 hours of discovery calls — stop overthinking them',
           whys: [{ text: "Lena is right — I lose clients by hesitating. Done is better than perfect.", added_at: null, source: 'original', motivation_signal: null }],
+          why_summary: null,
           category: 'creative work',
         },
         {
           title: 'Do a personal creative project for myself every month — not for clients',
           whys: [{ text: 'I got into design because I loved making things — I need to remember that outside of client work', added_at: null, source: 'original', motivation_signal: null }],
+          why_summary: null,
           category: 'personal growth',
         },
       ],
@@ -293,6 +320,12 @@ export const PERSONAS = {
       "Sat staring at the blank brief for an hour before finally starting — the work took 20 minutes once it began",
       "Had a genuine moment of pride looking at the Greyspace Studio portfolio — held it for about 3 minutes before the critical voice came back",
       "Lena said the portfolio is 'genuinely stunning' — Sam said thanks and immediately pointed out what was wrong with it",
+      // New events exercising commitment-goal bridge and related directives
+      "Committed to sending the Hana proposal tomorrow morning. When the coach asked how it connects to the studio goal, Sam went quiet then said: 'every proposal I send is evidence that I'm actually doing this, not just thinking about it'",
+      "Sent the proposal to Bren's startup — was messy and imperfect. When asked how that felt relative to the retainer goal, admitted it's the only way to close the gap between dreaming and earning",
+      "Missed the 48-hour proposal deadline again — had the goal in mind but perfectionism got in the way. Yusuf gently pointed it out.",
+      "Finished the personal project — a poster for nobody. When the coach reflected it back to the creative goal, Sam said 'yeah that's what it's about — proving I still make things for me'",
+      "Charged full rate for the second time — actually connected it to the $6k goal in real time without being asked",
     ],
     tendencies: {
       wins: "Goes deep on wins unprompted. Very reflective. Often connects wins to identity naturally.",
@@ -302,6 +335,9 @@ export const PERSONAS = {
       follow_through_rate: 0.5,
       // Weighted probability for response modes: A=30%, B=55%, C=15%
       responseModeWeights: [0.30, 0.55, 0.15],
+      commitment_bridge: "Goes deep immediately, often connects to identity. 'This isn't just a proposal — it's proof I'm actually doing the thing I said I wanted to do.'",
+      commitment_why_depth: "Goes to the craft-vs-compromise layer. References the exhaustion with client work that doesn't feel like theirs. Sometimes loops back to fear of finding out they're not as good as they think.",
+      progress_feeling_tendency: "Says it depends on the day, often undermines own progress. 'Sort of? I sent two proposals but I still don't have the retainer. I don't know.'",
     },
     // Sam has high shame about misses — the perfectionism makes every miss feel like evidence of inadequacy
     shameLevelOnMiss: 8,
@@ -348,6 +384,26 @@ export const PERSONAS = {
       identity_statement: "I'm someone who figures out how to make things work no matter what",
       life_areas: ['work', 'family', 'health', 'side project'],
       blockers: ['exhaustion', 'time_scarcity', 'guilt', 'fear_of_failure'],
+      goals: [
+        {
+          title: 'Grow Calmlog to $3k MRR in 12 months so I can leave my job',
+          whys: [{ text: "I can't keep doing this — I need to build a way out before I completely burn out", added_at: null, source: 'original', motivation_signal: null }],
+          why_summary: null,
+          category: 'side project',
+        },
+        {
+          title: 'Be present for Eli — not just physically there but actually engaged',
+          whys: [{ text: "I keep watching him grow up while I'm on my phone or half-asleep — that has to change", added_at: null, source: 'original', motivation_signal: null }],
+          why_summary: null,
+          category: 'family',
+        },
+        {
+          title: 'Establish one protected hour per week just for Calmlog — unmovable',
+          whys: [{ text: 'The only way this gets built is if I protect the time like a meeting I cannot cancel', added_at: null, source: 'original', motivation_signal: null }],
+          why_summary: null,
+          category: 'work',
+        },
+      ],
     },
     recurringBlockers: ['exhaustion', 'time_scarcity', 'guilt', 'fear_of_failure'],
     recurringStrengths: ['resilient_under_pressure', 'motivated_by_escape'],
@@ -384,6 +440,12 @@ export const PERSONAS = {
       "Manager pulled Maya into a 'critical escalation' that ran until 7pm — no Calmlog, no dinner, Devon handled everything",
       "Had a moment alone in the car — no podcast, no call — and just thought about what she actually wants",
       "Got Calmlog's first organic waitlist signup from someone she doesn't know — felt different from the ones from friends",
+      // New events exercising commitment-goal bridge and related directives
+      "Committed to 30 minutes of Calmlog work after Eli's bedtime — when asked how that connects to the bigger goal, said 'it's the only way out — every night I work on it is one step closer to not needing the job'",
+      "Actually sat with Eli for an hour without the phone — connected it to the presence goal. Felt guilty about work not getting done, then realized that was the point.",
+      "Missed the Calmlog hour this week — had it in the plan, Devon even helped with bedtime, but she fell asleep on the couch at 9. The $3k goal felt very far away.",
+      "Woke up at 5:30am, got 90 minutes in — told the coach 'I'm starting to think this is the only version of myself that's actually building toward getting out of this job'",
+      "Had a real conversation with Devon about Calmlog's progress — for the first time named it as the exit plan, not just a side project. Felt like something shifted.",
     ],
     tendencies: {
       wins: "Has real wins but usually frames them around how tired she is. Needs a push to claim credit.",
@@ -393,6 +455,9 @@ export const PERSONAS = {
       follow_through_rate: 0.55,
       // Weighted probability for response modes: A=45%, B=40%, C=15%
       responseModeWeights: [0.45, 0.40, 0.15],
+      commitment_bridge: "Honest about the connection but frames it through exhaustion. 'I guess it matters because if I don't work on it tonight, I won't work on it at all this week, and then I'm not actually building a way out.'",
+      commitment_why_depth: "Goes to the Eli layer or the 'becoming that person who never changed' fear. Emotional and specific when pushed. Sometimes tears up a bit.",
+      progress_feeling_tendency: "Says she doesn't know, it's hard to tell when she's this tired. Sometimes asks back: 'what counts as getting closer when you're moving this slowly?'",
     },
     // Maya feels significant shame about misses — she already feels like she's failing at everything
     shameLevelOnMiss: 7,
@@ -442,6 +507,26 @@ export const PERSONAS = {
       identity_statement: "I'm someone who is learning to build without burning",
       life_areas: ['health', 'work', 'relationships', 'creative work'],
       blockers: ['fear_of_burnout_repeat', 'undercommitting', 'avoidance'],
+      goals: [
+        {
+          title: 'Grow The Rebuild Report to 1,000 subscribers by end of year',
+          whys: [{ text: "If I can build something real while protecting my recovery, that proves I've actually changed", added_at: null, source: 'original', motivation_signal: null }],
+          why_summary: null,
+          category: 'creative work',
+        },
+        {
+          title: 'Protect the morning routine — walk, no phone for the first 30 minutes',
+          whys: [{ text: 'The burnout taught me that the morning is the only part of the day I can fully own — I need to defend it', added_at: null, source: 'original', motivation_signal: null }],
+          why_summary: null,
+          category: 'health',
+        },
+        {
+          title: 'Respond to meaningful subscriber replies within 48 hours',
+          whys: [{ text: 'Thomas and people like him are the whole reason I do this — if I go silent they feel abandoned in the same way I used to', added_at: null, source: 'original', motivation_signal: null }],
+          why_summary: null,
+          category: 'relationships',
+        },
+      ],
     },
     recurringBlockers: ['fear_of_burnout_repeat', 'undercommitting', 'avoidance', 'perfectionism'],
     recurringStrengths: ['strong_self_awareness', 'recovering_consistency'],
@@ -478,6 +563,12 @@ export const PERSONAS = {
       "Hit his weekly word count goal for the first time in a month — marked it in his journal without making a big deal of it",
       "Priya asked why Darius downplays every win — didn't have a great answer",
       "Cancelled plans to work on the newsletter — did two good hours, then felt guilty about the cancelled plans",
+      // New events exercising commitment-goal bridge and related directives
+      "Committed to writing 200 words of the next issue before bed. When asked how it ties to the 1,000-subscriber goal, said: 'each issue is a vote I cast for the newsletter being real. If I miss a week, I'm voting against it.'",
+      "Did the morning walk as planned — no phone. When the coach asked if it felt connected to the recovery goal, said 'more than I'd usually admit — it's the thing that tells me I'm not sliding back'",
+      "Missed the subscriber reply commitment — Thomas sent something real and Darius didn't respond for 4 days. Felt like a small betrayal of what the newsletter is for.",
+      "Hit 450 subscribers — told the coach 'more than I expected, actually. I'm not sure what I thought would happen but it's more than I deserve.' Coach sat with that one.",
+      "Sent the sponsor outreach email — hesitated for 20 minutes, then connected it to the 1,000 goal, which made it easier to hit send",
     ],
     tendencies: {
       wins: "Has real wins but immediately qualifies them. Needs the coach to hold them accountable for the full win.",
@@ -487,6 +578,9 @@ export const PERSONAS = {
       follow_through_rate: 0.7,
       // Weighted probability for response modes: A=45%, B=45%, C=10%
       responseModeWeights: [0.45, 0.45, 0.10],
+      commitment_bridge: "Thoughtful, measured, careful not to overclaim. 'I think it moves the newsletter forward in a real way, not just busy work. That matters because the whole point is doing this sustainably.'",
+      commitment_why_depth: "Goes to the burnout-must-mean-something layer. Very specific about the fear of collapsing again. Sometimes gets philosophical about what building vs proving means.",
+      progress_feeling_tendency: "Cautiously optimistic — 'more than I expected, actually'. But qualifies it heavily. Needs the coach to hold the ground when he starts minimizing.",
     },
     // Darius has moderate shame about misses — aware he's protecting himself, but honest about it
     shameLevelOnMiss: 4,

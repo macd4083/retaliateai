@@ -159,6 +159,52 @@ export async function generateUserResponse({
   const coachMsgLower = coachMessage.toLowerCase();
   const isWhyQuestion = whyKeywords.some((kw) => coachMsgLower.includes(kw.toLowerCase()));
 
+  // Detect bridge Q1: coach asking how commitment connects to goal/vision (tomorrow stage)
+  const bridgeQ1Keywords = [
+    'connect', 'tie to', 'ties to', 'longer-term', 'bigger picture',
+    'how does that connect', 'how does this connect', 'why is it important that you work on',
+    'why those specific', 'what are they connected to', 'what\'s the bigger thing',
+    'how do they connect', 'move toward', 'working toward',
+  ];
+  const isBridgeQ1 = currentStage === 'tomorrow' &&
+    bridgeQ1Keywords.some((kw) => coachMsgLower.includes(kw.toLowerCase()));
+
+  // Detect bridge Q2: coach pushing underneath the connection (why does the goal matter)
+  const bridgeQ2Keywords = [
+    'why does that matter', 'why does that goal', 'why does that actually matter',
+    'what\'s underneath even that', 'what would be lost', 'what\'s underneath it',
+    'why is that important', 'what would it mean', 'still the core of it',
+    'something shifted', 'does that still hold',
+  ];
+  const isBridgeQ2 = currentStage === 'tomorrow' &&
+    bridgeQ2Keywords.some((kw) => coachMsgLower.includes(kw.toLowerCase()));
+
+  // Detect progress feeling: coach asking about momentum/getting closer
+  const progressKeywords = [
+    'getting closer', 'making progress', 'feel like it\'s working',
+    'moving toward', 'feel like you\'re', 'do you feel like', 'making a dent',
+    'does it feel like', 'feel like this is working', 'feel any closer',
+  ];
+  const isProgressFeeling = progressKeywords.some((kw) => coachMsgLower.includes(kw.toLowerCase()));
+
+  // Detect wins-goal callback: coach connecting a win to a goal in wins stage
+  const winsGoalCallbackKeywords = [
+    'last night this was about', 'you said this was about', 'you committed to this because',
+    'you said that was connected to', 'tied to', 'you said it mattered because',
+    'the original why', 'what you said the goal was for',
+  ];
+  const isWinsGoalCallback = currentStage === 'wins' &&
+    winsGoalCallbackKeywords.some((kw) => coachMsgLower.includes(kw.toLowerCase()));
+
+  // Detect honest-miss grounding: coach referencing specific commitment + why in honest stage
+  const honestMissGroundingKeywords = [
+    'you said that was the floor', 'the floor you wouldn\'t fall below',
+    'you committed to', 'it was tied to', 'you said it mattered because',
+    'what actually happened', 'connected to your goal',
+  ];
+  const isHonestMissGrounding = currentStage === 'honest' &&
+    honestMissGroundingKeywords.some((kw) => coachMsgLower.includes(kw.toLowerCase()));
+
   // Build tiered why injection if coach is asking a why question and a whyPool is available
   let whyInjectionBlock = '';
   if (isWhyQuestion && whyPool) {
@@ -178,6 +224,80 @@ export async function generateUserResponse({
       whyInjectionBlock = `\nWHY-RESPONSE DIRECTION (the coach asked about motivation — use this as the core of your answer):
 "${chosenWhy}"
 Incorporate this naturally into your response. Don't just recite it verbatim — adapt it to sound like you're realizing or saying it in the moment. Keep it conversational and real.`;
+    }
+  }
+
+  // Build bridge Q1 injection: how commitment connects to goal/vision
+  let bridgeQ1Block = '';
+  if (isBridgeQ1 && persona.tendencies?.commitment_bridge) {
+    const day = typeof dayNumber === 'number' ? dayNumber : 1;
+    // On early days, use a shallower/vaguer answer; on later days, more specific
+    const isEarlySession = day <= 5;
+    const goals = persona.profile?.goals ?? [];
+    const goalName = goals.length > 0 ? goals[0].title : 'my main goal';
+    bridgeQ1Block = `\nBRIDGE Q1 DIRECTION (coach asked how your commitment connects to your goal/vision):
+${persona.tendencies.commitment_bridge}
+${isEarlySession ? 'It\'s early in the relationship — give a somewhat vague or surface-level connection. Don\'t fully open up yet.' : 'You\'ve built trust — give a more genuine, specific connection.'}
+Reference your goal by name if natural: "${goalName}".
+Don't be perfect. Sound like you're figuring it out as you say it. Keep it real and brief (2-3 sentences).`;
+  }
+
+  // Build bridge Q2 injection: why does that goal actually matter
+  let bridgeQ2Block = '';
+  if (isBridgeQ2 && whyPool) {
+    const day = typeof dayNumber === 'number' ? dayNumber : 1;
+    // Bridge Q2 should use deeper tier — this is the why-depth question
+    const tier = day <= 7 ? 'deeper' : (day <= 20 ? 'deeper' : 'additive');
+    const pool = whyPool[tier] ?? whyPool.deeper ?? whyPool.shallow ?? [];
+    if (pool.length > 0) {
+      const chosenWhy = pool[Math.floor(Math.random() * pool.length)];
+      bridgeQ2Block = `\nBRIDGE Q2 DIRECTION (coach is pushing underneath the connection — why does the goal actually matter):
+Use this as the core of your answer: "${chosenWhy}"
+${persona.tendencies?.commitment_why_depth ? `Your typical approach to this question: ${persona.tendencies.commitment_why_depth}` : ''}
+Adapt it naturally. Don't recite it. Sound like you're going somewhere real here.`;
+    } else if (persona.tendencies?.commitment_why_depth) {
+      bridgeQ2Block = `\nBRIDGE Q2 DIRECTION (coach asked why the goal actually matters):
+${persona.tendencies.commitment_why_depth}
+Go to the real layer here — not the surface reason.`;
+    }
+  }
+
+  // Build progress feeling injection
+  let progressFeelingBlock = '';
+  if (isProgressFeeling && persona.tendencies?.progress_feeling_tendency) {
+    const goals = persona.profile?.goals ?? [];
+    const goalName = goals.length > 0 ? goals[0].title : 'your main goal';
+    progressFeelingBlock = `\nPROGRESS FEELING DIRECTION (coach asked if you feel like you're getting closer):
+${persona.tendencies.progress_feeling_tendency}
+Reference the goal by name if natural: "${goalName}". Be honest about ambiguity — don't give a clean yes or no if that's not how this persona rolls.`;
+  }
+
+  // Build wins-goal callback injection
+  let winsGoalCallbackBlock = '';
+  if (isWinsGoalCallback) {
+    const openToDepth = typeof persona.openToDepthByDay === 'function'
+      ? persona.openToDepthByDay(typeof dayNumber === 'number' ? dayNumber : 1)
+      : 0.5;
+    const goesDeep = Math.random() < openToDepth;
+    winsGoalCallbackBlock = `\nWINS-GOAL CALLBACK DIRECTION (coach just connected your win to a goal or why you articulated before):
+${goesDeep
+      ? 'Engage genuinely with this reflection. Don\'t deflect. Let it land and respond with something real about what it means to you that you actually did it.'
+      : 'Acknowledge it but keep it brief — you\'re not quite ready to go deep on this yet. Maybe a "yeah, I guess that\'s true" type of response.'}`;
+  }
+
+  // Build honest-miss grounding injection
+  let honestMissGroundingBlock = '';
+  if (isHonestMissGrounding) {
+    const shameLevel = typeof persona.shameLevelOnMiss === 'number' ? persona.shameLevelOnMiss : 4;
+    if (shameLevel >= 7) {
+      honestMissGroundingBlock = `\nHONEST MISS GROUNDING DIRECTION (coach grounded the honest stage in a specific missed commitment + why):
+You feel real accountability here — this wasn't just missing a task, it was connected to something that matters. Be honest about what actually happened, but don't spiral into self-punishment. Short and real.`;
+    } else if (shameLevel >= 4) {
+      honestMissGroundingBlock = `\nHONEST MISS GROUNDING DIRECTION (coach grounded the honest stage in a specific missed commitment + why):
+Give an honest account of what got in the way. You're a bit embarrassed but not devastated. Own it briefly and don't make excuses.`;
+    } else {
+      honestMissGroundingBlock = `\nHONEST MISS GROUNDING DIRECTION (coach grounded the honest stage in a specific missed commitment + why):
+Matter-of-fact about the miss. Not a big deal to you emotionally. Just tell what happened.`;
     }
   }
 
@@ -292,6 +412,11 @@ BEHAVIORAL DIRECTION FOR THIS BEAT:
 ${behavioralFraming}
 ${checkinBlock}
 ${whyInjectionBlock}
+${bridgeQ1Block}
+${bridgeQ2Block}
+${progressFeelingBlock}
+${winsGoalCallbackBlock}
+${honestMissGroundingBlock}
 GENERAL RULES:
 - Sound like a real person TEXTING, not writing formally
 - Stay true to the persona's tendencies for this stage
