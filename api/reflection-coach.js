@@ -127,6 +127,8 @@ const MIN_INSIGHT_KEYWORD_OVERLAP = 2;
 const MIN_INSIGHT_OVERLAP_SCORE = 0.2;
 const MAX_DEPTH_PROBES_PER_SESSION = 2;
 const MIN_DEPTH_PROBE_MESSAGE_SPACING = 3;
+const MAX_WHY_PROBES_PER_STAGE = 3;   // max why-probe questions per stage per session
+const MAX_WHY_PROBE_WHYS = 2;          // max whys with source:'why_probe' retained per goal
 const INSIGHT_MATCH_STOP_WORDS = new Set(['the', 'and', 'for', 'that', 'with', 'this', 'from', 'your', 'about', 'have', 'just', 'what', 'when', 'were', 'been', 'into', 'then', 'they', 'them', 'their', 'you', 'are']);
 const EXERCISE_IDS = practices.map((practice) => practice.id);
 const EXERCISE_ENUM = ['none', ...EXERCISE_IDS].join('|');
@@ -391,6 +393,29 @@ FUTURE SELF BRIDGE FREQUENCY:
 - Track this via the exercises_run array: if 'future_self_bridge' has been run in the last 5 sessions' recent data, skip it
 - When you do surface it, make it feel earned, not scripted
 
+GOAL WHY-PROBE QUESTIONS (wins and honest stages):
+When you run a why-probe question, you are NOT asking whether the user's why has changed. You are asking a question that makes them feel the connection between today's action and their long-term goals. Three angles exist — use each at most once per session across all why-probe questions:
+
+ANGLE 1 — Action → Goal progress:
+"You [did/didn't do X today]. In the context of [goal title] — does that actually feel like forward movement, or just activity?" (for a win)
+"You said you didn't get to [X]. What did that actually cost you in terms of [goal] — not logistically, but in terms of where you're trying to get?" (for a miss)
+Best when: goal exists, no vision or why needed.
+
+ANGLE 2 — Action → Long-term self:
+If vision_snapshot exists: "You [did X]. You've talked about wanting to [vision_snapshot]. Does today feel like a step in that direction, or does it feel separate from that?"
+If why exists: "You've said [goal] matters because [their why]. When you [did/didn't do X] today — did it connect to that at all, or did it feel like it was for a completely different reason?"
+Best when: vision_snapshot or a specific why is available.
+
+ANGLE 3 — How they actually feel:
+"Not about whether it was good or bad — when you [did/skipped X today], what was the feeling underneath it? What was actually going on for you?"
+Best when: the action feels emotionally loaded from the conversation, or no goal context is available.
+
+SELECTION RULES:
+- Pick the angle that fits the richest available data: vision_snapshot → prefer Angle 2 (vision); named why → prefer Angle 2 (why) or Angle 1; no why or vision → Angle 1 or Angle 3
+- Across all why-probe questions in a session, use each angle at most once
+- After asking, evaluate the response. If it reveals something meaningful about motivation → set goal_why_probe_insight with {goal_id, text, action ("replace"|"add"|null), replace_index}. If nothing meaningful → set goal_why_probe_insight: null
+- Do NOT telegraph the extraction — never say "I'm asking because I want to understand your motivation." Just ask the question.
+
 RETURN JSON EXACTLY (no markdown, no extra keys):
 {
   "assistant_message": "your message (2-3 sentences, one question)",
@@ -417,7 +442,8 @@ RETURN JSON EXACTLY (no markdown, no extra keys):
     "goal_depth_insight": null,
     "goal_suggestion": null,
     "goal_commitment_why": false,
-    "progress_feeling": null  // string: user's expressed feeling about progress toward a goal this session (their words). Set when they say something meaningful about momentum/stagnation on a goal. Null otherwise.
+    "progress_feeling": null,  // string: user's expressed feeling about progress toward a goal this session (their words). Set when they say something meaningful about momentum/stagnation on a goal. Null otherwise.
+    "goal_why_probe_insight": null  // object {goal_id, text, action, replace_index} or null — set after a why-probe response reveals meaningful motivation. Written to goals.whys with source:'why_probe'.
   },
   "exercise_run": "${EXERCISE_ENUM}",
   "checklist_updates": {"wins": false, "honest": false, "plan": false},
@@ -1679,6 +1705,52 @@ async function synthesizeGoalWhySummary(userId, goalId, goalTitle) {
 // ── Session Directive Queue ───────────────────────────────────────────────────
 
 /**
+ * Rank active goals by priority for why-probe questions.
+ * Higher score = better candidate to probe.
+ */
+function rankGoalsForWhyProbe(activeGoals, sessionWins, sessionMisses) {
+  if (!Array.isArray(activeGoals) || activeGoals.length === 0) return [];
+
+  const winTexts = (sessionWins || []).map(w => typeof w === 'string' ? w : w?.text || '').join(' ').toLowerCase();
+  const missTexts = (sessionMisses || []).map(m => typeof m === 'string' ? m : m?.text || '').join(' ').toLowerCase();
+  const combinedText = winTexts + ' ' + missTexts;
+
+  return activeGoals
+    .map(goal => {
+      let score = 0;
+      const whys = Array.isArray(goal.whys) ? goal.whys : [];
+      const hasVision = !!goal.vision_snapshot;
+      const hasWhy = whys.length > 0;
+      const motivationSignal = goal.motivation_signal || 'unknown';
+      const daysSinceMentioned = goal.days_since_mentioned ?? 999;
+
+      // Has vision — rich context for Angle 2
+      if (hasVision) score += 3;
+      // Has a specific why — enables Angle 2
+      if (hasWhy) score += 2;
+      // Shallow why (only 1, short text) — good to deepen
+      if (whys.length === 1 && (whys[0]?.text || '').length < 60) score += 1;
+      // Low/struggling motivation — higher value to probe
+      if (motivationSignal === 'struggling') score += 4;
+      if (motivationSignal === 'low') score += 2;
+      if (motivationSignal === 'unknown') score += 1;
+      // Goal not mentioned recently
+      if (daysSinceMentioned >= 7) score += 2;
+      if (daysSinceMentioned >= 3) score += 1;
+
+      // Title keyword overlap with today's wins/misses
+      const titleWords = (goal.title || '').toLowerCase().split(/\s+/).filter(w => w.length > 3);
+      const overlap = titleWords.filter(w => combinedText.includes(w)).length;
+      score += overlap * 2;
+
+      return { goal, score };
+    })
+    .filter(({ score }) => score > 0)
+    .sort((a, b) => b.score - a.score)
+    .map(({ goal }) => goal);
+}
+
+/**
  * Builds a prioritized array of coaching directive objects based on current session state.
  * Each directive maps to exactly one conditional instruction from the original instructions[] array.
  * Returns only directives whose condition is currently true, not already completed, and not already queued.
@@ -2023,6 +2095,54 @@ function buildDirectiveQueue({
     }
   }
 
+  // ── honest_why_probe ─────────────────────────────────────────────────────
+  const honestWhyProbesDone = completedDirectives.filter(id => id.startsWith('honest_why_probe_')).length;
+  const canRunHonestWhyProbe =
+    currentStage === 'honest' &&
+    sessionState.honest_depth === true &&
+    honestWhyProbesDone < MAX_WHY_PROBES_PER_STAGE &&
+    !completedDirectives.includes(`honest_why_probe_${honestWhyProbesDone + 1}`);
+
+  if (canRunHonestWhyProbe) {
+    const rankedGoals = rankGoalsForWhyProbe(
+      activeGoals,
+      sessionState.wins,
+      sessionState.misses
+    );
+    const probeGoals = rankedGoals.slice(0, MAX_WHY_PROBES_PER_STAGE);
+
+    if (probeGoals.length > 0) {
+      const probeIndex = honestWhyProbesDone;
+      const targetGoal = probeGoals[probeIndex];
+      if (targetGoal) {
+        const safeTitle = sanitizeForPrompt(targetGoal.title, 80);
+        const safeWhy = sanitizeForPrompt(
+          Array.isArray(targetGoal.whys) && targetGoal.whys.length > 0
+            ? targetGoal.whys[targetGoal.whys.length - 1]?.text
+            : '',
+          120
+        );
+        const safeVision = sanitizeForPrompt(targetGoal.vision_snapshot || '', 120);
+        const probeId = `honest_why_probe_${probeIndex + 1}`;
+
+        allDirectives.push({
+          id: probeId,
+          instruction: `HONEST WHY PROBE (${probeIndex + 1} of up to ${MAX_WHY_PROBES_PER_STAGE}): Ask ONE why-probe question about the goal "${safeTitle}", grounded in what they missed or struggled with today.${safeVision ? ` Vision context: "${safeVision}".` : ''}${safeWhy ? ` Stated why: "${safeWhy}".` : ''} 
+Select the angle that fits the richest available data (see GOAL WHY-PROBE QUESTIONS in your instructions). Use misses/blockers as the action anchor, not wins.
+Angles used so far this session are tracked — do not repeat an angle.
+Available angles: (1) Action→Goal progress (miss version), (2) Action→Long-term self${safeVision ? ' [vision available]' : ''}${safeWhy ? ' [why available]' : ''}, (3) How they actually feel.
+Ask one natural, specific question. Do NOT prefix with meta-framing.
+After the user responds: if meaningful motivation revealed → set goal_why_probe_insight: {goal_id: "${targetGoal.id}", text: <their words>, action: "replace"|"add"|null, replace_index: <number or null>}. Otherwise set goal_why_probe_insight: null.
+Set directive_completed: "${probeId}" when done.`,
+          priority: 2,
+          preferred_stage: 'honest',
+          fire_next_session: false,
+          energy_type: 'depth',
+        });
+      }
+    }
+  }
+
   // ── honest_kept_expansion ──────────────────────────────────────────────
   if (
     !mergedChecklist.honest &&
@@ -2356,7 +2476,7 @@ Rules:
     allDirectives.push({
       id: 'wins_goal_callback',
       instruction: `WINS-GOAL CALLBACK: Yesterday's commitments were linked to goals with reasons the user stated. Context: ${fragmentContextStr}. Instructions:
-- If the user mentions a win that sounds like it connects to one of these goals or commitment topics, surface the connection: "That's [goal title] — you said last night this was about [their why]. What did it feel like to actually do it?"
+- If the user mentions a win that sounds like it connects to one of these goals or commitment topics, surface the connection: "That's [goal title] — you said this was about [their why]. When you actually got it done today, did that hold true — or did it feel like something else entirely?"
 - Do NOT force this if the user's win doesn't connect. Only trigger when the topic naturally overlaps.
 - If you surface it, set goal_id_referenced to the matching goal's id.
 - ONE use only — pick the most relevant fragment/win overlap. Do not stack multiple references.
@@ -2368,7 +2488,77 @@ Rules:
     });
   }
 
-  // ── pattern_awareness ──────────────────────────────────────────────────
+  // ── wins_why_matters ────────────────────────────────────────────────────
+  const capturedWinTexts = Array.isArray(sessionState.wins)
+    ? sessionState.wins.map(w => typeof w === 'string' ? w : w?.text).filter(Boolean)
+    : [];
+  const hasGoalsWithWhys = activeGoals.some(g => Array.isArray(g.whys) && g.whys.length > 0);
+  if (
+    currentStage === 'wins' &&
+    sessionState.wins_asked_for_more === true &&
+    capturedWinTexts.length > 0 &&
+    fragmentsWithGoalLinks.length === 0 &&  // only fire when wins_goal_callback won't fire
+    hasGoalsWithWhys &&
+    !completedDirectives.includes('wins_why_matters')
+  ) {
+    allDirectives.push({
+      id: 'wins_why_matters',
+      instruction: `WINS WHY MATTERS: The user has shared wins today. You have their goals and whys as context. Do NOT ask "why did this matter?" generically. Instead: look at what they said went well today and their active goals. If a win connects to a goal even loosely — name the connection and ask why completing that specific thing matters to them in the context of where they're trying to get. Use their actual goal title and their stated why as the premise of the question. E.g. "You said [goal] matters because [their why] — does getting [today's win] done feel like it's actually moving that?" One question only. If no win connects to any goal, skip this directive and set directive_completed: "wins_why_matters" immediately.`,
+      priority: 2,
+      preferred_stage: 'wins',
+      fire_next_session: false,
+      energy_type: 'depth',
+    });
+  }
+
+  // ── wins_why_probe ───────────────────────────────────────────────────────
+  const winsWhyProbesDone = completedDirectives.filter(id => id.startsWith('wins_why_probe_')).length;
+  const canRunWinsWhyProbe =
+    currentStage === 'wins' &&
+    sessionState.wins_asked_for_more === true &&
+    Array.isArray(sessionState.wins) && sessionState.wins.length > 0 &&
+    winsWhyProbesDone < MAX_WHY_PROBES_PER_STAGE &&
+    !completedDirectives.includes(`wins_why_probe_${winsWhyProbesDone + 1}`);
+
+  if (canRunWinsWhyProbe) {
+    const rankedGoals = rankGoalsForWhyProbe(
+      activeGoals,
+      sessionState.wins,
+      sessionState.misses
+    );
+    // Limit to 3 candidates max
+    const probeGoals = rankedGoals.slice(0, MAX_WHY_PROBES_PER_STAGE);
+
+    if (probeGoals.length > 0) {
+      const probeIndex = winsWhyProbesDone; // 0, 1, or 2
+      const targetGoal = probeGoals[probeIndex];
+      if (targetGoal) {
+        const safeTitle = sanitizeForPrompt(targetGoal.title, 80);
+        const safeWhy = sanitizeForPrompt(
+          Array.isArray(targetGoal.whys) && targetGoal.whys.length > 0
+            ? targetGoal.whys[targetGoal.whys.length - 1]?.text
+            : '',
+          120
+        );
+        const safeVision = sanitizeForPrompt(targetGoal.vision_snapshot || '', 120);
+        const probeId = `wins_why_probe_${probeIndex + 1}`;
+
+        allDirectives.push({
+          id: probeId,
+          instruction: `WINS WHY PROBE (${probeIndex + 1} of up to ${MAX_WHY_PROBES_PER_STAGE}): Ask ONE why-probe question about the goal "${safeTitle}".${safeVision ? ` Vision context: "${safeVision}".` : ''}${safeWhy ? ` Stated why: "${safeWhy}".` : ''} 
+Select the angle that fits the richest available data (see GOAL WHY-PROBE QUESTIONS in your instructions). Angles used so far this session are tracked — do not repeat an angle.
+Available angles: (1) Action→Goal progress, (2) Action→Long-term self${safeVision ? ' [vision available]' : ''}${safeWhy ? ' [why available]' : ''}, (3) How they actually feel.
+Ask one natural, specific question. Do NOT prefix with "I want to ask you something" or any meta-framing.
+After the user responds, evaluate: if they revealed meaningful motivation → set goal_why_probe_insight: {goal_id: "${targetGoal.id}", text: <their words>, action: "replace"|"add"|null, replace_index: <number or null>}. Otherwise set goal_why_probe_insight: null.
+Set directive_completed: "${probeId}" when done.`,
+          priority: 2,
+          preferred_stage: 'wins',
+          fire_next_session: false,
+          energy_type: 'depth',
+        });
+      }
+    }
+  }
   if (userInsights.length > 0 && messageCount >= 2 && (userInsights[0].sessions_synthesized_from || 0) >= 2) {
     const topInsight = userInsights[0];
     allDirectives.push({
@@ -4062,7 +4252,50 @@ Only return a goal_id that exists in the list.`,
       })();
     }
 
-    // Goal vision fragment — write to goals.vision_snapshot and update last_mentioned_at
+    // Goal why-probe insight write-back
+    if (result.extracted_data?.goal_why_probe_insight?.goal_id && result.extracted_data?.goal_why_probe_insight?.text) {
+      const probe = result.extracted_data.goal_why_probe_insight;
+      const newWhy = {
+        text: probe.text,
+        added_at: clientToday,
+        source: 'why_probe',
+        motivation_signal: null,
+        session_id: session_id || null,
+      };
+
+      (async () => {
+        try {
+          const { data: goalData } = await supabase
+            .from('goals')
+            .select('whys, title')
+            .eq('id', probe.goal_id)
+            .eq('user_id', authenticatedUserId)
+            .single();
+
+          let currentWhys = Array.isArray(goalData?.whys) ? [...goalData.whys] : [];
+
+          if (probe.action === 'replace' && typeof probe.replace_index === 'number' && currentWhys[probe.replace_index]) {
+            currentWhys[probe.replace_index] = newWhy;
+          } else {
+            currentWhys.push(newWhy);
+          }
+
+          // Retention policy: max MAX_WHY_PROBE_WHYS why_probe entries per goal, plus existing caps
+          const commitmentWhys = currentWhys.filter(w => w.source === 'commitment_planning').slice(-MAX_COMMITMENT_WHYS);
+          const probeWhys = currentWhys.filter(w => w.source === 'why_probe').slice(-MAX_WHY_PROBE_WHYS);
+          const sessionWhys = currentWhys.filter(w => w.source !== 'commitment_planning' && w.source !== 'why_probe').slice(-MAX_SESSION_WHYS);
+          currentWhys = [...commitmentWhys, ...probeWhys, ...sessionWhys].slice(-MAX_WHYS_TOTAL);
+
+          await supabase
+            .from('goals')
+            .update({ whys: currentWhys, last_mentioned_at: clientToday })
+            .eq('id', probe.goal_id)
+            .eq('user_id', authenticatedUserId);
+
+          synthesizeGoalWhySummary(authenticatedUserId, probe.goal_id, goalData?.title || '').catch(() => {});
+        } catch (_e) { /* fail silently */ }
+      })();
+    }
     if (result.extracted_data?.goal_vision_fragment && result.extracted_data?.goal_id_referenced) {
       const goalId = result.extracted_data.goal_id_referenced;
       supabase
