@@ -1958,13 +1958,24 @@ function buildDirectiveQueue({
     }
     const missedFragmentContext = (() => {
       if (!['missed', 'partial'].includes(sessionState?.checkin_outcome)) return '';
+
+      // Try enriched fragment first (has goal + why context)
       const linkedFragments = (enrichedYesterdayFragments || []).filter(f => f.goal_id && f.goal_why_context);
-      if (linkedFragments.length === 0) return '';
-      const top = linkedFragments[0];
-      const safeCommitment = sanitizeForPrompt(top.commitment_text, 120);
-      const safeGoalTitle = sanitizeForPrompt(top.goal_title, 80);
-      const safeWhy = sanitizeForPrompt(top.goal_why_context, 120);
-      return `\n\nFRAGMENT MISS CONTEXT: Yesterday they committed to "${safeCommitment}" as part of their goal "${safeGoalTitle}". They said this was about "${safeWhy}". They ${sessionState.checkin_outcome === 'missed' ? 'fully missed it' : 'partially completed it'}. Use this as the honest anchor — e.g. "You said working on [commitment] was about [why]. What got in the way of that?" This is your sharpest honest probe tool right now.`;
+      if (linkedFragments.length > 0) {
+        const top = linkedFragments[0];
+        const safeCommitment = sanitizeForPrompt(top.commitment_text, 120);
+        const safeGoalTitle = sanitizeForPrompt(top.goal_title, 80);
+        const safeWhy = sanitizeForPrompt(top.goal_why_context, 120);
+        return `\n\nCOMMITMENT MISS ANCHOR: Yesterday they committed to "${safeCommitment}" as part of their goal "${safeGoalTitle}". They said it was about "${safeWhy}". They ${sessionState.checkin_outcome === 'missed' ? 'fully missed it' : 'partially completed it'}. Open the honest stage by naming this directly: reference the specific commitment and what it was tied to. Then ask what got in the way — not generically, but specifically about this commitment.`;
+      }
+
+      // Fallback: plain commitment text with no goal context
+      const plainCommitment = sanitizeForPrompt(yesterdayCommitment, 120);
+      if (plainCommitment) {
+        return `\n\nCOMMITMENT MISS ANCHOR: Yesterday they committed to "${plainCommitment}" and ${sessionState.checkin_outcome === 'missed' ? 'fully missed it' : 'only partially completed it'}. Open the honest stage by naming this commitment specifically. Ask what got in the way of that — not a generic miss probe, but anchored to what they actually said they'd do.`;
+      }
+
+      return '';
     })();
     allDirectives.push({
       id: 'honest_missing',
@@ -1977,22 +1988,65 @@ function buildDirectiveQueue({
     });
   }
 
+  // ── honest_why_growth ──────────────────────────────────────────────────
+  if (
+    currentStage === 'honest' &&
+    hasMissInSession &&
+    !sessionState.honest_depth &&
+    !completedDirectives.includes('honest_why_growth')
+  ) {
+    const missText = typeof sessionState.misses?.[0] === 'string'
+      ? sanitizeForPrompt(sessionState.misses[0], 120)
+      : sanitizeForPrompt(sessionState.misses?.[0]?.text, 120);
+
+    const whyAlreadySurfaced = !!(
+      sessionState.depth_insight ||
+      sessionState.goal_why_insight ||
+      (Array.isArray(sessionState.misses) && sessionState.misses.some(m => {
+        const text = typeof m === 'string' ? m : m?.text || '';
+        return text.length > 80; // rough signal they went deep in their miss description
+      }))
+    );
+
+    if (!whyAlreadySurfaced) {
+      const missAnchor = missText
+        ? `They just named this as their miss or gap: "${missText}". `
+        : '';
+      allDirectives.push({
+        id: 'honest_why_growth',
+        instruction: `WHY GROWTH MATTERS: ${missAnchor}Now ask why getting better at this specific thing matters to them — not in a generic way, but tied to what they just said. E.g. "Why does getting better at [what they named] actually matter to you?" or "What would it mean for you if you stopped getting stuck on [this]?" One question only. Do NOT ask this if they've already explained why it matters to them in their previous message — evaluate whether their last message already contained a genuine answer about personal stakes. If it did, skip this and set honest_depth: true instead. If not, ask the question and wait for the answer before setting honest_depth: true.`,
+        priority: 2,
+        preferred_stage: 'honest',
+        fire_next_session: false,
+        energy_type: 'depth',
+      });
+    }
+  }
+
   // ── honest_kept_expansion ──────────────────────────────────────────────
   if (
     !mergedChecklist.honest &&
     mostlyKeptCheckin &&
-    messageCount >= 4 &&
     !completedDirectives.includes('honest_kept_expansion')
   ) {
     const keptFragmentContext = (() => {
-      if (sessionState?.checkin_outcome !== 'kept') return '';
-      const linkedFragments = (enrichedYesterdayFragments || []).filter(f => f.goal_id && f.goal_why_context);
-      if (linkedFragments.length === 0) return '';
-      const top = linkedFragments[0];
-      const safeCommitment = sanitizeForPrompt(top.commitment_text, 120);
-      const safeGoalTitle = sanitizeForPrompt(top.goal_title, 80);
-      const safeWhy = sanitizeForPrompt(top.goal_why_context, 120);
-      return `\n\nFRAGMENT WIN CONTEXT: They fully kept their commitment to "${safeCommitment}" (goal: "${safeGoalTitle}"). They said it was about "${safeWhy}". When you celebrate, connect it to the why: "You said this was about [why] — you actually showed up for that. What's that worth to you?" Use only if tone supports it.`;
+      // Try enriched fragment first
+      if (sessionState?.checkin_outcome === 'kept') {
+        const linkedFragments = (enrichedYesterdayFragments || []).filter(f => f.goal_id && f.goal_why_context);
+        if (linkedFragments.length > 0) {
+          const top = linkedFragments[0];
+          const safeCommitment = sanitizeForPrompt(top.commitment_text, 120);
+          const safeGoalTitle = sanitizeForPrompt(top.goal_title, 80);
+          const safeWhy = sanitizeForPrompt(top.goal_why_context, 120);
+          return `\n\nCOMMITMENT WIN ANCHOR: They fully kept their commitment to "${safeCommitment}" (goal: "${safeGoalTitle}"). They said it was about "${safeWhy}". When you celebrate, connect it to the why: "You said this was about [why] — you actually showed up for that. What's that worth to you?" Use only if tone supports it.`;
+        }
+        // Fallback: plain commitment text
+        const plainCommitment = sanitizeForPrompt(yesterdayCommitment, 120);
+        if (plainCommitment) {
+          return `\n\nCOMMITMENT WIN ANCHOR: They kept their commitment to "${plainCommitment}". Name it specifically when you celebrate — don't be generic.`;
+        }
+      }
+      return '';
     })();
     allDirectives.push({
       id: 'honest_kept_expansion',
@@ -2543,7 +2597,7 @@ function buildSessionContext({
   const mergedChecklist = { ...(sessionState.checklist || {}), ...(intentData?.checklist_content || {}) };
   const tomorrowFilled = !!sessionState.tomorrow_commitment;
   const hasMissInSession = Array.isArray(sessionState.misses) && sessionState.misses.length > 0;
-  const honestMissing = !mergedChecklist.honest && !hasMissInSession && messageCount >= 4;
+  const honestMissing = !mergedChecklist.honest && !hasMissInSession;
   const bridgeDone = sessionState.commitment_goal_bridge_done === true;
   const sessionReadyToClose = tomorrowFilled && !!sessionState.commitment_minimum && bridgeDone;
   const EMERGENCY_CLOSE_THRESHOLD = 20;
@@ -3160,7 +3214,7 @@ export default async function handler(req, res) {
     const mergedChecklist = { ...(session_state.checklist || {}), ...(intentData?.checklist_content || {}) };
     const tomorrowFilled = !!session_state.tomorrow_commitment;
     const hasMissInSession = Array.isArray(session_state.misses) && session_state.misses.length > 0;
-    const honestMissing = !mergedChecklist.honest && !hasMissInSession && messageCount >= 4;
+    const honestMissing = !mergedChecklist.honest && !hasMissInSession;
     const bridgeDone = session_state.commitment_goal_bridge_done === true;
     const sessionReadyToClose = tomorrowFilled && !!session_state.commitment_minimum && bridgeDone;
     const EMERGENCY_CLOSE_THRESHOLD = 20;
