@@ -2526,11 +2526,10 @@ Rules:
       sessionState.wins,
       sessionState.misses
     );
-    // Limit to 3 candidates max
     const probeGoals = rankedGoals.slice(0, MAX_WHY_PROBES_PER_STAGE);
 
     if (probeGoals.length > 0) {
-      const probeIndex = winsWhyProbesDone; // 0, 1, or 2
+      const probeIndex = winsWhyProbesDone; // 0 to MAX_WHY_PROBES_PER_STAGE-1
       const targetGoal = probeGoals[probeIndex];
       if (targetGoal) {
         const safeTitle = sanitizeForPrompt(targetGoal.title, 80);
