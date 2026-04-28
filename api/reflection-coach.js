@@ -1777,6 +1777,7 @@ function buildDirectiveQueue({
   const avgScore = avgCommitmentScoreContext ?? commitmentStats?.avgScore7 ?? null;
   const scoreTrajectory = scoreTrajectoryContext ?? commitmentStats?.scoreTrajectory ?? null;
   const mergedChecklist = { ...(sessionState.checklist || {}), ...(intentData?.checklist_content || {}) };
+  const hasMissInSession = Array.isArray(sessionState.misses) && sessionState.misses.length > 0;
   const parsedCommitmentScore = Number(sessionState?.commitment_score);
   const commitmentScore = Number.isFinite(parsedCommitmentScore) ? parsedCommitmentScore : null;
   // Priority: explicit kept outcome > score-based >=50 > partial fallback when score is unavailable.
