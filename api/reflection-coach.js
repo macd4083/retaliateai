@@ -705,8 +705,8 @@ function deriveStageHint(sessionState, classifierChecklist, completedDirectives 
   }
 
   // honest stage done — determine what comes next
-  // Advance if honest_depth fired OR if honest checklist is done and we've had enough messages (fallback)
-  const honestDepthSatisfied = sessionState.honest_depth === true || (cl.honest && messageCount >= 6);
+  // Advance only when honest_depth has been explicitly confirmed — no message-count fallback
+  const honestDepthSatisfied = sessionState.honest_depth === true;
   if (stage === 'honest' && cl.honest && honestDepthSatisfied) {
     // if wins is already completed (honest came after wins), advance to tomorrow
     if (cl.wins) return 'tomorrow';
@@ -2616,9 +2616,12 @@ Set directive_completed: "${probeId}" when done.`,
       || doneWithWinsPatterns.some((pattern) => pattern.test(lastUserText));
 
     const isWinsToHonest = sessionState.current_stage === 'wins' && suggestedNextStage === 'honest';
+    const isHonestToTomorrow = sessionState.current_stage === 'honest' && suggestedNextStage === 'tomorrow';
     const stageHintInstruction = (isWinsToHonest && userSignaledDone)
       ? 'STAGE HINT: You MUST set stage_advance:true, new_stage:"honest" on this response. Do not wait — the user has signaled they are done with wins. Transition with a soft pivot phrase (e.g. "Okay — I want to shift for a second.") and ask the honest question. Never announce the stage name.'
-      : `STAGE HINT: Ready to move to "${suggestedNextStage}". Transition naturally if conversation supports it — use a soft bridging phrase that signals the shift without announcing it. E.g. for wins→honest: "Okay — I want to shift for a second." For honest→tomorrow: "Alright, I've got a good picture of today. Let's talk about tomorrow." For tomorrow→complete: Do not announce a stage shift. Name the arc — what they committed to and the why behind it — in one sentence. Then set is_session_complete:true and deliver a warm specific closing message using their actual words. Never announce the stage name. Set stage_advance:true, new_stage:"${suggestedNextStage}".`;
+      : isHonestToTomorrow
+        ? `STAGE HINT: Ready to move to "tomorrow". Transition naturally if conversation supports it — use a soft bridging phrase that signals the shift without announcing it (e.g. "Alright, I've got a good picture of today. Let's talk about tomorrow."). For honest→tomorrow: Only transition if honest_depth has been confirmed for this session. Do NOT transition just because the user mentioned something they want to do differently — that belongs in honest. Wait for explicit stage_advance signal. Never announce the stage name. Set stage_advance:true, new_stage:"tomorrow".`
+        : `STAGE HINT: Ready to move to "${suggestedNextStage}". Transition naturally if conversation supports it — use a soft bridging phrase that signals the shift without announcing it. E.g. for wins→honest: "Okay — I want to shift for a second." For honest→tomorrow: "Alright, I've got a good picture of today. Let's talk about tomorrow." For tomorrow→complete: Do not announce a stage shift. Name the arc — what they committed to and the why behind it — in one sentence. Then set is_session_complete:true and deliver a warm specific closing message using their actual words. Never announce the stage name. Set stage_advance:true, new_stage:"${suggestedNextStage}".`;
 
     allDirectives.push({
       id: 'stage_hint',
