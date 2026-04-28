@@ -1094,8 +1094,16 @@ export default function AdminV2() {
               </label>
             </div>
             <label className="space-y-1 block">
-              <span className="text-xs text-zinc-400">Commitment <span className="text-zinc-600">(auto)</span></span>
-              <p className="text-zinc-500 text-xs italic px-2 py-1.5">Auto-assembled from Minimum + Stretch after save</p>
+              <span className="text-xs text-zinc-400">Commitment <span className="text-zinc-600">(read-only)</span></span>
+              <p className="bg-zinc-950 text-zinc-400 text-sm rounded-lg px-2 py-1.5 min-h-[2rem]">
+                {(() => {
+                  const assembledCommitment = [
+                    newSession.commitment_minimum && `Minimum: ${newSession.commitment_minimum}`,
+                    newSession.commitment_stretch && `Stretch: ${newSession.commitment_stretch}`,
+                  ].filter(Boolean).join(' | ') || null;
+                  return assembledCommitment || <span className="italic text-zinc-600">Fill in Minimum and/or Stretch above</span>;
+                })()}
+              </p>
             </label>
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="space-y-1">
@@ -1176,7 +1184,13 @@ export default function AdminV2() {
                     <label className="space-y-1 block">
                       <span className="text-xs text-zinc-400">Commitment <span className="text-zinc-600">(read-only)</span></span>
                       <p className="bg-zinc-950 text-zinc-400 text-sm rounded-lg px-2 py-1.5 min-h-[2rem]">
-                        {row.tomorrow_commitment || <span className="italic text-zinc-600">auto-assembled after save</span>}
+                        {(() => {
+                          const assembledCommitment = [
+                            rowEdits.commitment_minimum && `Minimum: ${rowEdits.commitment_minimum}`,
+                            rowEdits.commitment_stretch && `Stretch: ${rowEdits.commitment_stretch}`,
+                          ].filter(Boolean).join(' | ') || row.tomorrow_commitment || null;
+                          return assembledCommitment || <span className="italic text-zinc-600">Fill in Minimum and/or Stretch above</span>;
+                        })()}
                       </p>
                     </label>
 
