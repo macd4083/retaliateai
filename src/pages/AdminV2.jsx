@@ -9,6 +9,10 @@ import AdminToolsNav from '../components/admin/AdminToolsNav';
 
 const ADMIN_SECRET = import.meta.env.VITE_ADMIN_SECRET;
 
+const MAX_WHYS_TOTAL = 5;
+const MAX_SESSION_WHYS = 3;
+const MAX_COMMITMENT_WHYS = 1;
+
 async function adminFetch(body) {
   let accessToken = null;
   try {
@@ -361,6 +365,12 @@ export default function AdminV2() {
     is_complete: true,
   });
   const [insertingSession, setInsertingSession] = useState(false);
+  const [rowFragments, setRowFragments] = useState({});
+  const [activeGoals, setActiveGoals] = useState([]);
+  const [whyInputs, setWhyInputs] = useState({});
+  const [whySaving, setWhySaving] = useState({});
+  const [whySaved, setWhySaved] = useState({});
+  const [goalLinkSaved, setGoalLinkSaved] = useState({});
 
   // todayStr uses local time getters (not UTC) so the date matches the user's timezone.
   const todayStr = localDateStr();
@@ -397,6 +407,7 @@ export default function AdminV2() {
   useEffect(() => {
     if (isAdmin) {
       loadCommitmentRows();
+      loadActiveGoals();
     }
   }, [isAdmin]);
 
@@ -461,6 +472,22 @@ export default function AdminV2() {
         };
       }
       setCommitmentEdits(initialEdits);
+
+      const sessionIds = rows.map((r) => r.id).filter(Boolean);
+      if (sessionIds.length > 0) {
+        const { data: fragData } = await supabase
+          .from('goal_commitment_log')
+          .select('id, session_id, commitment_text, commitment_type, kept, goal_id, fragment_index')
+          .eq('user_id', user.id)
+          .in('session_id', sessionIds)
+          .order('fragment_index', { ascending: true });
+        const fragMap = {};
+        for (const frag of (fragData || [])) {
+          if (!fragMap[frag.session_id]) fragMap[frag.session_id] = [];
+          fragMap[frag.session_id].push(frag);
+        }
+        setRowFragments(fragMap);
+      }
     } catch (_e) {
       setCommitmentMsg('Failed to load sessions');
     }
@@ -499,6 +526,7 @@ export default function AdminV2() {
         commitmentMinimum: updates.commitment_minimum,
         commitmentStretch: updates.commitment_stretch,
       });
+      await loadFragmentsForSession(rowId);
       setCommitmentMsg(`✓ Saved row ${rowId.slice(0, 8)}…`);
       setCommitmentRows((rows) =>
         rows.map((r) => (r.id === rowId ? { ...r, ...updates } : r))
@@ -517,6 +545,118 @@ export default function AdminV2() {
     if (highlightedRowId === rowId) {
       setHighlightedRowId(null);
     }
+  }
+
+  async function loadActiveGoals() {
+    try {
+      const res = await adminFetch({
+        action: 'data',
+        user_id: user.id,
+        table: 'goals',
+      });
+      const json = await res.json();
+      setActiveGoals((json.data || []).filter((g) => g.status === 'active'));
+    } catch (_e) {
+      console.error('loadActiveGoals failed', _e);
+    }
+  }
+
+  async function loadFragmentsForSession(sessionId) {
+    try {
+      const { data } = await supabase
+        .from('goal_commitment_log')
+        .select('id, session_id, commitment_text, commitment_type, kept, goal_id, fragment_index')
+        .eq('user_id', user.id)
+        .eq('session_id', sessionId)
+        .order('fragment_index', { ascending: true });
+      setRowFragments((prev) => ({ ...prev, [sessionId]: data || [] }));
+    } catch (_e) {
+      console.error('loadFragmentsForSession failed', _e);
+    }
+  }
+
+  function getLatestWhyText(goal) {
+    if (!goal || !Array.isArray(goal.whys) || goal.whys.length === 0) return null;
+    return goal.whys[goal.whys.length - 1].text;
+  }
+
+  async function linkGoalToFragment(fragmentId, goalId, sessionId) {
+    const newGoalId = goalId || null;
+    setRowFragments((prev) => {
+      const frags = (prev[sessionId] || []).map((f) =>
+        f.id === fragmentId ? { ...f, goal_id: newGoalId } : f
+      );
+      return { ...prev, [sessionId]: frags };
+    });
+    try {
+      await adminFetch({
+        action: 'upsert',
+        user_id: user.id,
+        table: 'goal_commitment_log',
+        row_id: fragmentId,
+        updates: { goal_id: newGoalId },
+      });
+      setGoalLinkSaved((prev) => ({ ...prev, [fragmentId]: true }));
+      window.setTimeout(() => {
+        setGoalLinkSaved((prev) => ({ ...prev, [fragmentId]: false }));
+      }, 1500);
+      const goal = newGoalId ? activeGoals.find((g) => g.id === newGoalId) : null;
+      const latestWhy = getLatestWhyText(goal) || '';
+      setWhyInputs((prev) => ({ ...prev, [fragmentId]: latestWhy }));
+    } catch (_e) {
+      console.error('linkGoalToFragment failed', _e);
+    }
+  }
+
+  async function saveFragmentWhy(fragmentId, goalId, whyText) {
+    if (!goalId || !whyText.trim()) return;
+    setWhySaving((prev) => ({ ...prev, [fragmentId]: true }));
+    try {
+      const { data: goalData } = await supabase
+        .from('goals')
+        .select('whys')
+        .eq('id', goalId)
+        .eq('user_id', user.id)
+        .single();
+      const existingWhys = Array.isArray(goalData?.whys) ? [...goalData.whys] : [];
+      const todayDateStr = localDateStr();
+      const newEntry = { text: whyText.trim(), added_at: todayDateStr, source: 'admin', motivation_signal: null };
+      const latestText = existingWhys.length > 0 ? existingWhys[existingWhys.length - 1].text : null;
+      let updatedWhys;
+      if (latestText === whyText.trim()) {
+        updatedWhys = [...existingWhys.slice(0, -1), newEntry];
+      } else {
+        updatedWhys = [...existingWhys, newEntry];
+      }
+      const commitmentWhys = updatedWhys.filter((w) => w.source === 'commitment_planning').slice(-MAX_COMMITMENT_WHYS);
+      const otherWhys = updatedWhys.filter((w) => w.source !== 'commitment_planning').slice(-MAX_SESSION_WHYS);
+      updatedWhys = [...commitmentWhys, ...otherWhys].slice(-MAX_WHYS_TOTAL);
+      await adminFetch({
+        action: 'upsert',
+        user_id: user.id,
+        table: 'goals',
+        row_id: goalId,
+        updates: { whys: updatedWhys },
+      });
+      const { data: refreshed } = await supabase
+        .from('goals')
+        .select('whys')
+        .eq('id', goalId)
+        .eq('user_id', user.id)
+        .single();
+      if (refreshed) {
+        setActiveGoals((prev) =>
+          prev.map((g) => (g.id === goalId ? { ...g, whys: refreshed.whys } : g))
+        );
+      }
+      setWhySaved((prev) => ({ ...prev, [fragmentId]: true }));
+      window.setTimeout(() => {
+        setWhySaved((prev) => ({ ...prev, [fragmentId]: false }));
+      }, 1500);
+    } catch (_e) {
+      console.error('saveFragmentWhy failed', _e);
+    }
+    setWhySaving((prev) => ({ ...prev, [fragmentId]: false }));
   }
 
   async function syncCommitmentFragments({
@@ -1109,6 +1249,79 @@ export default function AdminV2() {
                         )}
                       </button>
                     </div>
+
+                    {/* Fragment list */}
+                    {(rowFragments[row.id] || []).length > 0 && (
+                      <div className="mt-1 pt-3 border-t border-zinc-800 space-y-3">
+                        {(rowFragments[row.id] || []).map((frag) => {
+                          const linkedGoal = frag.goal_id ? activeGoals.find((g) => g.id === frag.goal_id) : null;
+                          const latestWhy = getLatestWhyText(linkedGoal);
+                          const whyInput = whyInputs[frag.id] !== undefined ? whyInputs[frag.id] : (latestWhy || '');
+                          const keptLabel = frag.kept === true ? '✓ kept' : frag.kept === false ? '✗ missed' : '… pending';
+                          const keptClass = frag.kept === true ? 'text-green-400' : frag.kept === false ? 'text-red-400' : 'text-zinc-500';
+                          return (
+                            <div key={frag.id} className="bg-zinc-800/60 border border-zinc-700 rounded-lg p-3 space-y-2">
+                              <div className="flex items-start gap-2 flex-wrap">
+                                <span className="text-zinc-200 text-sm flex-1 min-w-0">{frag.commitment_text}</span>
+                                {frag.commitment_type && (
+                                  <span className={`text-xs px-1.5 py-0.5 rounded font-medium flex-shrink-0 ${
+                                    frag.commitment_type === 'minimum'
+                                      ? 'bg-blue-900/50 text-blue-300 border border-blue-800'
+                                      : 'bg-purple-900/50 text-purple-300 border border-purple-800'
+                                  }`}>
+                                    {frag.commitment_type}
+                                  </span>
+                                )}
+                                <span className={`text-xs flex-shrink-0 ${keptClass}`}>{keptLabel}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <select
+                                  value={frag.goal_id || ''}
+                                  onChange={(e) => linkGoalToFragment(frag.id, e.target.value || null, row.id)}
+                                  className="flex-1 bg-zinc-800 border border-zinc-700 text-zinc-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:border-red-500"
+                                >
+                                  <option value="">— Link a goal —</option>
+                                  {activeGoals.map((g) => (
+                                    <option key={g.id} value={g.id}>{g.title}</option>
+                                  ))}
+                                </select>
+                                {goalLinkSaved[frag.id] && (
+                                  <span className="text-green-400 text-xs flex-shrink-0">✓</span>
+                                )}
+                              </div>
+                              {frag.goal_id && (
+                                <div className="space-y-1.5">
+                                  {latestWhy && (
+                                    <p className="text-xs text-zinc-500 italic">Current why: &ldquo;{latestWhy}&rdquo;</p>
+                                  )}
+                                  <div className="flex items-center gap-2">
+                                    <input
+                                      type="text"
+                                      placeholder="Add / update why"
+                                      value={whyInput}
+                                      onChange={(e) =>
+                                        setWhyInputs((prev) => ({ ...prev, [frag.id]: e.target.value }))
+                                      }
+                                      className="flex-1 bg-zinc-800 border border-zinc-700 text-zinc-200 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:border-red-500 placeholder-zinc-600"
+                                    />
+                                    <button
+                                      onClick={() => saveFragmentWhy(frag.id, frag.goal_id, whyInput)}
+                                      disabled={!!whySaving[frag.id] || !whyInput.trim()}
+                                      className="bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs px-2 py-1.5 rounded-lg transition-colors flex-shrink-0"
+                                    >
+                                      {whySaving[frag.id] ? '…' : 'Save Why'}
+                                    </button>
+                                    {whySaved[frag.id] && (
+                                      <span className="text-green-400 text-xs flex-shrink-0">✓</span>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 );
               })}
