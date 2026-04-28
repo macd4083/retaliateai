@@ -358,7 +358,6 @@ export default function AdminV2() {
   const [highlightedRowId, setHighlightedRowId] = useState(null);
   const [newSession, setNewSession] = useState({
     date: '',
-    tomorrow_commitment: '',
     commitment_minimum: '',
     commitment_stretch: '',
     commitment_score: '',
@@ -463,7 +462,6 @@ export default function AdminV2() {
       const initialEdits = {};
       for (const row of rows) {
         initialEdits[row.id] = {
-          tomorrow_commitment: row.tomorrow_commitment || '',
           commitment_minimum: row.commitment_minimum || '',
           commitment_stretch: row.commitment_stretch || '',
           commitment_score: row.commitment_score ?? '',
@@ -502,7 +500,6 @@ export default function AdminV2() {
     try {
       const originalRow = commitmentRows.find((row) => row.id === rowId) || null;
       const updates = {
-        tomorrow_commitment: edits.tomorrow_commitment || null,
         commitment_minimum: edits.commitment_minimum || null,
         commitment_stretch: edits.commitment_stretch || null,
         commitment_score: edits.commitment_score !== '' ? Number(edits.commitment_score) : null,
@@ -522,7 +519,6 @@ export default function AdminV2() {
         sessionId: rowId,
         sessionDate: updates.date,
         previousSessionDate: originalRow?.date || null,
-        tomorrowCommitment: updates.tomorrow_commitment,
         commitmentMinimum: updates.commitment_minimum,
         commitmentStretch: updates.commitment_stretch,
       });
@@ -795,7 +791,6 @@ export default function AdminV2() {
     try {
       const row = {
         date: newSession.date,
-        tomorrow_commitment: newSession.tomorrow_commitment || null,
         commitment_minimum: newSession.commitment_minimum || null,
         commitment_stretch: newSession.commitment_stretch || null,
         commitment_score: parsedScore,
@@ -830,7 +825,6 @@ export default function AdminV2() {
         await syncCommitmentFragments({
           sessionId: insertedRow.id,
           sessionDate: row.date,
-          tomorrowCommitment: row.tomorrow_commitment,
           commitmentMinimum: row.commitment_minimum,
           commitmentStretch: row.commitment_stretch,
         });
@@ -838,7 +832,6 @@ export default function AdminV2() {
       setCommitmentMsg('✓ Session inserted');
       setNewSession({
         date: '',
-        tomorrow_commitment: '',
         commitment_minimum: '',
         commitment_stretch: '',
         commitment_score: '',
@@ -1101,13 +1094,8 @@ export default function AdminV2() {
               </label>
             </div>
             <label className="space-y-1 block">
-              <span className="text-xs text-zinc-400">Commitment</span>
-              <input
-                type="text"
-                value={newSession.tomorrow_commitment}
-                onChange={(e) => setNewSession((s) => ({ ...s, tomorrow_commitment: e.target.value }))}
-                className="bg-zinc-800 border border-zinc-700 text-white text-sm rounded-lg px-2 py-1.5 w-full focus:outline-none focus:border-red-500"
-              />
+              <span className="text-xs text-zinc-400">Commitment <span className="text-zinc-600">(auto)</span></span>
+              <p className="text-zinc-500 text-xs italic px-2 py-1.5">Auto-assembled from Minimum + Stretch after save</p>
             </label>
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="space-y-1">
@@ -1186,15 +1174,10 @@ export default function AdminV2() {
                     </div>
 
                     <label className="space-y-1 block">
-                      <span className="text-xs text-zinc-400">Commitment</span>
-                      <input
-                        type="text"
-                        value={rowEdits.tomorrow_commitment || ''}
-                        onChange={(e) => {
-                          updateCommitmentEdit(row.id, 'tomorrow_commitment', e.target.value);
-                        }}
-                        className="bg-zinc-800 border border-zinc-700 text-white text-sm rounded-lg px-2 py-1.5 w-full focus:outline-none focus:border-red-500"
-                      />
+                      <span className="text-xs text-zinc-400">Commitment <span className="text-zinc-600">(read-only)</span></span>
+                      <p className="bg-zinc-950 text-zinc-400 text-sm rounded-lg px-2 py-1.5 min-h-[2rem]">
+                        {row.tomorrow_commitment || <span className="italic text-zinc-600">auto-assembled after save</span>}
+                      </p>
                     </label>
 
                     <div className="grid gap-3 sm:grid-cols-2">
