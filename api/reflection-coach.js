@@ -993,7 +993,7 @@ async function loadYesterdayFragments(userId, clientToday) {
     return (data || []).map((fragment) => {
       const type = (fragment.commitment_type === 'minimum' || fragment.commitment_type === 'stretch')
         ? fragment.commitment_type
-        : (fragment.fragment_index === 0 ? 'minimum' : (fragment.fragment_index === 1 ? 'stretch' : null));
+        : null;
       return { ...fragment, type };
     });
   } catch (_e) { return []; }
