@@ -295,11 +295,9 @@ export default function ReflectionV2() {
   const [userProfile, setUserProfile] = useState(null);
   const [sessionState, setSessionState] = useState({
     current_stage: 'commitment_checkin',
-    mood_end_of_day: null,
     steps_completed: [],
     wins: [],
     misses: [],
-    blocker_tags: [],
     tomorrow_commitment: null,
     commitment_minimum: null,
     commitment_stretch: null,
@@ -414,7 +412,7 @@ export default function ReflectionV2() {
       try {
         const { data: profile } = await supabase
           .from('user_profiles')
-          .select('display_name, full_name, identity_statement, big_goal, why, future_self, life_areas, blockers')
+          .select('display_name, full_name, identity_statement, life_areas')
           .eq('id', user.id)
           .maybeSingle();
         setUserProfile(profile);
@@ -441,11 +439,9 @@ export default function ReflectionV2() {
 
       const restoredState = {
         current_stage: session.current_stage || 'commitment_checkin',
-        mood_end_of_day: session.mood_end_of_day || null,
         steps_completed: [],
         wins: session.wins || [],
         misses: session.misses || [],
-        blocker_tags: session.blocker_tags || [],
         tomorrow_commitment: session.tomorrow_commitment || null,
         commitment_minimum: session.commitment_minimum || null,
         commitment_stretch: session.commitment_stretch || null,
@@ -673,7 +669,7 @@ export default function ReflectionV2() {
         try {
           const { data } = await supabase
             .from('user_profiles')
-            .select('display_name, full_name, identity_statement, big_goal, why, future_self, life_areas, blockers')
+            .select('display_name, full_name, identity_statement, life_areas')
             .eq('id', user.id)
             .maybeSingle();
           profile = data;
@@ -718,11 +714,7 @@ export default function ReflectionV2() {
               time_of_day: timeContext.greeting,
               yesterday_commitment: yesterdayCommitment,
               identity_statement: profile?.identity_statement || null,
-              big_goal: profile?.big_goal || null,
-              why: profile?.why || null,
-              future_self: profile?.future_self || null,
               life_areas: profile?.life_areas || [],
-              blockers: profile?.blockers || [],
               display_name: profile?.display_name || profile?.full_name || null,
               client_local_date: localDateStr(),
               client_tz_offset: (isAdmin && timeOverride === 'afternoon')
@@ -820,13 +812,10 @@ export default function ReflectionV2() {
 
       if (data.extracted_data || data.stage_advance || data.checklist_updates || data.consecutive_excuses !== undefined || data.wins_asked_for_more || data.honest_depth || data.commitment_checkin_done || shouldShowChecklist) {
         const newState = { ...state };
-        if (data.extracted_data?.mood) newState.mood_end_of_day = data.extracted_data.mood;
         if (data.extracted_data?.win_text)
           newState.wins = [...(newState.wins || []), { text: data.extracted_data.win_text }];
         if (data.extracted_data?.miss_text)
           newState.misses = [...(newState.misses || []), { text: data.extracted_data.miss_text }];
-        if (data.extracted_data?.blocker_tags)
-          newState.blocker_tags = [...new Set([...(newState.blocker_tags || []), ...data.extracted_data.blocker_tags])];
         if (data.extracted_data?.tomorrow_commitment)
           newState.tomorrow_commitment = data.extracted_data.tomorrow_commitment;
         if (data.extracted_data?.commitment_minimum)
@@ -913,7 +902,6 @@ export default function ReflectionV2() {
         setSessionState(newState);
 
         const dbUpdates = {};
-        if (data.extracted_data?.mood) dbUpdates.mood_end_of_day = data.extracted_data.mood;
         if (data.extracted_data?.tomorrow_commitment) {
           if (resolvedMinimumCommitment && resolvedStretchCommitment) {
             dbUpdates.tomorrow_commitment = data.extracted_data.tomorrow_commitment;
@@ -1049,11 +1037,9 @@ export default function ReflectionV2() {
         commitmentStatsCacheRef.current = null;
         setSessionState({
           current_stage: 'commitment_checkin',
-          mood_end_of_day: null,
           steps_completed: [],
           wins: [],
           misses: [],
-          blocker_tags: [],
           tomorrow_commitment: null,
           commitment_minimum: null,
           commitment_stretch: null,

@@ -74,7 +74,7 @@ export default function SettingsV2() {
     const { data } = await supabase
       .from('user_profiles')
       .select(
-        'display_name, full_name, identity_statement, big_goal, why, future_self, life_areas, preferred_reflection_time, timezone, profile_updated_at, short_term_state'
+        'display_name, full_name, identity_statement, life_areas, preferred_reflection_time, timezone, profile_updated_at'
       )
       .eq('id', user.id)
       .maybeSingle();
@@ -334,118 +334,9 @@ export default function SettingsV2() {
                   <p className="text-zinc-200 text-sm italic">{profile?.identity_statement ? `"${profile.identity_statement}"` : <span className="text-zinc-600">Not set yet.</span>}</p>
                 )}
               </div>
-
-              {/* Big Goal */}
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <p className="text-zinc-500 text-xs">Big Goal</p>
-                  {editingIdentity !== 'big_goal' && (
-                    <button
-                      onClick={() => { setEditingIdentity('big_goal'); setIdentityEditValue(profile?.big_goal || ''); }}
-                      className="text-zinc-500 hover:text-white text-xs transition-colors"
-                    >
-                      Edit
-                    </button>
-                  )}
-                </div>
-                {editingIdentity === 'big_goal' ? (
-                  <div className="space-y-2">
-                    <textarea
-                      value={identityEditValue}
-                      onChange={(e) => setIdentityEditValue(e.target.value)}
-                      autoFocus
-                      rows={2}
-                      className="w-full bg-zinc-800 border border-zinc-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-red-600 resize-none"
-                    />
-                    <div className="flex gap-2">
-                      <button onClick={() => handleSaveIdentityField('big_goal')} disabled={identitySaving} className="px-3 py-1.5 bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white text-xs rounded-lg transition-colors">{identitySaving ? '...' : 'Save'}</button>
-                      <button onClick={() => setEditingIdentity(null)} className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 text-xs rounded-lg transition-colors">Cancel</button>
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-zinc-200 text-sm">{profile?.big_goal || <span className="text-zinc-600">Not set yet.</span>}</p>
-                )}
-              </div>
-
-              {/* Deep Why */}
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <p className="text-zinc-500 text-xs">Deep Why</p>
-                  {editingIdentity !== 'why' && (
-                    <button
-                      onClick={() => { setEditingIdentity('why'); setIdentityEditValue(profile?.why || ''); }}
-                      className="text-zinc-500 hover:text-white text-xs transition-colors"
-                    >
-                      Edit
-                    </button>
-                  )}
-                </div>
-                {editingIdentity === 'why' ? (
-                  <div className="space-y-2">
-                    <textarea
-                      value={identityEditValue}
-                      onChange={(e) => setIdentityEditValue(e.target.value)}
-                      autoFocus
-                      rows={2}
-                      className="w-full bg-zinc-800 border border-zinc-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-red-600 resize-none"
-                    />
-                    <div className="flex gap-2">
-                      <button onClick={() => handleSaveIdentityField('why')} disabled={identitySaving} className="px-3 py-1.5 bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white text-xs rounded-lg transition-colors">{identitySaving ? '...' : 'Save'}</button>
-                      <button onClick={() => setEditingIdentity(null)} className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 text-xs rounded-lg transition-colors">Cancel</button>
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-zinc-200 text-sm">{profile?.why || <span className="text-zinc-600">Not set yet.</span>}</p>
-                )}
-              </div>
-
-              {/* Future Self */}
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <p className="text-zinc-500 text-xs">Future Self</p>
-                  {editingIdentity !== 'future_self' && (
-                    <button
-                      onClick={() => { setEditingIdentity('future_self'); setIdentityEditValue(profile?.future_self || ''); }}
-                      className="text-zinc-500 hover:text-white text-xs transition-colors"
-                    >
-                      Edit
-                    </button>
-                  )}
-                </div>
-                {editingIdentity === 'future_self' ? (
-                  <div className="space-y-2">
-                    <textarea
-                      value={identityEditValue}
-                      onChange={(e) => setIdentityEditValue(e.target.value)}
-                      autoFocus
-                      rows={2}
-                      className="w-full bg-zinc-800 border border-zinc-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-red-600 resize-none"
-                    />
-                    <div className="flex gap-2">
-                      <button onClick={() => handleSaveIdentityField('future_self')} disabled={identitySaving} className="px-3 py-1.5 bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white text-xs rounded-lg transition-colors">{identitySaving ? '...' : 'Save'}</button>
-                      <button onClick={() => setEditingIdentity(null)} className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 text-xs rounded-lg transition-colors">Cancel</button>
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-zinc-200 text-sm italic">{profile?.future_self ? `"${profile.future_self}"` : <span className="text-zinc-600">Not set yet.</span>}</p>
-                )}
-              </div>
             </div>
 
-            {profile?.profile_updated_at && (
-              <p className="text-zinc-600 text-xs text-center mt-4">
-                Profile last evolved by AI on {new Date(profile.profile_updated_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
-              </p>
-            )}
           </section>
-
-          {/* ── How the AI Sees You Right Now ─────────────────────────── */}
-          {profile?.short_term_state && (
-            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
-              <p className="text-zinc-500 text-xs uppercase tracking-widest mb-2">How The AI Sees You Right Now</p>
-              <p className="text-zinc-300 text-sm leading-relaxed">{profile.short_term_state}</p>
-            </div>
-          )}
 
           {/* ── Focus Areas ─────────────────────────────────────────── */}
           <section className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
