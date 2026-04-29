@@ -8,7 +8,6 @@ const ALLOWED_TABLES = [
   'follow_up_queue',
   'growth_markers',
   'goals',
-  'user_progress_events',
   'goal_commitment_log',
 ];
 

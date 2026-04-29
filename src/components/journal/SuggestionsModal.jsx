@@ -202,14 +202,6 @@ export default function SuggestionsModal({ feedback, suggestions, onClose, onAcc
                           )}
                           <div className="flex-1">
                             <p className="text-sm text-slate-700 font-medium">{goal.title}</p>
-                            {goal.description && (
-                              <p className="text-xs text-slate-500 mt-1">{goal.description}</p>
-                            )}
-                            {goal.category && (
-                              <span className="inline-block mt-1 text-xs text-violet-600 bg-violet-50 px-2 py-0.5 rounded-full">
-                                {goal.category}
-                              </span>
-                            )}
                           </div>
                         </button>
                       ))}

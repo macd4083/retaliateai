@@ -19,9 +19,9 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { user_id, title, description, why_it_matters, category } = req.body;
+    const { user_id, title, why_it_matters } = req.body;
 
-    console.log('Received goal creation request:', { user_id, title, category });
+    console.log('Received goal creation request:', { user_id, title });
 
     if (!authenticatedUserId || !title) {
       return res.status(400).json({ error: 'user_id and title are required' });
@@ -40,9 +40,7 @@ export default async function handler(req, res) {
       .insert({
         user_id: authenticatedUserId,
         title: title,
-        description: description || null,
         whys: initialWhys,
-        category: category || null,
         status: 'active',
         // target_date, created_at, updated_at, completed_at will be handled by database defaults
       })
