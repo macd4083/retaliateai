@@ -246,24 +246,29 @@ function ChatMessage({ message, isFirstMessage, onChipSelect, chipsDisabled, str
         >
           {message.content}
         </motion.div>
-        {!isUser && message.chips && message.chips.length > 0 && (
-          <div className="flex flex-wrap gap-2 mt-2">
-            {message.chips.map((chip) => (
-              <button
-                key={chip.value}
-                onClick={() => !chipsDisabled && onChipSelect(chip)}
-                disabled={chipsDisabled}
-                className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
-                  chipsDisabled
-                    ? 'bg-zinc-800 border-zinc-700 text-zinc-600 cursor-not-allowed'
-                    : 'bg-zinc-800 border-zinc-600 text-zinc-200 hover:bg-red-900 hover:border-red-700 hover:text-white cursor-pointer'
-                }`}
-              >
-                {chip.label}
-              </button>
-            ))}
-          </div>
-        )}
+        {!isUser && message.chips && (() => {
+          const actionChips = message.chips.filter(
+            (chip) => chip.value === 'exercise_accept' || chip.value === 'exercise_skip'
+          );
+          return actionChips.length > 0 ? (
+            <div className="flex flex-wrap gap-2 mt-2">
+              {actionChips.map((chip) => (
+                <button
+                  key={chip.value}
+                  onClick={() => !chipsDisabled && onChipSelect(chip)}
+                  disabled={chipsDisabled}
+                  className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+                    chipsDisabled
+                      ? 'bg-zinc-800 border-zinc-700 text-zinc-600 cursor-not-allowed'
+                      : 'bg-zinc-800 border-zinc-600 text-zinc-200 hover:bg-red-900 hover:border-red-700 hover:text-white cursor-pointer'
+                  }`}
+                >
+                  {chip.label}
+                </button>
+              ))}
+            </div>
+          ) : null;
+        })()}
       </div>
     </div>
   );
