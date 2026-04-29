@@ -264,7 +264,6 @@ export default function OnboardingV2({ onOnboardingComplete } = {}) {
             whys: goal.why
               ? [{ text: goal.why, added_at: now, source: 'onboarding', motivation_signal: null }]
               : [],
-            category: area,
             status: 'active',
           });
         } catch (err) {

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { BookOpen, Lightbulb, Target, Users, Sparkles, Heart, Moon } from 'lucide-react';
+import { BookOpen, Lightbulb, Target, Users, Heart, Moon } from 'lucide-react';
 import { format } from 'date-fns';
 
 export default function Sidebar({
@@ -27,15 +27,6 @@ export default function Sidebar({
       tooltip: {
         title: 'Why It Works',
         description: 'Activates your Default Mode Network—your brain\'s introspection mode. Unstructured writing reduces cognitive filtering, allowing subconscious patterns to surface. Research shows 15-20 minutes of expressive writing improves emotional regulation and immune function.'
-      }
-    },
-    { 
-      id: 'clarity', 
-      icon: Sparkles, 
-      label: 'Clarity',
-      tooltip: {
-        title: 'Why It Works',
-        description: 'Writing externalizes problems from your limited working memory (4-7 items). Seeing thoughts on screen engages visual processing, allowing you to spot patterns and contradictions invisible when thoughts are swirling internally.'
       }
     },
     { 

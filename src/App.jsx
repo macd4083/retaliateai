@@ -26,7 +26,6 @@ import { supabase } from './lib/supabase/client';
 // import Sidebar from './components/layout/Sidebar';
 // import JournalEditor from './components/journal/JournalEditor';
 // import EntryDetailModal from './components/journal/EntryDetailModal';
-// import Clarity from './pages/Clarity';
 // import Gratitude from './pages/Gratitude';
 // import Insights from './pages/Insights';
 // import Goals from './pages/Goals';

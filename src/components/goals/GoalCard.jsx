@@ -1,23 +1,12 @@
 import React from 'react';
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Target, CheckCircle2, Pause, MoreHorizontal, Pencil } from "lucide-react";
+import { Target, CheckCircle2, Pause, MoreHorizontal } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-
-const categoryColors = {
-  health: 'bg-emerald-100 text-emerald-700',
-  career: 'bg-blue-100 text-blue-700',
-  relationships: 'bg-rose-100 text-rose-700',
-  personal_growth: 'bg-violet-100 text-violet-700',
-  financial: 'bg-amber-100 text-amber-700',
-  creative: 'bg-pink-100 text-pink-700',
-  other: 'bg-slate-100 text-slate-700',
-};
 
 const statusIcons = {
   active: Target,
@@ -47,11 +36,6 @@ export default function GoalCard({ goal, onUpdate, onDelete, onEdit }) {
             }`}>
               {goal.title}
             </h3>
-            {goal.category && (
-              <Badge className={`${categoryColors[goal.category]} border-0 mt-1 text-xs`}>
-                {goal.category.replace('_', ' ')}
-              </Badge>
-            )}
           </div>
         </div>
         

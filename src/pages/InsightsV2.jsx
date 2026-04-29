@@ -65,18 +65,14 @@ export default function InsightsV2() {
   const [slideDir, setSlideDir]                   = useState(null);
   const [chartOffset, setChartOffset]             = useState(0);
   const [gaugeAnimatedFrac, setGaugeAnimatedFrac] = useState(0);
-  const [wins, setWins]                           = useState([]);
-  const [narratives, setNarratives]               = useState([]);
   const [streak, setStreak]                       = useState(0);
   const [commitmentStats, setCommitmentStats]     = useState(null);
   const [loading, setLoading]                     = useState(true);
   const [activeGoals, setActiveGoals]             = useState([]);
   const [showAddGoal, setShowAddGoal]             = useState(false);
   const [newGoalTitle, setNewGoalTitle]           = useState('');
-  const [newGoalCategory, setNewGoalCategory]     = useState('');
   const [newGoalBaseline, setNewGoalBaseline]     = useState('');
   const [savingGoal, setSavingGoal]               = useState(false);
-  const [progressEvents, setProgressEvents]       = useState([]);
   const weeklyDataForGauge                         = commitmentStats?.weeklyData || [];
   const activeGaugeWeekIndex                      = selectedWeekIndex !== null
     ? selectedWeekIndex
@@ -105,9 +101,7 @@ export default function InsightsV2() {
         loadSessions(),
         loadStreak(),
         loadCommitmentStats(),
-        loadNarratives(),
         loadActiveGoals(),
-        loadProgressEvents(),
       ]);
     } finally {
       setLoading(false);
@@ -117,7 +111,7 @@ export default function InsightsV2() {
   async function loadActiveGoals() {
     const { data } = await supabase
       .from('goals')
-      .select('id, title, category, whys, status, created_at, vision_snapshot, last_mentioned_at, last_motivation_signal, baseline_snapshot, baseline_date')
+      .select('id, title, whys, status, created_at, last_mentioned_at, last_motivation_signal, baseline_snapshot, baseline_date')
       .eq('user_id', user.id)
       .eq('status', 'active')
       .order('created_at', { ascending: true })
@@ -132,7 +126,6 @@ export default function InsightsV2() {
       const { error } = await supabase.from('goals').insert({
         user_id: user.id,
         title: newGoalTitle.trim(),
-        category: newGoalCategory || null,
         status: 'active',
         whys: [],
         ...(newGoalBaseline.trim() && {
@@ -145,7 +138,6 @@ export default function InsightsV2() {
         return;
       }
       setNewGoalTitle('');
-      setNewGoalCategory('');
       setNewGoalBaseline('');
       setShowAddGoal(false);
       await loadActiveGoals();
@@ -222,25 +214,6 @@ export default function InsightsV2() {
     } else {
       setAllCommitments([]);
     }
-
-    // Wins from last 7 sessions
-    const { data: recentSessions } = await supabase
-      .from('reflection_sessions')
-      .select('date, wins')
-      .eq('user_id', user.id)
-      .order('date', { ascending: false })
-      .limit(7);
-
-    const allWins = [];
-    for (const session of recentSessions || []) {
-      if (Array.isArray(session.wins)) {
-        for (const win of session.wins) {
-          const text = typeof win === 'string' ? win : win?.text;
-          if (text) allWins.push({ text, date: session.date });
-        }
-      }
-    }
-    setWins(allWins.slice(0, 20));
   }
 
   async function loadStreak() {
@@ -259,42 +232,6 @@ export default function InsightsV2() {
         const data = await res.json();
         setCommitmentStats(data);
       }
-    } catch (_e) {}
-  }
-
-  async function getAuthHeaders() {
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token;
-    return {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    };
-  }
-
-  async function loadNarratives() {
-    try {
-      const res = await fetch('/api/synthesize-insights', {
-        method: 'POST',
-        headers: await getAuthHeaders(),
-        body: JSON.stringify({ user_id: user.id, return_as_narratives: true }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setNarratives(data.narratives || []);
-      }
-    } catch (_e) {}
-  }
-
-  async function loadProgressEvents() {
-    try {
-      const { data } = await supabase
-        .from('user_progress_events')
-        .select('id, event_type, payload, created_at')
-        .eq('user_id', user.id)
-        // No surfaced_at filter — show all recent events regardless of surfacing status
-        .order('created_at', { ascending: false })
-        .limit(7);
-      setProgressEvents(data || []);
     } catch (_e) {}
   }
 
@@ -701,158 +638,6 @@ export default function InsightsV2() {
 
           {/* ── ZONE 2: Progress & Identity ───────────────────────────────── */}
 
-          {/* Section 3: Recent Progress (wins + progress events combined) */}
-          {(() => {
-            const winItems = wins.map((w) => ({
-              type: 'win',
-              text: w.text,
-              date: w.date,
-              id: `win-${w.date}-${w.text}`,
-              signal: null,
-            }));
-            const eventItems = progressEvents.map((e) => ({
-              type: e.event_type,
-              text: e.payload?.display_text,
-              date: e.created_at,
-              id: e.id,
-              signal: e.payload?.new_signal,
-            }));
-            const combined = [...winItems, ...eventItems]
-              .filter((item) => item.text)
-              .sort((a, b) => new Date(b.date) - new Date(a.date))
-              .slice(0, 8);
-
-            const getBorderColor = (type, signal) => {
-              if (type === 'win') return 'border-l-green-600';
-              if (type === 'followthrough_milestone') return 'border-l-red-600';
-              if (type === 'motivation_signal_change') {
-                if (signal === 'strong') return 'border-l-green-600';
-                if (signal === 'low') return 'border-l-orange-500';
-                if (signal === 'struggling') return 'border-l-red-600';
-                return 'border-l-zinc-500';
-              }
-              return 'border-l-zinc-500';
-            };
-
-            const getIcon = (type, signal) => {
-              if (type === 'win') return '✅';
-              if (type === 'followthrough_milestone') return '🔥';
-              if (type === 'motivation_signal_change') {
-                return (signal === 'strong' || signal === 'medium') ? '📈' : '📉';
-              }
-              if (type === 'blocker_fading') return '💡';
-              if (type === 'foothold_unlocked') return '🔓';
-              return '📌';
-            };
-
-            const formatEventDate = (dateStr) => {
-              if (!dateStr) return '';
-              const d = new Date(dateStr);
-              return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-            };
-
-            return (
-              <section>
-                <h2 className="text-white font-semibold text-base mb-3">Recent Progress</h2>
-                {combined.length > 0 ? (
-                  <div className="space-y-2">
-                    {combined.map((item) => (
-                      <div
-                        key={item.id}
-                        className={`bg-zinc-900 border border-zinc-800 border-l-4 ${getBorderColor(item.type, item.signal)} rounded-2xl px-4 py-3 flex items-start gap-3`}
-                      >
-                        <span className="text-sm flex-shrink-0 mt-0.5">{getIcon(item.type, item.signal)}</span>
-                        <div className="min-w-0">
-                          <p className="text-zinc-200 text-sm leading-relaxed">{item.text}</p>
-                          <p className="text-zinc-500 text-xs mt-0.5">{formatEventDate(item.date)}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-zinc-500 text-sm bg-zinc-900 border border-zinc-800 rounded-xl p-4">
-                    Your wins and progress milestones will appear here after a few sessions.
-                  </p>
-                )}
-              </section>
-            );
-          })()}
-
-          {/* Section 3b: What's Shifting (progress event threshold crossings) */}
-          {progressEvents.length > 0 && (() => {
-            const getEventIcon = (type, payload) => {
-              if (type === 'followthrough_milestone') return '🔥';
-              if (type === 'motivation_signal_change') {
-                const to = payload?.to;
-                return (to === 'strong' || to === 'medium') ? '📈' : '📉';
-              }
-              if (type === 'blocker_fading') return '💡';
-              if (type === 'strength_resolved') return '⭐';
-              if (type === 'growth_area_resolved') return '🌱';
-              if (type === 'foothold_unlocked') return '🔓';
-              if (type === 'first_depth_insight') return '🧠';
-              return '📌';
-            };
-
-            const getEventBorder = (type, payload) => {
-              if (type === 'followthrough_milestone') return 'border-l-red-600';
-              if (type === 'motivation_signal_change') {
-                const to = payload?.to;
-                if (to === 'strong') return 'border-l-green-600';
-                if (to === 'low' || to === 'struggling') return 'border-l-orange-500';
-                return 'border-l-zinc-500';
-              }
-              if (type === 'blocker_fading') return 'border-l-yellow-500';
-              if (type === 'strength_resolved') return 'border-l-emerald-500';
-              if (type === 'growth_area_resolved') return 'border-l-teal-500';
-              if (type === 'foothold_unlocked') return 'border-l-blue-500';
-              if (type === 'first_depth_insight') return 'border-l-purple-500';
-              return 'border-l-zinc-500';
-            };
-
-            const getEventLabel = (type) => {
-              if (type === 'followthrough_milestone') return 'Commitment milestone';
-              if (type === 'motivation_signal_change') return 'Momentum shift';
-              if (type === 'blocker_fading') return 'Pattern fading';
-              if (type === 'strength_resolved') return 'Strength solidifying';
-              if (type === 'growth_area_resolved') return 'Growth achieved';
-              if (type === 'foothold_unlocked') return "Something's changing";
-              if (type === 'first_depth_insight') return 'First real insight';
-              return 'Progress marker';
-            };
-
-            const formatEvtDate = (dateStr) => {
-              if (!dateStr) return '';
-              const d = new Date(dateStr);
-              return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-            };
-
-            return (
-              <section>
-                <h2 className="text-white font-semibold text-base mb-3">What's Shifting</h2>
-                <div className="space-y-2">
-                  {progressEvents.map((e) => {
-                    const displayText = e.payload?.display_text;
-                    if (!displayText) return null;
-                    return (
-                      <div
-                        key={e.id}
-                        className={`bg-zinc-900 border border-zinc-800 border-l-4 ${getEventBorder(e.event_type, e.payload)} rounded-2xl px-4 py-3 flex items-start gap-3`}
-                      >
-                        <span className="text-sm flex-shrink-0 mt-0.5">{getEventIcon(e.event_type, e.payload)}</span>
-                        <div className="min-w-0">
-                          <p className="text-zinc-500 text-xs uppercase tracking-widest mb-1">{getEventLabel(e.event_type)}</p>
-                          <p className="text-zinc-200 text-sm leading-relaxed">{displayText}</p>
-                          <p className="text-zinc-500 text-xs mt-0.5">{formatEvtDate(e.created_at)}</p>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </section>
-            );
-          })()}
-
           {/* Section 4: Your Goals */}
           <section>
             <div className="flex items-center justify-between mb-3">
@@ -875,21 +660,6 @@ export default function InsightsV2() {
                   placeholder="Goal title"
                   className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-500"
                 />
-                <select
-                  value={newGoalCategory}
-                  onChange={(e) => setNewGoalCategory(e.target.value)}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-sm text-zinc-300 focus:outline-none focus:border-zinc-500"
-                >
-                  <option value="">Category (optional)</option>
-                  <option value="health">Health</option>
-                  <option value="career">Career</option>
-                  <option value="relationships">Relationships</option>
-                  <option value="finances">Finances</option>
-                  <option value="learning">Learning</option>
-                  <option value="creativity">Creativity</option>
-                  <option value="mindset">Mindset</option>
-                  <option value="other">Other</option>
-                </select>
                 <textarea
                   value={newGoalBaseline}
                   onChange={(e) => setNewGoalBaseline(e.target.value)}
@@ -906,7 +676,7 @@ export default function InsightsV2() {
                     {savingGoal ? 'Saving…' : 'Save'}
                   </button>
                   <button
-                    onClick={() => { setShowAddGoal(false); setNewGoalTitle(''); setNewGoalCategory(''); setNewGoalBaseline(''); }}
+                    onClick={() => { setShowAddGoal(false); setNewGoalTitle(''); setNewGoalBaseline(''); }}
                     className="px-4 py-2 text-zinc-400 hover:text-white rounded-xl text-sm transition-colors"
                   >
                     Cancel
@@ -955,11 +725,6 @@ export default function InsightsV2() {
                                   {signalBadge.text}
                                 </span>
                               )}
-                              {goal.category && (
-                                <span className="px-2 py-0.5 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-400 text-xs">
-                                  {goal.category.replace('_', ' ')}
-                                </span>
-                              )}
                             </div>
                           </div>
 
@@ -1000,15 +765,6 @@ export default function InsightsV2() {
                             <p className="text-zinc-600 text-xs mt-1 italic">No why yet — talk about this in your next session</p>
                           )}
 
-                          {/* Vision snapshot */}
-                          {goal.vision_snapshot && (
-                            <div className="mt-2 pt-2 border-t border-zinc-800">
-                              <p className="text-zinc-500 text-xs uppercase tracking-widest mb-1">Vision</p>
-                              <p className="text-zinc-500 text-xs leading-relaxed italic">
-                                &ldquo;{goal.vision_snapshot}&rdquo;
-                              </p>
-                            </div>
-                          )}
                         </div>
                       </div>
                     </div>
@@ -1066,71 +822,6 @@ export default function InsightsV2() {
               )}
             </div>
           )}
-
-          {/* ── ZONE 3: Patterns ──────────────────────────────────────────── */}
-
-          {/* Section 6: What We've Noticed */}
-          <section>
-            <h2 className="text-white font-semibold text-base mb-3">What We've Noticed</h2>
-            {narratives.length > 0 ? (
-              <div className="space-y-3">
-                {narratives.map((n, i) => {
-                  const borderColor =
-                    n.type === 'blocker'  ? 'border-l-red-600' :
-                    n.type === 'strength' ? 'border-l-green-600' :
-                                            'border-l-zinc-500';
-                  const label =
-                    n.type === 'blocker'  ? 'Something we keep seeing' :
-                    n.type === 'strength' ? 'A strength emerging' :
-                                            'A pattern';
-                  return (
-                    <div
-                      key={i}
-                      className={`bg-zinc-900 border border-zinc-800 border-l-4 ${borderColor} rounded-2xl p-4`}
-                    >
-                      <p className="text-zinc-500 text-xs uppercase tracking-widest mb-2">{label}</p>
-                      <p className="text-zinc-300 text-sm leading-relaxed">{n.narrative}</p>
-                      {n.watch_for && (
-                        <p className="text-zinc-500 text-xs mt-3 italic border-t border-zinc-800 pt-3">
-                          Watch for: {n.watch_for}
-                        </p>
-                      )}
-                      {n.occurrences && (
-                        <p className="text-zinc-600 text-xs mt-2">
-                          {n.occurrences} time{n.occurrences !== 1 ? 's' : ''} in your reflections
-                        </p>
-                      )}
-                      {n.first_seen_date && (() => {
-                        const first = formatInsightDate(n.first_seen_date);
-                        const last  = n.last_seen_date ? formatInsightDate(n.last_seen_date) : null;
-
-                        // Determine if span > 14 days
-                        const spanDays = n.last_seen_date
-                          ? Math.round(
-                              (new Date(n.last_seen_date) - new Date(n.first_seen_date)) / (1000 * 60 * 60 * 24)
-                            )
-                          : 0;
-
-                        const showRange = last && spanDays > 14;
-
-                        return (
-                          <p className="text-zinc-600 text-xs mt-1">
-                            {showRange
-                              ? `${first} → ${last}`
-                              : `First noticed ${first}`}
-                          </p>
-                        );
-                      })()}
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <p className="text-zinc-500 text-sm bg-zinc-900 border border-zinc-800 rounded-xl p-4">
-                Your coach is still learning your patterns. The more specific you are in your sessions, the faster these appear.
-              </p>
-            )}
-          </section>
 
           {/* Bottom padding */}
           <div className="h-6" />

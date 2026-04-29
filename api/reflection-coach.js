@@ -185,30 +185,17 @@ EVIDENCE FOR EXPLAINING QUESTIONS:
 When you signal intent before a question (per TRANSPARENT COACHING above), draw from specific data already in your context — never signal generically.
 
 Available evidence fields you MUST reference when they exist:
-- user_insights[n].trigger: the situation/state that activates this pattern — use this to explain WHY you're going there
-- user_insights[n].user_quote: their exact words from a prior session — quote it directly (e.g. "you said once: [quote]")
-- user_insights[n].foothold: evidence something is already shifting — name it as proof
 - user_insights[n].first_seen_date + last_seen_date: when this pattern was first observed and when it was last seen — use for "this has been happening since [month]" framing
 - recent_sessions: specific dates and what happened — reference them by date, not vaguely
 - goals[n].whys: what they said this goal was about before — reference the actual text
 - goals[n].depth_insights: realizations they had about this goal — reference by date if available
 
 Rules:
-- When you reference a pattern or insight, include AT LEAST ONE of: a specific count, a date, or their actual words (user_quote).
+- When you reference a pattern or insight, include AT LEAST ONE of: a specific count or a date.
 - NEVER say "this keeps coming up" — say "this has come up [occurrence_count] times since [first_seen_date]"
-- NEVER say "you've mentioned this before" — say "you said once: [user_quote]"
 - NEVER say "I noticed something" without immediately naming the specific thing from context
 - If none of the above evidence fields are populated for a topic, skip the framing entirely and just ask the question.
 - The framing is one sentence. Then the question. That's it.
-
-PROGRESS EVENTS — REAL THRESHOLD CROSSINGS:
-When progress_events are present in your context, these are recorded transitions — not computed stats, but real threshold crossings that were stored when they happened.
-When a progress event is relevant to what the user just said, NAME IT specifically before connecting to it.
-- "Your follow-through on [goal] just crossed into strong territory — that's the first time."
-- "That blocker hasn't shown up in two weeks. Something actually changed."
-- "The first time you got a real insight about [goal] was [date]. What you're saying now connects to it."
-Use the display_text from the event as a starting point — make it conversational, not a readout.
-After referencing a progress event, set progress_event_surfaced: "<event_id>" in your response JSON so it can be marked as surfaced.
 
 SELF-REFLECTION PRIORITY:
 This is crucial. The goal is not just action — it's self-awareness. At least once per session, go deeper:
@@ -268,7 +255,7 @@ ON EXERCISES:
   3. HOW TO ENGAGE: one brief framing of the angle or mindset to bring. E.g. "don't filter", "be honest even if it's uncomfortable", "go with the first thing that comes up".
 - Keep it casual, warm, and sharp. 2-3 sentences max. Then ask the question.
 - NEVER name the exercise out loud (no "I want to try a gratitude anchor"). Show the intent, don't label it.
-- Draw on: user_insights[n].trigger, user_insights[n].user_quote, goals[n].whys, recent_sessions, session wins/misses already captured this session — whatever is most relevant to WHY this exercise is the right one right now.
+- Draw on: user_insights[n].label, goals[n].whys, recent_sessions, session wins/misses already captured this session — whatever is most relevant to WHY this exercise is the right one right now.
 - After exercise: connect result back to identity, goals, or future self
 - implementation_intention: STOP once a specific plan is stated — one follow-up max
 
@@ -283,7 +270,7 @@ EXERCISE WORKFLOWS:
 
 GOAL CONNECTION — WHEN AND HOW TO BUILD MEANING
 
-You have a goals array. Each goal may have: id, area, title, whys (array of {text, added_at, source, motivation_signal}), vision_snapshot, depth_insights (array of {date, insight}), days_since_mentioned, suggested_next_action, motivation_signal ("strong"|"medium"|"low"|"struggling"|"unknown").
+You have a goals array. Each goal may have: id, title, whys (array of {text, added_at, source, motivation_signal}), depth_insights (array of {date, insight}), days_since_mentioned, motivation_signal ("strong"|"medium"|"low"|"struggling"|"unknown").
 - baseline_snapshot + baseline_date: where the user was when they created this goal — use for 'you've come a long way from when you [baseline_snapshot]' framing when motivation_signal is strong or improving
 
 GOAL WHYS (whys array):
@@ -332,7 +319,7 @@ WHEN TO MAKE THE CONNECTION:
 1. User mentions something that connects to a goal and reports it like a fact
    → They're reporting, not realizing the significance
    → Don't just celebrate — help them feel what it means
-   → Use the richest context available: if whys has entries use the most resonant one. If vision_snapshot exists use it.
+   → Use the richest context available: if whys has entries use the most resonant one.
    → "That's not just [what they did]. You've been working toward [goal title]. What was that like?"
    → Set extracted_data.goal_id_referenced to the goal's id
 
@@ -346,11 +333,8 @@ WHEN TO MAKE THE CONNECTION:
    → Set extracted_data.goal_id_referenced to the goal's id
 
 USER INSIGHTS IN HONEST STAGE:
-When a miss or stuck moment is mentioned during the honest stage, scan the available user_insights (in context as user_insights array) for any insight whose trigger field matches what's happening right now. If found:
-- Surface it using the user_quote (their own words, not the AI's label for the pattern)
-- Reference the narrative if it adds useful context
-- If a foothold is defined, consider using it as a gentle bridge toward what's next
-- Do NOT announce it as a "pattern" or "insight" — weave it naturally: "You've mentioned something like this before — [user_quote]. What's showing up for you right now that's similar?"
+When a miss or stuck moment is mentioned during the honest stage, scan the available user_insights (in context as user_insights array) for any insight whose label matches what's happening right now. If found:
+- Weave it naturally into the conversation without announcing it as a "pattern" or "insight"
 - This is the same treatment goals already get with depth_insights — just applied to cross-session synthesized patterns
 
 3. User questions a goal's relevance
@@ -362,26 +346,21 @@ When a miss or stuck moment is mentioned during the honest stage, scan the avail
    → If they release: acknowledge and ask "What matters more to you right now?"
    → If releasing: set extracted_data.goal_suggestion: { "action": "pause", "goal_id": "...", "reason": "their exact words" }
 
-4. User says something vivid about what their life looks like when a goal is done
-   → Capture it: set extracted_data.goal_vision_fragment with their exact words
-   → Set extracted_data.goal_id_referenced to the matching goal
-   → Then the identity close: "That's who you're becoming. And tonight you [specific thing they did]. That's the person who gets there."
-
-5. User has a realization about a goal
+4. User has a realization about a goal
    → Set extracted_data.goal_depth_insight with the realization in their words
    → Set extracted_data.goal_id_referenced
 
-6. Suggesting a new goal (when user mentions they want to pursue something new):
-   → Only suggest if the user explicitly indicates they want to track it as a goal
-   → Set extracted_data.goal_suggestion: { "action": "new_goal", "title": "concise goal title", "category": "health|career|relationships|finances|learning|creativity|mindset|other" }
-   → DO NOT set goal_id (this is a brand-new goal, not an existing one)
-   → After suggesting, tell the user you'll add it — they'll confirm in the UI
-   → Only one new goal suggestion per session
-
-7. User expresses how they feel about their progress toward a goal
+5. User expresses how they feel about their progress toward a goal
    → Set extracted_data.progress_feeling with their exact words about momentum or stagnation
    → Set extracted_data.goal_id_referenced to the matching goal
    → Use this when they say things like "I feel like I'm finally getting somewhere with this" or "I don't think I'm making any progress"
+
+6. Suggesting a new goal (when user mentions they want to pursue something new):
+   → Only suggest if the user explicitly indicates they want to track it as a goal
+   → Set extracted_data.goal_suggestion: { "action": "new_goal", "title": "concise goal title" }
+   → DO NOT set goal_id (this is a brand-new goal, not an existing one)
+   → After suggesting, tell the user you'll add it — they'll confirm in the UI
+   → Only one new goal suggestion per session
 
 WHAT NOT TO DO:
 - Never announce you're doing a "goal check-in"
@@ -399,19 +378,18 @@ When you run a why-probe question, you are NOT asking whether the user's why has
 ANGLE 1 — Action → Goal progress:
 "You [did/didn't do X today]. In the context of [goal title] — does that actually feel like forward movement, or just activity?" (for a win)
 "You said you didn't get to [X]. What did that actually cost you in terms of [goal] — not logistically, but in terms of where you're trying to get?" (for a miss)
-Best when: goal exists, no vision or why needed.
+Best when: goal exists.
 
 ANGLE 2 — Action → Long-term self:
-If vision_snapshot exists: "You [did X]. You've talked about wanting to [vision_snapshot]. Does today feel like a step in that direction, or does it feel separate from that?"
 If why exists: "You've said [goal] matters because [their why]. When you [did/didn't do X] today — did it connect to that at all, or did it feel like it was for a completely different reason?"
-Best when: vision_snapshot or a specific why is available.
+Best when: a specific why is available.
 
 ANGLE 3 — How they actually feel:
 "Not about whether it was good or bad — when you [did/skipped X today], what was the feeling underneath it? What was actually going on for you?"
 Best when: the action feels emotionally loaded from the conversation, or no goal context is available.
 
 SELECTION RULES:
-- Pick the angle that fits the richest available data: vision_snapshot → prefer Angle 2 (vision); named why → prefer Angle 2 (why) or Angle 1; no why or vision → Angle 1 or Angle 3
+- Pick the angle that fits the richest available data: named why → prefer Angle 2 (why) or Angle 1; no why → Angle 1 or Angle 3
 - Across all why-probe questions in a session, use each angle at most once
 - After asking, evaluate the response. If it reveals something meaningful about motivation → set goal_why_probe_insight with {goal_id, text, action ("replace"|"add"|null), replace_index}. If nothing meaningful → set goal_why_probe_insight: null
 - Do NOT telegraph the extraction — never say "I'm asking because I want to understand your motivation." Just ask the question.
@@ -432,13 +410,11 @@ RETURN JSON EXACTLY (no markdown, no extra keys):
     "commitment_stretch": null, // string: stretch/ideal commitment for tomorrow
     "tomorrow_commitment": null,
     "commitment_score": null, // integer 0-100: scored in commitment_checkin only
-    "self_hype_message": null,
     "depth_insight": null,
     "goal_id_referenced": null,  // REQUIRED when goal_why_insight is set — without this the why is silently discarded
     "goal_why_insight": null,
     "goal_why_action": null,
     "goal_why_replace_index": null,
-    "goal_vision_fragment": null,
     "goal_depth_insight": null,
     "goal_suggestion": null,
     "goal_commitment_why": false,
@@ -456,8 +432,7 @@ RETURN JSON EXACTLY (no markdown, no extra keys):
   "follow_up_queued": false,
   "follow_up_triggered": false,
   "is_session_complete": false,
-  "directive_completed": null,
-  "progress_event_surfaced": null
+  "directive_completed": null
 }
 
 Set "directive_completed" to the id of the directive you executed this message (from active_directive.id in context) when you have fully delivered the directive's intended coaching action in your response, or null if you did not act on it. Only mark one directive as completed per message.`;
@@ -530,7 +505,7 @@ function findInsightTriggeredExercise({
     const availablePractice = practicesForInsight.find((id) => EXERCISE_PROMPTS[id]);
     if (!availablePractice) continue;
 
-    const insightKeywords = tokenizeKeywords(`${insight.pattern_narrative || ''} ${insight.pattern_label || ''}`);
+    const insightKeywords = tokenizeKeywords(insight.pattern_label || '');
     if (insightKeywords.size === 0) continue;
     let overlapCount = 0;
     for (const keyword of messageKeywords) {
@@ -541,7 +516,7 @@ function findInsightTriggeredExercise({
       bestMatch = {
         insightId: insight.id,
         exerciseId: availablePractice,
-        insightContext: insight.pattern_narrative || insight.pattern_label || '',
+        insightContext: insight.pattern_label || '',
         score,
       };
     }
@@ -849,7 +824,7 @@ async function loadUserInsights(userId) {
   try {
     const { data } = await supabase
       .from('user_insights')
-      .select('id, pattern_label, pattern_type, pattern_narrative, trigger_context, user_quote, foothold, unlocked_practices, confidence_score, strength_evidence, first_seen_date, last_seen_date')
+      .select('id, pattern_label, pattern_type, unlocked_practices, confidence_score, first_seen_date, last_seen_date')
       .eq('user_id', userId)
       .eq('is_active', true)
       .order('confidence_score', { ascending: false })
@@ -891,7 +866,7 @@ function computePreSessionState(clientDate, { recentSessions = [], followUpQueue
       const insightWithPractice = userInsights.find((ins) => Array.isArray(ins.unlocked_practices) && ins.unlocked_practices.length > 0);
       if (insightWithPractice) {
         suggested_practice = insightWithPractice.unlocked_practices[0];
-        suggested_practice_reason = `user_insight: ${insightWithPractice.pattern_narrative || insightWithPractice.pattern_label || ''}`;
+        suggested_practice_reason = `user_insight: ${insightWithPractice.pattern_label || ''}`;
       }
     }
 
@@ -1016,7 +991,7 @@ async function loadUserProfile(userId) {
   try {
     const { data } = await supabase
       .from('user_profiles')
-      .select('full_name, display_name, bio, identity_statement, big_goal, why, future_self, life_areas, blockers, exercises_explained, values, short_term_state, long_term_patterns, growth_areas, strengths, consecutive_excuse_sessions')
+      .select('full_name, display_name, identity_statement, big_goal, why, future_self, life_areas, blockers, exercises_explained, values, short_term_state, long_term_patterns, growth_areas, strengths, consecutive_excuse_sessions')
       .eq('id', userId)
       .maybeSingle();
     return data || null;
@@ -1027,7 +1002,7 @@ async function loadActiveGoals(userId) {
   try {
     const { data } = await supabase
       .from('goals')
-      .select('id, title, category, whys, why_summary, vision_snapshot, depth_insights, last_mentioned_at, suggested_next_action, baseline_snapshot, baseline_date')
+      .select('id, title, whys, why_summary, depth_insights, last_mentioned_at, baseline_snapshot, baseline_date')
       .eq('user_id', userId)
       .eq('status', 'active')
       .limit(6);
@@ -1214,41 +1189,6 @@ async function markFollowUpTriggered(followUpId) {
   } catch (_e) {}
 }
 
-// ── Progress event helpers ────────────────────────────────────────────────────
-
-async function writeProgressEvent(userId, sessionId, eventType, payload) {
-  try {
-    await supabase.from('user_progress_events').insert({
-      user_id: userId,
-      session_id: sessionId || null,
-      event_type: eventType,
-      payload,
-    });
-  } catch (_e) {}
-}
-
-async function loadProgressEvents(userId) {
-  try {
-    const { data } = await supabase
-      .from('user_progress_events')
-      .select('id, event_type, payload, created_at')
-      .eq('user_id', userId)
-      .is('surfaced_at', null)
-      .order('created_at', { ascending: false })
-      .limit(5);
-    return data || [];
-  } catch (_e) { return []; }
-}
-
-async function markProgressEventSurfaced(eventId) {
-  try {
-    await supabase
-      .from('user_progress_events')
-      .update({ surfaced_at: new Date().toISOString() })
-      .eq('id', eventId);
-  } catch (_e) {}
-}
-
 async function upsertGrowthMarker(userId, theme, { exercise_run, check_in_message }, clientDate) {
   try {
     const { data: existing } = await supabase
@@ -1404,7 +1344,7 @@ Given the session summary and current user profile, extract:
 8. why_update: If the current value is null, derive one from this session. If non-null, update only if their why deepened or clarified — otherwise null.
 9. blockers_update: ONLY if new blockers clearly emerged or existing ones evolved — otherwise null. Array of strings max 5.
 10. future_self_update: If the current value is null, derive one from this session. If non-null, update only if the user expressed a clearer or evolved version of their 1-year vision — otherwise null.
-11. goal_updates: array of { goal_id, why_insight, why_action, why_replace_index, vision_fragment, depth_insight, last_mentioned_date } for any goals that were meaningfully discussed. Only include fields that have new content — null otherwise. Empty array if no goals were discussed.
+11. goal_updates: array of { goal_id, why_insight, why_action, why_replace_index, depth_insight, last_mentioned_date } for any goals that were meaningfully discussed. Only include fields that have new content — null otherwise. Empty array if no goals were discussed.
     - why_insight: the captured why text in their actual words (or null)
     - why_action: "add" | "replace" | null (add if new distinct motivation, replace if deeper version of existing)
     - why_replace_index: 0-based index of the why to replace (only set when why_action="replace")
@@ -1523,59 +1463,6 @@ Return valid JSON only:
       return true;
     });
 
-    // ── Fire strength_resolved events for established strengths that faded ─
-    for (const existing of existingStrengths) {
-      if (
-        !aiStrengthKeys.has(normLabel(existing.label)) &&
-        (existing.occurrence_count || 0) >= 3 &&
-        existing.last_seen && existing.last_seen < thirtyDaysAgoStr
-      ) {
-        (async () => {
-          const { data: existingEvt } = await supabase
-            .from('user_progress_events')
-            .select('id')
-            .eq('user_id', userId)
-            .eq('event_type', 'strength_resolved')
-            .contains('payload', { label: existing.label })
-            .maybeSingle();
-          if (!existingEvt) {
-            await writeProgressEvent(userId, sessionId || null, 'strength_resolved', {
-              label: existing.label,
-              occurrence_count: existing.occurrence_count,
-              first_seen: existing.first_seen,
-              display_text: `"${existing.label}" has shown up ${existing.occurrence_count} times since ${existing.first_seen || 'your first session'}. It may be becoming second nature.`,
-            });
-          }
-        })().catch(() => {});
-      }
-    }
-
-    // ── Fire growth_area_resolved events for areas that have faded out ────
-    for (const existing of existingGrowthAreas) {
-      if (
-        !aiGrowthKeys.has(normLabel(existing.label)) &&
-        existing.last_seen && existing.last_seen < thirtyDaysAgoStr &&
-        existing.started && existing.started < sixtyDaysAgoStr
-      ) {
-        (async () => {
-          const { data: existingEvt } = await supabase
-            .from('user_progress_events')
-            .select('id')
-            .eq('user_id', userId)
-            .eq('event_type', 'growth_area_resolved')
-            .contains('payload', { label: existing.label })
-            .maybeSingle();
-          if (!existingEvt) {
-            await writeProgressEvent(userId, sessionId || null, 'growth_area_resolved', {
-              label: existing.label,
-              started: existing.started,
-              display_text: `"${existing.label}" has been an active growth area since ${existing.started}. It looks like you've made real progress here.`,
-            });
-          }
-        })().catch(() => {});
-      }
-    }
-
     const profileUpdates = {
       short_term_state: evolution.short_term_state,
       long_term_patterns: dedupedPatterns,
@@ -1605,7 +1492,6 @@ Return valid JSON only:
       for (const gu of evolution.goal_updates) {
         if (!gu.goal_id) continue;
         const goalUpdates = {};
-        if (gu.vision_fragment) goalUpdates.vision_snapshot = gu.vision_fragment;
         if (gu.last_mentioned_date) goalUpdates.last_mentioned_at = gu.last_mentioned_date;
 
         // Handle why_insight — append to whys array (evolve pass always adds, never replaces blindly unless index given)
@@ -1719,13 +1605,10 @@ function rankGoalsForWhyProbe(activeGoals, sessionWins, sessionMisses) {
     .map(goal => {
       let score = 0;
       const whys = Array.isArray(goal.whys) ? goal.whys : [];
-      const hasVision = !!goal.vision_snapshot;
       const hasWhy = whys.length > 0;
       const motivationSignal = goal.motivation_signal || 'unknown';
       const daysSinceMentioned = goal.days_since_mentioned ?? 999;
 
-      // Has vision — rich context for Angle 2
-      if (hasVision) score += 3;
       // Has a specific why — enables Angle 2
       if (hasWhy) score += 2;
       // Shallow why (only 1, short text) — good to deepen
@@ -2027,7 +1910,7 @@ function buildDirectiveQueue({
     const topBlockerInsight = (userInsights || []).find((i) => i.pattern_type === 'blocker');
     let patternContext = '';
     if (topBlockerInsight) {
-      patternContext = `\n\nPATTERN CONTEXT: Their top identified blocker pattern is "${topBlockerInsight.pattern_label}". Trigger: "${topBlockerInsight.trigger_context || 'unclear'}". If what they share tonight clearly connects to this pattern, name it explicitly: "That sounds like the ${topBlockerInsight.pattern_label} pattern coming up — is that what's happening?" Don't force it if the connection isn't clear. But when it is clear, say it.`;
+      patternContext = `\n\nPATTERN CONTEXT: Their top identified blocker pattern is "${topBlockerInsight.pattern_label}". If what they share tonight clearly connects to this pattern, name it explicitly: "That sounds like the ${topBlockerInsight.pattern_label} pattern coming up — is that what's happening?" Don't force it if the connection isn't clear. But when it is clear, say it.`;
     }
     const missedFragmentContext = (() => {
       if (!['missed', 'partial'].includes(sessionState?.checkin_outcome)) return '';
@@ -2123,15 +2006,14 @@ function buildDirectiveQueue({
             : '',
           120
         );
-        const safeVision = sanitizeForPrompt(targetGoal.vision_snapshot || '', 120);
         const probeId = `honest_why_probe_${probeIndex + 1}`;
 
         allDirectives.push({
           id: probeId,
-          instruction: `HONEST WHY PROBE (${probeIndex + 1} of up to ${MAX_WHY_PROBES_PER_STAGE}): Ask ONE why-probe question about the goal "${safeTitle}", grounded in what they missed or struggled with today.${safeVision ? ` Vision context: "${safeVision}".` : ''}${safeWhy ? ` Stated why: "${safeWhy}".` : ''} 
+          instruction: `HONEST WHY PROBE (${probeIndex + 1} of up to ${MAX_WHY_PROBES_PER_STAGE}): Ask ONE why-probe question about the goal "${safeTitle}", grounded in what they missed or struggled with today.${safeWhy ? ` Stated why: "${safeWhy}".` : ''} 
 Select the angle that fits the richest available data (see GOAL WHY-PROBE QUESTIONS in your instructions). Use misses/blockers as the action anchor, not wins.
 Angles used so far this session are tracked — do not repeat an angle.
-Available angles: (1) Action→Goal progress (miss version), (2) Action→Long-term self${safeVision ? ' [vision available]' : ''}${safeWhy ? ' [why available]' : ''}, (3) How they actually feel.
+Available angles: (1) Action→Goal progress (miss version), (2) Action→Long-term self${safeWhy ? ' [why available]' : ''}, (3) How they actually feel.
 Ask one natural, specific question. Do NOT prefix with meta-framing.
 After the user responds: if meaningful motivation revealed → set goal_why_probe_insight: {goal_id: "${targetGoal.id}", text: <their words>, action: "replace"|"add"|null, replace_index: <number or null>}. Otherwise set goal_why_probe_insight: null.
 Set directive_completed: "${probeId}" when done.`,
@@ -2436,8 +2318,7 @@ Rules:
   if (recentSessions.length >= 3) {
     const hasStrengths = Array.isArray(profile.strengths) && profile.strengths.length > 0;
     const hasGrowthAreas = Array.isArray(profile.growth_areas) && profile.growth_areas.length > 0;
-    const strengthInsights = userInsights.filter(ins => ins.pattern_type === 'strength' && ins.strength_evidence);
-    if (hasStrengths || hasGrowthAreas || strengthInsights.length > 0) {
+    if (hasStrengths || hasGrowthAreas) {
       const strengthsText = hasStrengths
         ? profile.strengths.map(s => {
             if (typeof s === 'object' && s.label) return `"${s.label}": ${s.evidence || ''}`;
@@ -2450,12 +2331,9 @@ Rules:
             return String(g);
           }).join(' | ')
         : '';
-      const strengthInsightsText = strengthInsights.length > 0
-        ? strengthInsights.map(ins => `"${ins.pattern_label}": ${ins.strength_evidence}`).join(' | ')
-        : '';
       allDirectives.push({
         id: 'strength_recognition',
-        instruction: `STRENGTH RECOGNITION: When the user names a win or something that went well, do NOT just celebrate it. Connect it to what it means for them specifically — using their goals, their whys, and the evidence you have about their patterns. You have this data:${strengthInsightsText ? `\nStrength insights (most specific — prefer these): ${strengthInsightsText}` : ''}${strengthsText ? `\nTracked strengths: ${strengthsText}` : ''}${growthText ? `\nGrowth in progress: ${growthText}` : ''}\nWhen a win connects to a tracked strength or growth area — name the specific evidence first, then connect it to their goal or why. Prefer strength_insights evidence over profile strengths since it's more specific and recent. E.g. if they mention finishing something under pressure and you have evidence they've done this before, say: "You've done this [specific number] times now — [specific dates/events from evidence]. That's the thing that actually moves [their specific goal]." Pull from their actual whys array and goal context to explain why it matters. The explanation must come from their data, not from a coaching script. If a win doesn't connect to anything tracked, just acknowledge it briefly and move on — no forced meaning.`,
+        instruction: `STRENGTH RECOGNITION: When the user names a win or something that went well, do NOT just celebrate it. Connect it to what it means for them specifically — using their goals, their whys, and the evidence you have about their patterns. You have this data:${strengthsText ? `\nTracked strengths: ${strengthsText}` : ''}${growthText ? `\nGrowth in progress: ${growthText}` : ''}\nWhen a win connects to a tracked strength or growth area — name the specific evidence first, then connect it to their goal or why. Pull from their actual whys array and goal context to explain why it matters. The explanation must come from their data, not from a coaching script. If a win doesn't connect to anything tracked, just acknowledge it briefly and move on — no forced meaning.`,
         priority: 2,
         preferred_stage: 'wins',
         fire_next_session: false,
@@ -2540,14 +2418,13 @@ Rules:
             : '',
           120
         );
-        const safeVision = sanitizeForPrompt(targetGoal.vision_snapshot || '', 120);
         const probeId = `wins_why_probe_${probeIndex + 1}`;
 
         allDirectives.push({
           id: probeId,
-          instruction: `WINS WHY PROBE (${probeIndex + 1} of up to ${MAX_WHY_PROBES_PER_STAGE}): Ask ONE why-probe question about the goal "${safeTitle}".${safeVision ? ` Vision context: "${safeVision}".` : ''}${safeWhy ? ` Stated why: "${safeWhy}".` : ''} 
+          instruction: `WINS WHY PROBE (${probeIndex + 1} of up to ${MAX_WHY_PROBES_PER_STAGE}): Ask ONE why-probe question about the goal "${safeTitle}".${safeWhy ? ` Stated why: "${safeWhy}".` : ''} 
 Select the angle that fits the richest available data (see GOAL WHY-PROBE QUESTIONS in your instructions). Angles used so far this session are tracked — do not repeat an angle.
-Available angles: (1) Action→Goal progress, (2) Action→Long-term self${safeVision ? ' [vision available]' : ''}${safeWhy ? ' [why available]' : ''}, (3) How they actually feel.
+Available angles: (1) Action→Goal progress, (2) Action→Long-term self${safeWhy ? ' [why available]' : ''}, (3) How they actually feel.
 Ask one natural, specific question. Do NOT prefix with "I want to ask you something" or any meta-framing.
 After the user responds, evaluate: if they revealed meaningful motivation → set goal_why_probe_insight: {goal_id: "${targetGoal.id}", text: <their words>, action: "replace"|"add"|null, replace_index: <number or null>}. Otherwise set goal_why_probe_insight: null.
 Set directive_completed: "${probeId}" when done.`,
@@ -2783,7 +2660,6 @@ function buildSessionContext({
   activeDirective,
   directiveQueue,
   completedDirectives,
-  progressEvents,   // <-- progress event threshold crossings
 }) {
   // ── Derive internal values ─────────────────────────────────────────────
   const sessionExercisesRun = Array.isArray(sessionState.exercises_run) ? sessionState.exercises_run : [];
@@ -2834,7 +2710,6 @@ function buildSessionContext({
           return {
             goal_id: g.id,
             title: g.title,
-            category: g.category || null,
             whys: hasWhys ? g.whys : [],
             has_whys: hasWhys,
             motivation_signal: g.motivation_signal,
@@ -2847,31 +2722,17 @@ function buildSessionContext({
     yesterday_commitment_minimum: yesterdayMinimum || null,
     yesterday_commitment_stretch: yesterdayStretch || null,
     same_day_commitment: sameDayCommitment ? { commitment: sameDayCommitment.commitment, made_at: sameDayCommitment.made_at } : undefined,
-    // user_insights takes priority — rich synthesised records with narrative/trigger/quote/foothold/practices
+    // user_insights: synthesised pattern records with practices
     user_insights: userInsights.length > 0
       ? userInsights.map((ins) => ({
           label: ins.pattern_label,
           type: ins.pattern_type,
-          narrative: ins.pattern_narrative,
-          trigger: ins.trigger_context,
-          user_quote: ins.user_quote,
-          foothold: ins.foothold,
           practices: ins.unlocked_practices,
           confidence: ins.confidence_score,
           first_seen_date: ins.first_seen_date || null,
           last_seen_date: ins.last_seen_date || null,
         }))
       : undefined,
-    strength_insights: (() => {
-      const si = userInsights.filter(ins => ins.pattern_type === 'strength' && ins.strength_evidence)
-        .map(ins => ({
-          label: ins.pattern_label,
-          evidence: ins.strength_evidence,
-          narrative: ins.pattern_narrative,
-          user_quote: ins.user_quote,
-        }));
-      return si.length > 0 ? si : undefined;
-    })(),
     recent_sessions: recentSessionsText,
     relevant_memories: relevantMemories.length > 0
       ? relevantMemories.map((m) => ({ date: m.date, summary: m.summary, similarity: m.similarity }))
@@ -2886,14 +2747,6 @@ function buildSessionContext({
             ? Math.round(commitmentStats.avgScore7 * 100) / 100
             : null,
         }
-      : undefined,
-    progress_events: Array.isArray(progressEvents) && progressEvents.length > 0
-      ? progressEvents.map((e) => ({
-          id: e.id,
-          type: e.event_type,
-          display_text: e.payload?.display_text,
-          created_at: e.created_at,
-        }))
       : undefined,
     session: {
       stage: sessionState.current_stage || 'commitment_checkin',
@@ -3084,7 +2937,7 @@ export default async function handler(req, res) {
     // ── 2. Load context in parallel ───────────────────────────────────────
     const currentSignals = [intentData?.intent, intentData?.emotional_state, intentData?.accountability_signal].filter(Boolean);
 
-    const [loadedFollowUpQueue, growthMarkers, recentSessions, yesterdayCommitment, yesterdayCommitmentDetails, yesterdayFragments, userProfile, activeGoalsRaw, commitmentStats, todayEarlyCommitment, goalCommitmentStats, userInsights, progressEvents] =
+    const [loadedFollowUpQueue, growthMarkers, recentSessions, yesterdayCommitment, yesterdayCommitmentDetails, yesterdayFragments, userProfile, activeGoalsRaw, commitmentStats, todayEarlyCommitment, goalCommitmentStats, userInsights] =
       await Promise.all([
         loadFollowUpQueue(authenticatedUserId, currentSignals, client_local_date),
         loadGrowthMarkers(authenticatedUserId, client_local_date),
@@ -3098,7 +2951,6 @@ export default async function handler(req, res) {
         loadTodayEarlyCommitment(authenticatedUserId, client_local_date),
         loadGoalCommitmentStats(authenticatedUserId, client_local_date),
         loadUserInsights(authenticatedUserId),
-        loadProgressEvents(authenticatedUserId),
       ]);
 
     // Filter out stale identity_missing follow-ups that were queued with the generic placeholder text
@@ -3143,44 +2995,6 @@ export default async function handler(req, res) {
     const resolvedCommitmentTrajectory = contextCommitmentTrajectory ?? commitmentStats?.trajectory ?? null;
     const resolvedAvgCommitmentScore = contextAvgCommitmentScore ?? commitmentStats?.avgScore7 ?? null;
     const resolvedScoreTrajectory = contextScoreTrajectory ?? commitmentStats?.scoreTrajectory ?? null;
-
-    // ── Tag prior-state flags for progress event dedup ───────────────────────
-    // Run both tagging passes concurrently to avoid up to N sequential DB
-    // roundtrips (one per insight + one per goal) blocking the response path.
-    await Promise.all([
-      // Tag user insights: _had_foothold_previously = true if a foothold_unlocked
-      // event already exists for this insight id (prevents duplicate event writes).
-      ...(Array.isArray(userInsights) ? userInsights.map(async (insight) => {
-        if (insight.foothold) {
-          const { data: existingFootholdEvent } = await supabase
-            .from('user_progress_events')
-            .select('id')
-            .eq('user_id', authenticatedUserId)
-            .eq('event_type', 'foothold_unlocked')
-            .contains('payload', { insight_id: insight.id })
-            .maybeSingle();
-          insight._had_foothold_previously = !!existingFootholdEvent;
-        } else {
-          insight._had_foothold_previously = true; // no foothold = nothing to fire
-        }
-      }) : []),
-      // Tag goals: _had_depth_insight_previously = true if a first_depth_insight
-      // event already exists for this goal id (prevents duplicate event writes).
-      ...(Array.isArray(activeGoals) ? activeGoals.map(async (goal) => {
-        if (goal.id) {
-          const { data: existingDepthEvent } = await supabase
-            .from('user_progress_events')
-            .select('id')
-            .eq('user_id', authenticatedUserId)
-            .eq('event_type', 'first_depth_insight')
-            .contains('payload', { goal_id: goal.id })
-            .maybeSingle();
-          goal._had_depth_insight_previously = !!existingDepthEvent;
-        } else {
-          goal._had_depth_insight_previously = true;
-        }
-      }) : []),
-    ]);
 
     // ── 2b. Pre-session state (init only, zero extra DB queries) ─────────
     const preSessionState = isInit
@@ -3351,12 +3165,9 @@ export default async function handler(req, res) {
       ? activeGoals.map((g) => {
           const obj = {
             id: g.id,
-            area: g.category,
             title: g.title,
             whys: Array.isArray(g.whys) ? g.whys : [],
-            vision_snapshot: g.vision_snapshot || null,
             depth_insights: g.depth_insights?.length > 0 ? g.depth_insights : null,
-            suggested_next_action: g.suggested_next_action || null,
             motivation_signal: g.motivation_signal || 'unknown',
             baseline_snapshot: g.baseline_snapshot || null,
             baseline_date: g.baseline_date || null,
@@ -3372,7 +3183,6 @@ export default async function handler(req, res) {
       .filter((g) => g.last_mentioned_at && g.days_since_mentioned > 14)
       .map((g) => ({
         goal_id: g.id,
-        area: g.category,
         title: g.title,
         days_since_mentioned: g.days_since_mentioned,
         note: "hasn't come up recently — if a natural opening exists, one soft check-in is fine. If no opening, skip it.",
@@ -3498,7 +3308,6 @@ export default async function handler(req, res) {
       activeDirective,
       directiveQueue: combinedDirectiveQueue,
       completedDirectives,
-      progressEvents,
     });
 
     // ── 9. Build messages ─────────────────────────────────────────────────
@@ -3710,11 +3519,6 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
       }
     }
 
-    // Mark a progress event as surfaced if the AI referenced it
-    if (result.progress_event_surfaced && typeof result.progress_event_surfaced === 'string') {
-      markProgressEventSurfaced(result.progress_event_surfaced); // fire-and-forget
-    }
-
     // Safety guard — prevent hallucinated stage values from GPT
     const VALID_STAGES = ['wins', 'commitment_checkin', 'honest', 'tomorrow', 'complete'];
     if (result.new_stage && !VALID_STAGES.includes(result.new_stage)) {
@@ -3895,7 +3699,6 @@ Return ONLY valid JSON: { "question": "..." }`,
       if (result.extracted_data?.commitment_score != null) {
         updates.commitment_score = result.extracted_data.commitment_score;
       }
-      if (result.extracted_data?.self_hype_message) updates.self_hype_message = result.extracted_data.self_hype_message;
       if (result.commitment_checkin_done) updates.commitment_checkin_done = true;
       if (result.stage_order_swapped === true) updates.stage_order_swapped = true;
       if (result.extracted_data?.checkin_outcome) updates.checkin_outcome = result.extracted_data.checkin_outcome;
@@ -3950,7 +3753,7 @@ Return ONLY valid JSON: { "question": "..." }`,
         try {
           const minimumCommitmentText = result.extracted_data?.commitment_minimum || session_state.commitment_minimum;
           const stretchCommitmentText = result.extracted_data?.commitment_stretch || session_state.commitment_stretch;
-          const goalList = activeGoals.map((g) => ({ id: g.id, title: g.title, category: g.category }));
+          const goalList = activeGoals.map((g) => ({ id: g.id, title: g.title }));
           const clientToday = today(client_local_date);
 
           const resolveGoalId = async (commitmentText) => {
@@ -4046,153 +3849,6 @@ Only return a goal_id that exists in the list.`,
           })
         ).catch((e) => console.error('Failed to persist miss to session:', e))
       );
-    }
-
-    // ── Progress event writes (fire-and-forget) ────────────────────────────────
-
-    // Event 1: motivation_signal_change per goal
-    if (activeGoals?.length) {
-      dbPromises.push(
-        (async () => {
-          for (const goal of activeGoals) {
-            if (!goal.id || !goal._goalStats) continue;
-            const newSignal = computeGoalMotivationSignal(goal._goalStats, goal);
-            const prevSignal = goal.last_motivation_signal;
-            if (prevSignal && prevSignal !== newSignal && newSignal !== 'unknown') {
-              // Persist new signal for next-session comparison
-              supabase.from('goals')
-                .update({ last_motivation_signal: newSignal })
-                .eq('id', goal.id)
-                .then(() => {}).catch(() => {});
-
-              let displayText = null;
-              if (newSignal === 'strong') {
-                displayText = `Your follow-through on "${goal.title}" just hit strong territory — a real shift from ${prevSignal}.`;
-              } else if (newSignal === 'medium' && prevSignal === 'low') {
-                displayText = `Your commitment follow-through on "${goal.title}" crossed 40%. Something is changing.`;
-              } else if (newSignal === 'low' && (prevSignal === 'medium' || prevSignal === 'strong')) {
-                displayText = `Follow-through on "${goal.title}" has slipped below 40%. Worth paying attention to.`;
-              } else if (newSignal === 'struggling') {
-                displayText = `"${goal.title}" hasn't come up in a while and follow-through is declining. Worth naming.`;
-              }
-              if (displayText) {
-                await writeProgressEvent(authenticatedUserId, session_id, 'motivation_signal_change', {
-                  goal_id: goal.id,
-                  goal_title: goal.title,
-                  from: prevSignal,
-                  to: newSignal,
-                  display_text: displayText,
-                });
-              }
-            } else if (!prevSignal && newSignal !== 'unknown') {
-              // First time signal computed — store it silently, no event
-              supabase.from('goals')
-                .update({ last_motivation_signal: newSignal })
-                .eq('id', goal.id)
-                .then(() => {}).catch(() => {});
-            }
-          }
-        })()
-      );
-    }
-
-    // Event 2: followthrough_milestone crossing
-    if (commitmentStats) {
-      const { rate7, trajectory: ct } = commitmentStats;
-      dbPromises.push(
-        (async () => {
-          const { data: existingMilestone } = await supabase
-            .from('user_progress_events')
-            .select('id')
-            .eq('user_id', authenticatedUserId)
-            .eq('event_type', 'followthrough_milestone')
-            .gte('created_at', new Date(Date.now() - 30 * 86400000).toISOString())
-            .limit(1)
-            .maybeSingle();
-
-          if (!existingMilestone) {
-            if (rate7 >= MOTIVATION_STRONG_THRESHOLD && ct !== 'declining') {
-              await writeProgressEvent(authenticatedUserId, session_id, 'followthrough_milestone', {
-                rate: rate7,
-                tier: 'strong',
-                display_text: `Your overall commitment follow-through just hit ${Math.round(rate7 * 100)}% — your strongest stretch yet.`,
-              });
-            } else if (rate7 >= MOTIVATION_MEDIUM_THRESHOLD && ct === 'improving') {
-              await writeProgressEvent(authenticatedUserId, session_id, 'followthrough_milestone', {
-                rate: rate7,
-                tier: 'medium',
-                display_text: `Your follow-through rate just crossed 40% and is trending up. That's a real shift.`,
-              });
-            }
-          }
-        })()
-      );
-    }
-
-    // Event 3: foothold_unlocked (user_insight with foothold not yet recorded as an event)
-    if (Array.isArray(userInsights)) {
-      for (const insight of userInsights) {
-        if (insight.foothold && !insight._had_foothold_previously) {
-          dbPromises.push(
-            writeProgressEvent(authenticatedUserId, session_id, 'foothold_unlocked', {
-              insight_id: insight.id,
-              pattern_label: insight.pattern_label,
-              foothold: insight.foothold,
-              display_text: `Something is shifting with "${insight.pattern_label}": ${insight.foothold}`,
-            })
-          );
-        }
-      }
-    }
-
-    // Event 4: first_depth_insight on a goal
-    if (Array.isArray(activeGoals)) {
-      dbPromises.push(
-        (async () => {
-          for (const goal of activeGoals) {
-            if (!goal.id || goal._had_depth_insight_previously) continue;
-            const depthInsights = Array.isArray(goal.depth_insights) ? goal.depth_insights : [];
-            if (depthInsights.length === 1) {
-              await writeProgressEvent(authenticatedUserId, session_id, 'first_depth_insight', {
-                goal_id: goal.id,
-                goal_title: goal.title,
-                insight: depthInsights[0].insight,
-                date: depthInsights[0].date,
-                display_text: `You had your first real insight about "${goal.title}" on ${depthInsights[0].date}: "${depthInsights[0].insight && depthInsights[0].insight.length > 80 ? depthInsights[0].insight.slice(0, 80) + '...' : (depthInsights[0].insight || '')}"`,
-              });
-            }
-          }
-        })()
-      );
-    }
-
-    // Event 5: blocker_fading (blocker insight not seen in 14+ days)
-    if (Array.isArray(userInsights) && client_local_date) {
-      const fourteenDaysAgo = localDate(-14, client_local_date);
-      const fadingBlockers = userInsights.filter(
-        (ins) => ins.pattern_type === 'blocker' && ins.last_seen_date && ins.last_seen_date < fourteenDaysAgo && (ins.sessions_synthesized_from || 0) >= 3
-      );
-      for (const blocker of fadingBlockers) {
-        dbPromises.push(
-          (async () => {
-            const { data: existingFade } = await supabase
-              .from('user_progress_events')
-              .select('id')
-              .eq('user_id', authenticatedUserId)
-              .eq('event_type', 'blocker_fading')
-              .contains('payload', { label: blocker.pattern_label })
-              .maybeSingle();
-            if (!existingFade) {
-              await writeProgressEvent(authenticatedUserId, session_id, 'blocker_fading', {
-                label: blocker.pattern_label,
-                last_seen_date: blocker.last_seen_date,
-                occurrence_count: blocker.sessions_synthesized_from,
-                display_text: `"${blocker.pattern_label}" showed up ${blocker.sessions_synthesized_from} times but hasn't appeared since ${blocker.last_seen_date}. That pattern may be fading.`,
-              });
-            }
-          })()
-        );
-      }
     }
 
     Promise.all(dbPromises).catch(() => {});
@@ -4299,19 +3955,6 @@ Only return a goal_id that exists in the list.`,
         } catch (_e) { /* fail silently */ }
       })();
     }
-    if (result.extracted_data?.goal_vision_fragment && result.extracted_data?.goal_id_referenced) {
-      const goalId = result.extracted_data.goal_id_referenced;
-      supabase
-        .from('goals')
-        .update({
-          vision_snapshot: result.extracted_data.goal_vision_fragment,
-          last_mentioned_at: clientToday,
-        })
-        .eq('id', goalId)
-        .eq('user_id', authenticatedUserId)
-        .then(() => {}).catch(() => {});
-    }
-
     // Goal depth insight — append to goals.depth_insights array
     if (result.extracted_data?.goal_depth_insight && result.extracted_data?.goal_id_referenced) {
       const goalId = result.extracted_data.goal_id_referenced;

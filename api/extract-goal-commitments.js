@@ -5,7 +5,7 @@
  * to extract which goal IDs (if any) each piece of the commitment maps to, and
  * writes the results to goal_commitment_log.
  *
- * POST { user_id, session_id, commitment_text, goals: [{ id, title, category }], commitment_type? }
+ * POST { user_id, session_id, commitment_text, goals: [{ id, title }], commitment_type? }
  *
  * Returns:
  *   { goal_commitments: [{ goal_id: string | null, commitment_fragment: string, confidence: "high"|"medium"|"low" }] }

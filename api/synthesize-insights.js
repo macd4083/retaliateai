@@ -12,7 +12,6 @@
  *   - On InsightsV2 load if newest synthesized_at > 3 days old
  *
  * Required migrations:
- * -- ALTER TABLE user_insights ADD COLUMN IF NOT EXISTS strength_evidence text;
  * -- ALTER TABLE user_profiles ALTER COLUMN strengths TYPE jsonb[] USING strengths::jsonb[];
  * -- ALTER TABLE user_profiles ALTER COLUMN growth_areas TYPE jsonb[] USING growth_areas::jsonb[];
  */
@@ -34,8 +33,6 @@ function insightToNarrative(ins) {
     label: ins.pattern_label || 'Insight',
     type: ins.pattern_type || 'pattern',
     occurrences: ins.sessions_synthesized_from || 0,
-    narrative: ins.pattern_narrative || '',
-    watch_for: ins.trigger_context || null,
     first_seen_date: ins.first_seen_date || null,
     last_seen_date: ins.last_seen_date || null,
   };
@@ -51,29 +48,17 @@ You will receive:
 - Optionally: exercises_already_explained — a list of exercise IDs the user has already run
 
 For each insight produce:
-- pattern_narrative: 4–6 sentences, second person, SPECIFIC evidence (dates, quotes, actual events). Name the mechanism — what is the pattern doing/protecting/avoiding?
-- trigger_context: The specific situation/internal state that activates this. One sentence.
-- user_quote: Most revealing direct quote in their exact words. null if none.
-- foothold: What is already shifting — evidence of change. null if nothing shifting yet.
 - pattern_label: 3–5 words. e.g. "Shipping avoidance", "Accountability deflection"
 - pattern_type: "blocker" | "strength" | "identity_theme"
 - unlocked_practices: Applicable exercise IDs from: ["ownership_reframe","gratitude_anchor","why_reconnect","evidence_audit","implementation_intention","values_clarification","future_self_bridge","triage_one_thing","identity_reinforcement","depth_probe"]
 - confidence_score: 0.0–1.0 based on session count, recency, and whether user acknowledged it
 - existing_insight_id: UUID of existing insight this updates, or null
-- strength_evidence: (strength-type insights only) One ready-to-use sentence the coaching AI can reference verbatim — specific dates, events, the user's actual words. Names what the strength looks like in action for this person. null for blocker and identity_theme types.
 
 RULES:
 - Max 7 insights. Fewer is fine if not enough evidence.
-- Cite specific dates or events. If you cannot, omit.
-- No generic coaching language. No "it's worth sitting with", "this shows growth".
-- Second person throughout.
+- No generic coaching language.
 - Update existing insights rather than creating duplicates.
 - For each insight's unlocked_practices: only include exercise IDs the user has NOT yet run (not in exercises_already_explained). If all applicable exercises are already explained, return an empty array.
-- Each pattern_narrative must begin with a different grammatical structure. Vary between: starting with 'You', starting with the pattern mechanism ('This pattern...', 'When...', 'Since...'), starting with a specific date reference, starting with an observation about frequency. No two narratives in the same response may open with the same word.
-
-WHAT NOT TO DO:
-❌ Generic: "This keeps coming up across your sessions. It's worth noting that you tend to avoid completion. This shows a pattern that might be worth sitting with."
-✅ Specific: "On March 14 you committed to shipping the landing page by Friday, then on March 21 you named 'fear of judgment' as the reason it still wasn't live — the same language you used on Feb 28. The pattern isn't avoidance of work; it's avoidance of the moment other people can evaluate it."
 
 Return ONLY valid JSON:
 {
@@ -82,13 +67,8 @@ Return ONLY valid JSON:
       "existing_insight_id": "<uuid or null>",
       "pattern_label": "...",
       "pattern_type": "blocker|strength|identity_theme",
-      "pattern_narrative": "...",
-      "trigger_context": "...",
-      "user_quote": "... or null",
-      "foothold": "... or null",
       "unlocked_practices": ["..."],
-      "confidence_score": 0.0,
-      "strength_evidence": "... or null"
+      "confidence_score": 0.0
     }
   ]
 }`;
@@ -114,7 +94,7 @@ export default async function handler(req, res) {
       const [{ data: activeInsights }, { count: currentSessionCount }] = await Promise.all([
         supabase
           .from('user_insights')
-          .select('id, pattern_label, pattern_type, pattern_narrative, trigger_context, sessions_synthesized_from, synthesized_at, confidence_score, first_seen_date, last_seen_date')
+          .select('id, pattern_label, pattern_type, sessions_synthesized_from, synthesized_at, confidence_score, first_seen_date, last_seen_date')
           .eq('user_id', targetUserId)
           .eq('is_active', true)
           .order('confidence_score', { ascending: false })
@@ -206,7 +186,7 @@ export default async function handler(req, res) {
     // ── 3. Load existing active insights ──────────────────────────────────
     const { data: existingInsights } = await supabase
       .from('user_insights')
-      .select('id, pattern_label, pattern_type, pattern_narrative, synthesized_at, confidence_score')
+      .select('id, pattern_label, pattern_type, synthesized_at, confidence_score')
       .eq('user_id', targetUserId)
       .eq('is_active', true)
       .order('synthesized_at', { ascending: false })
@@ -290,10 +270,6 @@ export default async function handler(req, res) {
         user_id: targetUserId,
         pattern_label: insight.pattern_label,
         pattern_type: insight.pattern_type,
-        pattern_narrative: insight.pattern_narrative,
-        trigger_context: insight.trigger_context || null,
-        user_quote: insight.user_quote || null,
-        foothold: insight.foothold || null,
         unlocked_practices: insight.unlocked_practices || [],
         confidence_score: typeof insight.confidence_score === 'number' ? insight.confidence_score : 0.5,
         sessions_synthesized_from: sessions.length,
@@ -301,7 +277,6 @@ export default async function handler(req, res) {
         last_updated_at: now,
         last_seen_date: todayDate,
         is_active: true,
-        strength_evidence: insight.strength_evidence || null,
       };
 
       if (insight.existing_insight_id) {

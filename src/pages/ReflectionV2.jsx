@@ -189,11 +189,6 @@ function SummaryCard({ data, streak, followThroughStats }) {
             <p className="text-white text-sm">{followThroughLine}</p>
           </div>
         )}
-        {data.self_hype_message && (
-          <div className="mt-4 p-3 bg-zinc-900 rounded-xl border border-zinc-700">
-            <p className="text-zinc-300 text-sm italic">"{data.self_hype_message}"</p>
-          </div>
-        )}
       </div>
       <p className="text-zinc-500 text-xs mt-4 text-center italic">
         You're building the identity of someone who shows up.
@@ -308,7 +303,6 @@ export default function ReflectionV2() {
     tomorrow_commitment: null,
     commitment_minimum: null,
     commitment_stretch: null,
-    self_hype_message: null,
     consecutive_excuses: 0,
     checklist: { ...DEFAULT_CHECKLIST },
     exercises_run: [],
@@ -454,7 +448,6 @@ export default function ReflectionV2() {
         tomorrow_commitment: session.tomorrow_commitment || null,
         commitment_minimum: session.commitment_minimum || null,
         commitment_stretch: session.commitment_stretch || null,
-        self_hype_message: session.self_hype_message || null,
         consecutive_excuses: session.consecutive_excuses || 0,
         checklist: session.checklist || { ...DEFAULT_CHECKLIST },
         exercises_run: Array.isArray(session.exercises_run) ? session.exercises_run : [],
@@ -503,7 +496,7 @@ export default function ReflectionV2() {
       try {
         const { data: goalsData } = await supabase
           .from('goals')
-          .select('id, title, category')
+          .select('id, title')
           .eq('user_id', user.id)
           .eq('status', 'active');
         setActiveGoals(goalsData || []);
@@ -839,8 +832,6 @@ export default function ReflectionV2() {
           newState.commitment_minimum = data.extracted_data.commitment_minimum;
         if (data.extracted_data?.commitment_stretch)
           newState.commitment_stretch = data.extracted_data.commitment_stretch;
-        if (data.extracted_data?.self_hype_message)
-          newState.self_hype_message = data.extracted_data.self_hype_message;
         if (data.extracted_data?.depth_insight)
           newState.depth_insight = data.extracted_data.depth_insight;
         if (data.stage_advance && data.new_stage)
@@ -918,8 +909,6 @@ export default function ReflectionV2() {
           dbUpdates.commitment_stretch = data.extracted_data.commitment_stretch;
         if (data.extracted_data?.commitment_score != null)
           dbUpdates.commitment_score = data.extracted_data.commitment_score;
-        if (data.extracted_data?.self_hype_message)
-          dbUpdates.self_hype_message = data.extracted_data.self_hype_message;
         if (data.stage_advance && data.new_stage) dbUpdates.current_stage = data.new_stage;
         if (data.commitment_checkin_done === true && !state.commitment_checkin_done) {
           dbUpdates.commitment_checkin_done = true;
@@ -1048,7 +1037,6 @@ export default function ReflectionV2() {
           tomorrow_commitment: null,
           commitment_minimum: null,
           commitment_stretch: null,
-          self_hype_message: null,
           consecutive_excuses: 0,
           checklist: { ...DEFAULT_CHECKLIST },
           exercises_run: [],
@@ -1084,13 +1072,13 @@ export default function ReflectionV2() {
 
   async function handleAcceptGoalSuggestion() {
     if (!pendingGoalSuggestion) return;
-    const { title, category } = pendingGoalSuggestion;
+    const { title } = pendingGoalSuggestion;
     setPendingGoalSuggestion(null);
     try {
       const res = await fetch('/api/create-goal', {
         method: 'POST',
         headers: await getAuthHeaders(),
-        body: JSON.stringify({ user_id: user.id, title, category: category || null }),
+        body: JSON.stringify({ user_id: user.id, title }),
       });
       if (!res.ok) return;
       const data = await res.json();
@@ -1342,11 +1330,6 @@ export default function ReflectionV2() {
                 <div className="mx-0 mt-3 mb-2 bg-zinc-900 border border-zinc-700 rounded-2xl p-4">
                   <p className="text-zinc-400 text-xs uppercase tracking-widest mb-2">Suggested goal</p>
                   <p className="text-white font-medium text-sm mb-1">{pendingGoalSuggestion.title}</p>
-                  {pendingGoalSuggestion.category && (
-                    <span className="inline-block px-2 py-0.5 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-400 text-xs mb-3">
-                      {pendingGoalSuggestion.category.replace('_', ' ')}
-                    </span>
-                  )}
                   <div className="flex gap-2 mt-3">
                     <button
                       onClick={handleAcceptGoalSuggestion}

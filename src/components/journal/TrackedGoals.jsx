@@ -1,18 +1,7 @@
-import React, { useState } from 'react';
-import { Target, Eye, EyeOff, X } from 'lucide-react';
+import React from 'react';
+import { Target, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { Badge } from '@/components/ui/badge';
-
-const categoryColors = {
-  health: 'bg-emerald-100 text-emerald-700',
-  career: 'bg-blue-100 text-blue-700',
-  relationships: 'bg-rose-100 text-rose-700',
-  personal_growth: 'bg-violet-100 text-violet-700',
-  financial: 'bg-amber-100 text-amber-700',
-  creative: 'bg-pink-100 text-pink-700',
-  other: 'bg-slate-100 text-slate-700',
-};
 
 export default function TrackedGoals({ goals, progressNotes, onProgressChange, onDeactivate }) {
   if (goals.length === 0) return null;
@@ -34,15 +23,7 @@ export default function TrackedGoals({ goals, progressNotes, onProgressChange, o
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-1">
                   <h4 className="font-medium text-slate-900">{goal.title}</h4>
-                  {goal.category && (
-                    <Badge className={`${categoryColors[goal.category]} border-0 text-xs`}>
-                      {goal.category.replace('_', ' ')}
-                    </Badge>
-                  )}
                 </div>
-                {goal.description && (
-                  <p className="text-xs text-slate-500">{goal.description}</p>
-                )}
               </div>
               <Button
                 variant="ghost"
