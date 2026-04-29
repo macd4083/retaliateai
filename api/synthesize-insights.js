@@ -2,18 +2,14 @@
  * api/synthesize-insights.js
  *
  * Persistent insight synthesis endpoint.
- * Reads last 30 sessions + depth insights, synthesizes 5-7 insights via GPT-4o,
- * and writes them as individual rows to user_insights.
+ * Uses goal commitment data and session causal extracts to synthesize 5-7 insights.
+ * Replaces the prior session_history + profile pipeline.
  *
  * POST { user_id, force_refresh? }
  *
  * Called:
  *   - After every completed session (fire-and-forget from reflection-coach.js)
  *   - On InsightsV2 load if newest synthesized_at > 3 days old
- *
- * Required migrations:
- * -- ALTER TABLE user_profiles ALTER COLUMN strengths TYPE jsonb[] USING strengths::jsonb[];
- * -- ALTER TABLE user_profiles ALTER COLUMN growth_areas TYPE jsonb[] USING growth_areas::jsonb[];
  */
 
 import OpenAI from 'openai';
@@ -24,7 +20,6 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
 const SYNTHESIS_CACHE_DAYS = 3;
-const STALE_INSIGHT_DAYS = 14;
 const MAX_ACTIVE_INSIGHTS = 7;
 const MIN_SESSIONS = 3;
 
@@ -38,26 +33,31 @@ function insightToNarrative(ins) {
   };
 }
 
-const SYNTHESIS_SYSTEM = `You are analyzing a person's real reflection session data to synthesize 5–7 genuine psychological insights about patterns actively shaping their behavior. These are NOT summaries. They are precise, evidence-based observations.
+const SYNTHESIS_SYSTEM = `You are analyzing a person's behavioral data to synthesize 5–7 genuine insights about patterns actively shaping their follow-through and motivation.
 
 You will receive:
-- Their last 30 sessions (dates, summaries, wins, struggles, blocker tags, commitments)
-- Direct quotes/realizations from sessions (depth_insights)
-- Their existing tracked insights (update rather than duplicate)
-- Their profile as a structured object with fields: profile.identity, profile.goal, profile.why, profile.future_self, profile.values, profile.current_state
-- Optionally: exercises_already_explained — a list of exercise IDs the user has already run
+- active_goals: array of goals with their why history, commitment follow-through rates, and depth insights
+- win_causes: what they said drove their wins over the last 30 days (their actual words)
+- miss_causes: what they said got in the way over the last 30 days (their actual words)
+- existing_tracked_insights: current insights to update rather than duplicate
 
 For each insight produce:
-- pattern_label: 3–5 words. e.g. "Shipping avoidance", "Accountability deflection"
+- pattern_label: 3–5 words describing the pattern (e.g. "Commitment drops mid-week", "Wins tied to morning routine")
 - pattern_type: "blocker" | "strength" | "identity_theme"
-- unlocked_practices: Applicable exercise IDs from: ["ownership_reframe","gratitude_anchor","why_reconnect","evidence_audit","implementation_intention","values_clarification","future_self_bridge","triage_one_thing","identity_reinforcement","depth_probe"]
-- confidence_score: 0.0–1.0 based on session count, recency, and whether user acknowledged it
+- evidence: one specific sentence citing actual data — commitment rates, their actual words from win/miss causes, goal-specific patterns. Never generic.
+- unlocked_practices: applicable exercise IDs from: ["ownership_reframe","gratitude_anchor","why_reconnect","evidence_audit","implementation_intention","values_clarification","future_self_bridge","triage_one_thing","identity_reinforcement","depth_probe"]
+- confidence_score: 0.0–1.0
 - existing_insight_id: UUID of existing insight this updates, or null
 
 RULES:
+- Derive patterns from behavioral evidence (commitment kept/missed rates, what they said caused wins/misses)
+- If a goal has <40% follow-through rate, that's a blocker insight
+- If win_causes show a recurring theme (same thing mentioned 3+ times), that's a strength insight
+- If miss_causes show a recurring theme, that's a blocker insight
+- Use their actual words from win_causes/miss_causes in the evidence field
+- Never use abstract psychological language
+- Update existing insights rather than duplicating them
 - Max 7 insights. Fewer is fine if not enough evidence.
-- No generic coaching language.
-- Update existing insights rather than creating duplicates.
 - For each insight's unlocked_practices: only include exercise IDs the user has NOT yet run (not in exercises_already_explained). If all applicable exercises are already explained, return an empty array.
 
 Return ONLY valid JSON:
@@ -67,6 +67,7 @@ Return ONLY valid JSON:
       "existing_insight_id": "<uuid or null>",
       "pattern_label": "...",
       "pattern_type": "blocker|strength|identity_theme",
+      "evidence": "...",
       "unlocked_practices": ["..."],
       "confidence_score": 0.0
     }
@@ -153,73 +154,110 @@ export default async function handler(req, res) {
       }
     }
 
-    // ── 1. Load sessions ──────────────────────────────────────────────────
-    const { data: sessions } = await supabase
+    // ── 1. Check minimum session count ────────────────────────────────────
+    const { count: sessionCount } = await supabase
       .from('reflection_sessions')
-      .select('date, summary, wins, misses, tomorrow_commitment, mood_end_of_day, blocker_tags, checklist')
+      .select('id', { count: 'exact', head: true })
       .eq('user_id', targetUserId)
-      .eq('is_complete', true)
-      .order('date', { ascending: false })
-      .limit(30);
+      .eq('is_complete', true);
 
-    if (!sessions || sessions.length < MIN_SESSIONS) {
+    if (!sessionCount || sessionCount < MIN_SESSIONS) {
       if (return_as_narratives) {
         return res.status(200).json({ narratives: [], message: `Need at least ${MIN_SESSIONS} sessions.` });
       }
       return res.status(200).json({ insights: [], message: `Need at least ${MIN_SESSIONS} sessions.` });
     }
 
-    // ── 2. Load depth insights ────────────────────────────────────────────
-    const { data: depthMessages } = await supabase
-      .from('reflection_messages')
-      .select('extracted_data, created_at')
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+
+    // ── 2. Load active goals with commitment stats ─────────────────────────
+    const [
+      { data: activeGoals },
+      { data: commitmentLog },
+      { data: causalExtracts },
+      { data: existingInsights },
+      { data: profileData },
+    ] = await Promise.all([
+      supabase
+        .from('goals')
+        .select('id, title, whys, why_summary, depth_insights, last_mentioned_at, last_motivation_signal')
+        .eq('user_id', targetUserId)
+        .eq('status', 'active'),
+      supabase
+        .from('goal_commitment_log')
+        .select('goal_id, commitment_text, kept, date')
+        .eq('user_id', targetUserId)
+        .gte('date', thirtyDaysAgo)
+        .order('date', { ascending: false }),
+      supabase
+        .from('session_causal_extracts')
+        .select('id, type, raw_text, goal_id, date')
+        .eq('user_id', targetUserId)
+        .gte('date', thirtyDaysAgo)
+        .order('date', { ascending: false }),
+      supabase
+        .from('user_insights')
+        .select('id, pattern_label, pattern_type, synthesized_at, confidence_score, last_seen_date')
+        .eq('user_id', targetUserId)
+        .eq('is_active', true)
+        .order('synthesized_at', { ascending: false })
+        .limit(MAX_ACTIVE_INSIGHTS),
+      supabase
+        .from('user_profiles')
+        .select('exercises_explained')
+        .eq('id', targetUserId)
+        .maybeSingle(),
+    ]);
+
+    // ── 3. Clean up causal extracts older than 30 days (fire-and-forget) ──
+    supabase
+      .from('session_causal_extracts')
+      .delete()
       .eq('user_id', targetUserId)
-      .not('extracted_data', 'is', null)
-      .gte('created_at', new Date(Date.now() - 30 * 86400000).toISOString())
-      .order('created_at', { ascending: false })
-      .limit(30);
+      .lt('date', thirtyDaysAgo)
+      .then(() => {}).catch(() => {});
 
-    const depthInsights = (depthMessages || [])
-      .map((m) => m.extracted_data?.depth_insight)
-      .filter(Boolean);
+    const exercisesExplained = profileData?.exercises_explained || [];
 
-    // ── 3. Load existing active insights ──────────────────────────────────
-    const { data: existingInsights } = await supabase
-      .from('user_insights')
-      .select('id, pattern_label, pattern_type, synthesized_at, confidence_score')
-      .eq('user_id', targetUserId)
-      .eq('is_active', true)
-      .order('synthesized_at', { ascending: false })
-      .limit(MAX_ACTIVE_INSIGHTS);
+    // ── 4. Build goal context with commitment stats ───────────────────────
+    const goalContext = (activeGoals || []).map(goal => {
+      const goalCommitments = (commitmentLog || []).filter(c => c.goal_id === goal.id);
+      const kept = goalCommitments.filter(c => c.kept === true).length;
+      const missed = goalCommitments.filter(c => c.kept === false).length;
+      const total = kept + missed;
+      const followThroughRate = total > 0 ? Math.round((kept / total) * 100) : null;
 
-    // ── 4. Load profile ───────────────────────────────────────────────────
-    const { data: profile } = await supabase
-      .from('user_profiles')
-      .select('identity_statement, big_goal, why, future_self, values, short_term_state, long_term_patterns, strengths, growth_areas, exercises_explained')
-      .eq('id', targetUserId)
-      .maybeSingle();
+      return {
+        id: goal.id,
+        title: goal.title,
+        whys: (goal.whys || []).slice(-3).map(w => w.text || w),
+        why_summary: goal.why_summary || null,
+        depth_insights: (goal.depth_insights || []).slice(-3).map(d => d.insight || d),
+        last_mentioned_at: goal.last_mentioned_at,
+        motivation_signal: goal.last_motivation_signal,
+        commitment_follow_through_rate: followThroughRate,
+        total_commitments_tracked: total,
+        recent_commitments: goalCommitments.slice(0, 5).map(c => ({
+          text: c.commitment_text,
+          kept: c.kept,
+          date: c.date,
+        })),
+      };
+    });
 
-    const exercisesExplained = profile?.exercises_explained || [];
+    const winCauses = (causalExtracts || []).filter(e => e.type === 'win_cause').map(e => ({
+      text: e.raw_text,
+      date: e.date,
+      goal_id: e.goal_id,
+    }));
 
-    // ── 5. Build GPT context ──────────────────────────────────────────────
-    const sessionHistory = sessions.map((s) => {
-      const wins = Array.isArray(s.wins)
-        ? s.wins.map((w) => (typeof w === 'string' ? w : w?.text)).filter(Boolean).join('; ')
-        : (typeof s.wins === 'string' ? s.wins : '');
-      const misses = Array.isArray(s.misses)
-        ? s.misses.map((m) => (typeof m === 'string' ? m : m?.text)).filter(Boolean).join('; ')
-        : (typeof s.misses === 'string' ? s.misses : '');
-      const blockers = Array.isArray(s.blocker_tags) ? s.blocker_tags.join(', ') : '';
-      let line = `[${s.date}]`;
-      if (s.summary) line += ` ${s.summary}`;
-      if (wins) line += ` Wins: ${wins}.`;
-      if (misses) line += ` Struggles: ${misses}.`;
-      if (blockers) line += ` Blockers: ${blockers}.`;
-      if (s.tomorrow_commitment) line += ` Committed: ${s.tomorrow_commitment}.`;
-      return line;
-    }).join('\n');
+    const missCauses = (causalExtracts || []).filter(e => e.type === 'miss_cause').map(e => ({
+      text: e.raw_text,
+      date: e.date,
+      goal_id: e.goal_id,
+    }));
 
-    // ── 6. Call GPT-4o ────────────────────────────────────────────────────
+    // ── 5. Call GPT-4o ────────────────────────────────────────────────────
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o',
       messages: [
@@ -227,21 +265,14 @@ export default async function handler(req, res) {
         {
           role: 'user',
           content: JSON.stringify({
-            session_history: sessionHistory,
-            depth_insights: depthInsights.length > 0 ? depthInsights : undefined,
+            active_goals: goalContext.length > 0 ? goalContext : undefined,
+            win_causes: winCauses.length > 0 ? winCauses : undefined,
+            miss_causes: missCauses.length > 0 ? missCauses : undefined,
             existing_tracked_insights: (existingInsights || []).length > 0
               ? (existingInsights || []).map((i) => ({ id: i.id, label: i.pattern_label, type: i.pattern_type, last_synthesized: i.synthesized_at, confidence: i.confidence_score }))
               : undefined,
-            profile: {
-              identity: profile?.identity_statement || null,
-              goal: profile?.big_goal || null,
-              why: profile?.why || null,
-              future_self: profile?.future_self || null,
-              values: profile?.values || null,
-              current_state: profile?.short_term_state || null,
-            },
             exercises_already_explained: exercisesExplained.length > 0 ? exercisesExplained : undefined,
-            total_sessions_analyzed: sessions.length,
+            total_sessions_analyzed: sessionCount,
           }),
         },
       ],
@@ -264,7 +295,7 @@ export default async function handler(req, res) {
     const todayDate = now.slice(0, 10);
     const upsertedIds = new Set();
 
-    // ── 7. Upsert insights ────────────────────────────────────────────────
+    // ── 6. Upsert insights ────────────────────────────────────────────────
     for (const insight of newInsights) {
       const row = {
         user_id: targetUserId,
@@ -272,7 +303,7 @@ export default async function handler(req, res) {
         pattern_type: insight.pattern_type,
         unlocked_practices: insight.unlocked_practices || [],
         confidence_score: typeof insight.confidence_score === 'number' ? insight.confidence_score : 0.5,
-        sessions_synthesized_from: sessions.length,
+        sessions_synthesized_from: sessionCount,
         synthesized_at: todayDate,
         last_updated_at: now,
         last_seen_date: todayDate,
@@ -280,7 +311,6 @@ export default async function handler(req, res) {
       };
 
       if (insight.existing_insight_id) {
-        // Update existing: preserve first_seen_date (set last_seen_date to today)
         const { data: updated } = await supabase
           .from('user_insights')
           .update(row)
@@ -290,7 +320,6 @@ export default async function handler(req, res) {
           .maybeSingle();
         if (updated?.id) upsertedIds.add(updated.id);
       } else {
-        // New insight: set both first_seen_date and last_seen_date to today
         const { data: inserted } = await supabase
           .from('user_insights')
           .insert({ ...row, first_seen_date: todayDate })
@@ -300,11 +329,24 @@ export default async function handler(req, res) {
       }
     }
 
-    // ── 8. Retire stale insights not updated in this run ──────────────────
-    const staleCutoff = new Date(Date.now() - STALE_INSIGHT_DAYS * 86400000).toISOString().slice(0, 10);
+    // ── 7. Update last_seen_in_insight on contributing causal extracts ────
+    if (upsertedIds.size > 0 && (causalExtracts || []).length > 0) {
+      const extractIds = (causalExtracts || []).map(e => e.id).filter(Boolean);
+      if (extractIds.length > 0) {
+        supabase
+          .from('session_causal_extracts')
+          .update({ last_seen_in_insight: todayDate })
+          .eq('user_id', targetUserId)
+          .in('id', extractIds)
+          .then(() => {}).catch(() => {});
+      }
+    }
+
+    // ── 8. Retire stale insights (15-day rule) ────────────────────────────
+    const fifteenDaysAgo = new Date(Date.now() - 15 * 86400000).toISOString().slice(0, 10);
     const toRetire = (existingInsights || [])
-      .filter((i) => !upsertedIds.has(i.id) && i.synthesized_at < staleCutoff)
-      .map((i) => i.id);
+      .filter(i => !upsertedIds.has(i.id) && (i.last_seen_date || i.synthesized_at) < fifteenDaysAgo)
+      .map(i => i.id);
 
     if (toRetire.length > 0) {
       await supabase

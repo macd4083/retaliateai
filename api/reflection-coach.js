@@ -262,8 +262,13 @@ ON EXERCISES:
 ANTI-EXCUSE SYSTEM (when accountability_signal === "excuse"):
 Step 1 (consecutive_excuses === 1): Acknowledge without validating + pivot to control
 Step 2 (consecutive_excuses >= 2): "I notice we keep landing on what you couldn't do. What could you have done differently, even with that being true?"
-Step 3 (consecutive_excuses >= 3): Pull future_self. "The version of you that [future_self] doesn't live there. What would they say right now?"
+Step 3 (consecutive_excuses >= 3): Pull from their goals. "What would the version of you that actually achieved [most relevant goal] say right now?"
 Never punitive. Always warm but direct.
+
+COMMITMENT CHECK-INS:
+- Never critique or shame missed commitments. Present data only (what was committed, what happened).
+- If miss_cause data is available from yesterday, reference it: "You said [X] got in the way."
+- Always pivot immediately to forward questions: "What are you absolutely doing today? How are you prioritizing it?"
 
 EXERCISE WORKFLOWS:
 // Active exercise instruction injected below when selected
@@ -405,7 +410,6 @@ RETURN JSON EXACTLY (no markdown, no extra keys):
     "mood": null,
     "win_text": null,
     "miss_text": null,
-    "blocker_tags": [],
     "commitment_minimum": null, // string: bare minimum floor commitment for tomorrow
     "commitment_stretch": null, // string: stretch/ideal commitment for tomorrow
     "tomorrow_commitment": null,
@@ -827,8 +831,7 @@ async function loadUserInsights(userId) {
       .select('id, pattern_label, pattern_type, unlocked_practices, confidence_score, first_seen_date, last_seen_date')
       .eq('user_id', userId)
       .eq('is_active', true)
-      .order('confidence_score', { ascending: false })
-      .limit(5);
+      .order('confidence_score', { ascending: false });
     return data || [];
   } catch (_e) { return []; }
 }
@@ -879,7 +882,6 @@ function computePreSessionState(clientDate, { recentSessions = [], followUpQueue
       } else if (lastSession.tomorrow_commitment) {
         parts.push(`committed to "${lastSession.tomorrow_commitment}"`);
       }
-      if (lastSession.mood_end_of_day) parts.push(`mood: ${lastSession.mood_end_of_day}`);
       returning_user_context = parts.join('. ');
     }
 
@@ -917,7 +919,7 @@ async function loadRecentSessionsSummary(userId) {
   try {
     const { data } = await supabase
       .from('reflection_sessions')
-      .select('date, wins, misses, tomorrow_commitment, current_stage, checklist, mood_end_of_day, summary, blocker_tags, exercises_run')
+      .select('date, wins, misses, tomorrow_commitment, current_stage, checklist, summary, exercises_run')
       .eq('user_id', userId)
       .eq('is_complete', true)
       .order('date', { ascending: false })
@@ -987,11 +989,35 @@ async function loadTodayEarlyCommitment(userId, clientToday) {
   } catch (_e) { return null; }
 }
 
+async function loadTodayCausalExtracts(userId, clientDate) {
+  try {
+    const { data } = await supabase
+      .from('session_causal_extracts')
+      .select('type, raw_text, goal_id, date')
+      .eq('user_id', userId)
+      .eq('date', today(clientDate))
+      .order('created_at', { ascending: true });
+    return data || [];
+  } catch (_e) { return []; }
+}
+
+async function loadYesterdayCausalExtracts(userId, clientDate) {
+  try {
+    const { data } = await supabase
+      .from('session_causal_extracts')
+      .select('type, raw_text, goal_id, date')
+      .eq('user_id', userId)
+      .eq('date', localDate(-1, clientDate))
+      .order('created_at', { ascending: true });
+    return data || [];
+  } catch (_e) { return []; }
+}
+
 async function loadUserProfile(userId) {
   try {
     const { data } = await supabase
       .from('user_profiles')
-      .select('full_name, display_name, identity_statement, big_goal, why, future_self, life_areas, blockers, exercises_explained, values, short_term_state, long_term_patterns, growth_areas, strengths, consecutive_excuse_sessions')
+      .select('full_name, display_name, identity_statement, life_areas, exercises_explained, consecutive_excuse_sessions')
       .eq('id', userId)
       .maybeSingle();
     return data || null;
@@ -1255,300 +1281,15 @@ function generateSessionSummary(sessionState, result, profile, dateStr) {
   const commitment = sessionState.tomorrow_commitment || result.extracted_data?.tomorrow_commitment || null;
   const insight = result.extracted_data?.depth_insight || sessionState.depth_insight || null;
   const exercises = Array.isArray(sessionState.exercises_run) ? sessionState.exercises_run.join(', ') : 'none';
-  const mood = sessionState.mood_end_of_day || result.extracted_data?.mood || null;
-  const blockers = Array.isArray(sessionState.blocker_tags) ? sessionState.blocker_tags.join(', ') : null;
 
   let summary = `Session ${dateStr}: ${name} worked on ${wins}.`;
   if (miss) summary += ` Honest moment: ${miss}.`;
-  if (blockers) summary += ` Blockers: ${blockers}.`;
   if (commitment) summary += ` Tomorrow's plan: ${commitment}.`;
   if (insight) summary += ` Depth insight: ${insight}.`;
   if (exercises !== 'none') summary += ` Exercises: ${exercises}.`;
-  if (mood) summary += ` Mood: ${mood}.`;
   return summary;
 }
 
-async function evolveUserProfile(userId, summaryText, currentProfile, recentSessions, sessionId) {
-  try {
-    // Check if a monthly deep pattern pass is due
-    const lastUpdated = currentProfile?.profile_updated_at ? new Date(currentProfile.profile_updated_at) : null;
-    const daysSinceUpdate = lastUpdated ? Math.floor((Date.now() - lastUpdated.getTime()) / (1000 * 60 * 60 * 24)) : 999;
-    const isMonthlyPassDue = daysSinceUpdate >= 30;
-
-    let deepPatternContext = '';
-    if (isMonthlyPassDue) {
-      try {
-        const { data: thirtyDaySessions } = await supabase
-          .from('reflection_sessions')
-          .select('date, summary, mood_end_of_day, tomorrow_commitment')
-          .eq('user_id', userId)
-          .not('summary', 'is', null)
-          .order('date', { ascending: false })
-          .limit(30);
-
-        if (thirtyDaySessions && thirtyDaySessions.length >= 5) {
-          const patternCompletion = await openai.chat.completions.create({
-            model: 'gpt-4o-mini',
-            messages: [
-              {
-                role: 'system',
-                content: `Analyze these 30 days of reflection session summaries and identify:
-1. top_3_recurring_themes: themes mentioned 3+ times (max 3 strings)
-2. mood_trend: "improving" | "stable" | "declining" based on mood data
-3. commitment_followthrough_rate: rough % based on wins following commitments (0-100)
-4. emerging_strengths: new strengths becoming consistent (max 3 strings)
-5. persistent_blockers: blockers that keep showing up (max 3 strings)
-
-Return ONLY valid JSON matching exactly:
-{
-  "top_3_recurring_themes": [],
-  "mood_trend": "stable",
-  "commitment_followthrough_rate": 0,
-  "emerging_strengths": [],
-  "persistent_blockers": []
-}`,
-              },
-              {
-                role: 'user',
-                content: JSON.stringify(thirtyDaySessions.map((s) => ({
-                  date: s.date,
-                  summary: s.summary?.slice(0, 200),
-                  mood: s.mood_end_of_day,
-                  committed: !!s.tomorrow_commitment,
-                }))),
-              },
-            ],
-            response_format: { type: 'json_object' },
-            max_tokens: 300,
-            temperature: 0.5,
-          });
-          deepPatternContext = patternCompletion.choices[0].message.content;
-        }
-      } catch (_e) { /* fail silently */ }
-    }
-
-    const EVOLVE_SYSTEM = `You are analyzing a completed reflection session to evolve the user's profile.
-
-Given the session summary and current user profile, extract:
-1. short_term_state: 1-2 sentences on how they're doing right now. Human language, not clinical. E.g. "He's been grinding on his app and working on his morning routine."
-2. long_term_patterns: recurring themes/behaviors emerging (max 5 strings)
-3. growth_areas: areas actively being worked on. Max 4 objects. Each object:
-   { "label": "2-4 word name", "evidence": "One specific sentence: what they did, when, how it's shifting. Use dates if available. Their actual situation, not generic language.", "started": "YYYY-MM-DD or null" }
-   Example: { "label": "Morning consistency", "evidence": "Went from skipping mornings entirely to 4/7 days in the last three weeks — the trend started after they committed to protecting pre-work hours.", "started": "2024-03-10" }
-4. strengths: positive traits demonstrated with evidence. Max 4 objects. Each object:
-   { "label": "2-4 word name", "evidence": "One specific sentence citing what they actually did — dates, events, their words where possible. Name the mechanism: what does this strength look like in action for them specifically.", "first_seen": "YYYY-MM-DD or null", "occurrence_count": number }
-   Example: { "label": "Executes under pressure", "evidence": "Shipped the auth feature the same week they said they were exhausted and two days behind — this has shown up three times in the last month.", "first_seen": "2024-03-18", "occurrence_count": 3 }
-5. values: core values surfaced in their language and choices (max 5 strings)
-6. identity_statement_update: If the current value is null, derive one from this session. If non-null, update only if the session surfaces meaningfully new detail — otherwise null.
-7. big_goal_update: If the current value is null, derive one from this session. If non-null, update only if the goal evolved or became clearer — otherwise null.
-8. why_update: If the current value is null, derive one from this session. If non-null, update only if their why deepened or clarified — otherwise null.
-9. blockers_update: ONLY if new blockers clearly emerged or existing ones evolved — otherwise null. Array of strings max 5.
-10. future_self_update: If the current value is null, derive one from this session. If non-null, update only if the user expressed a clearer or evolved version of their 1-year vision — otherwise null.
-11. goal_updates: array of { goal_id, why_insight, why_action, why_replace_index, depth_insight, last_mentioned_date } for any goals that were meaningfully discussed. Only include fields that have new content — null otherwise. Empty array if no goals were discussed.
-    - why_insight: the captured why text in their actual words (or null)
-    - why_action: "add" | "replace" | null (add if new distinct motivation, replace if deeper version of existing)
-    - why_replace_index: 0-based index of the why to replace (only set when why_action="replace")
-
-Rules:
-- Use their actual words, not clinical language
-- For identity_statement/big_goal/why/future_self: always populate if currently null; update if non-null only when this session adds meaningful new detail
-- Merge with existing profile — evolve, don't erase
-- Keep arrays concise, quality over quantity
-
-Return valid JSON only:
-{
-  "short_term_state": "...",
-  "long_term_patterns": ["..."],
-  "growth_areas": [{"label": "...", "evidence": "...", "started": "..."}],
-  "strengths": [{"label": "...", "evidence": "...", "first_seen": "...", "occurrence_count": 0}],
-  "values": ["..."],
-  "identity_statement_update": "..." | null,
-  "big_goal_update": "..." | null,
-  "why_update": "..." | null,
-  "blockers_update": ["..."] | null,
-  "future_self_update": "..." | null,
-  "goal_updates": []
-}`;
-
-    const recentSummaries = recentSessions
-      .filter((s) => s.summary)
-      .slice(0, 3)
-      .map((s) => `${s.date}: ${s.summary}`)
-      .join('\n');
-
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o',
-      messages: [
-        { role: 'system', content: EVOLVE_SYSTEM },
-        {
-          role: 'user',
-          content: JSON.stringify({
-            session_summary: summaryText,
-            current_profile: {
-              name: currentProfile?.display_name || currentProfile?.full_name,
-              identity_statement: currentProfile?.identity_statement,
-              big_goal: currentProfile?.big_goal,
-              why: currentProfile?.why,
-              future_self: currentProfile?.future_self,
-              short_term_state: currentProfile?.short_term_state,
-              long_term_patterns: currentProfile?.long_term_patterns,
-              growth_areas: currentProfile?.growth_areas,
-              strengths: currentProfile?.strengths,
-              values: currentProfile?.values,
-            },
-            recent_sessions: recentSummaries || 'none',
-          }) + (deepPatternContext ? `\n\n## MONTHLY DEEP PATTERN ANALYSIS (use to enrich long_term_patterns and strengths):\n${deepPatternContext}` : ''),
-        },
-      ],
-      response_format: { type: 'json_object' },
-      temperature: 0.4,
-      max_tokens: 1000,
-    });
-
-    const evolution = JSON.parse(completion.choices[0].message.content);
-
-    const todayStr = new Date().toISOString().split('T')[0];
-    const thirtyDaysAgoStr = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0];
-    const sixtyDaysAgoStr = new Date(Date.now() - 60 * 86400000).toISOString().split('T')[0];
-
-    // ── Merge strengths — carry forward history, don't full-replace ───────
-    const normLabel = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-    const existingStrengths = Array.isArray(currentProfile?.strengths) ? currentProfile.strengths : [];
-    const aiStrengths = Array.isArray(evolution.strengths) ? evolution.strengths : [];
-    const aiStrengthKeys = new Set(aiStrengths.map((s) => normLabel(s.label)));
-
-    const mergedAiStrengths = aiStrengths.map((aiS) => {
-      const existing = existingStrengths.find((e) => normLabel(e.label) === normLabel(aiS.label));
-      return {
-        label: aiS.label,
-        evidence: aiS.evidence,
-        first_seen: existing?.first_seen || aiS.first_seen || todayStr,
-        occurrence_count: (existing?.occurrence_count || 0) + 1,
-        last_seen: todayStr,
-      };
-    });
-    // Keep established entries (occurrence_count >= 2) that weren't in this session's output
-    const keptStrengths = existingStrengths
-      .filter((e) => !aiStrengthKeys.has(normLabel(e.label)) && (e.occurrence_count || 0) >= 2)
-      .map((e) => ({ ...e, last_seen: e.last_seen || todayStr }));
-    const mergedStrengths = [...mergedAiStrengths, ...keptStrengths].slice(0, 6);
-
-    // ── Merge growth_areas — keep established entries, carry started date ─
-    const existingGrowthAreas = Array.isArray(currentProfile?.growth_areas) ? currentProfile.growth_areas : [];
-    const aiGrowthAreas = Array.isArray(evolution.growth_areas) ? evolution.growth_areas : [];
-    const aiGrowthKeys = new Set(aiGrowthAreas.map((g) => normLabel(g.label)));
-
-    const mergedAiGrowthAreas = aiGrowthAreas.map((aiG) => {
-      const existing = existingGrowthAreas.find((e) => normLabel(e.label) === normLabel(aiG.label));
-      return {
-        label: aiG.label,
-        evidence: aiG.evidence,
-        started: existing?.started || aiG.started || null,
-        last_seen: todayStr,
-      };
-    });
-    // Keep entries not in this session's output if they've been seen recently or have no last_seen yet (migration grace)
-    const keptGrowthAreas = existingGrowthAreas
-      .filter((e) => !aiGrowthKeys.has(normLabel(e.label)) && (!e.last_seen || e.last_seen >= sixtyDaysAgoStr))
-      .map((e) => ({ ...e, last_seen: e.last_seen || todayStr }));
-    const mergedGrowthAreas = [...mergedAiGrowthAreas, ...keptGrowthAreas].slice(0, 6);
-
-    // ── Dedupe long_term_patterns ─────────────────────────────────────────
-    const rawPatterns = Array.isArray(evolution.long_term_patterns) ? evolution.long_term_patterns : [];
-    const seenPatterns = new Set();
-    const dedupedPatterns = rawPatterns.filter((p) => {
-      const key = normLabel(p);
-      if (seenPatterns.has(key)) return false;
-      seenPatterns.add(key);
-      return true;
-    });
-
-    const profileUpdates = {
-      short_term_state: evolution.short_term_state,
-      long_term_patterns: dedupedPatterns,
-      growth_areas: mergedGrowthAreas,
-      strengths: mergedStrengths,
-      values: evolution.values,
-      profile_updated_at: new Date().toISOString(),
-    };
-    if (evolution.identity_statement_update || !currentProfile?.identity_statement) {
-      if (evolution.identity_statement_update) profileUpdates.identity_statement = evolution.identity_statement_update;
-    }
-    if (evolution.big_goal_update || !currentProfile?.big_goal) {
-      if (evolution.big_goal_update) profileUpdates.big_goal = evolution.big_goal_update;
-    }
-    if (evolution.why_update || !currentProfile?.why) {
-      if (evolution.why_update) profileUpdates.why = evolution.why_update;
-    }
-    if (evolution.blockers_update) profileUpdates.blockers = evolution.blockers_update;
-    if (evolution.future_self_update || !currentProfile?.future_self) {
-      if (evolution.future_self_update) profileUpdates.future_self = evolution.future_self_update;
-    }
-
-    await supabase.from('user_profiles').update(profileUpdates).eq('id', userId);
-
-    // Write back goal updates from EVOLVE pass
-    if (Array.isArray(evolution.goal_updates)) {
-      for (const gu of evolution.goal_updates) {
-        if (!gu.goal_id) continue;
-        const goalUpdates = {};
-        if (gu.last_mentioned_date) goalUpdates.last_mentioned_at = gu.last_mentioned_date;
-
-        // Handle why_insight — append to whys array (evolve pass always adds, never replaces blindly unless index given)
-        if (gu.why_insight) {
-          supabase
-            .from('goals')
-            .select('whys')
-            .eq('id', gu.goal_id)
-            .eq('user_id', userId)
-            .maybeSingle()
-            .then(({ data }) => {
-              let currentWhys = Array.isArray(data?.whys) ? [...data.whys] : [];
-              const newWhy = {
-                text: gu.why_insight,
-                added_at: gu.last_mentioned_date || new Date().toISOString().split('T')[0],
-                source: 'evolve_pass',
-                motivation_signal: null,
-                session_id: null,
-              };
-              if (gu.why_action === 'replace' && typeof gu.why_replace_index === 'number' && currentWhys[gu.why_replace_index]) {
-                currentWhys[gu.why_replace_index] = newWhy;
-              } else {
-                currentWhys.push(newWhy);
-              }
-              // Enforce retention policy
-              const commitmentWhys = currentWhys.filter(w => w.source === 'commitment_planning').slice(-MAX_COMMITMENT_WHYS);
-              const sessionWhys = currentWhys.filter(w => w.source !== 'commitment_planning').slice(-MAX_SESSION_WHYS);
-              currentWhys = [...commitmentWhys, ...sessionWhys].slice(-MAX_WHYS_TOTAL);
-              return supabase.from('goals').update({ ...goalUpdates, whys: currentWhys }).eq('id', gu.goal_id).eq('user_id', userId);
-            })
-            .then(() => {}).catch(() => {});
-          if (!gu.depth_insight) continue; // why_insight handled above, skip simple update unless depth_insight also present
-        }
-
-        if (gu.depth_insight) {
-          // Append depth insight — fetch first, then update
-          supabase
-            .from('goals')
-            .select('depth_insights')
-            .eq('id', gu.goal_id)
-            .eq('user_id', userId)
-            .maybeSingle()
-            .then(({ data }) => {
-              const current = Array.isArray(data?.depth_insights) ? data.depth_insights : [];
-              const updated = [...current.slice(-MAX_DEPTH_INSIGHTS_RETAINED), { date: gu.last_mentioned_date || new Date().toISOString().split('T')[0], insight: gu.depth_insight }];
-              return supabase.from('goals').update({ ...goalUpdates, depth_insights: updated }).eq('id', gu.goal_id).eq('user_id', userId);
-            })
-            .then(() => {}).catch(() => {});
-          continue; // Skip simple update below since async above handles it
-        }
-        if (Object.keys(goalUpdates).length > 0) {
-          supabase.from('goals').update(goalUpdates).eq('id', gu.goal_id).eq('user_id', userId).then(() => {}).catch(() => {});
-        }
-      }
-    }
-  } catch (_e) {}
-}
 
 /**
  * Synthesizes a why_summary for a goal from its current whys array using gpt-4o-mini.
@@ -1651,6 +1392,7 @@ function buildDirectiveQueue({
   userInsights, recentSessions, effectiveConsecutiveExcuses,
   currentDirectiveQueue, completedDirectives,
   activeGoals = [],
+  yesterdayCausalExtracts = [],
 }) {
   const currentStage = sessionState.current_stage || 'commitment_checkin';
   const allDirectives = [];
@@ -1873,11 +1615,10 @@ function buildDirectiveQueue({
     const capturedMisses = Array.isArray(sessionState.misses)
       ? sessionState.misses.map(m => typeof m === 'string' ? m : m?.text).filter(Boolean)
       : [];
-    const capturedBlockers = Array.isArray(sessionState.blocker_tags) ? sessionState.blocker_tags : [];
-    if (capturedWins.length > 0 || capturedMisses.length > 0 || capturedBlockers.length > 0) {
+    if (capturedWins.length > 0 || capturedMisses.length > 0) {
       allDirectives.push({
         id: 'reference_shared',
-        instruction: `REFERENCE WHAT THEY SAID: The user has already shared: wins=[${capturedWins.join(', ')}], misses=[${capturedMisses.join(', ')}], blockers=[${capturedBlockers.join(', ')}]. Your next question MUST reference at least one of these specifically. Never ask a generic question when you have their real words.`,
+        instruction: `REFERENCE WHAT THEY SAID: The user has already shared: wins=[${capturedWins.join(', ')}], misses=[${capturedMisses.join(', ')}]. Your next question MUST reference at least one of these specifically. Never ask a generic question when you have their real words.`,
         priority: 1,
         preferred_stage: 'any',
         fire_next_session: false,
@@ -2085,20 +1826,19 @@ Set directive_completed: "${probeId}" when done.`,
               }
               return JSON.stringify(f);
             });
-            return `\n- Yesterday's fragment checklist to show in UI: ${JSON.stringify(checklistFragments)}\n- Present the checklist by returning show_commitment_checklist: true and checklist_fragments as an array of {id, text, type} objects from the fragments below.\n- When a fragment has type="minimum" or type="stretch", keep that type and label intact in checklist_fragments so the user can see exactly which is minimum vs stretch.\n- Do NOT ask a free-text question. Wait for the user to submit the checklist.\n- After the user submits the checklist, use the submitted results + precomputed_commitment_score from context to set extracted_data.checkin_outcome (kept/partial/missed), set extracted_data.commitment_score, set commitment_checkin_done: true, and continue naturally.\n- GOAL CONTEXT per fragment (use to personalize the check-in tone — do NOT recite this verbatim): ${fragmentsWithGoals.join(' | ')}\n- When a fragment has a goal+why attached: after the user marks checklist, your follow-up acknowledgment can reference the why — e.g. "You said this was about [why] — what happened with that?" Use this only if it flows naturally.\n- FRAGMENT-GOAL CONTEXT: If any fragment has goal+why context, after the checklist result comes in, use the why to ask a pointed follow-up. E.g. "You said yesterday that working on [commitment] was about [why] — does how today went change anything about that?" Do NOT ask this for every fragment — pick the most resonant one only.`;
+            return `\n- Yesterday's fragment checklist to show in UI: ${JSON.stringify(checklistFragments)}\n- Present the checklist by returning show_commitment_checklist: true and checklist_fragments as an array of {id, text, type} objects from the fragments below.\n- When a fragment has type="minimum" or type="stretch", keep that type and label intact in checklist_fragments so the user can see exactly which is minimum vs stretch.\n- Do NOT ask a free-text question. Wait for the user to submit the checklist.\n- After the user submits the checklist, use the submitted results + precomputed_commitment_score from context to set extracted_data.checkin_outcome (kept/partial/missed), set extracted_data.commitment_score, set commitment_checkin_done: true, and continue naturally.\n- GOAL CONTEXT per fragment (use to personalize the check-in tone — do NOT recite this verbatim): ${fragmentsWithGoals.join(' | ')}\n- When a fragment has a goal+why attached: after the checklist result comes in, use the why to ask a pointed follow-up. E.g. "You said yesterday that working on [commitment] was about [why] — does how today went change anything about that?" Do NOT ask this for every fragment — pick the most resonant one only.`;
           })()
         : '\n- No fragment checklist is available for yesterday, so use the normal free-text check-in question flow.';
-      let checkinTone = '';
-      if (rate !== null && rate < 40) {
-        checkinTone = `\n\nTONE: Their follow-through has been inconsistent lately (${rate}%). Ask how it went with genuine curiosity, no assumption either way. If they missed it, go there with them and get specific about what got in the way. If they did it, celebrate it. Don't lead with skepticism.`;
-      } else if (rate !== null && rate >= 70) {
-        checkinTone = `\n\nTONE: They've been strong at ${rate}% follow-through. Open from belief — "How did [commitment] go?" is enough. Let them tell you.`;
-      } else if (trajectory === 'declining') {
-        checkinTone = `\n\nTONE: Follow-through is declining. After they answer, if they missed it, don't move on — ask "What specifically got in the way?" We need the real blocker named before advancing stage.`;
-      }
+
+      // Build yesterday miss_cause context for the check-in
+      const yesterdayMissCauses = (yesterdayCausalExtracts || []).filter(e => e.type === 'miss_cause');
+      const missCauseContext = yesterdayMissCauses.length > 0
+        ? `\n- YESTERDAY'S MISS CAUSE DATA (use if they missed): ${yesterdayMissCauses.map(e => `"${sanitizeForPrompt(e.raw_text, 200)}"`).join(' | ')}`
+        : '';
+
       allDirectives.push({
         id: 'commitment_checkin',
-        instruction: `## COMMITMENT CHECK-IN\nYou are checking in on yesterday right after their mood response.\n- Yesterday's commitment to reference naturally: "${yc}"${minimumText}${stretchText}${checklistText}\n- This is the FIRST thing you address after mood. Ask how it went in a natural, direct way that feels like catching up — not evaluating performance.\n- Reference what they committed to, but do NOT open with a formal template like "you said you'd [X]". Keep it conversational and human.\n- If yesterday has a custom opener, use it exactly once before your question: ${yesterdayCheckinOpener ? `"${yesterdayCheckinOpener}"` : '(none available)'}\n- Use their exact words from the commitment. Never ask a generic or identity-style question.\n- If doing free-text fallback (no checklist), ask exactly ONE specific question and then wait.\n- If checklist fragments are available, you MUST show the checklist (show_commitment_checklist: true) and MUST NOT ask a free-text question.\n- On this transition turn from wins, set stage_advance:true and new_stage:"commitment_checkin" so the UI reflects the check-in stage immediately.\n- Never ask twice. One exchange only. Always set commitment_checkin_done: true after their response, regardless of outcome.\n- ROUTING AFTER CHECK-IN: if commitment_score >= 50, set stage_advance:true and new_stage:"wins". If commitment_score < 50 (or score is unknown), set stage_advance:true and new_stage:"honest".${checkinTone}`,
+        instruction: `## COMMITMENT CHECK-IN\nYou are checking in on yesterday at the start of the session.\n- Yesterday's commitment: "${yc}"${minimumText}${stretchText}${checklistText}${missCauseContext}\n- DATA PRESENTATION APPROACH: Present what happened factually — "Yesterday you committed to [X]. Here's what the data shows: [kept/partial/missed]." If miss_cause data is available, reference it naturally: "You mentioned [raw_text] got in the way."\n- NEVER say "You missed your commitment", "You didn't follow through", or anything that sounds like judgment or critique.\n- After presenting the data, pivot IMMEDIATELY to forward questions: "What are you absolutely getting done today? How are you planning to make that happen?"\n- If yesterday has a custom opener, use it exactly once before the data presentation: ${yesterdayCheckinOpener ? `"${yesterdayCheckinOpener}"` : '(none available)'}\n- If checklist fragments are available, you MUST show the checklist (show_commitment_checklist: true) and MUST NOT ask a free-text question first.\n- After the user submits the checklist, use the submitted results + precomputed_commitment_score to set extracted_data.checkin_outcome (kept/partial/missed), set extracted_data.commitment_score, and set commitment_checkin_done: true.\n- On this transition turn from wins, set stage_advance:true and new_stage:"commitment_checkin" so the UI reflects the check-in stage immediately.\n- Never ask twice. One exchange only. Always set commitment_checkin_done: true after their response, regardless of outcome.\n- ROUTING AFTER CHECK-IN: if commitment_score >= 50, set stage_advance:true and new_stage:"wins". If commitment_score < 50 (or score is unknown), set stage_advance:true and new_stage:"honest".`,
         priority: 1,
         preferred_stage: isTransitioningToCheckin ? 'wins' : 'commitment_checkin',
         fire_next_session: false,
@@ -2173,8 +1913,8 @@ Set directive_completed: "${probeId}" when done.`,
 - Do not ask both questions in one message.
 - IMPORTANT: Do NOT ask the stretch question until 'commitment_specificity' is in completed_directives. The specificity check runs first.${lowScoreNudge
   ? `\n- IMPORTANT: We've noticed you haven't been able to meet the minimum viable commitment a couple times now. What can you absolutely guarantee you'll get done tomorrow — not what you want to do, what you WILL do no matter what? Push them for something smaller and more guaranteed.`
-  : ''}${(Array.isArray(activeGoals) && activeGoals.length === 0) && !profile?.future_self
-  ? `\n- If activeGoals is empty AND profile.future_self is null, after capturing the stretch commitment add one closing question: "What does committing to that say about where you're trying to get?" Then set is_session_complete:true on that same response.`
+  : ''}${Array.isArray(activeGoals) && activeGoals.length === 0
+  ? `\n- If activeGoals is empty, after capturing the stretch commitment add one closing question: "What does committing to that say about where you're trying to get?" Then set is_session_complete:true on that same response.`
   : ''}`,
       priority: 1,
       preferred_stage: 'tomorrow',
@@ -2185,7 +1925,7 @@ Set directive_completed: "${probeId}" when done.`,
 
   // ── commitment_goal_bridge ─────────────────────────────────────────────
   const hasBothCommitments = !!sessionState.commitment_minimum && !!sessionState.commitment_stretch;
-  const hasGoalsOrVision = (Array.isArray(activeGoals) && activeGoals.length > 0) || !!profile?.future_self;
+  const hasGoalsOrVision = Array.isArray(activeGoals) && activeGoals.length > 0;
   if (
     currentStage === 'tomorrow' &&
     hasBothCommitments &&
@@ -2193,31 +1933,27 @@ Set directive_completed: "${probeId}" when done.`,
     !completedDirectives.includes('commitment_goal_bridge') &&
     !completedDirectives.includes('commitment_goal_why_depth')
   ) {
-    const goalContext = Array.isArray(activeGoals) && activeGoals.length > 0
-      ? activeGoals.map(g => {
+    const goalContext = activeGoals.map(g => {
           const latestWhy = Array.isArray(g.whys) && g.whys.length > 0
             ? g.whys[g.whys.length - 1].text
             : null;
           return `"${g.title}"${latestWhy ? ` (previously said: "${latestWhy.slice(0, 80)}")` : ' (no why captured yet)'}`;
-        }).join(', ')
-      : null;
-    const futureContext = profile?.future_self || null;
+        }).join(', ');
 
     allDirectives.push({
       id: 'commitment_goal_bridge',
-      instruction: `COMMITMENT-GOAL BRIDGE (Question 1 of 2): The user has now stated both their minimum and stretch commitment for tomorrow. Ask them why those specific tasks matter — not "is this good" or "does this connect to a goal" — ask directly: why is it important that they work on those specific things tomorrow? How do they connect to a long-term goal or vision they're working toward?
+      instruction: `COMMITMENT-GOAL BRIDGE (Question 1 of 2): The user has now stated both their minimum and stretch commitment for tomorrow. Ask them which of their goals this commitment connects to most, then ask how doing this tomorrow gets them closer to that goal.
 
 Available context to make this feel personal (do NOT recite this, use it to shape the question):
 - Their active goals: ${goalContext || 'none'}
-- Their stated future self vision: ${futureContext || 'not set'}
 
 Rules:
 - ONE question only. Do not validate the commitment first. Do not transition stages. Stay in tomorrow stage.
+- Show the active goals as options if there are multiple: "Which of your goals does this connect to most? [goal names as options]"
+- Then ask: "How do you see yourself getting closer to [that goal] by doing this tomorrow?"
 - Do NOT say "before we wrap" or any closing phrase — this is not the end, there is one more question after their answer.
-- Do NOT use "before we close out tomorrow" or any variant.
 - If they have a goal with a prior why, reference their own words back naturally: "You said once this was about [why] — is working on [commitment] a step toward that?"
-- If they have goals but no whys yet, ask openly: "Why is it important that you work on those things tomorrow specifically — what's the bigger thing they're connected to?"
-- If their future_self is set and no goals exist, frame against vision: "You said you want to be [future_self] — how does [commitment] move toward that?"
+- If they have goals but no whys yet, ask openly: "Which of your goals does this connect to most — and how does working on [commitment] move you toward it?"
 - Set directive_completed: "commitment_goal_bridge" once you have asked this question and received an answer. Do NOT set is_session_complete.`,
       priority: 1,
       preferred_stage: 'tomorrow',
@@ -2312,34 +2048,6 @@ Rules:
       fire_next_session: false,
       energy_type: 'planning',
     });
-  }
-
-  // ── strength_recognition ───────────────────────────────────────────────
-  if (recentSessions.length >= 3) {
-    const hasStrengths = Array.isArray(profile.strengths) && profile.strengths.length > 0;
-    const hasGrowthAreas = Array.isArray(profile.growth_areas) && profile.growth_areas.length > 0;
-    if (hasStrengths || hasGrowthAreas) {
-      const strengthsText = hasStrengths
-        ? profile.strengths.map(s => {
-            if (typeof s === 'object' && s.label) return `"${s.label}": ${s.evidence || ''}`;
-            return String(s);
-          }).join(' | ')
-        : '';
-      const growthText = hasGrowthAreas
-        ? profile.growth_areas.map(g => {
-            if (typeof g === 'object' && g.label) return `"${g.label}": ${g.evidence || ''}`;
-            return String(g);
-          }).join(' | ')
-        : '';
-      allDirectives.push({
-        id: 'strength_recognition',
-        instruction: `STRENGTH RECOGNITION: When the user names a win or something that went well, do NOT just celebrate it. Connect it to what it means for them specifically — using their goals, their whys, and the evidence you have about their patterns. You have this data:${strengthsText ? `\nTracked strengths: ${strengthsText}` : ''}${growthText ? `\nGrowth in progress: ${growthText}` : ''}\nWhen a win connects to a tracked strength or growth area — name the specific evidence first, then connect it to their goal or why. Pull from their actual whys array and goal context to explain why it matters. The explanation must come from their data, not from a coaching script. If a win doesn't connect to anything tracked, just acknowledge it briefly and move on — no forced meaning.`,
-        priority: 2,
-        preferred_stage: 'wins',
-        fire_next_session: false,
-        energy_type: 'planning',
-      });
-    }
   }
 
   // ── wins_goal_callback ─────────────────────────────────────────────────
@@ -2676,31 +2384,18 @@ function buildSessionContext({
   const goalMissingWhy = goalsNeedWhyBuilding.find(g => !Array.isArray(g.whys) || g.whys.length === 0) ?? null;
 
   const recentSessionsText = recentSessions.slice(0, 3).map((s) => {
-    const blockers = Array.isArray(s.blocker_tags) ? s.blocker_tags.join(', ') : '';
     if (s.summary) {
-      let line = `${s.date}: ${s.summary}`;
-      if (blockers) line += ` blockers=[${blockers}]`;
-      return line;
+      return `${s.date}: ${s.summary}`;
     }
     const wins = Array.isArray(s.wins) ? s.wins.map((w) => (typeof w === 'string' ? w : w.text)).filter(Boolean) : [];
-    let line = `${s.date}: wins=[${wins.slice(0, 2).join(', ')}] commitment="${s.tomorrow_commitment || ''}"`;
-    if (blockers) line += ` blockers=[${blockers}]`;
-    return line;
+    return `${s.date}: wins=[${wins.slice(0, 2).join(', ')}] commitment="${s.tomorrow_commitment || ''}"`;
   }).join(' | ') || 'none';
 
   const contextData = {
     profile: {
       name: profile.display_name,
       identity: profile.identity_statement,
-      goal: profile.big_goal,
-      why: profile.why,
-      future_self: profile.future_self,
       life_areas: Array.isArray(profile.life_areas) ? profile.life_areas.join(', ') : '',
-      values: Array.isArray(profile.values) && profile.values.length > 0 ? profile.values.join(', ') : undefined,
-      short_term_state: profile.short_term_state || undefined,
-      long_term_patterns: Array.isArray(profile.long_term_patterns) && profile.long_term_patterns.length > 0 ? profile.long_term_patterns : undefined,
-      growth_areas: Array.isArray(profile.growth_areas) && profile.growth_areas.length > 0 ? profile.growth_areas : undefined,
-      strengths: Array.isArray(profile.strengths) && profile.strengths.length > 0 ? profile.strengths : undefined,
     },
     goals: goalsContext.length > 0 ? goalsContext : 'none',
     quiet_goals: quietGoals.length > 0 ? quietGoals : undefined,
@@ -2767,7 +2462,6 @@ function buildSessionContext({
       session_misses_captured: Array.isArray(sessionState.misses)
         ? sessionState.misses.map(m => typeof m === 'string' ? m : m?.text).filter(Boolean)
         : [],
-      session_blockers_captured: sessionState.blocker_tags || [],
       depth_insight_captured: sessionState.depth_insight || null,
       depth_probe_count: sessionState.depth_probe_count || 0,
       last_depth_probe_message_index: sessionState.last_depth_probe_message_index ?? null,
@@ -2793,6 +2487,7 @@ function buildSessionContext({
     days_since_last_session: daysSinceLastSession,
     precomputed_commitment_score: precomputedCommitmentScore,
     pre_session_state: preSessionState || undefined,
+    today_causal_extracts: todayCausalExtracts.length > 0 ? todayCausalExtracts : undefined,
       instructions: [
         // ── Active directive — one queued coaching action dispatched this message ─
         activeDirective ? activeDirective.instruction : null,
@@ -2937,7 +2632,7 @@ export default async function handler(req, res) {
     // ── 2. Load context in parallel ───────────────────────────────────────
     const currentSignals = [intentData?.intent, intentData?.emotional_state, intentData?.accountability_signal].filter(Boolean);
 
-    const [loadedFollowUpQueue, growthMarkers, recentSessions, yesterdayCommitment, yesterdayCommitmentDetails, yesterdayFragments, userProfile, activeGoalsRaw, commitmentStats, todayEarlyCommitment, goalCommitmentStats, userInsights] =
+    const [loadedFollowUpQueue, growthMarkers, recentSessions, yesterdayCommitment, yesterdayCommitmentDetails, yesterdayFragments, userProfile, activeGoalsRaw, commitmentStats, todayEarlyCommitment, goalCommitmentStats, userInsights, todayCausalExtracts, yesterdayCausalExtracts] =
       await Promise.all([
         loadFollowUpQueue(authenticatedUserId, currentSignals, client_local_date),
         loadGrowthMarkers(authenticatedUserId, client_local_date),
@@ -2951,6 +2646,8 @@ export default async function handler(req, res) {
         loadTodayEarlyCommitment(authenticatedUserId, client_local_date),
         loadGoalCommitmentStats(authenticatedUserId, client_local_date),
         loadUserInsights(authenticatedUserId),
+        loadTodayCausalExtracts(authenticatedUserId, client_local_date),
+        loadYesterdayCausalExtracts(authenticatedUserId, client_local_date),
       ]);
 
     // Filter out stale identity_missing follow-ups that were queued with the generic placeholder text
@@ -3005,16 +2702,7 @@ export default async function handler(req, res) {
     const profile = {
       display_name: context.display_name || userProfile?.display_name || userProfile?.full_name || null,
       identity_statement: context.identity_statement || userProfile?.identity_statement || null,
-      big_goal: context.big_goal || userProfile?.big_goal || null,
-      why: context.why || userProfile?.why || null,
-      future_self: context.future_self || userProfile?.future_self || null,
       life_areas: context.life_areas || userProfile?.life_areas || [],
-      blockers: context.blockers || userProfile?.blockers || [],
-      values: userProfile?.values || [],
-      short_term_state: userProfile?.short_term_state || null,
-      long_term_patterns: userProfile?.long_term_patterns || [],
-      growth_areas: userProfile?.growth_areas || [],
-      strengths: userProfile?.strengths || [],
       consecutive_excuse_sessions: userProfile?.consecutive_excuse_sessions || 0,
       last_session_completed_at: userProfile?.last_session_completed_at || null,
     };
@@ -3260,6 +2948,7 @@ export default async function handler(req, res) {
       currentDirectiveQueue,
       completedDirectives,
       activeGoals,
+      yesterdayCausalExtracts,
     });
 
     // Combined queue: existing pending + newly generated (no duplicates)
@@ -3609,6 +3298,48 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
       dbPromises.push(markFollowUpTriggered(dueFollowUp.id));
     }
 
+    // Extract and store win causes when wins stage completes for the first time this session
+    if (session_id && client_local_date && result.checklist_updates?.wins === true && !session_state.checklist?.wins) {
+      const winTexts = Array.isArray(session_state.wins)
+        ? session_state.wins.map(w => typeof w === 'string' ? w : w?.text).filter(Boolean)
+        : [];
+      const newWinText = result.extracted_data?.win_text;
+      const allWins = newWinText ? [...winTexts, newWinText] : winTexts;
+      if (allWins.length > 0) {
+        dbPromises.push(
+          supabase.from('session_causal_extracts').insert({
+            user_id: authenticatedUserId,
+            session_id: session_id,
+            goal_id: result.extracted_data?.goal_id_referenced || null,
+            type: 'win_cause',
+            raw_text: allWins.join(' | '),
+            date: today(client_local_date),
+          }).then(() => {}).catch(() => {})
+        );
+      }
+    }
+
+    // Extract and store miss causes when honest stage completes for the first time this session
+    if (session_id && client_local_date && result.checklist_updates?.honest === true && !session_state.checklist?.honest) {
+      const missTexts = Array.isArray(session_state.misses)
+        ? session_state.misses.map(m => typeof m === 'string' ? m : m?.text).filter(Boolean)
+        : [];
+      const newMissText = result.extracted_data?.miss_text;
+      const allMisses = newMissText ? [...missTexts, newMissText] : missTexts;
+      if (allMisses.length > 0) {
+        dbPromises.push(
+          supabase.from('session_causal_extracts').insert({
+            user_id: authenticatedUserId,
+            session_id: session_id,
+            goal_id: result.extracted_data?.goal_id_referenced || null,
+            type: 'miss_cause',
+            raw_text: allMisses.join(' | '),
+            date: today(client_local_date),
+          }).then(() => {}).catch(() => {})
+        );
+      }
+    }
+
     if (dueGrowthMarker) {
       supabase
         .from('growth_markers')
@@ -3642,7 +3373,7 @@ Return ONLY valid JSON: { "question": "..." }`,
                 },
                 {
                   role: 'user',
-                  content: `Exercise run: ${exerciseName}\n${depthInsight ? `Depth insight from session: "${depthInsight}"\n` : ''}User profile: identity="${profile.identity_statement || 'not set'}", why="${profile.why || 'not set'}"`,
+                  content: `Exercise run: ${exerciseName}\n${depthInsight ? `Depth insight from session: "${depthInsight}"\n` : ''}User profile: identity="${profile.identity_statement || 'not set'}"`,
                 },
               ],
               response_format: { type: 'json_object' },
@@ -3680,7 +3411,6 @@ Return ONLY valid JSON: { "question": "..." }`,
     if (session_id && (result.stage_advance || result.extracted_data || result.is_session_complete || result.commitment_checkin_done || result.stage_order_swapped)) {
       const updates = {};
       if (result.stage_advance && result.new_stage) updates.current_stage = result.new_stage;
-      if (result.extracted_data?.mood) updates.mood_end_of_day = result.extracted_data.mood;
       const resolvedMinimumCommitment = result.extracted_data?.commitment_minimum || session_state.commitment_minimum;
       const resolvedStretchCommitment = result.extracted_data?.commitment_stretch || session_state.commitment_stretch;
       if (result.extracted_data?.tomorrow_commitment && resolvedMinimumCommitment && resolvedStretchCommitment) {
@@ -4043,7 +3773,6 @@ Only return a goal_id that exists in the list.`,
           const sessionUpdates = { summary: summaryText };
           const resolvedCommitmentMinimum = result.extracted_data?.commitment_minimum || session_state.commitment_minimum || null;
           const resolvedCommitmentStretch = result.extracted_data?.commitment_stretch || session_state.commitment_stretch || null;
-          const resolvedMood = result.extracted_data?.mood || session_state.mood_end_of_day || null;
           const latestWin = result.extracted_data?.win_text || session_state?.wins?.slice?.(-1)?.[0]?.text || null;
           const latestMiss = result.extracted_data?.miss_text || session_state?.misses?.slice?.(-1)?.[0]?.text || null;
           const keySessionSignal = latestWin || latestMiss || 'no single highlight captured';
@@ -4065,7 +3794,6 @@ The sentence should reference yesterday's commitment naturally and sound convers
                     content: JSON.stringify({
                       commitment_minimum: resolvedCommitmentMinimum,
                       commitment_stretch: resolvedCommitmentStretch,
-                      mood_end_of_day: resolvedMood,
                       key_win_or_miss: keySessionSignal,
                       identity_statement: profile.identity_statement || null,
                     }),
@@ -4083,7 +3811,6 @@ The sentence should reference yesterday's commitment naturally and sound convers
           }
           if (embedding) sessionUpdates.embedding = embedding;
           await supabase.from('reflection_sessions').update(sessionUpdates).eq('id', session_id);
-          await evolveUserProfile(authenticatedUserId, summaryText, userProfile, recentSessions, session_id);
 
           // Shallow session detector — if wins or honest checklist items are missing,
           // queue a strategic follow-up for the next night
@@ -4110,7 +3837,7 @@ Return ONLY valid JSON: { "question": "...", "context": "brief context on why th
                   },
                   {
                     role: 'user',
-                    content: `Session summary: ${summaryText}\n\nUser profile: identity="${userProfile?.identity_statement || 'not set'}", why="${userProfile?.why || 'not set'}", future_self="${userProfile?.future_self || 'not set'}"`,
+                    content: `Session summary: ${summaryText}\n\nUser profile: identity="${userProfile?.identity_statement || 'not set'}"`,
                   },
                 ],
                 response_format: { type: 'json_object' },
