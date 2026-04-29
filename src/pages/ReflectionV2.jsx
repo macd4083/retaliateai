@@ -880,7 +880,7 @@ export default function ReflectionV2() {
           newState.fragments_submitted = false;
           setCheckedFragments({});
         }
-        if (data.commitment_checkin_done === true) {
+        if (isChecklistSubmission && data.commitment_checkin_done === true) {
           newState.checklist_fragments = [];
           newState.fragments_submitted = true;
           setCheckedFragments({});
