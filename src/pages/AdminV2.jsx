@@ -66,11 +66,18 @@ function buildCommitmentFragments({ tomorrowCommitment, commitmentMinimum, commi
     }));
   }
 
-  return allTasks.map((task, i) => ({
-    commitment_text: task,
-    fragment_index: i,
-    commitment_type: null,
-  }));
+  return [
+    ...minimumTasks.map((task, i) => ({
+      commitment_text: task,
+      fragment_index: i,
+      commitment_type: 'minimum',
+    })),
+    ...stretchTasks.map((task, i) => ({
+      commitment_text: task,
+      fragment_index: minimumTasks.length + i,
+      commitment_type: 'stretch',
+    })),
+  ];
 }
 
 const DATA_TABS = [

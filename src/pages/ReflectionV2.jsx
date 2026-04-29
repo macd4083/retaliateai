@@ -213,6 +213,9 @@ function SummaryCard({ data, streak, followThroughStats }) {
 
 function ChatMessage({ message, isFirstMessage, onChipSelect, chipsDisabled, streak, followThroughStats }) {
   const isUser = message.role === 'user';
+  const actionChips = !isUser && Array.isArray(message.chips)
+    ? message.chips.filter((chip) => chip.value === 'exercise_accept' || chip.value === 'exercise_skip')
+    : [];
   if (message.isTyping) return <TypingIndicator />;
   if (message.message_type === 'summary_card' && message.card_data) {
     return (
@@ -246,9 +249,9 @@ function ChatMessage({ message, isFirstMessage, onChipSelect, chipsDisabled, str
         >
           {message.content}
         </motion.div>
-        {!isUser && message.chips && message.chips.length > 0 && (
+        {actionChips.length > 0 && (
           <div className="flex flex-wrap gap-2 mt-2">
-            {message.chips.map((chip) => (
+            {actionChips.map((chip) => (
               <button
                 key={chip.value}
                 onClick={() => !chipsDisabled && onChipSelect(chip)}
