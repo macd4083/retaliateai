@@ -12,6 +12,7 @@ const ADMIN_SECRET = import.meta.env.VITE_ADMIN_SECRET;
 const MAX_WHYS_TOTAL = 5;
 const MAX_SESSION_WHYS = 3;
 const MAX_COMMITMENT_WHYS = 1;
+const MAX_WHY_PROBE_WHYS = 2;
 
 async function adminFetch(body) {
   let accessToken = null;
@@ -33,11 +34,16 @@ async function adminFetch(body) {
 
 function parseTasksFromText(text) {
   if (!text || !text.trim()) return [];
+  // Split on:
+  //   - ". " followed by uppercase (sentence boundary)
+  //   - "; "
+  //   - ", and " / ", or "
+  //   - " and " / " or " as clause separators (but not inside short phrases)
   const parts = text
-    .split(/,\s*and\s+|,\s*or\s+|;\s*|,\s*|\s+and\s+|\s+or\s+/i)
-    .map((s) => s.trim())
+    .split(/\.\s+(?=[A-Z])|;\s*|,\s*(?:and|or)\s+|\s+(?:and|or)\s+/i)
+    .map((s) => s.replace(/\.\s*$/, '').trim())
     .filter(Boolean);
-  return parts;
+  return parts.length > 0 ? parts : [text.trim()];
 }
 
 function buildCommitmentFragments({ tomorrowCommitment, commitmentMinimum, commitmentStretch }) {
@@ -45,21 +51,22 @@ function buildCommitmentFragments({ tomorrowCommitment, commitmentMinimum, commi
   const stretch = String(commitmentStretch || '').trim();
   const commitment = String(tomorrowCommitment || '').trim();
 
-  let sourceText = '';
-  if (minimum && stretch) {
-    sourceText = `${minimum}, ${stretch}`;
-  } else if (minimum) {
-    sourceText = minimum;
-  } else if (stretch) {
-    sourceText = stretch;
-  } else {
-    sourceText = commitment;
+  // Parse each field independently into individual task fragments
+  const minimumTasks = parseTasksFromText(minimum);
+  const stretchTasks = parseTasksFromText(stretch);
+
+  const allTasks = [...minimumTasks, ...stretchTasks];
+
+  if (allTasks.length === 0 && commitment) {
+    const fallbackTasks = parseTasksFromText(commitment);
+    return fallbackTasks.map((task, i) => ({
+      commitment_text: task,
+      fragment_index: i,
+      commitment_type: null,
+    }));
   }
 
-  const tasks = parseTasksFromText(sourceText);
-  if (tasks.length === 0) return [];
-
-  return tasks.map((task, i) => ({
+  return allTasks.map((task, i) => ({
     commitment_text: task,
     fragment_index: i,
     commitment_type: null,
@@ -631,8 +638,9 @@ export default function AdminV2() {
         updatedWhys = [...existingWhys, newEntry];
       }
       const commitmentWhys = updatedWhys.filter((w) => w.source === 'commitment_planning').slice(-MAX_COMMITMENT_WHYS);
-      const otherWhys = updatedWhys.filter((w) => w.source !== 'commitment_planning').slice(-MAX_SESSION_WHYS);
-      updatedWhys = [...commitmentWhys, ...otherWhys].slice(-MAX_WHYS_TOTAL);
+      const probeWhys = updatedWhys.filter((w) => w.source === 'why_probe').slice(-MAX_WHY_PROBE_WHYS);
+      const sessionWhys = updatedWhys.filter((w) => w.source !== 'commitment_planning' && w.source !== 'why_probe').slice(-MAX_SESSION_WHYS);
+      updatedWhys = [...commitmentWhys, ...probeWhys, ...sessionWhys].slice(-MAX_WHYS_TOTAL);
       await adminFetch({
         action: 'upsert',
         user_id: user.id,
