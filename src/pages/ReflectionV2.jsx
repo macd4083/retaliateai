@@ -319,6 +319,7 @@ export default function ReflectionV2() {
     checkin_outcome: null,
     commitment_score: null,
     checklist_fragments: [],
+    pending_checklist_fragments: [],
     fragments_submitted: false,
     depth_opportunity_count: 0,
     depth_probe_count: 0,
@@ -873,10 +874,29 @@ export default function ReflectionV2() {
         if (data.extracted_data?.commitment_score != null)
           newState.commitment_score = data.extracted_data.commitment_score;
         if (shouldShowChecklist) {
-          newState.checklist_fragments = data.checklist_fragments.map((f) => ({
-            id: f.id,
-            text: f.text || f.commitment_text || '',
-          }));
+          if (isInit) {
+            // Defer — show checklist after first exchange, not immediately on INIT
+            newState.pending_checklist_fragments = data.checklist_fragments.map((f) => ({
+              id: f.id,
+              text: f.text || f.commitment_text || '',
+            }));
+          } else {
+            newState.checklist_fragments = data.checklist_fragments.map((f) => ({
+              id: f.id,
+              text: f.text || f.commitment_text || '',
+            }));
+            newState.fragments_submitted = false;
+            setCheckedFragments({});
+          }
+        }
+        // Promote deferred checklist fragments after the first real exchange
+        if (!isInit && !isChecklistSubmission && !isExerciseSkipSignal &&
+            Array.isArray(state.pending_checklist_fragments) &&
+            state.pending_checklist_fragments.length > 0 &&
+            !newState.checklist_fragments?.length &&
+            !newState.fragments_submitted) {
+          newState.checklist_fragments = state.pending_checklist_fragments;
+          newState.pending_checklist_fragments = [];
           newState.fragments_submitted = false;
           setCheckedFragments({});
         }
@@ -1059,6 +1079,7 @@ export default function ReflectionV2() {
           checkin_outcome: null,
           commitment_score: null,
           checklist_fragments: [],
+          pending_checklist_fragments: [],
           fragments_submitted: false,
           depth_opportunity_count: 0,
           depth_probe_count: 0,
