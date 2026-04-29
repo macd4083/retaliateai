@@ -1368,9 +1368,7 @@ export default function ReflectionV2() {
 
         <div className="flex-shrink-0 border-t border-zinc-800 bg-zinc-950 px-4 py-3">
           <div className="space-y-2">
-            {isChecklistBlocking && (
-              <p className="text-xs text-zinc-500">Complete the check-in above to continue</p>
-            )}
+
             <div className="flex items-end gap-3">
               <div className="flex-1">
                 <textarea
@@ -1379,7 +1377,7 @@ export default function ReflectionV2() {
                   onChange={handleTextareaChange}
                   onKeyDown={handleKeyDown}
                   onFocus={() => setChatFocused(true)}
-                  disabled={isInitializing || isChecklistBlocking}
+                  disabled={isInitializing}
                   placeholder={textareaPlaceholder}
                   rows={1}
                   className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-500 resize-none focus:outline-none focus:border-zinc-500 transition-colors"
@@ -1390,7 +1388,6 @@ export default function ReflectionV2() {
               onClick={handleSend}
               disabled={
                 !inputValue.trim() || isLoading || isInitializing
-                  || isChecklistBlocking
               }
               className="w-10 h-10 rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center flex-shrink-0"
             >
