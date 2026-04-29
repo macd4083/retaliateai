@@ -36,35 +36,17 @@ function weekdayIndexFromDateStr(dateStr) {
   return day === 0 ? 6 : day - 1;
 }
 
-function formatInsightDate(dateStr) {
-  if (!dateStr) return '';
-  const [y, m] = dateStr.split('-').map(Number);
-  return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-}
-
-// ─── Main Component ────────────────────────────────────��──────────────────────
-
-// Returns true if an array has at least one object item with an evidence field
-function hasEvidenceItems(items) {
-  return Array.isArray(items) && items.some((item) => typeof item === 'object' && item?.evidence);
-}
-
-const COMMITMENT_SCORE_EXCEPTIONAL_THRESHOLD = 90;
-const COMMITMENT_SCORE_GOOD_THRESHOLD = 75;
-const COMMITMENT_SCORE_RAISE_BAR_THRESHOLD = 80;
-const COMMITMENT_SCORE_SOLID_THRESHOLD = 60;
+// ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function InsightsV2() {
   const { user } = useAuth();
 
-  const [livingProfile, setLivingProfile]       = useState(null);
   const [allCommitments, setAllCommitments]       = useState([]);
   const [visibleCount, setVisibleCount]           = useState(5);
   const [selectedWeekIndex, setSelectedWeekIndex] = useState(null);
   const [selectedDayIndex, setSelectedDayIndex]   = useState(null);
   const [slideDir, setSlideDir]                   = useState(null);
   const [chartOffset, setChartOffset]             = useState(0);
-  const [gaugeAnimatedFrac, setGaugeAnimatedFrac] = useState(0);
   const [streak, setStreak]                       = useState(0);
   const [commitmentStats, setCommitmentStats]     = useState(null);
   const [loading, setLoading]                     = useState(true);
@@ -73,11 +55,7 @@ export default function InsightsV2() {
   const [newGoalTitle, setNewGoalTitle]           = useState('');
   const [newGoalBaseline, setNewGoalBaseline]     = useState('');
   const [savingGoal, setSavingGoal]               = useState(false);
-  const weeklyDataForGauge                         = commitmentStats?.weeklyData || [];
-  const activeGaugeWeekIndex                      = selectedWeekIndex !== null
-    ? selectedWeekIndex
-    : Math.max(0, weeklyDataForGauge.length - 1);
-  const gScoreForEffect                            = weeklyDataForGauge[activeGaugeWeekIndex]?.avgScore ?? null;
+  const [fragmentHistory, setFragmentHistory]     = useState([]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -85,23 +63,24 @@ export default function InsightsV2() {
   }, [user?.id]);
 
   useEffect(() => {
-    const targetFillFrac = gScoreForEffect != null ? Math.max(0, Math.min(gScoreForEffect / 100, 1)) : 0;
-    setGaugeAnimatedFrac(0);
-    const timeout = setTimeout(() => {
-      setGaugeAnimatedFrac(targetFillFrac);
-    }, 50);
-    return () => clearTimeout(timeout);
-  }, [activeGaugeWeekIndex, gScoreForEffect]);
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible' && user?.id) {
+        loadData();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, [user?.id]);
 
   async function loadData() {
     setLoading(true);
     try {
       await Promise.all([
-        loadProfile(),
         loadSessions(),
         loadStreak(),
         loadCommitmentStats(),
         loadActiveGoals(),
+        loadFragmentHistory(),
       ]);
     } finally {
       setLoading(false);
@@ -146,13 +125,56 @@ export default function InsightsV2() {
     }
   }
 
-  async function loadProfile() {
-    const { data } = await supabase
-      .from('user_profiles')
-      .select('short_term_state, strengths, values, identity_statement, growth_areas, long_term_patterns, profile_updated_at')
-      .eq('id', user.id)
-      .maybeSingle();
-    setLivingProfile(data);
+  async function loadFragmentHistory() {
+    const { data: sessions } = await supabase
+      .from('reflection_sessions')
+      .select('id')
+      .eq('user_id', user.id)
+      .eq('is_complete', true)
+      .order('date', { ascending: false })
+      .limit(3);
+
+    if (!sessions || sessions.length === 0) {
+      setFragmentHistory([]);
+      return;
+    }
+
+    const sessionIds = sessions.map((s) => s.id);
+
+    const { data: fragments } = await supabase
+      .from('goal_commitment_log')
+      .select('id, commitment_text, kept, goal_id, session_id, date')
+      .in('session_id', sessionIds);
+
+    if (!fragments || fragments.length === 0) {
+      setFragmentHistory([]);
+      return;
+    }
+
+    const goalIds = [...new Set(fragments.filter((f) => f.goal_id).map((f) => f.goal_id))];
+    let goalsMap = {};
+    if (goalIds.length > 0) {
+      const { data: goals } = await supabase
+        .from('goals')
+        .select('id, title, whys')
+        .in('id', goalIds);
+      for (const g of goals || []) {
+        goalsMap[g.id] = g;
+      }
+    }
+
+    const enriched = fragments.map((f) => {
+      const goal = f.goal_id ? goalsMap[f.goal_id] : null;
+      const whys = Array.isArray(goal?.whys) ? goal.whys : [];
+      const lastWhy = whys.length > 0 ? whys[whys.length - 1] : null;
+      return {
+        ...f,
+        goal_title: goal?.title ?? null,
+        goal_why: lastWhy?.text ?? null,
+      };
+    });
+
+    setFragmentHistory(enriched);
   }
 
   // Intentionally does not select reflection_streak — live streak is computed in loadStreak() via reflectionHelpers.getReflectionStreak()
@@ -247,21 +269,12 @@ export default function InsightsV2() {
 
   // ── Derived values ────────────────────────────────────────────────────────
 
-  const avgScore7 = commitmentStats?.avgScore7 ?? null;
-  const trajectory = commitmentStats?.trajectory;
   const weeklyData = commitmentStats?.weeklyData || [];
 
   // Selected week defaults to the most recent (last index)
   const activeWeekIndex      = selectedWeekIndex !== null ? selectedWeekIndex : Math.max(0, weeklyData.length - 1);
   const selectedWeek         = weeklyData[activeWeekIndex] ?? null;
   const isCurrentWeekSelected = weeklyData.length === 0 || activeWeekIndex === weeklyData.length - 1;
-
-  function trajectoryLine() {
-    if (avgScore7 == null) return 'Keep showing up — more data coming.';
-    if (trajectory === 'improving') return 'Score trending up — keep building.';
-    if (trajectory === 'declining') return 'Score trending down. Worth paying attention to.';
-    return 'Consistent with last week.';
-  }
 
   function goToWeek(newIndex) {
     if (newIndex < 0 || newIndex >= weeklyData.length || newIndex === activeWeekIndex) return;
@@ -293,6 +306,9 @@ export default function InsightsV2() {
 
   const showLoadMore = isCurrentWeekSelected && commitmentsWithTextOnly.length > visibleCount;
 
+  const keptFragments   = fragmentHistory.filter((f) => f.kept === true);
+  const missedFragments = fragmentHistory.filter((f) => f.kept === false);
+
   return (
     <AppShellV2 title="Insights">
       <div className="h-full overflow-y-auto">
@@ -306,9 +322,9 @@ export default function InsightsV2() {
 
             {weeklyData.length > 0 ? (() => {
               const dayLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
-              const padX     = 20;
-              const baseline = 70;
-              const chartTop = 10;
+              const padX     = 28;
+              const baseline = 88;
+              const chartTop = 12;
               const chartH   = baseline - chartTop;
               const totalW   = 320;
               const xStep    = (totalW - 2 * padX) / 6;
@@ -365,27 +381,6 @@ export default function InsightsV2() {
                 return '#71717a';
               }
 
-              // ── Half-circle gauge: avg score / 100 ─────────────────────
-              const cx       = 100;
-              const cy       = 108;
-              const r        = 78;
-              const halfCirc = Math.PI * r;
-              const fullCirc = 2 * Math.PI * r;
-
-              const gScore = selectedWeek?.avgScore ?? null;
-              const fillLen = gaugeAnimatedFrac * halfCirc;
-              const fillColor = gScore == null ? '#52525b' : gScore >= 80 ? '#dc2626' : gScore >= 60 ? '#f97316' : '#71717a';
-
-              const weekDescText = gScore == null
-                ? 'No scored commitments this week.'
-                : gScore >= 80
-                  ? `Strong week — avg score ${Math.round(gScore)}/100.`
-                  : gScore >= 60
-                    ? `Solid week — avg score ${Math.round(gScore)}/100.`
-                    : gScore >= 40
-                      ? `Avg score ${Math.round(gScore)}/100 this week.`
-                      : `Tough week — avg score ${Math.round(gScore)}/100.`;
-
               return (
                 <>
                   <p className="text-center text-zinc-500 text-xs mb-1">{selectedWeek?.weekLabel} week</p>
@@ -398,7 +393,7 @@ export default function InsightsV2() {
                       ‹
                     </button>
 
-                    <div className="flex-1 overflow-hidden">
+                    <div className="flex-1 overflow-hidden min-h-[80px]">
                       <div
                         key={activeWeekIndex}
                         data-slide-dir={slideDir || 'none'}
@@ -408,10 +403,10 @@ export default function InsightsV2() {
                           transition: chartOffset === 0 && slideDir ? 'transform 0.3s ease' : 'none',
                         }}
                       >
-                        <svg viewBox="0 0 320 100" className="w-full mb-1">
-                          <text x={padX - 4} y={chartTop + 4} textAnchor="end" fill="#71717a" fontSize={5} fontFamily="sans-serif">100</text>
-                          <text x={padX - 4} y={getY(50) + 3} textAnchor="end" fill="#71717a" fontSize={5} fontFamily="sans-serif">50</text>
-                          <text x={padX - 4} y={baseline} textAnchor="end" fill="#71717a" fontSize={5} fontFamily="sans-serif">0</text>
+                        <svg viewBox="0 0 320 120" className="w-full mb-1">
+                          <text x={padX - 4} y={chartTop + 7} textAnchor="end" fill="#71717a" fontSize={8} fontFamily="sans-serif">100</text>
+                          <text x={padX - 4} y={getY(50) + 4} textAnchor="end" fill="#71717a" fontSize={8} fontFamily="sans-serif">50</text>
+                          <text x={padX - 4} y={baseline} textAnchor="end" fill="#71717a" fontSize={8} fontFamily="sans-serif">0</text>
                           <line x1={padX} y1={baseline} x2={totalW - padX} y2={baseline}
                             stroke="#3f3f46" strokeWidth={1} strokeDasharray="3 3" />
                           <line x1={padX} y1={getY(50)} x2={totalW - padX} y2={getY(50)}
@@ -441,9 +436,9 @@ export default function InsightsV2() {
                                   <>
                                     <rect
                                       x={x - 12}
-                                      y={y - 17}
+                                      y={y - 20}
                                       width={24}
-                                      height={13}
+                                      height={15}
                                       rx={6}
                                       fill="#27272a"
                                       stroke="#3f3f46"
@@ -451,10 +446,10 @@ export default function InsightsV2() {
                                     />
                                     <text
                                       x={x}
-                                      y={y - 8}
+                                      y={y - 10}
                                       textAnchor="middle"
                                       fill="white"
-                                      fontSize={6}
+                                      fontSize={9}
                                       fontWeight="bold"
                                       fontFamily="sans-serif"
                                     >
@@ -465,10 +460,10 @@ export default function InsightsV2() {
                                 <circle cx={x} cy={y} r={isSelected ? 3 : 2} fill={dotColor(d, isSelected)} />
                                 <text
                                   x={x}
-                                  y={95}
+                                  y={112}
                                   textAnchor="middle"
                                   fill={isSelected ? '#ef4444' : '#52525b'}
-                                  fontSize={5}
+                                  fontSize={8}
                                   fontFamily="sans-serif"
                                 >
                                   {d.label}
@@ -488,79 +483,9 @@ export default function InsightsV2() {
                       ›
                     </button>
                   </div>
-
-                  {/* Half-circle gauge */}
-                  <div className="flex justify-center mt-2">
-                    <svg width="200" height="120" viewBox="0 0 200 120">
-                      {/* Track */}
-                      <circle cx={cx} cy={cy} r={r}
-                        fill="none" stroke="#27272a" strokeWidth={16}
-                        strokeDasharray={`${halfCirc} ${fullCirc}`}
-                        strokeDashoffset={0}
-                        strokeLinecap="round"
-                        transform={`rotate(180 ${cx} ${cy})`}
-                      />
-                      {/* Fill */}
-                      <circle cx={cx} cy={cy} r={r}
-                        fill="none" stroke={fillColor} strokeWidth={16}
-                        strokeDasharray={`${fillLen} ${fullCirc}`}
-                        strokeDashoffset={0}
-                        strokeLinecap="round"
-                        style={{ transition: 'stroke-dasharray 0.6s ease' }}
-                        transform={`rotate(180 ${cx} ${cy})`}
-                      />
-                      {/* Centre label */}
-                      <text x={cx} y={cy - 14} textAnchor="middle"
-                        fill="white" fontSize={26} fontWeight="bold" fontFamily="sans-serif">
-                        {gScore != null ? Math.round(gScore) : '–'}
-                      </text>
-                      <text x={cx} y={cy + 22} textAnchor="middle"
-                        fill="#52525b" fontSize={9} fontFamily="sans-serif">
-                        {selectedWeek?.weekLabel ?? 'this week'}
-                      </text>
-                    </svg>
-                  </div>
-
-                  {/* Trajectory line */}
-                  <p className="text-zinc-500 text-xs mt-3">{trajectoryLine()}</p>
-
-                  {commitmentStats?.avgScore7 != null && (
-                    <div className="mt-3 pt-3 border-t border-zinc-800">
-                      <div className="flex items-center justify-between mb-1">
-                        <p className="text-zinc-400 text-xs">Avg commitment score</p>
-                        <span className={`text-sm font-bold ${
-                          commitmentStats.avgScore7 >= COMMITMENT_SCORE_RAISE_BAR_THRESHOLD ? 'text-red-400' :
-                          commitmentStats.avgScore7 >= COMMITMENT_SCORE_SOLID_THRESHOLD ? 'text-orange-400' : 'text-zinc-400'
-                        }`}>
-                          {Math.round(commitmentStats.avgScore7)}/100
-                        </span>
-                      </div>
-                      <p className="text-zinc-600 text-xs">
-                        {commitmentStats.scoreTrajectory === 'improving' ? '↑ Improving from last week' :
-                         commitmentStats.scoreTrajectory === 'declining' ? '↓ Declining from last week' :
-                         'Consistent with last week'}
-                      </p>
-                    </div>
-                  )}
-
-                  {commitmentStats?.avgScore7 >= COMMITMENT_SCORE_RAISE_BAR_THRESHOLD && (
-                    <div className="mt-3 p-3 bg-red-950/30 border border-red-900/40 rounded-xl">
-                      <p className="text-red-400 text-xs font-semibold mb-1">⚡ Time to raise the bar</p>
-                      <p className="text-zinc-400 text-xs leading-relaxed">
-                        Your score has averaged {Math.round(commitmentStats.avgScore7)} — you're consistently hitting your stretch goals. Your coach will push you to raise the ceiling in your next session.
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Week description */}
-                  <p className="text-zinc-400 text-xs mt-1">{weekDescText}</p>
                 </>
               );
-            })() : (
-              <p className="text-zinc-500 text-sm">
-                No data yet. Start reflecting to see your consistency over time.
-              </p>
-            )}
+            })() : null}
           </div>
 
           {/* Right: Commitment list */}
@@ -582,19 +507,7 @@ export default function InsightsV2() {
                            c.status === 'missed' ? '❌' : '⏳'}
                         </span>
                         <div className="min-w-0 flex-1">
-                          <div className="flex items-start gap-2">
-                            <p className="text-zinc-200 text-sm leading-snug">{c.commitment}</p>
-                            {c.score != null && (
-                              <span className={`ml-auto text-xs font-bold px-2 py-0.5 rounded-full flex-shrink-0 ${
-                                c.score >= COMMITMENT_SCORE_EXCEPTIONAL_THRESHOLD ? 'bg-red-900/50 text-red-300 border border-red-700' :
-                                c.score >= COMMITMENT_SCORE_GOOD_THRESHOLD ? 'bg-orange-900/50 text-orange-300 border border-orange-700' :
-                                c.score >= COMMITMENT_SCORE_SOLID_THRESHOLD ? 'bg-zinc-800 text-zinc-300 border border-zinc-600' :
-                                'bg-zinc-900 text-zinc-500 border border-zinc-700'
-                              }`}>
-                                {c.score}/100
-                              </span>
-                            )}
-                          </div>
+                          <p className="text-zinc-200 text-sm leading-snug">{c.commitment}</p>
                           {c.minimum && (
                             <p className="text-zinc-600 text-xs mt-0.5">
                               <span className="text-zinc-500">Minimum:</span> {c.minimum}
@@ -774,54 +687,60 @@ export default function InsightsV2() {
             )}
           </section>
 
-          {/* Section 5: Who You're Becoming (with inline strengths + growth areas) */}
-          {livingProfile?.identity_statement && (
-            <div className="bg-gradient-to-br from-red-950/40 to-zinc-900 border border-red-900/50 rounded-2xl p-5">
-              <p className="text-zinc-500 text-xs uppercase tracking-widest mb-2">Who You're Becoming</p>
-              <p className="text-white text-base font-medium leading-relaxed">
-                "{livingProfile.identity_statement}"
+          {/* Section: Kept */}
+          <section>
+            <h2 className="text-white font-semibold text-base mb-3">Kept</h2>
+            {keptFragments.length > 0 ? (
+              <div className="space-y-2">
+                {keptFragments.map((f) => (
+                  <div key={f.id} className="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3">
+                    <p className="text-zinc-200 text-sm leading-relaxed">
+                      {f.commitment_text}
+                      {f.goal_title && (
+                        <span className="text-zinc-500">
+                          {' '}— related to your {f.goal_title} goal
+                          {f.goal_why && `, it was important because ${f.goal_why}`}
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-zinc-500 text-sm bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+                No kept commitments in your last 3 sessions yet.
               </p>
+            )}
+          </section>
 
-              {/* Inline strengths */}
-              {hasEvidenceItems(livingProfile.strengths) && (
-                <div className="mt-3 pt-3 border-t border-red-900/30 space-y-1">
-                  <p className="text-zinc-600 text-xs uppercase tracking-widest mb-1">Strengths</p>
-                  {livingProfile.strengths.filter((s) => typeof s === 'object' && s.evidence).slice(0, 2).map((s, i) => {
-                    const label = typeof s === 'object' ? s.label : s;
-                    return (
-                      <p key={i} className="text-zinc-400 text-xs leading-relaxed">
-                        — <span className="text-zinc-300">{label}</span>: {s.evidence}
-                      </p>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* Inline growth areas */}
-              {hasEvidenceItems(livingProfile.growth_areas) && (
-                <div className="mt-3 pt-3 border-t border-red-900/30 space-y-1">
-                  <p className="text-zinc-600 text-xs uppercase tracking-widest mb-1">Growing In</p>
-                  {livingProfile.growth_areas.filter((g) => typeof g === 'object' && g.evidence).slice(0, 2).map((g, i) => {
-                    const label = typeof g === 'object' ? g.label : g;
-                    return (
-                      <p key={i} className="text-zinc-400 text-xs leading-relaxed">
-                        — <span className="text-zinc-300">{label}</span>: {g.evidence}
-                      </p>
-                    );
-                  })}
-                </div>
-              )}
-
-              {livingProfile.profile_updated_at && (
-                <p className="text-zinc-600 text-xs mt-3">
-                  Last updated{' '}
-                  {new Date(livingProfile.profile_updated_at).toLocaleDateString('en-US', {
-                    month: 'short', day: 'numeric',
-                  })}
-                </p>
-              )}
-            </div>
-          )}
+          {/* Section: Missed */}
+          <section>
+            <h2 className="text-white font-semibold text-base mb-3">Missed</h2>
+            {missedFragments.length > 0 ? (
+              <div className="space-y-2">
+                {missedFragments.map((f) => (
+                  <div key={f.id} className="bg-zinc-900 border border-zinc-800 border-l-4 border-l-zinc-600 rounded-xl px-4 py-3">
+                    <p className="text-zinc-200 text-sm leading-relaxed">
+                      {f.commitment_text}
+                      {f.goal_title && (
+                        <span className="text-zinc-500">
+                          {' '}— related to your {f.goal_title} goal
+                          {f.goal_why && `, it was important because ${f.goal_why}`}
+                        </span>
+                      )}
+                    </p>
+                    <p className="text-zinc-500 text-xs mt-2 italic">
+                      Hey, I noticed you missed this — think about how you can better prioritize it throughout your day.
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-zinc-500 text-sm bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+                No missed commitments in your last 3 sessions.
+              </p>
+            )}
+          </section>
 
           {/* Bottom padding */}
           <div className="h-6" />
