@@ -92,9 +92,9 @@ export default function InsightsV2() {
       .from('goals')
       .select('id, title, whys, status, created_at, last_mentioned_at, last_motivation_signal, baseline_snapshot, baseline_date')
       .eq('user_id', user.id)
-      .eq('status', 'active')
+      .or('status.eq.active,status.is.null')
       .order('created_at', { ascending: true })
-      .limit(5);
+      .limit(10);
     setActiveGoals(data || []);
   }
 
@@ -383,12 +383,12 @@ export default function InsightsV2() {
 
               return (
                 <>
-                  <p className="text-center text-zinc-500 text-xs mb-1">{selectedWeek?.weekLabel} week</p>
+                  <p className="text-center text-zinc-300 text-sm font-medium mb-2">{selectedWeek?.weekLabel} week</p>
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => goToWeek(Math.max(0, activeWeekIndex - 1))}
                       disabled={activeWeekIndex === 0}
-                      className="flex-shrink-0 w-6 h-6 flex items-center justify-center text-zinc-500 hover:text-white disabled:opacity-20 disabled:cursor-not-allowed transition-colors text-lg"
+                      className="flex-shrink-0 w-10 h-10 flex items-center justify-center text-zinc-500 hover:text-white disabled:opacity-20 disabled:cursor-not-allowed transition-colors text-3xl"
                     >
                       ‹
                     </button>
@@ -478,7 +478,7 @@ export default function InsightsV2() {
                     <button
                       onClick={() => goToWeek(Math.min(weeklyData.length - 1, activeWeekIndex + 1))}
                       disabled={activeWeekIndex === weeklyData.length - 1}
-                      className="flex-shrink-0 w-6 h-6 flex items-center justify-center text-zinc-500 hover:text-white disabled:opacity-20 disabled:cursor-not-allowed transition-colors text-lg"
+                      className="flex-shrink-0 w-10 h-10 flex items-center justify-center text-zinc-500 hover:text-white disabled:opacity-20 disabled:cursor-not-allowed transition-colors text-3xl"
                     >
                       ›
                     </button>
