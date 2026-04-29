@@ -31,34 +31,39 @@ async function adminFetch(body) {
   });
 }
 
+function parseTasksFromText(text) {
+  if (!text || !text.trim()) return [];
+  const parts = text
+    .split(/,\s*and\s+|,\s*or\s+|;\s*|,\s*|\s+and\s+|\s+or\s+/i)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return parts;
+}
+
 function buildCommitmentFragments({ tomorrowCommitment, commitmentMinimum, commitmentStretch }) {
   const minimum = String(commitmentMinimum || '').trim();
   const stretch = String(commitmentStretch || '').trim();
   const commitment = String(tomorrowCommitment || '').trim();
 
-  const fragments = [];
-  if (minimum) {
-    fragments.push({
-      commitment_text: minimum,
-      fragment_index: 0,
-      commitment_type: 'minimum',
-    });
+  let sourceText = '';
+  if (minimum && stretch) {
+    sourceText = `${minimum}, ${stretch}`;
+  } else if (minimum) {
+    sourceText = minimum;
+  } else if (stretch) {
+    sourceText = stretch;
+  } else {
+    sourceText = commitment;
   }
-  if (stretch) {
-    fragments.push({
-      commitment_text: stretch,
-      fragment_index: 1,
-      commitment_type: 'stretch',
-    });
-  }
-  if (!minimum && !stretch && commitment) {
-    fragments.push({
-      commitment_text: commitment,
-      fragment_index: 0,
-      commitment_type: null,
-    });
-  }
-  return fragments;
+
+  const tasks = parseTasksFromText(sourceText);
+  if (tasks.length === 0) return [];
+
+  return tasks.map((task, i) => ({
+    commitment_text: task,
+    fragment_index: i,
+    commitment_type: null,
+  }));
 }
 
 const DATA_TABS = [
@@ -519,6 +524,7 @@ export default function AdminV2() {
         sessionId: rowId,
         sessionDate: updates.date,
         previousSessionDate: originalRow?.date || null,
+        tomorrowCommitment: null,
         commitmentMinimum: updates.commitment_minimum,
         commitmentStretch: updates.commitment_stretch,
       });
@@ -825,6 +831,7 @@ export default function AdminV2() {
         await syncCommitmentFragments({
           sessionId: insertedRow.id,
           sessionDate: row.date,
+          tomorrowCommitment: null,
           commitmentMinimum: row.commitment_minimum,
           commitmentStretch: row.commitment_stretch,
         });
