@@ -118,6 +118,8 @@ const supabase = createClient(
  */
 
 const DEFAULT_CHECKLIST = { wins: false, honest: false, plan: false };
+const CHECKLIST_INIT_MESSAGE = "Here are your commitments from yesterday — check off what you actually did so I can get a sense of where we're starting tonight.";
+const CHECKLIST_SUBMITTED_SENTINEL = '__checklist_submitted__';
 const MIN_DEEP_SESSION_MESSAGE_COUNT = 6;
 const MAX_DEPTH_INSIGHTS_RETAINED = 4;
 const MAX_COMMITMENT_WHYS = 1;   // max 1 active commitment_planning why per goal (always replace)
@@ -3210,6 +3212,7 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
         type: fragment.type || null,
         text: formatChecklistFragmentText(fragment),
       }));
+      result.assistant_message = CHECKLIST_INIT_MESSAGE;
     }
 
     const hasInsightDirectiveQueued = combinedDirectiveQueue.some((directive) => directive.id === 'insight_triggered_exercise');
@@ -3237,6 +3240,30 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
       else result.extracted_data.checkin_outcome = 'partial';
     }
     result.checkin_outcome = result.extracted_data?.checkin_outcome || null;
+
+    // Enforce commitment_score routing after checklist submission — server-side override,
+    // not relying on LLM prompt output
+    if (isChecklistSubmission && precomputedScore !== null) {
+      const checklistRoutingDecision = deriveStageHint(
+        {
+          ...session_state,
+          current_stage: 'commitment_checkin',
+          commitment_checkin_done: true,
+          commitment_score: precomputedScore,
+          yesterday_commitment: session_state.yesterday_commitment || yesterdayCommitment || CHECKLIST_SUBMITTED_SENTINEL,
+        },
+        intentData?.checklist_content,
+        completedDirectives,
+        messageCount,
+        intentData,
+        displayMessage
+      );
+      if (checklistRoutingDecision === 'wins' || checklistRoutingDecision === 'honest') {
+        result.stage_advance = true;
+        result.new_stage = checklistRoutingDecision;
+        result.stage_order_swapped = checklistRoutingDecision === 'honest';
+      }
+    }
     let depthProbeCount = Number(session_state.depth_probe_count || 0);
     let lastDepthProbeMessageIndex = Number.isFinite(Number(session_state.last_depth_probe_message_index))
       ? Number(session_state.last_depth_probe_message_index)
