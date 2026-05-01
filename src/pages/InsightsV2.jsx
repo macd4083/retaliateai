@@ -56,6 +56,9 @@ export default function InsightsV2() {
   const [newGoalBaseline, setNewGoalBaseline]     = useState('');
   const [savingGoal, setSavingGoal]               = useState(false);
   const [fragmentHistory, setFragmentHistory]     = useState([]);
+  const [archivedGoals, setArchivedGoals]         = useState([]);
+  const [goalFilter, setGoalFilter]               = useState('active'); // 'active' | 'archived'
+  const [goalActionLoading, setGoalActionLoading] = useState(null); // goalId | null
 
   useEffect(() => {
     if (!user?.id) return;
@@ -80,6 +83,7 @@ export default function InsightsV2() {
         loadStreak(),
         loadCommitmentStats(),
         loadActiveGoals(),
+        loadArchivedGoals(),
         loadFragmentHistory(),
       ]);
     } finally {
@@ -96,6 +100,17 @@ export default function InsightsV2() {
       .order('created_at', { ascending: true })
       .limit(10);
     setActiveGoals(data || []);
+  }
+
+  async function loadArchivedGoals() {
+    const { data } = await supabase
+      .from('goals')
+      .select('id, title, whys, status, created_at, last_mentioned_at, last_motivation_signal, baseline_snapshot, baseline_date')
+      .eq('user_id', user.id)
+      .in('status', ['archived', 'paused', 'achieved'])
+      .order('created_at', { ascending: false })
+      .limit(20);
+    setArchivedGoals(data || []);
   }
 
   async function handleSaveGoal() {
@@ -122,6 +137,36 @@ export default function InsightsV2() {
       await loadActiveGoals();
     } finally {
       setSavingGoal(false);
+    }
+  }
+
+  async function handleArchiveGoal(goalId) {
+    setGoalActionLoading(goalId);
+    try {
+      await supabase.from('goals').update({ status: 'archived' }).eq('id', goalId).eq('user_id', user.id);
+      await Promise.all([loadActiveGoals(), loadArchivedGoals()]);
+    } finally {
+      setGoalActionLoading(null);
+    }
+  }
+
+  async function handleDeleteGoal(goalId) {
+    setGoalActionLoading(goalId);
+    try {
+      await supabase.from('goals').delete().eq('id', goalId).eq('user_id', user.id);
+      await Promise.all([loadActiveGoals(), loadArchivedGoals()]);
+    } finally {
+      setGoalActionLoading(null);
+    }
+  }
+
+  async function handleReactivateGoal(goalId) {
+    setGoalActionLoading(goalId);
+    try {
+      await supabase.from('goals').update({ status: 'active' }).eq('id', goalId).eq('user_id', user.id);
+      await Promise.all([loadActiveGoals(), loadArchivedGoals()]);
+    } finally {
+      setGoalActionLoading(null);
     }
   }
 
@@ -555,134 +600,228 @@ export default function InsightsV2() {
           <section>
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-white font-semibold text-base">Your Goals</h2>
-              <button
-                onClick={() => setShowAddGoal((v) => !v)}
-                className="text-zinc-400 hover:text-white text-sm flex items-center gap-1 transition-colors"
-              >
-                + Add
-              </button>
-            </div>
-
-            {/* Inline add-goal form */}
-            {showAddGoal && (
-              <div className="bg-zinc-900 border border-zinc-700 rounded-2xl p-4 mb-3 space-y-3">
-                <input
-                  type="text"
-                  value={newGoalTitle}
-                  onChange={(e) => setNewGoalTitle(e.target.value)}
-                  placeholder="Goal title"
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-500"
-                />
-                <textarea
-                  value={newGoalBaseline}
-                  onChange={(e) => setNewGoalBaseline(e.target.value)}
-                  placeholder="Where are you starting from? (optional)"
-                  rows={2}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-500 resize-none"
-                />
-                <div className="flex gap-2">
+              <div className="flex items-center gap-2">
+                {/* Filter toggle */}
+                <div className="flex bg-zinc-800 rounded-lg p-0.5 text-xs">
                   <button
-                    onClick={handleSaveGoal}
-                    disabled={!newGoalTitle.trim() || savingGoal}
-                    className="px-4 py-2 bg-red-600 hover:bg-red-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-sm font-medium transition-colors"
+                    onClick={() => setGoalFilter('active')}
+                    className={`px-3 py-1 rounded-md transition-colors ${goalFilter === 'active' ? 'bg-zinc-600 text-white' : 'text-zinc-400 hover:text-white'}`}
                   >
-                    {savingGoal ? 'Saving…' : 'Save'}
+                    Active
                   </button>
                   <button
-                    onClick={() => { setShowAddGoal(false); setNewGoalTitle(''); setNewGoalBaseline(''); }}
-                    className="px-4 py-2 text-zinc-400 hover:text-white rounded-xl text-sm transition-colors"
+                    onClick={() => setGoalFilter('archived')}
+                    className={`px-3 py-1 rounded-md transition-colors ${goalFilter === 'archived' ? 'bg-zinc-600 text-white' : 'text-zinc-400 hover:text-white'}`}
                   >
-                    Cancel
+                    Archived {archivedGoals.length > 0 && `(${archivedGoals.length})`}
                   </button>
                 </div>
-                <p className="text-zinc-600 text-xs">Your coach will ask why this matters in your next session.</p>
+                {goalFilter === 'active' && (
+                  <button
+                    onClick={() => setShowAddGoal((v) => !v)}
+                    className="text-zinc-400 hover:text-white text-sm flex items-center gap-1 transition-colors"
+                  >
+                    + Add
+                  </button>
+                )}
               </div>
+            </div>
+
+            {/* Active goals tab */}
+            {goalFilter === 'active' && (
+              <>
+                {/* Inline add-goal form */}
+                {showAddGoal && (
+                  <div className="bg-zinc-900 border border-zinc-700 rounded-2xl p-4 mb-3 space-y-3">
+                    <input
+                      type="text"
+                      value={newGoalTitle}
+                      onChange={(e) => setNewGoalTitle(e.target.value)}
+                      placeholder="Goal title"
+                      className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-500"
+                    />
+                    <textarea
+                      value={newGoalBaseline}
+                      onChange={(e) => setNewGoalBaseline(e.target.value)}
+                      placeholder="Where are you starting from? (optional)"
+                      rows={2}
+                      className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-500 resize-none"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleSaveGoal}
+                        disabled={!newGoalTitle.trim() || savingGoal}
+                        className="px-4 py-2 bg-red-600 hover:bg-red-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-sm font-medium transition-colors"
+                      >
+                        {savingGoal ? 'Saving…' : 'Save'}
+                      </button>
+                      <button
+                        onClick={() => { setShowAddGoal(false); setNewGoalTitle(''); setNewGoalBaseline(''); }}
+                        className="px-4 py-2 text-zinc-400 hover:text-white rounded-xl text-sm transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                    <p className="text-zinc-600 text-xs">Your coach will ask why this matters in your next session.</p>
+                  </div>
+                )}
+
+                {activeGoals.length === 0 && !showAddGoal && (
+                  <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
+                    <p className="text-zinc-500 text-sm">No active goals yet. Add one and your coach will help you understand why it matters.</p>
+                  </div>
+                )}
+
+                {activeGoals.length > 0 && (
+                  <div className="space-y-3">
+                    {activeGoals.map((goal, i) => {
+                      const whysList = Array.isArray(goal.whys) && goal.whys.length > 0
+                        ? [...goal.whys].reverse()
+                        : [];
+
+                      const signal = goal.last_motivation_signal;
+                      const signalBadge = (() => {
+                        if (signal === 'strong')     return { dot: 'bg-green-500',  text: 'Strong momentum' };
+                        if (signal === 'medium')     return { dot: 'bg-yellow-400', text: 'Building' };
+                        if (signal === 'low')        return { dot: 'bg-orange-500', text: 'Needs attention' };
+                        if (signal === 'struggling') return { dot: 'bg-red-500',    text: 'Struggling' };
+                        return null;
+                      })();
+
+                      return (
+                        <div
+                          key={goal.id || i}
+                          className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4"
+                        >
+                          <div className="flex items-start gap-3">
+                            <span className="text-lg mt-0.5">🎯</span>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-start justify-between gap-2">
+                                <p className="text-white font-medium text-sm leading-snug">{goal.title}</p>
+                                <div className="flex items-center gap-1 flex-shrink-0">
+                                  {signalBadge && (
+                                    <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-zinc-800 border border-zinc-700 text-xs text-zinc-400">
+                                      <span className={`w-1.5 h-1.5 rounded-full ${signalBadge.dot}`} />
+                                      {signalBadge.text}
+                                    </span>
+                                  )}
+                                  <button
+                                    onClick={() => handleArchiveGoal(goal.id)}
+                                    disabled={goalActionLoading === goal.id}
+                                    className="text-zinc-600 hover:text-zinc-400 text-xs px-2 py-0.5 rounded-lg hover:bg-zinc-800 transition-colors disabled:opacity-40"
+                                    title="Archive goal"
+                                  >
+                                    Archive
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteGoal(goal.id)}
+                                    disabled={goalActionLoading === goal.id}
+                                    className="text-zinc-600 hover:text-red-400 text-xs px-2 py-0.5 rounded-lg hover:bg-zinc-800 transition-colors disabled:opacity-40"
+                                    title="Delete goal"
+                                  >
+                                    Delete
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* Baseline snapshot */}
+                              {goal.baseline_snapshot && (
+                                <p className="text-zinc-500 text-xs mt-1 leading-relaxed">
+                                  Started:{' '}
+                                  <span className="text-zinc-400">{goal.baseline_snapshot}</span>
+                                  {goal.baseline_date && (
+                                    <span className="text-zinc-600 ml-1">
+                                      · {new Date(goal.baseline_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                                    </span>
+                                  )}
+                                </p>
+                              )}
+
+                              {/* Whys list */}
+                              {whysList.length > 0 && (
+                                <div className="mt-2 space-y-1.5">
+                                  <p className="text-zinc-500 text-xs uppercase tracking-widest">Why this matters</p>
+                                  {whysList.map((w, j) => (
+                                    <div key={j} className="flex items-start gap-1.5">
+                                      <span className="text-zinc-600 text-xs mt-0.5 flex-shrink-0">"</span>
+                                      <p className="text-zinc-400 text-xs leading-relaxed italic flex-1">
+                                        {w.text}
+                                        {w.added_at && (
+                                          <span className="text-zinc-600 not-italic ml-1">
+                                            · {new Date(w.added_at + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                                          </span>
+                                        )}
+                                      </p>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                              {whysList.length === 0 && (
+                                <p className="text-zinc-600 text-xs mt-1 italic">No why yet — talk about this in your next session</p>
+                              )}
+
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
             )}
 
-            {activeGoals.length === 0 && !showAddGoal && (
-              <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
-                <p className="text-zinc-500 text-sm">No active goals yet. Add one and your coach will help you understand why it matters.</p>
-              </div>
-            )}
-
-            {activeGoals.length > 0 && (
-              <div className="space-y-3">
-                {activeGoals.map((goal, i) => {
-                  const whysList = Array.isArray(goal.whys) && goal.whys.length > 0
-                    ? [...goal.whys].reverse()
-                    : [];
-
-                  const signal = goal.last_motivation_signal;
-                  const signalBadge = (() => {
-                    if (signal === 'strong')     return { dot: 'bg-green-500',  text: 'Strong momentum' };
-                    if (signal === 'medium')     return { dot: 'bg-yellow-400', text: 'Building' };
-                    if (signal === 'low')        return { dot: 'bg-orange-500', text: 'Needs attention' };
-                    if (signal === 'struggling') return { dot: 'bg-red-500',    text: 'Struggling' };
-                    return null;
-                  })();
-
-                  return (
-                    <div
-                      key={goal.id || i}
-                      className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4"
-                    >
-                      <div className="flex items-start gap-3">
-                        <span className="text-lg mt-0.5">🎯</span>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-start justify-between gap-2">
-                            <p className="text-white font-medium text-sm leading-snug">{goal.title}</p>
-                            <div className="flex items-center gap-1.5 flex-shrink-0">
-                              {signalBadge && (
-                                <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-zinc-800 border border-zinc-700 text-xs text-zinc-400">
-                                  <span className={`w-1.5 h-1.5 rounded-full ${signalBadge.dot}`} />
-                                  {signalBadge.text}
-                                </span>
+            {/* Archived goals tab */}
+            {goalFilter === 'archived' && (
+              <div>
+                {archivedGoals.length === 0 ? (
+                  <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
+                    <p className="text-zinc-500 text-sm">No archived goals yet.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {archivedGoals.map((goal, i) => {
+                      const statusLabel = goal.status === 'achieved' ? 'Achieved' : goal.status === 'paused' ? 'Paused' : 'Archived';
+                      const statusColor = goal.status === 'achieved' ? 'text-green-500' : 'text-zinc-500';
+                      return (
+                        <div key={goal.id || i} className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 opacity-80">
+                          <div className="flex items-start gap-3">
+                            <span className="text-lg mt-0.5">🎯</span>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-start justify-between gap-2">
+                                <div>
+                                  <p className="text-zinc-300 font-medium text-sm leading-snug">{goal.title}</p>
+                                  <p className={`text-xs mt-0.5 ${statusColor}`}>{statusLabel}</p>
+                                </div>
+                                <div className="flex items-center gap-1 flex-shrink-0">
+                                  <button
+                                    onClick={() => handleReactivateGoal(goal.id)}
+                                    disabled={goalActionLoading === goal.id}
+                                    className="text-zinc-500 hover:text-white text-xs px-2 py-0.5 rounded-lg hover:bg-zinc-800 transition-colors disabled:opacity-40"
+                                  >
+                                    Reactivate
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteGoal(goal.id)}
+                                    disabled={goalActionLoading === goal.id}
+                                    className="text-zinc-600 hover:text-red-400 text-xs px-2 py-0.5 rounded-lg hover:bg-zinc-800 transition-colors disabled:opacity-40"
+                                  >
+                                    Delete
+                                  </button>
+                                </div>
+                              </div>
+                              {goal.baseline_snapshot && (
+                                <p className="text-zinc-600 text-xs mt-1 leading-relaxed">
+                                  Started: <span className="text-zinc-500">{goal.baseline_snapshot}</span>
+                                </p>
                               )}
                             </div>
                           </div>
-
-                          {/* Baseline snapshot */}
-                          {goal.baseline_snapshot && (
-                            <p className="text-zinc-500 text-xs mt-1 leading-relaxed">
-                              Started:{' '}
-                              <span className="text-zinc-400">{goal.baseline_snapshot}</span>
-                              {goal.baseline_date && (
-                                <span className="text-zinc-600 ml-1">
-                                  · {new Date(goal.baseline_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-                                </span>
-                              )}
-                            </p>
-                          )}
-
-                          {/* Whys list */}
-                          {whysList.length > 0 && (
-                            <div className="mt-2 space-y-1.5">
-                              <p className="text-zinc-500 text-xs uppercase tracking-widest">Why this matters</p>
-                              {whysList.map((w, j) => (
-                                <div key={j} className="flex items-start gap-1.5">
-                                  <span className="text-zinc-600 text-xs mt-0.5 flex-shrink-0">"</span>
-                                  <p className="text-zinc-400 text-xs leading-relaxed italic flex-1">
-                                    {w.text}
-                                    {w.added_at && (
-                                      <span className="text-zinc-600 not-italic ml-1">
-                                        · {new Date(w.added_at + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                                      </span>
-                                    )}
-                                  </p>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-
-                          {whysList.length === 0 && (
-                            <p className="text-zinc-600 text-xs mt-1 italic">No why yet — talk about this in your next session</p>
-                          )}
-
                         </div>
-                      </div>
-                    </div>
-                  );
-                })}
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
           </section>
