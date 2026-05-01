@@ -2368,6 +2368,7 @@ function buildSessionContext({
   activeDirective,
   directiveQueue,
   completedDirectives,
+  todayCausalExtracts = [],
 }) {
   // ── Derive internal values ─────────────────────────────────────────────
   const sessionExercisesRun = Array.isArray(sessionState.exercises_run) ? sessionState.exercises_run : [];
@@ -2997,6 +2998,7 @@ export default async function handler(req, res) {
       activeDirective,
       directiveQueue: combinedDirectiveQueue,
       completedDirectives,
+      todayCausalExtracts,
     });
 
     // ── 9. Build messages ─────────────────────────────────────────────────
