@@ -210,13 +210,12 @@ export default async function handler(req, res) {
     ]);
 
     // ── 3. Auto-archive goals inactive for 15+ days (fire-and-forget) ────
-    const fifteenDaysAgo = new Date(Date.now() - 15 * 86400000).toISOString().slice(0, 10);
     supabase
       .from('goals')
       .update({ status: 'archived', updated_at: new Date().toISOString() })
       .eq('user_id', targetUserId)
       .eq('status', 'active')
-      .lt('last_mentioned_at', fifteenDaysAgo)
+      .lt('last_mentioned_at', new Date(Date.now() - 15 * 86400000).toISOString().slice(0, 10))
       .not('last_mentioned_at', 'is', null)
       .then(() => {}).catch(() => {});
 
