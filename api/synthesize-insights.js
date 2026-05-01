@@ -209,7 +209,18 @@ export default async function handler(req, res) {
         .maybeSingle(),
     ]);
 
-    // ── 3. Clean up causal extracts older than 30 days (fire-and-forget) ──
+    // ── 3. Auto-archive goals inactive for 15+ days (fire-and-forget) ────
+    const fifteenDaysAgo = new Date(Date.now() - 15 * 86400000).toISOString().slice(0, 10);
+    supabase
+      .from('goals')
+      .update({ status: 'archived', updated_at: new Date().toISOString() })
+      .eq('user_id', targetUserId)
+      .eq('status', 'active')
+      .lt('last_mentioned_at', fifteenDaysAgo)
+      .not('last_mentioned_at', 'is', null)
+      .then(() => {}).catch(() => {});
+
+    // ── 4. Clean up causal extracts older than 30 days (fire-and-forget) ──
     supabase
       .from('session_causal_extracts')
       .delete()

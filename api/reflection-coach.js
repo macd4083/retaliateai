@@ -1874,6 +1874,50 @@ Set directive_completed: "${probeId}" when done.`,
     });
   }
 
+  // ── minimum_why_probe ─────────────────────────────────────────────────
+  if (
+    currentStage === 'tomorrow' &&
+    sessionState.commitment_minimum &&
+    completedDirectives.includes('commitment_specificity') &&
+    !sessionState.commitment_stretch &&
+    !completedDirectives.includes('minimum_why_probe')
+  ) {
+    const goalContext = Array.isArray(activeGoals) && activeGoals.length > 0
+      ? activeGoals.map(g => {
+          const latestWhy = Array.isArray(g.whys) && g.whys.length > 0
+            ? g.whys[g.whys.length - 1].text
+            : null;
+          return `id="${g.id}" title="${g.title}"${latestWhy ? ` (why: "${latestWhy.slice(0, 80)}")` : ''}`;
+        }).join(', ')
+      : 'none';
+
+    allDirectives.push({
+      id: 'minimum_why_probe',
+      instruction: `MINIMUM COMMITMENT WHY-PROBE: The user just stated their minimum commitment: "${sessionState.commitment_minimum}". Before asking the stretch question, evaluate whether their response already contained a named goal or a reason/why behind the work.
+
+TWO BRANCHES — pick exactly one:
+
+BRANCH A — No goal or why detected in the minimum response:
+Ask: "Which of your goals is that work important to, and why?" Keep it conversational, don't recite a list. Set directive_completed: "minimum_why_probe" once you've received their answer. Do NOT set commitment_stretch yet.
+
+BRANCH B — Goal or why already present in the minimum response:
+Briefly mirror their stated reason back ("Sounds like that's important to you because [X]"), then push deeper: ask why that goal or reason creates urgency to get it done specifically tomorrow — not just someday. Set directive_completed: "minimum_why_probe" once you've received their deeper answer. Do NOT set commitment_stretch yet.
+
+Rules:
+- ONE question only per turn.
+- Do NOT set is_session_complete.
+- Do NOT set commitment_stretch.
+- If they reveal a goal, set goal_id_referenced to the matching goal id from the active goals list.
+- If they reveal a meaningful why, set goal_why_insight (action: "add") and goal_id_referenced.
+
+Active goals for matching: ${goalContext}`,
+      priority: 1,
+      preferred_stage: 'tomorrow',
+      fire_next_session: false,
+      energy_type: 'identity',
+    });
+  }
+
   // ── tomorrow_commitment_structure ─────────────────────────────────────
   if (currentStage === 'tomorrow' && !sessionState.tomorrow_commitment) {
     const minimumCaptured = !!sessionState.commitment_minimum;
@@ -1903,15 +1947,15 @@ Set directive_completed: "${probeId}" when done.`,
 - If the user states anything hedged — "I'll try", "I'll aim to", "maybe", "sometime", "probably", "when I feel ready", "hopefully", "if I have time" — this is NOT a minimum. Push back once: "That's an intention, not a floor commitment. What's the one thing you WILL do — not might, will?"
 - commitment_minimum and commitment_stretch are separate fields. Never set tomorrow_commitment directly — only set commitment_minimum and commitment_stretch.
 - Capture TWO commitments in sequence — never both at once.
-- First capture the complete set of floor commitments with this opening framing (you may paraphrase while keeping intent): "Let's build out tomorrow. What are all the things that, if you got them done, would make tomorrow a real win — the floor you wouldn't fall below?" Store it in extracted_data.commitment_minimum.
+- First capture the complete set of floor commitments with this opening framing (you may paraphrase while keeping intent): "What is the minimum amount of work towards your goals you are going to complete tomorrow?" Store it in extracted_data.commitment_minimum.
 - Minimum framing guidance: ${minimumFraming}
 - On the turn you ask/capture minimum, do NOT set extracted_data.commitment_stretch and do NOT set extracted_data.tomorrow_commitment. Wait for the next user reply.
-- Only AFTER minimum is captured and the specificity directive is completed, ask the stretch question: "Now push it — if tomorrow went as well as it possibly could, what would you have gotten done on top of that?" Store it in extracted_data.commitment_stretch.
+- Only AFTER minimum is captured and the specificity directive is completed, ask the stretch question: "If you worked extremely hard tomorrow, making a ton of sacrifices on time, what else can you get done tomorrow including what you've already mentioned?" Store it in extracted_data.commitment_stretch.
 - Current captured state: minimum=${minimumCaptured ? `"${sessionState.commitment_minimum}"` : 'null'}, stretch=${stretchCaptured ? `"${sessionState.commitment_stretch}"` : 'null'}.
 - STRICT ORDER: extracted_data.tomorrow_commitment MUST be set only after BOTH extracted_data.commitment_minimum and extracted_data.commitment_stretch already exist (from this turn or prior turns).
 - Once BOTH exist, set extracted_data.tomorrow_commitment to a combined summary (e.g. "Minimum: [minimum]. Stretch: [stretch].") and continue naturally.
 - Do not ask both questions in one message.
-- IMPORTANT: Do NOT ask the stretch question until 'commitment_specificity' is in completed_directives. The specificity check runs first.${lowScoreNudge
+- IMPORTANT: Do NOT ask the stretch question until BOTH 'commitment_specificity' AND 'minimum_why_probe' are in completed_directives. The minimum why-probe runs between specificity and stretch.${lowScoreNudge
   ? `\n- IMPORTANT: We've noticed you haven't been able to meet the minimum viable commitment a couple times now. What can you absolutely guarantee you'll get done tomorrow — not what you want to do, what you WILL do no matter what? Push them for something smaller and more guaranteed.`
   : ''}${Array.isArray(activeGoals) && activeGoals.length === 0
   ? `\n- If activeGoals is empty, after capturing the stretch commitment add one closing question: "What does committing to that say about where you're trying to get?" Then set is_session_complete:true on that same response.`
@@ -1923,6 +1967,39 @@ Set directive_completed: "${probeId}" when done.`,
     });
   }
 
+  // ── stretch_why_probe ─────────────────────────────────────────────────
+  if (
+    currentStage === 'tomorrow' &&
+    !!sessionState.commitment_stretch &&
+    completedDirectives.includes('minimum_why_probe') &&
+    !completedDirectives.includes('stretch_why_probe') &&
+    !completedDirectives.includes('commitment_goal_bridge') &&
+    !completedDirectives.includes('commitment_goal_why_depth')
+  ) {
+    allDirectives.push({
+      id: 'stretch_why_probe',
+      instruction: `STRETCH COMMITMENT WHY-PROBE: The user just stated their stretch commitment: "${sessionState.commitment_stretch}". Evaluate whether their stretch response already contained a goal or a reason/why for pushing hard.
+
+TWO BRANCHES — pick exactly one:
+
+BRANCH A — No goal or why detected in the stretch response:
+Ask: "Why is it important to work hard tomorrow in order to see as much of your potential be realized?" Frame it around what it would mean — not just for the tasks, but for who they're becoming. Set directive_completed: "stretch_why_probe" once you've received their answer.
+
+BRANCH B — Goal or why already present in the stretch response:
+Acknowledge their stated reason briefly, then go deeper: ask what it would mean for their long-term potential if they kept pushing to the stretch level consistently — not just tomorrow. Set directive_completed: "stretch_why_probe" once you've received their deeper answer.
+
+Rules:
+- ONE question only per turn.
+- Do NOT set is_session_complete.
+- Do NOT advance to goal bridge yet — this directive fires first.
+- If they name a goal or why, capture goal_id_referenced and goal_why_insight (action: "add").`,
+      priority: 1,
+      preferred_stage: 'tomorrow',
+      fire_next_session: false,
+      energy_type: 'identity',
+    });
+  }
+
   // ── commitment_goal_bridge ─────────────────────────────────────────────
   const hasBothCommitments = !!sessionState.commitment_minimum && !!sessionState.commitment_stretch;
   const hasGoalsOrVision = Array.isArray(activeGoals) && activeGoals.length > 0;
@@ -1930,6 +2007,8 @@ Set directive_completed: "${probeId}" when done.`,
     currentStage === 'tomorrow' &&
     hasBothCommitments &&
     hasGoalsOrVision &&
+    completedDirectives.includes('minimum_why_probe') &&
+    completedDirectives.includes('stretch_why_probe') &&
     !completedDirectives.includes('commitment_goal_bridge') &&
     !completedDirectives.includes('commitment_goal_why_depth')
   ) {
