@@ -854,29 +854,10 @@ export default function ReflectionV2() {
         if (data.extracted_data?.commitment_score != null)
           newState.commitment_score = data.extracted_data.commitment_score;
         if (shouldShowChecklist) {
-          if (isInit) {
-            // Defer — show checklist after first exchange, not immediately on INIT
-            newState.pending_checklist_fragments = data.checklist_fragments.map((f) => ({
-              id: f.id,
-              text: f.text || f.commitment_text || '',
-            }));
-          } else {
-            newState.checklist_fragments = data.checklist_fragments.map((f) => ({
-              id: f.id,
-              text: f.text || f.commitment_text || '',
-            }));
-            newState.fragments_submitted = false;
-            setCheckedFragments({});
-          }
-        }
-        // Promote deferred checklist fragments after the first real exchange
-        if (!isInit && !isChecklistSubmission && !isExerciseSkipSignal &&
-            Array.isArray(state.pending_checklist_fragments) &&
-            state.pending_checklist_fragments.length > 0 &&
-            !newState.checklist_fragments?.length &&
-            !newState.fragments_submitted) {
-          newState.checklist_fragments = state.pending_checklist_fragments;
-          newState.pending_checklist_fragments = [];
+          newState.checklist_fragments = data.checklist_fragments.map((f) => ({
+            id: f.id,
+            text: f.text || f.commitment_text || '',
+          }));
           newState.fragments_submitted = false;
           setCheckedFragments({});
         }
@@ -1370,7 +1351,7 @@ export default function ReflectionV2() {
                   onChange={handleTextareaChange}
                   onKeyDown={handleKeyDown}
                   onFocus={() => setChatFocused(true)}
-                  disabled={isInitializing}
+                  disabled={isInitializing || isChecklistBlocking}
                   placeholder={textareaPlaceholder}
                   rows={1}
                   className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-500 resize-none focus:outline-none focus:border-zinc-500 transition-colors"
@@ -1380,7 +1361,7 @@ export default function ReflectionV2() {
             <button
               onClick={handleSend}
               disabled={
-                !inputValue.trim() || isLoading || isInitializing
+                !inputValue.trim() || isLoading || isInitializing || isChecklistBlocking
               }
               className="w-10 h-10 rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center flex-shrink-0"
             >
