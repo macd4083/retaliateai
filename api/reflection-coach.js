@@ -3212,7 +3212,6 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
         type: fragment.type || null,
         text: formatChecklistFragmentText(fragment),
       }));
-      result.assistant_message = CHECKLIST_INIT_MESSAGE;
     }
 
     const hasInsightDirectiveQueued = combinedDirectiveQueue.some((directive) => directive.id === 'insight_triggered_exercise');

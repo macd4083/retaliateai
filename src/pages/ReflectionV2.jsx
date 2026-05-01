@@ -35,6 +35,7 @@ const STAGE_PLACEHOLDERS = {
 };
 
 const DEFAULT_CHECKLIST = { wins: false, commitment_checkin: false, honest: false, plan: false };
+const CHECKLIST_INIT_MESSAGE = "Here are your commitments from yesterday — check off what you actually did so I can get a sense of where we're starting tonight.";
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -456,6 +457,7 @@ export default function ReflectionV2() {
         checkin_outcome: session.checkin_outcome || null,
         commitment_score: session.commitment_score ?? null,
         checklist_fragments: [],
+        pending_checklist_fragments: [],
         fragments_submitted: !!(session.commitment_checkin_done && session.commitment_score != null),
         depth_opportunity_count: session.depth_opportunity_count || 0,
         depth_probe_count: session.depth_probe_count || 0,
@@ -781,6 +783,26 @@ export default function ReflectionV2() {
         data.show_commitment_checklist === true &&
         Array.isArray(data.checklist_fragments) &&
         data.checklist_fragments.length > 0;
+
+      // Promote deferred checklist fragments — inject intro message before AI reply
+      const shouldPromoteChecklist = !isInit && !isChecklistSubmission && !isExerciseSkipSignal &&
+        Array.isArray(state.pending_checklist_fragments) &&
+        state.pending_checklist_fragments.length > 0 &&
+        !shouldShowChecklist;
+      if (shouldPromoteChecklist) {
+        const checklistIntroMsg = {
+          id: `ai-checklist-intro-${Date.now()}`,
+          role: 'assistant',
+          content: CHECKLIST_INIT_MESSAGE,
+          chips: null,
+          message_type: 'question',
+          card_data: null,
+          isTyping: false,
+        };
+        const msgsWithoutTyping = messagesRef.current.filter((m) => !m.isTyping);
+        messagesRef.current = [...msgsWithoutTyping, checklistIntroMsg];
+      }
+
       const aiMessage = {
         id: `ai-${Date.now()}`,
         role: 'assistant',
@@ -810,7 +832,7 @@ export default function ReflectionV2() {
         })
         .catch(() => {});
 
-      if (data.extracted_data || data.stage_advance || data.checklist_updates || data.consecutive_excuses !== undefined || data.wins_asked_for_more || data.honest_depth || data.commitment_checkin_done || shouldShowChecklist) {
+      if (data.extracted_data || data.stage_advance || data.checklist_updates || data.consecutive_excuses !== undefined || data.wins_asked_for_more || data.honest_depth || data.commitment_checkin_done || shouldShowChecklist || shouldPromoteChecklist) {
         const newState = { ...state };
         if (data.extracted_data?.win_text)
           newState.wins = [...(newState.wins || []), { text: data.extracted_data.win_text }];
@@ -854,10 +876,22 @@ export default function ReflectionV2() {
         if (data.extracted_data?.commitment_score != null)
           newState.commitment_score = data.extracted_data.commitment_score;
         if (shouldShowChecklist) {
-          newState.checklist_fragments = data.checklist_fragments.map((f) => ({
+          const mappedFragments = data.checklist_fragments.map((f) => ({
             id: f.id,
             text: f.text || f.commitment_text || '',
           }));
+          if (isInit) {
+            // Defer — show checklist after first exchange, not immediately on INIT
+            newState.pending_checklist_fragments = mappedFragments;
+          } else {
+            newState.checklist_fragments = mappedFragments;
+            newState.fragments_submitted = false;
+            setCheckedFragments({});
+          }
+        }
+        if (shouldPromoteChecklist) {
+          newState.checklist_fragments = state.pending_checklist_fragments;
+          newState.pending_checklist_fragments = [];
           newState.fragments_submitted = false;
           setCheckedFragments({});
         }
