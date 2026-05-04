@@ -905,7 +905,6 @@ export default function ReflectionV2() {
         //   setCheckedFragments({});
         // }
         if (isChecklistSubmission && data.commitment_checkin_done === true) {
-          newState.checklist_fragments = [];
           newState.fragments_submitted = true;
           newState.checklist_submitted_pending = false;
           setCheckedFragments({});
@@ -1323,7 +1322,7 @@ export default function ReflectionV2() {
                   followThroughStats={followThroughStats}
                 />
               ))}
-              {sessionState.checklist_fragments.length > 0 && (!sessionState.fragments_submitted || sessionState.checklist_submitted_pending) && (
+              {sessionState.checklist_fragments.length > 0 && (
                 <div className="mx-4 mb-3 bg-zinc-900 border border-zinc-700 rounded-xl p-4">
                   <p className="text-sm text-zinc-400 mb-3">Before we dive in — check off what you actually did:</p>
                   {sessionState.checklist_fragments.map((frag) => (
@@ -1332,13 +1331,13 @@ export default function ReflectionV2() {
                         type="checkbox"
                         className="mt-0.5 accent-red-500"
                         checked={!!checkedFragments[frag.id]}
-                        disabled={sessionState.checklist_submitted_pending}
+                        disabled={sessionState.checklist_submitted_pending || sessionState.fragments_submitted}
                         onChange={(e) => setCheckedFragments((prev) => ({ ...prev, [frag.id]: e.target.checked }))}
                       />
                       <span className="text-sm text-white">{frag.text}</span>
                     </label>
                   ))}
-                  {!sessionState.checklist_submitted_pending && (
+                  {!sessionState.checklist_submitted_pending && !sessionState.fragments_submitted && (
                     <button
                       onClick={handleChecklistSubmit}
                       className="mt-3 w-full bg-red-600 hover:bg-red-700 text-white text-sm font-medium py-2 rounded-lg transition-colors"
