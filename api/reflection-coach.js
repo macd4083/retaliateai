@@ -2786,7 +2786,13 @@ export default async function handler(req, res) {
         const fragment = (yesterdayFragments || []).find((f) => f.id === r.id);
         return fragment ? formatChecklistFragmentText(fragment) : r.id;
       });
-      checklistResultContextInstruction = `\n\nCHECKLIST RESULT: The user submitted yesterday's checklist. They completed ${kept}/${total} commitments.\nKept: ${keptItems.length > 0 ? keptItems.join(', ') : 'none'}\nMissed: ${missedItems.length > 0 ? missedItems.join(', ') : 'none'}\nAcknowledge the specific items naturally (mention what they did well and what slipped) then transition forward. Do NOT ask what they completed — you already know.`;
+      if (precomputedScore !== null && precomputedScore >= 50) {
+        // Routing to wins — only surface kept items so GPT-4o stays in celebration mode
+        checklistResultContextInstruction = `\n\nCHECKLIST RESULT: The user submitted yesterday's checklist and completed ${kept}/${total} commitments.\nKept: ${keptItems.length > 0 ? keptItems.join(', ') : 'none'}\nAcknowledge what they completed and transition into the session.`;
+      } else {
+        // Routing to honest — include both kept and missed items
+        checklistResultContextInstruction = `\n\nCHECKLIST RESULT: The user submitted yesterday's checklist and completed ${kept}/${total} commitments.\nKept: ${keptItems.length > 0 ? keptItems.join(', ') : 'none'}\nMissed: ${missedItems.length > 0 ? missedItems.join(', ') : 'none'}\nAcknowledge the specific items naturally then transition forward. Do NOT ask what they completed — you already know.`;
+      }
     }
 
     // ── 2b. Pre-session state (init only, zero extra DB queries) ─────────
