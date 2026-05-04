@@ -390,7 +390,7 @@ export default function ReflectionV2() {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, scrollToBottom]);
+  }, [messages, scrollToBottom, sessionState.checklist_fragments, sessionState.checklist_submitted_pending]);
 
   // ── Initialize session ──────────────────────────────���─────────────────────
 
@@ -1350,6 +1350,7 @@ export default function ReflectionV2() {
               {sessionState.checklist_submitted_pending && (
                 <TypingIndicator />
               )}
+              <div ref={messagesEndRef} />
               {initError && (
                 <div className="flex justify-center mt-3">
                   <button
@@ -1386,8 +1387,6 @@ export default function ReflectionV2() {
                   </div>
                 </div>
               )}
-
-              <div ref={messagesEndRef} />
             </motion.div>
           )}
         </AnimatePresence>
