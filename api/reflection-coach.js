@@ -3220,6 +3220,30 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
       }));
     }
 
+    // Server-side guard for non-init messages: force checklist when fragments exist and checkin is incomplete.
+    // This prevents GPT-4o from probabilistically skipping the checklist step and firing the wins question early.
+    if (
+      !isInit &&
+      !isChecklistSubmission &&
+      Array.isArray(yesterdayFragments) &&
+      yesterdayFragments.length > 0 &&
+      !session_state.commitment_checkin_done
+    ) {
+      result.show_commitment_checklist = true;
+      result.checklist_fragments = yesterdayFragments.map((fragment) => ({
+        id: fragment.id,
+        type: fragment.type || null,
+        text: formatChecklistFragmentText(fragment),
+      }));
+      result.commitment_checkin_done = false;
+
+      // Block premature stage advance to wins/honest before the checklist is submitted
+      if (result.stage_advance && ['wins', 'honest'].includes(result.new_stage)) {
+        result.stage_advance = false;
+        result.new_stage = null;
+      }
+    }
+
     const hasInsightDirectiveQueued = combinedDirectiveQueue.some((directive) => directive.id === 'insight_triggered_exercise');
     if (hasInsightDirectiveQueued && !isExerciseSkipSignal) {
       result.chips = [
