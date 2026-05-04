@@ -414,6 +414,8 @@ RETURN JSON EXACTLY (no markdown, no extra keys):
     "miss_text": null,
     "commitment_minimum": null, // string: bare minimum floor commitment for tomorrow
     "commitment_stretch": null, // string: stretch/ideal commitment for tomorrow
+    "commitment_minimum_why": null,
+    "commitment_stretch_why": null,
     "tomorrow_commitment": null,
     "commitment_score": null, // integer 0-100: scored in commitment_checkin only
     "depth_insight": null,
@@ -965,7 +967,7 @@ async function loadYesterdayFragments(userId, clientToday) {
     const yesterday = localDate(-1, clientToday);
     const { data } = await supabase
       .from('goal_commitment_log')
-      .select('id, commitment_text, fragment_index, commitment_type, goal_id, kept')
+      .select('id, commitment_text, fragment_index, commitment_type, goal_id, kept, commitment_why')
       .eq('user_id', userId)
       .eq('date', yesterday)
       .order('fragment_index', { ascending: true });
@@ -1668,6 +1670,15 @@ function buildDirectiveQueue({
         return `\n\nCOMMITMENT MISS ANCHOR: Yesterday they committed to "${safeCommitment}" as part of their goal "${safeGoalTitle}". They said it was about "${safeWhy}". They ${sessionState.checkin_outcome === 'missed' ? 'fully missed it' : 'partially completed it'}. Open the honest stage by naming this directly: reference the specific commitment and what it was tied to. Then ask what got in the way — not generically, but specifically about this commitment.`;
       }
 
+      // Path 2b: unlinked fragment but has its own why
+      const orphanFragments = (enrichedYesterdayFragments || []).filter(f => !f.goal_id && f.commitment_why);
+      if (orphanFragments.length > 0) {
+        const top = orphanFragments[0];
+        const safeCommitment = sanitizeForPrompt(top.commitment_text, 120);
+        const safeWhy = sanitizeForPrompt(top.commitment_why, 120);
+        return `\n\nCOMMITMENT MISS ANCHOR: Yesterday they committed to "${safeCommitment}" — they said it was important because "${safeWhy}". They ${sessionState.checkin_outcome === 'missed' ? 'fully missed it' : 'only partially completed it'}. Open the honest stage by naming this directly — reference their own stated reason.`;
+      }
+
       // Fallback: plain commitment text with no goal context
       const plainCommitment = sanitizeForPrompt(yesterdayCommitment, 120);
       if (plainCommitment) {
@@ -1828,6 +1839,10 @@ Set directive_completed: "${probeId}" when done.`,
                 if (enriched?.goal_title && enriched?.goal_why_context) {
                   return `${JSON.stringify(f)} → goal: "${sanitizeForPrompt(enriched.goal_title, 80)}", why: "${sanitizeForPrompt(enriched.goal_why_context, 100)}"`;
                 }
+                // No goal but fragment has its own why
+                if (enriched?.commitment_why) {
+                  return `${JSON.stringify(f)} → why: "${sanitizeForPrompt(enriched.commitment_why, 100)}"`;
+                }
                 return JSON.stringify(f);
               });
               return `\n- Yesterday's fragment checklist to show in UI: ${JSON.stringify(checklistFragments)}\n- Present the checklist by returning show_commitment_checklist: true and checklist_fragments as an array of {id, text, type} objects from the fragments below.\n- When a fragment has type="minimum" or type="stretch", keep that type and label intact in checklist_fragments so the user can see exactly which is minimum vs stretch.\n- In assistant_message, write a short checklist intro — e.g. "Here are your commitments from yesterday — check off what you actually did so I can get a sense of where we're starting tonight." Do NOT include a question mark. Do NOT ask a free-text question. Do NOT write a wins or honest check-in question. Wait for the user to submit the checklist.\n- After the user submits the checklist, use the submitted results + precomputed_commitment_score from context to set extracted_data.checkin_outcome (kept/partial/missed), set extracted_data.commitment_score, set commitment_checkin_done: true, and continue naturally.\n- GOAL CONTEXT per fragment (use to personalize the check-in tone — do NOT recite this verbatim): ${fragmentsWithGoals.join(' | ')}\n- When a fragment has a goal+why attached: after the checklist result comes in, use the why to ask a pointed follow-up. E.g. "You said yesterday that working on [commitment] was about [why] — does how today went change anything about that?" Do NOT ask this for every fragment — pick the most resonant one only.`;
@@ -1915,6 +1930,7 @@ Rules:
 - Do NOT set commitment_stretch.
 - If they reveal a goal, set goal_id_referenced to the matching goal id from the active goals list.
 - If they reveal a meaningful why, set goal_why_insight (action: "add") and goal_id_referenced.
+- When the user answers the why question, capture their answer in extracted_data.commitment_minimum_why (their exact words). Do this regardless of whether they named a goal.
 
 Active goals for matching: ${goalContext}`,
       priority: 1,
@@ -1998,7 +2014,8 @@ Rules:
 - ONE question only per turn.
 - Do NOT set is_session_complete.
 - Do NOT advance to goal bridge yet — this directive fires first.
-- If they name a goal or why, capture goal_id_referenced and goal_why_insight (action: "add").`,
+- If they name a goal or why, capture goal_id_referenced and goal_why_insight (action: "add").
+- When the user answers the why question, capture their answer in extracted_data.commitment_stretch_why (their exact words). Do this regardless of whether they named a goal.`,
       priority: 1,
       preferred_stage: 'tomorrow',
       fire_next_session: false,
@@ -2760,11 +2777,13 @@ export default async function handler(req, res) {
       return {
         ...f,
         goal_title: linkedGoal?.title || null,
-        // Prefer synthesized summary; fall back to most recent why text
+        // Prefer synthesized summary; fall back to most recent why text; then fragment-level why
         goal_why_context: linkedGoal?.why_summary
           || (Array.isArray(linkedGoal?.whys) && linkedGoal.whys.length > 0
             ? linkedGoal.whys[linkedGoal.whys.length - 1].text
-            : null),
+            : null)
+          || f.commitment_why   // fragment-level why as tertiary fallback
+          || null,
       };
     });
     const resolvedCommitmentRate7 = contextCommitmentRate7 !== null
@@ -2780,11 +2799,21 @@ export default async function handler(req, res) {
       const total = context.checklist_result.length;
       const keptItems = context.checklist_result.filter((r) => r.kept).map((r) => {
         const fragment = (yesterdayFragments || []).find((f) => f.id === r.id);
-        return fragment ? formatChecklistFragmentText(fragment) : r.id;
+        if (!fragment) return r.id;
+        const enriched = enrichedYesterdayFragments.find(ef => ef.id === r.id);
+        const why = enriched?.goal_why_context || fragment.commitment_why;
+        return why
+          ? `${formatChecklistFragmentText(fragment)} (why: "${why.slice(0, 80)}")`
+          : formatChecklistFragmentText(fragment);
       });
       const missedItems = context.checklist_result.filter((r) => !r.kept).map((r) => {
         const fragment = (yesterdayFragments || []).find((f) => f.id === r.id);
-        return fragment ? formatChecklistFragmentText(fragment) : r.id;
+        if (!fragment) return r.id;
+        const enriched = enrichedYesterdayFragments.find(ef => ef.id === r.id);
+        const why = enriched?.goal_why_context || fragment.commitment_why;
+        return why
+          ? `${formatChecklistFragmentText(fragment)} (why: "${why.slice(0, 80)}")`
+          : formatChecklistFragmentText(fragment);
       });
       if (precomputedScore !== null && precomputedScore >= 50) {
         // Routing to wins — only surface kept items so GPT-4o stays in celebration mode
@@ -3223,6 +3252,11 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
 
     const resolvedMinimumCommitmentForOutput = result.extracted_data.commitment_minimum || session_state.commitment_minimum;
     const resolvedStretchCommitmentForOutput = result.extracted_data.commitment_stretch || session_state.commitment_stretch;
+    // NEW — resolve why fields for fragment write-back
+    const resolvedMinimumWhy = result.extracted_data?.commitment_minimum_why || session_state.commitment_minimum_why || null;
+    const resolvedStretchWhy = result.extracted_data?.commitment_stretch_why || session_state.commitment_stretch_why || null;
+    result.commitment_minimum_why = resolvedMinimumWhy;
+    result.commitment_stretch_why = resolvedStretchWhy;
     if (!resolvedMinimumCommitmentForOutput || !resolvedStretchCommitmentForOutput) {
       result.extracted_data.tomorrow_commitment = null;
     }
@@ -3679,6 +3713,7 @@ Only return a goal_id that exists in the list.`,
               session_id: session_id || null,
               goal_id: minimumGoalId,
               commitment_text: minimumCommitmentText,
+              commitment_why: resolvedMinimumWhy || null,
               date: clientToday,
               kept: null,
               fragment_index: 0, // fallback convention for minimum when commitment_type is unavailable
@@ -3689,6 +3724,7 @@ Only return a goal_id that exists in the list.`,
               session_id: session_id || null,
               goal_id: stretchGoalId,
               commitment_text: stretchCommitmentText,
+              commitment_why: resolvedStretchWhy || null,
               date: clientToday,
               kept: null,
               fragment_index: 1, // fallback convention for stretch when commitment_type is unavailable
@@ -3698,7 +3734,7 @@ Only return a goal_id that exists in the list.`,
 
           const { error: insertError } = await supabase.from('goal_commitment_log').insert(fragmentRows);
           if (insertError && /commitment_type/i.test(insertError.message || '')) {
-            const fallbackRows = fragmentRows.map(({ commitment_type: _commitmentType, ...row }) => row);
+            const fallbackRows = fragmentRows.map(({ commitment_type: _ct, commitment_why: _cw, ...row }) => row);
             await supabase.from('goal_commitment_log').insert(fallbackRows);
           }
         } catch (_e) { /* fail silently */ }
@@ -3740,7 +3776,10 @@ Only return a goal_id that exists in the list.`,
     // ── Goal write-backs (fire-and-forget, all fail silently) ─────────────
     const clientToday = today(client_local_date);
 
-    // Goal why insight — smart append/replace to goals.whys array
+    // Goal-linked why write-back: writes to goals.whys[] when a goal was explicitly referenced.
+    // For commitment-level whys without a goal reference, see commitment_minimum_why /
+    // commitment_stretch_why fields which are written to goal_commitment_log.commitment_why
+    // via the fragment INSERT block above.
     if (result.extracted_data?.goal_why_insight && result.extracted_data?.goal_id_referenced) {
       const goalId = result.extracted_data.goal_id_referenced;
       const action = result.extracted_data.goal_why_action;
