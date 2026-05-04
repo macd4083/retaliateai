@@ -18,6 +18,12 @@ export default function PersonCard({ person, onDelete }) {
     .toUpperCase()
     .slice(0, 2);
 
+  const lastMentionedDate = (() => {
+    if (!person.last_mentioned) return null;
+    const [y, m, d] = person.last_mentioned.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  })();
+
   return (
     <div className="bg-white rounded-2xl border border-slate-200 p-5 hover:shadow-md transition-shadow">
       <div className="flex items-start gap-4">
@@ -62,8 +68,8 @@ export default function PersonCard({ person, onDelete }) {
                 {person.mention_count} mention{person.mention_count > 1 ? 's' : ''}
               </span>
             )}
-            {person.last_mentioned && (
-              <span>Last: {format(new Date(person.last_mentioned), 'MMM d')}</span>
+            {lastMentionedDate && (
+              <span>Last: {format(lastMentionedDate, 'MMM d')}</span>
             )}
           </div>
         </div>
