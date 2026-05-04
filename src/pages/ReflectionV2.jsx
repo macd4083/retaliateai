@@ -785,28 +785,32 @@ export default function ReflectionV2() {
         data.checklist_fragments.length > 0;
 
       // Promote deferred checklist fragments — inject intro message before AI reply
-      const shouldPromoteChecklist = !isInit && !isChecklistSubmission && !isExerciseSkipSignal &&
-        Array.isArray(state.pending_checklist_fragments) &&
-        state.pending_checklist_fragments.length > 0 &&
-        !shouldShowChecklist;
-      if (shouldPromoteChecklist) {
-        const checklistIntroMsg = {
-          id: `ai-checklist-intro-${Date.now()}`,
-          role: 'assistant',
-          content: CHECKLIST_INIT_MESSAGE,
-          chips: null,
-          message_type: 'question',
-          card_data: null,
-          isTyping: false,
-        };
-        const msgsWithoutTyping = messagesRef.current.filter((m) => !m.isTyping);
-        messagesRef.current = [...msgsWithoutTyping, checklistIntroMsg];
-      }
+      // NOTE: shouldPromoteChecklist is dead code — the server guard always sets shouldShowChecklist: true
+      // when fragments exist and checkin is incomplete, so this path can never fire.
+      // const shouldPromoteChecklist = !isInit && !isChecklistSubmission && !isExerciseSkipSignal &&
+      //   Array.isArray(state.pending_checklist_fragments) &&
+      //   state.pending_checklist_fragments.length > 0 &&
+      //   !shouldShowChecklist;
+      // if (shouldPromoteChecklist) {
+      //   const checklistIntroMsg = {
+      //     id: `ai-checklist-intro-${Date.now()}`,
+      //     role: 'assistant',
+      //     content: CHECKLIST_INIT_MESSAGE,
+      //     chips: null,
+      //     message_type: 'question',
+      //     card_data: null,
+      //     isTyping: false,
+      //   };
+      //   const msgsWithoutTyping = messagesRef.current.filter((m) => !m.isTyping);
+      //   messagesRef.current = [...msgsWithoutTyping, checklistIntroMsg];
+      // }
 
       const aiMessage = {
         id: `ai-${Date.now()}`,
         role: 'assistant',
-        content: data.assistant_message || '',
+        // When the server forces the checklist (non-init), override any GPT-4o message with the
+        // canonical checklist intro so a stray wins/honest question never appears as a chat bubble.
+        content: (shouldShowChecklist && !isInit) ? CHECKLIST_INIT_MESSAGE : (data.assistant_message || ''),
         chips: data.chips || null,
         message_type: isSummaryCard
           ? 'summary_card'
@@ -832,7 +836,7 @@ export default function ReflectionV2() {
         })
         .catch(() => {});
 
-      if (data.extracted_data || data.stage_advance || data.checklist_updates || data.consecutive_excuses !== undefined || data.wins_asked_for_more || data.honest_depth || data.commitment_checkin_done || shouldShowChecklist || shouldPromoteChecklist) {
+      if (data.extracted_data || data.stage_advance || data.checklist_updates || data.consecutive_excuses !== undefined || data.wins_asked_for_more || data.honest_depth || data.commitment_checkin_done || shouldShowChecklist) {
         const newState = { ...state };
         if (data.extracted_data?.win_text)
           newState.wins = [...(newState.wins || []), { text: data.extracted_data.win_text }];
@@ -889,12 +893,13 @@ export default function ReflectionV2() {
             setCheckedFragments({});
           }
         }
-        if (shouldPromoteChecklist) {
-          newState.checklist_fragments = state.pending_checklist_fragments;
-          newState.pending_checklist_fragments = [];
-          newState.fragments_submitted = false;
-          setCheckedFragments({});
-        }
+        // shouldPromoteChecklist path is dead — see comment above where the variable was removed.
+        // if (shouldPromoteChecklist) {
+        //   newState.checklist_fragments = state.pending_checklist_fragments;
+        //   newState.pending_checklist_fragments = [];
+        //   newState.fragments_submitted = false;
+        //   setCheckedFragments({});
+        // }
         if (isChecklistSubmission && data.commitment_checkin_done === true) {
           newState.checklist_fragments = [];
           newState.fragments_submitted = true;
@@ -1207,7 +1212,7 @@ export default function ReflectionV2() {
     : isComplete
     ? 'Anything else on your mind...'
     : STAGE_PLACEHOLDERS[sessionState.current_stage] || 'Tell me more...';
-  const displayStage = sessionState.current_stage === 'wins' && !sessionState.commitment_checkin_done
+  const displayStage = (sessionState.current_stage === 'wins' || sessionState.current_stage === 'honest') && !sessionState.commitment_checkin_done
     ? 'commitment_checkin'
     : sessionState.current_stage;
 
