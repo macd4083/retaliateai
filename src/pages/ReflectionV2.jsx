@@ -1312,44 +1312,51 @@ export default function ReflectionV2() {
               className="flex-1 overflow-y-auto px-4 py-4"
             >
               {messages.map((message, index) => (
-                <ChatMessage
-                  key={message.id}
-                  message={message}
-                  isFirstMessage={index === 0 && message.role === 'assistant'}
-                  onChipSelect={(chip) => handleChipSelect(chip, message.id)}
-                  chipsDisabled={usedChipMessageIds.has(message.id) || isLoading}
-                  streak={streak}
-                  followThroughStats={followThroughStats}
-                />
-              ))}
-              {sessionState.checklist_fragments.length > 0 && (
-                <div className="mx-4 mb-3 bg-zinc-900 border border-zinc-700 rounded-xl p-4">
-                  <p className="text-sm text-zinc-400 mb-3">Before we dive in — check off what you actually did:</p>
-                  {sessionState.checklist_fragments.map((frag) => (
-                    <label key={frag.id} className="flex items-start gap-3 mb-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        className="mt-0.5 accent-red-500"
-                        checked={!!checkedFragments[frag.id]}
-                        disabled={sessionState.checklist_submitted_pending || sessionState.fragments_submitted}
-                        onChange={(e) => setCheckedFragments((prev) => ({ ...prev, [frag.id]: e.target.checked }))}
-                      />
-                      <span className="text-sm text-white">{frag.text}</span>
-                    </label>
-                  ))}
-                  {!sessionState.checklist_submitted_pending && !sessionState.fragments_submitted && (
-                    <button
-                      onClick={handleChecklistSubmit}
-                      className="mt-3 w-full bg-red-600 hover:bg-red-700 text-white text-sm font-medium py-2 rounded-lg transition-colors"
-                    >
-                      Submit
-                    </button>
+                <React.Fragment key={message.id}>
+                  <ChatMessage
+                    message={message}
+                    isFirstMessage={index === 0 && message.role === 'assistant'}
+                    onChipSelect={(chip) => handleChipSelect(chip, message.id)}
+                    chipsDisabled={usedChipMessageIds.has(message.id) || isLoading}
+                    streak={streak}
+                    followThroughStats={followThroughStats}
+                  />
+                  {/* Render checklist inline after the checklist-init message */}
+                  {message.role === 'assistant' &&
+                    message.content === CHECKLIST_INIT_MESSAGE &&
+                    sessionState.checklist_fragments.length > 0 && (
+                      <div className="mx-4 mb-3 bg-zinc-900 border border-zinc-700 rounded-xl p-4">
+                        <p className="text-sm text-zinc-400 mb-3">Before we dive in — check off what you actually did:</p>
+                        {sessionState.checklist_fragments.map((frag) => (
+                          <label key={frag.id} className="flex items-start gap-3 mb-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              className="mt-0.5 accent-red-500"
+                              checked={!!checkedFragments[frag.id]}
+                              disabled={sessionState.checklist_submitted_pending || sessionState.fragments_submitted}
+                              onChange={(e) => setCheckedFragments((prev) => ({ ...prev, [frag.id]: e.target.checked }))}
+                            />
+                            <span className="text-sm text-white">{frag.text}</span>
+                          </label>
+                        ))}
+                        {!sessionState.checklist_submitted_pending && !sessionState.fragments_submitted && (
+                          <button
+                            onClick={handleChecklistSubmit}
+                            className="mt-3 w-full bg-red-600 hover:bg-red-700 text-white text-sm font-medium py-2 rounded-lg transition-colors"
+                          >
+                            Submit
+                          </button>
+                        )}
+                      </div>
                   )}
-                </div>
-              )}
-              {sessionState.checklist_submitted_pending && (
-                <TypingIndicator />
-              )}
+                  {/* Render typing indicator inline after the checklist widget while pending */}
+                  {message.role === 'assistant' &&
+                    message.content === CHECKLIST_INIT_MESSAGE &&
+                    sessionState.checklist_submitted_pending && (
+                      <TypingIndicator />
+                  )}
+                </React.Fragment>
+              ))}
               <div ref={messagesEndRef} />
               {initError && (
                 <div className="flex justify-center mt-3">
