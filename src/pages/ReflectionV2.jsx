@@ -907,7 +907,6 @@ export default function ReflectionV2() {
         if (isChecklistSubmission && data.commitment_checkin_done === true) {
           newState.fragments_submitted = true;
           newState.checklist_submitted_pending = false;
-          setCheckedFragments({});
         }
         if (data.depth_opportunity === true || data.intentData?.depth_opportunity === true) {
           newState.depth_opportunity_count = (newState.depth_opportunity_count || 0) + 1;
@@ -1329,7 +1328,7 @@ export default function ReflectionV2() {
                         <p className="text-sm text-zinc-400 mb-3">Before we dive in — check off what you actually did:</p>
                         {sessionState.checklist_fragments.map((frag) => (
                           <label key={frag.id} className="flex items-start gap-3 mb-2 cursor-pointer">
-                            {sessionState.fragments_submitted ? (
+                            {(sessionState.fragments_submitted || sessionState.checklist_submitted_pending) ? (
                               <div
                                 className={`mt-0.5 w-4 h-4 rounded flex-shrink-0 border flex items-center justify-center ${
                                   !!checkedFragments[frag.id]
