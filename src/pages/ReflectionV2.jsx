@@ -1329,13 +1329,29 @@ export default function ReflectionV2() {
                         <p className="text-sm text-zinc-400 mb-3">Before we dive in — check off what you actually did:</p>
                         {sessionState.checklist_fragments.map((frag) => (
                           <label key={frag.id} className="flex items-start gap-3 mb-2 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              className="mt-0.5 accent-red-500"
-                              checked={!!checkedFragments[frag.id]}
-                              disabled={sessionState.checklist_submitted_pending || sessionState.fragments_submitted}
-                              onChange={(e) => setCheckedFragments((prev) => ({ ...prev, [frag.id]: e.target.checked }))}
-                            />
+                            {sessionState.fragments_submitted ? (
+                              <div
+                                className={`mt-0.5 w-4 h-4 rounded flex-shrink-0 border flex items-center justify-center ${
+                                  !!checkedFragments[frag.id]
+                                    ? 'bg-red-500 border-red-500'
+                                    : 'bg-transparent border-zinc-600'
+                                }`}
+                              >
+                                {!!checkedFragments[frag.id] && (
+                                  <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 10 10">
+                                    <path d="M1.5 5l2.5 2.5 4.5-4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                                  </svg>
+                                )}
+                              </div>
+                            ) : (
+                              <input
+                                type="checkbox"
+                                className="mt-0.5 accent-red-500"
+                                checked={!!checkedFragments[frag.id]}
+                                disabled={sessionState.checklist_submitted_pending}
+                                onChange={(e) => setCheckedFragments((prev) => ({ ...prev, [frag.id]: e.target.checked }))}
+                              />
+                            )}
                             <span className="text-sm text-white">{frag.text}</span>
                           </label>
                         ))}
