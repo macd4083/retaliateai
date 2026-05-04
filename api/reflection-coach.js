@@ -2695,11 +2695,6 @@ export default async function handler(req, res) {
       } catch (_e) {}
     }
     let checklistResultContextInstruction = '';
-    if (Array.isArray(context?.checklist_result) && context.checklist_result.length > 0) {
-      const kept = context.checklist_result.filter((item) => item.kept).length;
-      const total = context.checklist_result.length;
-      checklistResultContextInstruction = `\n\nCHECKLIST RESULT: The user submitted yesterday's checklist and marked ${kept}/${total} complete. Acknowledge this directly and naturally before moving forward.`;
-    }
 
     // ── 1. Classify intent ────────────────────────────────────────────────
     let intentData = clientIntentData;
@@ -2778,6 +2773,21 @@ export default async function handler(req, res) {
     const resolvedCommitmentTrajectory = contextCommitmentTrajectory ?? commitmentStats?.trajectory ?? null;
     const resolvedAvgCommitmentScore = contextAvgCommitmentScore ?? commitmentStats?.avgScore7 ?? null;
     const resolvedScoreTrajectory = contextScoreTrajectory ?? commitmentStats?.scoreTrajectory ?? null;
+
+    // Build checklist result instruction now that yesterdayFragments is available for item-level detail
+    if (Array.isArray(context?.checklist_result) && context.checklist_result.length > 0) {
+      const kept = context.checklist_result.filter((item) => item.kept).length;
+      const total = context.checklist_result.length;
+      const keptItems = context.checklist_result.filter((r) => r.kept).map((r) => {
+        const fragment = (yesterdayFragments || []).find((f) => f.id === r.id);
+        return fragment ? formatChecklistFragmentText(fragment) : r.id;
+      });
+      const missedItems = context.checklist_result.filter((r) => !r.kept).map((r) => {
+        const fragment = (yesterdayFragments || []).find((f) => f.id === r.id);
+        return fragment ? formatChecklistFragmentText(fragment) : r.id;
+      });
+      checklistResultContextInstruction = `\n\nCHECKLIST RESULT: The user submitted yesterday's checklist. They completed ${kept}/${total} commitments.\nKept: ${keptItems.length > 0 ? keptItems.join(', ') : 'none'}\nMissed: ${missedItems.length > 0 ? missedItems.join(', ') : 'none'}\nAcknowledge the specific items naturally (mention what they did well and what slipped) then transition forward. Do NOT ask what they completed — you already know.`;
+    }
 
     // ── 2b. Pre-session state (init only, zero extra DB queries) ─────────
     const preSessionState = isInit

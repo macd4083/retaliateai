@@ -314,6 +314,7 @@ export default function ReflectionV2() {
     checklist_fragments: [],
     pending_checklist_fragments: [],
     fragments_submitted: false,
+    checklist_submitted_pending: false,
     depth_opportunity_count: 0,
     depth_probe_count: 0,
     last_depth_probe_message_index: null,
@@ -459,6 +460,7 @@ export default function ReflectionV2() {
         checklist_fragments: [],
         pending_checklist_fragments: [],
         fragments_submitted: !!(session.commitment_checkin_done && session.commitment_score != null),
+        checklist_submitted_pending: false,
         depth_opportunity_count: session.depth_opportunity_count || 0,
         depth_probe_count: session.depth_probe_count || 0,
         last_depth_probe_message_index: session.last_depth_probe_message_index ?? null,
@@ -654,10 +656,12 @@ export default function ReflectionV2() {
       }
     }
 
-    // Add typing indicator
-    const withTyping = [...currentMsgs, { id: `typing-${Date.now()}`, role: 'assistant', isTyping: true }];
-    messagesRef.current = withTyping;
-    setMessages(withTyping);
+    // Add typing indicator (skip for checklist submissions — a standalone indicator renders below the checklist widget)
+    if (!isChecklistSubmission) {
+      const withTyping = [...currentMsgs, { id: `typing-${Date.now()}`, role: 'assistant', isTyping: true }];
+      messagesRef.current = withTyping;
+      setMessages(withTyping);
+    }
     setIsLoading(true);
 
     try {
@@ -903,6 +907,7 @@ export default function ReflectionV2() {
         if (isChecklistSubmission && data.commitment_checkin_done === true) {
           newState.checklist_fragments = [];
           newState.fragments_submitted = true;
+          newState.checklist_submitted_pending = false;
           setCheckedFragments({});
         }
         if (data.depth_opportunity === true || data.intentData?.depth_opportunity === true) {
@@ -1026,6 +1031,9 @@ export default function ReflectionV2() {
       const withErr = [...messagesRef.current.filter((m) => !m.isTyping), errMsg];
       messagesRef.current = withErr;
       setMessages(withErr);
+      if (isChecklistSubmission) {
+        setSessionState((prev) => ({ ...prev, checklist_submitted_pending: false }));
+      }
     } finally {
       setIsLoading(false);
     }
@@ -1075,6 +1083,7 @@ export default function ReflectionV2() {
           checklist_fragments: [],
           pending_checklist_fragments: [],
           fragments_submitted: false,
+          checklist_submitted_pending: false,
           depth_opportunity_count: 0,
           depth_probe_count: 0,
           last_depth_probe_message_index: null,
@@ -1160,8 +1169,7 @@ export default function ReflectionV2() {
       });
     } catch (_e) {}
 
-    setCheckedFragments({});
-    setSessionState((prev) => ({ ...prev, fragments_submitted: true }));
+    setSessionState((prev) => ({ ...prev, checklist_submitted_pending: true }));
     await sendMessage('__CHECKLIST_SUBMITTED__', undefined, undefined, {
       checklist_result: fragmentResults,
     });
@@ -1315,7 +1323,7 @@ export default function ReflectionV2() {
                   followThroughStats={followThroughStats}
                 />
               ))}
-              {sessionState.checklist_fragments.length > 0 && !sessionState.fragments_submitted && (
+              {sessionState.checklist_fragments.length > 0 && (!sessionState.fragments_submitted || sessionState.checklist_submitted_pending) && (
                 <div className="mx-4 mb-3 bg-zinc-900 border border-zinc-700 rounded-xl p-4">
                   <p className="text-sm text-zinc-400 mb-3">Before we dive in — check off what you actually did:</p>
                   {sessionState.checklist_fragments.map((frag) => (
@@ -1324,18 +1332,24 @@ export default function ReflectionV2() {
                         type="checkbox"
                         className="mt-0.5 accent-red-500"
                         checked={!!checkedFragments[frag.id]}
+                        disabled={sessionState.checklist_submitted_pending}
                         onChange={(e) => setCheckedFragments((prev) => ({ ...prev, [frag.id]: e.target.checked }))}
                       />
                       <span className="text-sm text-white">{frag.text}</span>
                     </label>
                   ))}
-                  <button
-                    onClick={handleChecklistSubmit}
-                    className="mt-3 w-full bg-red-600 hover:bg-red-700 text-white text-sm font-medium py-2 rounded-lg transition-colors"
-                  >
-                    Submit
-                  </button>
+                  {!sessionState.checklist_submitted_pending && (
+                    <button
+                      onClick={handleChecklistSubmit}
+                      className="mt-3 w-full bg-red-600 hover:bg-red-700 text-white text-sm font-medium py-2 rounded-lg transition-colors"
+                    >
+                      Submit
+                    </button>
+                  )}
                 </div>
+              )}
+              {sessionState.checklist_submitted_pending && (
+                <TypingIndicator />
               )}
               {initError && (
                 <div className="flex justify-center mt-3">
