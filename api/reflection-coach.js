@@ -1855,7 +1855,7 @@ Set directive_completed: "${probeId}" when done.`,
   if (currentStage === 'commitment_checkin' && !sessionState.commitment_checkin_done && !yc) {
     allDirectives.push({
       id: 'commitment_checkin',
-      instruction: `## STAGE: COMMITMENT CHECK-IN\nNo yesterday commitment is available. This stage is still a real check-in.\n- Respond directly to what they just shared about how they are feeling right now.\n- Ask one specific follow-up only if needed to clarify what is most present for them.\n- Use plain human language. Ask how they're doing, what's going on, or what kind of day it has been.\n- Do NOT use coaching-speak templates like "what feels most present for you," "what's coming up for you," or "where are you at energetically."\n- Do NOT mention that there is "nothing to check in on" and do NOT use generic form language.\n- Once you've captured their current state, set commitment_checkin_done: true.\n- The server will route to honest-first when their state sounds heavy/stuck/stressed, otherwise wins-first. Focus on the quality of the check-in message.`,
+      instruction: `## STAGE: COMMITMENT CHECK-IN\nNo yesterday commitment is available. This stage is still a real check-in.\n- Respond directly to what they just shared about how they are feeling right now.\n- Ask one specific follow-up only if needed to clarify what is most present for them.\n- Use plain human language. Ask how they're doing, what's going on, or what kind of day it has been.\n- Do NOT use coaching-speak templates like "what feels most present for you," "what's coming up for you," or "where are you at energetically."\n- Do NOT use the phrase "just checking in" or "checking in to see how you're feeling" — ask directly and warmly instead.\n- Do NOT mention that there is "nothing to check in on" and do NOT use generic form language.\n- Once you've captured their current state, set commitment_checkin_done: true.\n- The server will route to honest-first when their state sounds heavy/stuck/stressed, otherwise wins-first. Focus on the quality of the check-in message.`,
       priority: 1,
       preferred_stage: 'commitment_checkin',
       fire_next_session: false,
@@ -3122,6 +3122,8 @@ Do NOT tell them to pick a mood.
 Do NOT say "what feels most present for you" or any variant of that phrasing.
 Do NOT use coaching-speak openers (like "what's coming up for you" or "where are you at energetically"). Ask in plain, direct language — warm but not performative.
 Do NOT use the phrase "what's underneath that."
+Do NOT use the phrase "just checking in" or "checking in to see how you're feeling" — these sound transactional and impersonal.
+Do NOT say "just checking in to see how you're feeling today" or any variant of that phrasing.
 Return mood chips in the JSON "chips" field only — don't call attention to them in assistant_message.
 ${returningContext}
 ${
