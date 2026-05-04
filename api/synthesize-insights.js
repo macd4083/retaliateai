@@ -36,7 +36,7 @@ function insightToNarrative(ins) {
 const SYNTHESIS_SYSTEM = `You are analyzing a person's behavioral data to synthesize 5–7 genuine insights about patterns actively shaping their follow-through and motivation.
 
 You will receive:
-- active_goals: array of goals with their why history, commitment follow-through rates, and depth insights
+- active_goals: array of goals with their why history, commitment follow-through rates, depth insights, and recent_commitments (each entry includes a why field — what the user said this specific commitment was for; may be null for older entries). When present, use recent_commitments[].why to assess the gap between stated motivation and follow-through.
 - win_causes: what they said drove their wins over the last 30 days (their actual words)
 - miss_causes: what they said got in the way over the last 30 days (their actual words)
 - existing_tracked_insights: current insights to update rather than duplicate
@@ -185,7 +185,7 @@ export default async function handler(req, res) {
         .eq('status', 'active'),
       supabase
         .from('goal_commitment_log')
-        .select('goal_id, commitment_text, kept, date')
+        .select('goal_id, commitment_text, commitment_why, kept, date')
         .eq('user_id', targetUserId)
         .gte('date', thirtyDaysAgo)
         .order('date', { ascending: false }),
@@ -249,6 +249,7 @@ export default async function handler(req, res) {
         total_commitments_tracked: total,
         recent_commitments: goalCommitments.slice(0, 5).map(c => ({
           text: c.commitment_text,
+          why: c.commitment_why || null,
           kept: c.kept,
           date: c.date,
         })),
