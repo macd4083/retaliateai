@@ -1561,9 +1561,18 @@ function buildDirectiveQueue({
   if (depthProbeNeeded) {
     allDirectives.push({
       id: 'depth_probe',
-      instruction: `DEPTH OPPORTUNITY: The user's message has depth potential. Before asking the depth question, briefly signal the pivot in one phrase — e.g. "I want to go underneath that for a second" or "there's something worth understanding here" — then ask WHY or surface the belief underneath what they just said. The framing makes the question land with intention rather than feeling random. Use a depth_probe question naturally. Set exercise_run="depth_probe". Store any insight in extracted_data.depth_insight. IMPORTANT: Do NOT frame this as goal-specific unless the user is directly referencing a goal — keep depth probes grounded in what the user just said.`,
+      instruction: `DEPTH OPPORTUNITY: The classifier detected a depth opportunity in the user's last message. Before asking a depth question, evaluate whether the opportunity is relevant to one of these three coaching goals:
+(1) Helping the user recognize their own personal progress
+(2) Linking what they did or didn't do to their motivations and goals
+(3) Connecting their goals to why it matters to work hard NOW, not someday
+
+If the depth opportunity clearly connects to at least one of these — ask the depth question. Signal the pivot in one phrase first (e.g. "I want to go underneath that for a second") then ask WHY or surface the belief underneath what they just said. Set exercise_run="depth_probe". Store any insight in extracted_data.depth_insight.
+
+If the depth opportunity does NOT connect to any of these three goals — skip it. Do NOT ask an unrelated depth question. Set directive_completed: "depth_probe" and move on.
+
+Do NOT frame this as goal-specific unless the user is directly referencing a goal.`,
       priority: 2,
-      preferred_stage: 'honest',
+      preferred_stage: 'any',
       fire_next_session: true,
       followup_question: 'I want to come back to what you were exploring last time — did anything new come up around that after we talked?',
       energy_type: 'depth',
@@ -1705,9 +1714,14 @@ function buildDirectiveQueue({
   }
 
   // ── honest_why_growth ──────────────────────────────────────────────────
+  const honestWhyGrowthSignal = !!(
+    intentData?.depth_opportunity ||
+    ['low', 'stressed', 'anxious', 'frustrated', 'stuck', 'flat', 'overwhelmed'].includes(intentData?.emotional_state) ||
+    hasMissInSession
+  );
   if (
     currentStage === 'honest' &&
-    hasMissInSession &&
+    honestWhyGrowthSignal &&
     !sessionState.honest_depth &&
     !completedDirectives.includes('honest_why_growth')
   ) {
@@ -1766,11 +1780,18 @@ function buildDirectiveQueue({
             : '',
           120
         );
+        // Missed fragment context for this goal
+        const missedFragmentsForGoal = (enrichedYesterdayFragments || []).filter(
+          f => f.goal_id === targetGoal.id && f.commitment_why
+        );
+        const fragmentWhyStr = missedFragmentsForGoal.length > 0
+          ? ` When they committed to this goal they said it was for: "${sanitizeForPrompt(missedFragmentsForGoal[0].commitment_why, 100)}".`
+          : '';
         const probeId = `honest_why_probe_${probeIndex + 1}`;
 
         allDirectives.push({
           id: probeId,
-          instruction: `HONEST WHY PROBE (${probeIndex + 1} of up to ${MAX_WHY_PROBES_PER_STAGE}): Ask ONE why-probe question about the goal "${safeTitle}", grounded in what they missed or struggled with today.${safeWhy ? ` Stated why: "${safeWhy}".` : ''} 
+          instruction: `HONEST WHY PROBE (${probeIndex + 1} of up to ${MAX_WHY_PROBES_PER_STAGE}): Ask ONE why-probe question about the goal "${safeTitle}", grounded in what they missed or struggled with today.${safeWhy ? ` Stated why: "${safeWhy}".` : ''}${fragmentWhyStr}
 Select the angle that fits the richest available data (see GOAL WHY-PROBE QUESTIONS in your instructions). Use misses/blockers as the action anchor, not wins.
 Angles used so far this session are tracked — do not repeat an angle.
 Available angles: (1) Action→Goal progress (miss version), (2) Action→Long-term self${safeWhy ? ' [why available]' : ''}, (3) How they actually feel.
@@ -1784,41 +1805,6 @@ Set directive_completed: "${probeId}" when done.`,
         });
       }
     }
-  }
-
-  // ── honest_kept_expansion ──────────────────────────────────────────────
-  if (
-    !mergedChecklist.honest &&
-    mostlyKeptCheckin &&
-    !completedDirectives.includes('honest_kept_expansion')
-  ) {
-    const keptFragmentContext = (() => {
-      // Try enriched fragment first
-      if (sessionState?.checkin_outcome === 'kept') {
-        const linkedFragments = (enrichedYesterdayFragments || []).filter(f => f.goal_id && f.goal_why_context);
-        if (linkedFragments.length > 0) {
-          const top = linkedFragments[0];
-          const safeCommitment = sanitizeForPrompt(top.commitment_text, 120);
-          const safeGoalTitle = sanitizeForPrompt(top.goal_title, 80);
-          const safeWhy = sanitizeForPrompt(top.goal_why_context, 120);
-          return `\n\nCOMMITMENT WIN ANCHOR: They fully kept their commitment to "${safeCommitment}" (goal: "${safeGoalTitle}"). They said it was about "${safeWhy}". When you celebrate, connect it to the why: "You said this was about [why] — you actually showed up for that. What's that worth to you?" Use only if tone supports it.`;
-        }
-        // Fallback: plain commitment text
-        const plainCommitment = sanitizeForPrompt(yesterdayCommitment, 120);
-        if (plainCommitment) {
-          return `\n\nCOMMITMENT WIN ANCHOR: They kept their commitment to "${plainCommitment}". Name it specifically when you celebrate — don't be generic.`;
-        }
-      }
-      return '';
-    })();
-    allDirectives.push({
-      id: 'honest_kept_expansion',
-      instruction: `HONEST (KEPT): They fully or mostly completed their commitment (score >= 50). Start by naming what they did complete. If score is 100 (fully completed), do NOT ask about misses — go deeper on what made the follow-through happen. If score is 50-99 (partial), acknowledge the follow-through first, then gently ask what broke on the unfinished part. Example: "You still followed through on a solid chunk — what helped you get that part done?" then "And what got in the way of the rest?" Extract a depth insight from the mechanism, not just the miss. Set honest_depth: true once you have a real answer.${keptFragmentContext}`,
-      priority: 2,
-      preferred_stage: 'honest',
-      fire_next_session: false,
-      energy_type: 'depth',
-    });
   }
 
   // ── commitment_checkin ─────────────────────────────────────────────────
@@ -2159,34 +2145,49 @@ Rules:
   }
 
   // ── wins_goal_callback ─────────────────────────────────────────────────
-  const fragmentsWithGoalLinks = (enrichedYesterdayFragments || yesterdayFragments || []).filter(f => f.goal_id);
+  const allYesterdayFragments = enrichedYesterdayFragments || yesterdayFragments || [];
   if (
     currentStage === 'wins' &&
-    fragmentsWithGoalLinks.length > 0 &&
+    allYesterdayFragments.length > 0 &&
     !completedDirectives.includes('wins_goal_callback')
   ) {
     const goalGroups = {};
-    for (const f of fragmentsWithGoalLinks) {
-      const key = f.goal_id;
-      if (!goalGroups[key]) goalGroups[key] = { goal_title: f.goal_title || 'your goal', goal_id: f.goal_id, fragments: [] };
-      goalGroups[key].fragments.push(sanitizeForPrompt(f.commitment_text, 120));
+    const ungrouped = [];
+    for (const f of allYesterdayFragments) {
+      if (f.goal_id) {
+        const key = f.goal_id;
+        if (!goalGroups[key]) goalGroups[key] = { goal_title: f.goal_title || null, goal_why: f.goal_why_context || null, fragments: [] };
+        goalGroups[key].fragments.push({ text: sanitizeForPrompt(f.commitment_text, 120), commitment_why: f.commitment_why || null });
+      } else {
+        ungrouped.push({ text: sanitizeForPrompt(f.commitment_text, 120), commitment_why: f.commitment_why || null });
+      }
     }
-    const goalGroupsStr = Object.values(goalGroups).map(g =>
-      `Goal: "${g.goal_title}" → completed: ${g.fragments.map(t => `"${t}"`).join(', ')}`
-    ).join('\n');
+    const goalGroupLines = Object.entries(goalGroups).map(([gid, g]) =>
+      `Goal "${g.goal_title || gid}"${g.goal_why ? ` (why: "${sanitizeForPrompt(g.goal_why, 100)}")` : ''}: ${g.fragments.map(f => `"${f.text}"${f.commitment_why ? ` (fragment why: "${sanitizeForPrompt(f.commitment_why, 80)}")` : ''}`).join(', ')}`
+    );
+    const ungroupedLines = ungrouped.map(f =>
+      `No goal: "${f.text}"${f.commitment_why ? ` (why: "${sanitizeForPrompt(f.commitment_why, 80)}")` : ''}`
+    );
+    const fragmentContextStr = [...goalGroupLines, ...ungroupedLines].join('\n');
     allDirectives.push({
       id: 'wins_goal_callback',
-      instruction: `WINS-GOAL CALLBACK: Yesterday the user completed commitments tied to their goals. Here is the context grouped by goal:
+      instruction: `WINS-GOAL CALLBACK: Yesterday the user completed commitments. Here is the context:
 
-${goalGroupsStr}
+${fragmentContextStr}
 
 Instructions:
-- Write ONE coach message. For each goal group, ask one question: name the specific thing(s) they completed, name the goal, and ask whether they feel like they made tangible progress — or whether they feel like they're getting closer to it.
-- Example per goal: "You got [X] and [Y] done today for [goal title] — do you feel like that actually moved things forward? Do you feel like you're getting closer?"
-- If there is only one goal, ask one question. If there are two goals, ask two questions in the same message.
-- Do NOT editorialize or celebrate before asking. Ask directly.
-- Set directive_completed: "wins_goal_callback" after sending this message.
-- Set goal_id_referenced to the first goal's id.`,
+- Write ONE coach message. Group fragments by goal when goal_id is available.
+- For each group, ask ONE question. Use the best available context:
+  • Has goal + why: "You got [X] done for [goal] — you said it was about [why]. Do you feel like you made tangible progress? Do you feel like you're getting closer?"
+  • Has goal, no why: "You got [X] done for [goal] — do you feel like that actually moved things forward?"
+  • Has commitment_why but no goal: "You got [X] done — you said it mattered because [why]. Did it feel that way when you did it?"
+  • Has neither: "You got [X] done today — do you feel like you made progress?"
+- If mostlyKeptCheckin is true AND it feels natural, add one follow-through line per group: "What actually helped you get that done?" — but only if it doesn't make the message feel crowded or formulaic. Use judgment.
+- Do NOT celebrate before asking. Ask directly.
+- Set directive_completed: "wins_goal_callback" after sending.
+- Set goal_id_referenced to the first goal's id if available.
+
+mostlyKeptCheckin: ${mostlyKeptCheckin}`,
       priority: 1,
       preferred_stage: 'wins',
       fire_next_session: false,
@@ -2274,8 +2275,28 @@ Set directive_completed: "${probeId}" when done.`,
       }
     }
   }
-  if (userInsights.length > 0 && messageCount >= 2 && (userInsights[0].sessions_synthesized_from || 0) >= 2) {
-    const topInsight = userInsights[0];
+  const topInsight = userInsights.length > 0 ? userInsights[0] : null;
+  const patternAwarenessReady = !!(
+    topInsight &&
+    (topInsight.confidence_score || 0) >= 0.6 &&
+    (topInsight.sessions_synthesized_from || 0) >= 2 &&
+    messageCount >= 2
+  );
+
+  // Session relevance: does today's content (wins + misses text) contain keywords from the pattern label?
+  const sessionContentText = [
+    ...(sessionState.wins || []).map(w => typeof w === 'string' ? w : w?.text || ''),
+    ...(sessionState.misses || []).map(m => typeof m === 'string' ? m : m?.text || ''),
+    intentData?.emotional_state || '',
+  ].join(' ').toLowerCase();
+
+  const patternKeywords = (topInsight?.pattern_label || '').replace(/_/g, ' ').toLowerCase().split(/\s+/).filter(w => w.length > 3);
+  const patternSessionMatch = patternKeywords.length > 0 && patternKeywords.some(kw => sessionContentText.includes(kw));
+
+  // Also fire if depth_opportunity is flagged — classifier saw something worth probing
+  const patternAwarenessSignal = patternAwarenessReady && (patternSessionMatch || intentData?.depth_opportunity === true);
+
+  if (patternAwarenessSignal && !completedDirectives.includes('pattern_awareness')) {
     allDirectives.push({
       id: 'pattern_awareness',
       instruction: `PATTERN AWARENESS: The user's most recurring pattern is "${topInsight.pattern_label}" (${topInsight.sessions_synthesized_from || 0}x). If they say or do something that looks like this pattern — even obliquely — ask a question that helps them SEE it, not name it for them. Never say "I notice you keep doing X" or "this sounds like your ${topInsight.pattern_label} pattern". Instead, ask something like: "What's making it hard to just ship it as-is?" or "You said you'd do this yesterday — what happened between then and now?" The goal is to surface the pattern through their own answer, not your observation. Use naturally. Once per session max. Do NOT interrupt a good moment to force it in. When you name it, briefly frame why noticing patterns matters: e.g. "I keep seeing this come up — and I think it's worth naming because patterns don't change until you see them" or "This is something I've noticed across a few sessions." One sentence, then surface the pattern.`,
