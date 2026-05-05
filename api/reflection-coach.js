@@ -129,7 +129,7 @@ const MIN_INSIGHT_KEYWORD_OVERLAP = 2;
 const MIN_INSIGHT_OVERLAP_SCORE = 0.2;
 const MAX_DEPTH_PROBES_PER_SESSION = 2;
 const MIN_DEPTH_PROBE_MESSAGE_SPACING = 3;
-const MAX_WHY_PROBES_PER_STAGE = 3;   // max why-probe questions per stage per session
+const MAX_WHY_PROBES_PER_STAGE = 2;   // max why-probe questions per stage per session
 const MAX_WHY_PROBE_WHYS = 2;          // max whys with source:'why_probe' retained per goal
 const INSIGHT_MATCH_STOP_WORDS = new Set(['the', 'and', 'for', 'that', 'with', 'this', 'from', 'your', 'about', 'have', 'just', 'what', 'when', 'were', 'been', 'into', 'then', 'they', 'them', 'their', 'you', 'are']);
 const EXERCISE_IDS = practices.map((practice) => practice.id);
@@ -1413,6 +1413,7 @@ function buildDirectiveQueue({
   const mostlyKeptCheckin = sessionState?.checkin_outcome === 'kept'
     || (commitmentScore !== null && commitmentScore >= 50)
     || (sessionState?.checkin_outcome === 'partial' && commitmentScore === null);
+  const hasYesterdayCommitment = ((enrichedYesterdayFragments || yesterdayFragments || []).length > 0);
 
   // ── cold_start_opener ──────────────────────────────────────────────────
   if (preSessionState?.cold_start) {
@@ -1570,10 +1571,15 @@ function buildDirectiveQueue({
   }
 
   // ── wins_invite_more ───────────────────────────────────────────────────
+  const priorWinsStepsDone = !hasYesterdayCommitment || (
+    completedDirectives.includes('wins_goal_callback') &&
+    completedDirectives.includes('wins_why_matters')
+  );
   if (
     currentStage === 'wins' &&
     mergedChecklist.wins === true &&
-    !sessionState.wins_asked_for_more
+    !sessionState.wins_asked_for_more &&
+    priorWinsStepsDone
   ) {
     allDirectives.push({
       id: 'wins_invite_more',
@@ -2153,24 +2159,35 @@ Rules:
   }
 
   // ── wins_goal_callback ─────────────────────────────────────────────────
-  const fragmentsWithGoalLinks = (enrichedYesterdayFragments || yesterdayFragments || []).filter(f => f.goal_id && f.goal_why_context);
+  const fragmentsWithGoalLinks = (enrichedYesterdayFragments || yesterdayFragments || []).filter(f => f.goal_id);
   if (
     currentStage === 'wins' &&
     fragmentsWithGoalLinks.length > 0 &&
     !completedDirectives.includes('wins_goal_callback')
   ) {
-    const fragmentContextStr = fragmentsWithGoalLinks.map(f =>
-      `"${sanitizeForPrompt(f.commitment_text, 120)}" → goal: "${sanitizeForPrompt(f.goal_title, 80) || 'unknown'}", why they said: "${sanitizeForPrompt(f.goal_why_context, 100)}"`
-    ).join(' | ');
+    const goalGroups = {};
+    for (const f of fragmentsWithGoalLinks) {
+      const key = f.goal_id;
+      if (!goalGroups[key]) goalGroups[key] = { goal_title: f.goal_title || 'your goal', goal_id: f.goal_id, fragments: [] };
+      goalGroups[key].fragments.push(sanitizeForPrompt(f.commitment_text, 120));
+    }
+    const goalGroupsStr = Object.values(goalGroups).map(g =>
+      `Goal: "${g.goal_title}" → completed: ${g.fragments.map(t => `"${t}"`).join(', ')}`
+    ).join('\n');
     allDirectives.push({
       id: 'wins_goal_callback',
-      instruction: `WINS-GOAL CALLBACK: Yesterday's commitments were linked to goals with reasons the user stated. Context: ${fragmentContextStr}. Instructions:
-- If the user mentions a win that sounds like it connects to one of these goals or commitment topics, surface the connection: "That's [goal title] — you said this was about [their why]. When you actually got it done today, did that hold true — or did it feel like something else entirely?"
-- Do NOT force this if the user's win doesn't connect. Only trigger when the topic naturally overlaps.
-- If you surface it, set goal_id_referenced to the matching goal's id.
-- ONE use only — pick the most relevant fragment/win overlap. Do not stack multiple references.
-- After using this, set directive_completed: "wins_goal_callback".`,
-      priority: 2,
+      instruction: `WINS-GOAL CALLBACK: Yesterday the user completed commitments tied to their goals. Here is the context grouped by goal:
+
+${goalGroupsStr}
+
+Instructions:
+- Write ONE coach message. For each goal group, ask one question: name the specific thing(s) they completed, name the goal, and ask whether they feel like they made tangible progress — or whether they feel like they're getting closer to it.
+- Example per goal: "You got [X] and [Y] done today for [goal title] — do you feel like that actually moved things forward? Do you feel like you're getting closer?"
+- If there is only one goal, ask one question. If there are two goals, ask two questions in the same message.
+- Do NOT editorialize or celebrate before asking. Ask directly.
+- Set directive_completed: "wins_goal_callback" after sending this message.
+- Set goal_id_referenced to the first goal's id.`,
+      priority: 1,
       preferred_stage: 'wins',
       fire_next_session: false,
       energy_type: 'momentum',
@@ -2178,22 +2195,32 @@ Rules:
   }
 
   // ── wins_why_matters ────────────────────────────────────────────────────
-  const capturedWinTexts = Array.isArray(sessionState.wins)
-    ? sessionState.wins.map(w => typeof w === 'string' ? w : w?.text).filter(Boolean)
-    : [];
-  const hasGoalsWithWhys = activeGoals.some(g => Array.isArray(g.whys) && g.whys.length > 0);
+  const orphanFragments = (enrichedYesterdayFragments || []).filter(f => !f.goal_id);
   if (
     currentStage === 'wins' &&
-    sessionState.wins_asked_for_more === true &&
-    capturedWinTexts.length > 0 &&
-    fragmentsWithGoalLinks.length === 0 &&  // only fire when wins_goal_callback won't fire
-    hasGoalsWithWhys &&
+    hasYesterdayCommitment &&
+    completedDirectives.includes('wins_goal_callback') &&
     !completedDirectives.includes('wins_why_matters')
   ) {
+    let winsWhyMattersInstruction;
+    if (orphanFragments.length === 0) {
+      winsWhyMattersInstruction = `No orphan fragments — set directive_completed: "wins_why_matters" immediately without asking a question.`;
+    } else {
+      const orphanCtxLines = orphanFragments.map(f => {
+        const commitText = sanitizeForPrompt(f.commitment_text, 120);
+        if (f.commitment_why) {
+          const why = sanitizeForPrompt(f.commitment_why, 150);
+          return `- Sub-case A: "${commitText}" (stored why: "${why}") → ask: "You got ${commitText} done today. When you planned it last night, you said it mattered because ${why}. Did it actually feel that way when you did it — or did something else show up?"`;
+        } else {
+          return `- Sub-case B: "${commitText}" (no stored why) → ask: "You got ${commitText} done today — why was it important to you that you got that done?"`;
+        }
+      }).join('\n');
+      winsWhyMattersInstruction = `WINS WHY MATTERS: The user completed commitments that weren't tied to a goal. Ask about each one using the appropriate sub-case below:\n${orphanCtxLines}\n- For sub-case A, ask whether it actually felt that way when they did it. For sub-case B, ask why it was important.\n- One question at a time. Set directive_completed: "wins_why_matters" after sending your question.`;
+    }
     allDirectives.push({
       id: 'wins_why_matters',
-      instruction: `WINS WHY MATTERS: The user has shared wins today. You have their goals and whys as context. Do NOT ask "why did this matter?" generically. Instead: look at what they said went well today and their active goals. If a win connects to a goal even loosely — name the connection and ask why completing that specific thing matters to them in the context of where they're trying to get. Use their actual goal title and their stated why as the premise of the question. E.g. "You said [goal] matters because [their why] — does getting [today's win] done feel like it's actually moving that?" One question only. If no win connects to any goal, skip this directive and set directive_completed: "wins_why_matters" immediately.`,
-      priority: 2,
+      instruction: winsWhyMattersInstruction,
+      priority: 1,
       preferred_stage: 'wins',
       fire_next_session: false,
       energy_type: 'depth',
@@ -2204,6 +2231,7 @@ Rules:
   const winsWhyProbesDone = completedDirectives.filter(id => id.startsWith('wins_why_probe_')).length;
   const canRunWinsWhyProbe =
     currentStage === 'wins' &&
+    !hasYesterdayCommitment &&
     sessionState.wins_asked_for_more === true &&
     Array.isArray(sessionState.wins) && sessionState.wins.length > 0 &&
     winsWhyProbesDone < MAX_WHY_PROBES_PER_STAGE &&
