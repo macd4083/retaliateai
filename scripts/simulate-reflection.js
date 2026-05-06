@@ -1702,6 +1702,8 @@ async function runFullCoverageTest({ personaKey, startDate, clean }) {
         sessionCheckinOutcome = result.extracted_data.checkin_outcome;
       }
       // Track stage_order_swapped if returned by the API
+      // Checked in both result.extracted_data and result directly — the field may appear
+      // at either level depending on which API response shape the coach returns it in.
       if (result.extracted_data?.stage_order_swapped === true || result.stage_order_swapped === true) {
         sessionState.stage_order_swapped = true;
         sessionRecord.stage_order_swapped = true;
