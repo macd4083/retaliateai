@@ -2986,7 +2986,7 @@ async function main() {
       if (liveGoals && liveGoals.length > 0) {
         sessionGoalsForExtraction = liveGoals.map(g => ({ id: g.id, title: g.title, category: g.category }));
       }
-    } catch { /* non-fatal */ }
+    } catch (err) { console.warn(`    ⚠️  live goals fetch failed: ${err.message}`); }
     const backendState = await validateBackend(supabase, userId, simulatedDate, crossSessionState.prevGoalWhysCounts, {
       sampleUserMessage: history.filter(m => m.role === 'user').slice(-1)[0]?.content ?? '',
       commitmentText: sessionState.tomorrow_commitment ?? null,
