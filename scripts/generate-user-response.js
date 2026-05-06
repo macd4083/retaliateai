@@ -52,11 +52,36 @@ const WINS_GOAL_CALLBACK_KEYWORDS = [
   'last night this was about', 'you said this was about', 'you committed to this because',
   'you said that was connected to', 'tied to', 'you said it mattered because',
   'the original why', 'what you said the goal was for',
+  'when you said that win was connected to',
+  'you said that was moving you toward',
+  'how does that sit with', 'are you getting closer on',
+  'that sounds like it moved you toward',
 ];
 const HONEST_MISS_GROUNDING_KEYWORDS = [
   'you said that was the floor', 'the floor you wouldn\'t fall below',
   'you committed to', 'it was tied to', 'you said it mattered because',
   'what actually happened', 'connected to your goal',
+];
+const MINIMUM_WHY_PROBE_KEYWORDS = [
+  'why does that minimum matter', 'why is that your floor', 'what makes that the floor',
+  'why that as the minimum', 'what makes that minimum feel right',
+  'what would it mean to you to do at least that', 'why did you pick that as the minimum',
+];
+const STRETCH_WHY_PROBE_KEYWORDS = [
+  'why does the stretch matter', 'what would the stretch mean', 'why aim for the stretch',
+  'what would it feel like to hit the stretch', 'what makes the stretch worth it',
+  'why the stretch goal', 'what would hitting the stretch prove',
+];
+const WINS_WHY_MATTERS_KEYWORDS = [
+  'why does that win matter', 'what does that mean to you', 'why is that significant',
+  'what does it mean that you did that', 'why does it feel like a win',
+  'what made that meaningful', 'why that one',
+];
+const HONEST_WHY_GROWTH_KEYWORDS = [
+  'why does growth matter to you', 'what does getting better mean',
+  'what would it mean to actually change this', 'why does this pattern matter',
+  'what\'s underneath the pattern', 'why keep working on this',
+  'what would it mean to break that pattern',
 ];
 
 /**
@@ -95,6 +120,10 @@ async function generateBehavioralFraming({
   followedThrough,
   sessionContext,
   assignedTraits,
+  isMinimumWhyProbe = false,
+  isStretchWhyProbe = false,
+  isWinsWhyMatters = false,
+  isHonestWhyGrowth = false,
 }) {
   const modeLabel = mode === 'A'
     ? 'concrete and specific (Mode A: I have an answer)'
@@ -126,7 +155,10 @@ ${traitSummary}
 Coach just said: "${coachMessage}"
 
 Response mode to use: ${modeLabel}
-
+${isMinimumWhyProbe ? '- Coach asked why the minimum commitment matters' : ''}
+${isStretchWhyProbe ? '- Coach asked why the stretch matters' : ''}
+${isWinsWhyMatters ? '- Coach asked why a specific win matters' : ''}
+${isHonestWhyGrowth ? '- Coach asked why growth/changing this pattern matters' : ''}
 Write a 2-5 sentence behavioral direction for how ${persona.name} should respond RIGHT NOW to this specific coach message.
 Be specific — reference the actual event, the mood, and how any active traits color the response.
 This is an instruction to the actor, not the response itself.
@@ -207,6 +239,22 @@ export async function generateUserResponse({
   const isHonestMissGrounding = currentStage === 'honest' &&
     HONEST_MISS_GROUNDING_KEYWORDS.some((kw) => coachMsgLower.includes(kw.toLowerCase()));
 
+  // Detect minimum-why probe: coach asking why the minimum commitment matters (tomorrow stage)
+  const isMinimumWhyProbe = currentStage === 'tomorrow' &&
+    MINIMUM_WHY_PROBE_KEYWORDS.some((kw) => coachMsgLower.includes(kw.toLowerCase()));
+
+  // Detect stretch-why probe: coach asking why the stretch goal matters (tomorrow stage)
+  const isStretchWhyProbe = currentStage === 'tomorrow' &&
+    STRETCH_WHY_PROBE_KEYWORDS.some((kw) => coachMsgLower.includes(kw.toLowerCase()));
+
+  // Detect wins-why-matters: coach asking why a specific win matters (wins stage)
+  const isWinsWhyMatters = currentStage === 'wins' &&
+    WINS_WHY_MATTERS_KEYWORDS.some((kw) => coachMsgLower.includes(kw.toLowerCase()));
+
+  // Detect honest-why-growth: coach asking why growth/changing a pattern matters (honest stage)
+  const isHonestWhyGrowth = currentStage === 'honest' &&
+    HONEST_WHY_GROWTH_KEYWORDS.some((kw) => coachMsgLower.includes(kw.toLowerCase()));
+
   // Build tiered why injection if coach is asking a why question and a whyPool is available
   let whyInjectionBlock = '';
   if (isWhyQuestion && whyPool) {
@@ -281,10 +329,13 @@ Reference the goal by name if natural: "${goalName}". Be honest about ambiguity 
       ? persona.openToDepthByDay(typeof dayNumber === 'number' ? dayNumber : 1)
       : 0.5;
     const goesDeep = Math.random() < openToDepth;
-    winsGoalCallbackBlock = `\nWINS-GOAL CALLBACK DIRECTION (coach just connected your win to a goal or why you articulated before):
+    const goals = persona.profile?.goals ?? [];
+    const goalName = goals.length > 0 ? goals[0].title : 'the goal';
+    winsGoalCallbackBlock = `\nWINS-GOAL CALLBACK DIRECTION (coach just connected your win to a goal or asked if you're getting closer):
 ${goesDeep
-      ? 'Engage genuinely with this reflection. Don\'t deflect. Let it land and respond with something real about what it means to you that you actually did it.'
-      : 'Acknowledge it but keep it brief — you\'re not quite ready to go deep on this yet. Maybe a "yeah, I guess that\'s true" type of response.'}`;
+      ? `Engage genuinely with this reflection. Reference "${goalName}" by name. Let it land — respond with something real about what this win means relative to where you're trying to go.`
+      : `Acknowledge it briefly but don't fully open up yet. A "yeah I guess" or "maybe" energy — you're not ready to go deep on this.`}
+${persona.tendencies?.progress_feeling_tendency ? `Your typical framing when asked about progress: ${persona.tendencies.progress_feeling_tendency}` : ''}`;
   }
 
   // Build honest-miss grounding injection
@@ -301,6 +352,68 @@ Give an honest account of what got in the way. You're a bit embarrassed but not 
       honestMissGroundingBlock = `\nHONEST MISS GROUNDING DIRECTION (coach grounded the honest stage in a specific missed commitment + why):
 Matter-of-fact about the miss. Not a big deal to you emotionally. Just tell what happened.`;
     }
+  }
+
+  // Build minimum-why probe injection
+  let minimumWhyProbeBlock = '';
+  if (isMinimumWhyProbe) {
+    const goals = persona.profile?.goals ?? [];
+    const goalName = goals.length > 0 ? goals[0].title : 'my main goal';
+    const day = typeof dayNumber === 'number' ? dayNumber : 1;
+    const isEarlySession = day <= 5;
+    minimumWhyProbeBlock = `\nMINIMUM WHY PROBE DIRECTION (coach asked why your minimum commitment matters):
+${persona.tendencies?.commitment_bridge
+  ? `Your natural framing: ${persona.tendencies.commitment_bridge}`
+  : 'Connect it back to your goal, even loosely.'}
+${isEarlySession ? 'Keep it brief and a bit surface-level — you haven\'t fully opened up yet.' : 'Give a more genuine answer — you\'ve built some trust.'}
+Reference the goal by name if natural: "${goalName}". Answer why THIS specific floor matters to you, not just what the task is. Keep it 2-3 sentences.`;
+  }
+
+  // Build stretch-why probe injection
+  let stretchWhyProbeBlock = '';
+  if (isStretchWhyProbe && whyPool) {
+    const day = typeof dayNumber === 'number' ? dayNumber : 1;
+    const tier = day <= 7 ? 'shallow' : (day <= 20 ? 'deeper' : 'additive');
+    const pool = whyPool[tier] ?? whyPool.shallow ?? [];
+    const chosenWhy = pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : null;
+    stretchWhyProbeBlock = `\nSTRETCH WHY PROBE DIRECTION (coach asked why the stretch goal matters):
+${chosenWhy ? `Use this as your core answer: "${chosenWhy}"` : 'Reach for a genuine reason why hitting the full stretch would mean something.'}
+${persona.tendencies?.commitment_why_depth ? `Your depth layer: ${persona.tendencies.commitment_why_depth}` : ''}
+Sound like you're reaching for something real, not giving a clean answer. Adapt naturally, don't recite.`;
+  } else if (isStretchWhyProbe && persona.tendencies?.commitment_why_depth) {
+    stretchWhyProbeBlock = `\nSTRETCH WHY PROBE DIRECTION (coach asked why the stretch goal matters):
+${persona.tendencies.commitment_why_depth}
+Go to the real layer. Don't give the surface reason.`;
+  }
+
+  // Build wins-why-matters injection
+  let winsWhyMattersBlock = '';
+  if (isWinsWhyMatters && whyPool) {
+    const day = typeof dayNumber === 'number' ? dayNumber : 1;
+    const tier = day <= 7 ? 'shallow' : 'deeper';
+    const pool = whyPool[tier] ?? whyPool.shallow ?? [];
+    const chosenWhy = pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : null;
+    winsWhyMattersBlock = `\nWINS WHY MATTERS DIRECTION (coach asked why a specific win matters):
+${chosenWhy ? `You can weave in this underlying motivation if it fits: "${chosenWhy}"` : ''}
+${persona.tendencies?.wins ? `Your natural style in the wins stage: ${persona.tendencies.wins}` : ''}
+Connect the win to something real — not just "it felt good". Why this specific thing? Keep it brief and honest.`;
+  } else if (isWinsWhyMatters) {
+    winsWhyMattersBlock = `\nWINS WHY MATTERS DIRECTION (coach asked why a specific win matters):
+${persona.tendencies?.wins ? `Your natural style: ${persona.tendencies.wins}` : ''}
+Give a genuine reason — not generic pride. One or two sentences.`;
+  }
+
+  // Build honest-why-growth injection
+  let honestWhyGrowthBlock = '';
+  if (isHonestWhyGrowth && whyPool) {
+    const day = typeof dayNumber === 'number' ? dayNumber : 1;
+    const tier = day <= 7 ? 'deeper' : 'additive';
+    const pool = whyPool[tier] ?? whyPool.deeper ?? whyPool.shallow ?? [];
+    const chosenWhy = pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : null;
+    honestWhyGrowthBlock = `\nHONEST WHY GROWTH DIRECTION (coach asked why growth/changing this pattern matters):
+${chosenWhy ? `Core of your answer: "${chosenWhy}"` : ''}
+${persona.tendencies?.honest ? `Your honest stage tendency: ${persona.tendencies.honest}` : ''}
+Don't give a clean reason. Go to the real layer — why this miss or pattern actually matters to who you want to become.`;
   }
 
   // Pick response mode based on persona's weighted probabilities, applying drift if set
@@ -326,6 +439,10 @@ Matter-of-fact about the miss. Not a big deal to you emotionally. Just tell what
     followedThrough,
     sessionContext,
     assignedTraits,
+    isMinimumWhyProbe,
+    isStretchWhyProbe,
+    isWinsWhyMatters,
+    isHonestWhyGrowth,
   });
 
   const hiddenTraitBlock =
@@ -419,6 +536,10 @@ ${bridgeQ2Block}
 ${progressFeelingBlock}
 ${winsGoalCallbackBlock}
 ${honestMissGroundingBlock}
+${minimumWhyProbeBlock}
+${stretchWhyProbeBlock}
+${winsWhyMattersBlock}
+${honestWhyGrowthBlock}
 GENERAL RULES:
 - Sound like a real person TEXTING, not writing formally
 - Stay true to the persona's tendencies for this stage

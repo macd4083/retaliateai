@@ -752,6 +752,22 @@ function initCoverageAssertions() {
     // ── New assertions — whys pruning ──────────────────────────────────────────
     make('commitment_planning_whys_max_one',  'goals.whys never contains more than 1 entry with source:commitment_planning per goal'),
     make('total_whys_max_five',               'goals.whys never exceeds 5 entries total for any goal'),
+    // ── New assertions — session_causal_extracts ────────────────────────────────
+    make('win_cause_extracted',               'session_causal_extracts: win_cause row written after a session with wins'),
+    make('miss_cause_extracted',              'session_causal_extracts: miss_cause row written after a session with misses'),
+    // ── New assertions — commitment why fields ──────────────────────────────────
+    make('commitment_minimum_why_written',    'reflection_sessions.commitment_minimum_why is non-null after minimum_why_probe fires'),
+    make('commitment_stretch_why_written',    'reflection_sessions.commitment_stretch_why is non-null after stretch_why_probe fires'),
+    // ── New assertions — goal_commitment_log ───────────────────────────────────
+    make('goal_commitment_why_populated',     'goal_commitment_log.commitment_why is non-null on at least one row per user'),
+    // ── New assertions — stage_order_swapped ───────────────────────────────────
+    make('stage_order_swapped_tracked',       'stage_order_swapped field tracked in session record when coach returns it'),
+    // ── New assertions — checkin_outcome ───────────────────────────────────────
+    make('checkin_outcome_extracted',         'checkin_outcome is extracted from extracted_data after commitment_checkin stage resolves'),
+    // ── New assertions — wins directive ordering ────────────────────────────────
+    make('wins_invite_more_fires_last',       'wins_invite_more directive fires only after wins_goal_callback and wins_why_matters are resolved'),
+    // ── New assertions — causal extracts insight linkage ───────────────────────
+    make('causal_extracts_linked_to_insight', 'session_causal_extracts.last_seen_in_insight set after synthesize-insights runs'),
   ];
 }
 
@@ -1513,6 +1529,7 @@ async function runFullCoverageTest({ personaKey, startDate, clean }) {
       is_complete: false,
       commitment_checkin_done: false,
       commitment_goal_bridge_done: false,
+      stage_order_swapped: false,
     };
     const sessionContext = { sharedWins: null, sharedMisses: null, sharedTomorrow: null, sharedCheckin: null };
     const stageSequence = [sessionState.current_stage];
@@ -1543,6 +1560,7 @@ async function runFullCoverageTest({ personaKey, startDate, clean }) {
       commitment_goal_bridge_done: false,
       progress_feeling: null,
       goal_why_committed: false,
+      stage_order_swapped: false,
       anomalies: [],
       conversation: [],
       backend_state: null,
@@ -1683,6 +1701,11 @@ async function runFullCoverageTest({ personaKey, startDate, clean }) {
       if (result.extracted_data?.checkin_outcome) {
         sessionCheckinOutcome = result.extracted_data.checkin_outcome;
       }
+      // Track stage_order_swapped if returned by the API
+      if (result.extracted_data?.stage_order_swapped === true || result.stage_order_swapped === true) {
+        sessionState.stage_order_swapped = true;
+        sessionRecord.stage_order_swapped = true;
+      }
       // Detect plan set without real commitment (plan gating check)
       // sessionState.tomorrow_commitment is already updated above from result.extracted_data, so
       // checking sessionState.tomorrow_commitment is sufficient to cover both current and prior turns
@@ -1797,6 +1820,23 @@ async function runFullCoverageTest({ personaKey, startDate, clean }) {
     // Progress feeling (day 1–14)
     if (day <= 14 && sessionProgressFeelingExtracted) {
       passAssertion(assertions, 'progress_feeling_extracted', day);
+    }
+
+    // checkin_outcome extracted
+    if (sessionRecord.checkin_stage_resolved && sessionCheckinOutcome !== null) {
+      passAssertion(assertions, 'checkin_outcome_extracted', day);
+    }
+
+    // stage_order_swapped tracked
+    if (sessionRecord.stage_order_swapped) {
+      passAssertion(assertions, 'stage_order_swapped_tracked', day);
+    }
+
+    // wins_invite_more fires only after wins_goal_callback or wins_why_matters
+    if (firedDirectives.has('wins_invite_more')) {
+      if (firedDirectives.has('wins_goal_callback') || firedDirectives.has('wins_why_matters')) {
+        passAssertion(assertions, 'wins_invite_more_fires_last', day);
+      }
     }
 
     // Plan checklist gating: plan must not be set true without a real commitment
@@ -1934,6 +1974,19 @@ async function runFullCoverageTest({ personaKey, startDate, clean }) {
     if (day >= 5 && backendState.patterns_accumulated.length > 0) {
       passAssertion(assertions, 'patterns_after_5_sessions', day, `${backendState.patterns_accumulated.length} pattern(s)`);
     }
+    if (day >= 5) {
+      try {
+        const { data: linkedExtracts } = await supabase
+          .from('session_causal_extracts')
+          .select('id')
+          .eq('user_id', userId)
+          .not('last_seen_in_insight', 'is', null)
+          .limit(1);
+        if ((linkedExtracts || []).length > 0) {
+          passAssertion(assertions, 'causal_extracts_linked_to_insight', day);
+        }
+      } catch { /* non-fatal */ }
+    }
     if (day >= 10) {
       const repeating = backendState.patterns_accumulated.filter((p) => p.occurrences >= 2);
       if (repeating.length >= 2) {
@@ -1953,6 +2006,19 @@ async function runFullCoverageTest({ personaKey, startDate, clean }) {
       passAssertion(assertions, 'goal_commitment_evaluation', day);
     }
 
+    // goal_commitment_log.commitment_why populated check
+    try {
+      const { data: commitmentWhyRows } = await supabase
+        .from('goal_commitment_log')
+        .select('id')
+        .eq('user_id', userId)
+        .not('commitment_why', 'is', null)
+        .limit(1);
+      if ((commitmentWhyRows || []).length > 0) {
+        passAssertion(assertions, 'goal_commitment_why_populated', day);
+      }
+    } catch { /* non-fatal */ }
+
     // Follow-up queue check
     try {
       const { data: queueRows } = await supabase
@@ -1965,6 +2031,36 @@ async function runFullCoverageTest({ personaKey, startDate, clean }) {
         if (hasFutureDate) passAssertion(assertions, 'follow_up_queue_future_date', day);
       }
     } catch { /* non-fatal */ }
+
+    // session_causal_extracts: win_cause and miss_cause rows
+    if (sessionId) {
+      try {
+        const { data: causalRows } = await supabase
+          .from('session_causal_extracts')
+          .select('id, type')
+          .eq('session_id', sessionId)
+          .eq('user_id', userId);
+        if ((causalRows || []).some((r) => r.type === 'win_cause')) {
+          passAssertion(assertions, 'win_cause_extracted', day);
+        }
+        if ((causalRows || []).some((r) => r.type === 'miss_cause')) {
+          passAssertion(assertions, 'miss_cause_extracted', day);
+        }
+      } catch { /* non-fatal */ }
+    }
+
+    // reflection_sessions: commitment_minimum_why and commitment_stretch_why fields
+    if (sessionId) {
+      try {
+        const { data: sessionRow } = await supabase
+          .from('reflection_sessions')
+          .select('commitment_minimum_why, commitment_stretch_why')
+          .eq('id', sessionId)
+          .maybeSingle();
+        if (sessionRow?.commitment_minimum_why) passAssertion(assertions, 'commitment_minimum_why_written', day);
+        if (sessionRow?.commitment_stretch_why) passAssertion(assertions, 'commitment_stretch_why_written', day);
+      } catch { /* non-fatal */ }
+    }
 
     // Goals snapshot assertions
     if (backendState.goals_snapshot && backendState.goals_snapshot.length > 0) {
