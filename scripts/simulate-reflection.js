@@ -391,6 +391,12 @@ async function validateBackend(supabase, userId, simulatedDate, prevGoalWhysCoun
     } catch (err) {
       console.warn(`    ⚠️  extract-goal-commitments failed: ${err.message}`);
     }
+  } else {
+    const reason = !options.commitmentText
+      ? 'no commitment text'
+      : 'no active goals passed';
+    console.log(`    ⏭️  extract-goal-commitments skipped (${reason})`);
+    backendState.extract_commitments_check = { count: 0, passed: false, skipped: true, reason };
   }
 
   // 7. Goal commitment stats (always runs — needs only user_id)
@@ -688,6 +694,21 @@ async function cleanUserData(supabase, userId) {
       rowsDeleted += count;
       tablesCleared.push({ table: 'session_causal_extracts', rows: count });
       console.log(`    🗑️  Cleared session_causal_extracts (${count} rows)`);
+    }
+  }
+
+  // Delete goal_commitment_log
+  {
+    const { data: deletedCommitmentLog, error: commitmentLogErr } = await supabase
+      .from('goal_commitment_log')
+      .delete()
+      .eq('user_id', userId)
+      .select('id');
+    if (!commitmentLogErr) {
+      const count = (deletedCommitmentLog ?? []).length;
+      rowsDeleted += count;
+      tablesCleared.push({ table: 'goal_commitment_log', rows: count });
+      console.log(`    🗑️  Cleared goal_commitment_log (${count} rows)`);
     }
   }
 
@@ -2288,8 +2309,8 @@ async function runFullCoverageTest({ personaKey, startDate, clean }) {
     report.backend_summary.goal_commitment_log_coverage = {
       sessions_checked: logChecks.length,
       sessions_with_rows: logChecks.filter(c => c.rows > 0).length,
-      sessions_with_goal_id: logChecks.filter(c => c.with_goal_id > 0).length,
-      sessions_with_commitment_why: logChecks.filter(c => c.with_commitment_why > 0).length,
+      sessions_with_goal_id: logChecks.filter(c => (c.with_goal_id ?? 0) > 0).length,
+      sessions_with_commitment_why: logChecks.filter(c => (c.with_commitment_why ?? 0) > 0).length,
     };
   }
 
@@ -2955,10 +2976,21 @@ async function main() {
 
     // Run backend validation and store result
     console.log(`\n🔍  Backend validation:`);
+    let sessionGoalsForExtraction = Object.entries(crossSessionState.goalIds).map(([title, id]) => ({ id, title }));
+    try {
+      const { data: liveGoals } = await supabase
+        .from('goals')
+        .select('id, title, category')
+        .eq('user_id', userId)
+        .eq('status', 'active');
+      if (liveGoals && liveGoals.length > 0) {
+        sessionGoalsForExtraction = liveGoals.map(g => ({ id: g.id, title: g.title, category: g.category }));
+      }
+    } catch (err) { console.warn(`    ⚠️  live goals fetch failed: ${err.message}`); }
     const backendState = await validateBackend(supabase, userId, simulatedDate, crossSessionState.prevGoalWhysCounts, {
       sampleUserMessage: history.filter(m => m.role === 'user').slice(-1)[0]?.content ?? '',
-      commitmentText: sessionState.tomorrow_commitment ?? '',
-      sampleGoals: Object.entries(crossSessionState.goalIds).map(([title, id]) => ({ id, title })),
+      commitmentText: sessionState.tomorrow_commitment ?? null,
+      sampleGoals: sessionGoalsForExtraction,
       sessionId: sessionId,
     });
     sessionRecord.backend_state = backendState;
@@ -3170,8 +3202,8 @@ function finalizeReport(report, totalQualityScores, totalWhyDeepeningScores = []
   report.backend_summary.goal_commitment_log_coverage = {
     sessions_checked: logChecks.length,
     sessions_with_rows: logChecks.filter(c => c.rows > 0).length,
-    sessions_with_goal_id: logChecks.filter(c => c.with_goal_id > 0).length,
-    sessions_with_commitment_why: logChecks.filter(c => c.with_commitment_why > 0).length,
+    sessions_with_goal_id: logChecks.filter(c => (c.with_goal_id ?? 0) > 0).length,
+    sessions_with_commitment_why: logChecks.filter(c => (c.with_commitment_why ?? 0) > 0).length,
   };
 
   try {

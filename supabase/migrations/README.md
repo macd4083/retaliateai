@@ -24,3 +24,9 @@ Run files in filename order (alphabetical / chronological).
 15. `20260412_consolidation_prereqs.sql` — Adds first_seen_date, last_seen_date, strength_evidence to user_insights; backfills from synthesized_at
 16. `20260412_seed_whys_from_why_it_matters.sql` — Ensures whys column exists on goals; seeds whys[0] from why_it_matters for all goals that had it but no whys
 17. `20260413_consolidate_why_it_matters.sql` — Drops the legacy goals.why_it_matters column (data already migrated to whys[] by migration 16)
+18. `20260414_goal_baseline_and_commitment_outcome.sql` — Adds baseline_snapshot and baseline_date to goals; adds checkin_outcome to goal_commitment_log for storing explicit kept/missed/partial answers
+19. `20260418_add_fragment_index.sql` — Adds fragment_index integer column to goal_commitment_log for ordering commitment fragments within a session
+20. `20260420_add_goal_commitment_type.sql` — Adds commitment_type varchar column to goal_commitment_log
+21. `20260428_add_commitment_type_to_goal_commitment_log.sql` — Ensures commitment_type text and fragment_index integer columns exist on goal_commitment_log (idempotent re-run of 19–20)
+22. `20260429_session_causal_extracts.sql` — Creates session_causal_extracts table for storing win/miss cause raw text per session; used by synthesize-insights.js
+23. `20260504_commitment_why.sql` — Adds commitment_why text column to goal_commitment_log; required for reflection-coach.js to persist fragment-level whys and for synthesize-insights.js to read them
