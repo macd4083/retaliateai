@@ -146,3 +146,47 @@ button:focus-visible {
     @apply bg-background text-foreground;
   }
 }
+
+html {
+  --sb-bg: #0a0a0a;
+  --sb-thumb: #1a1a1a;
+  --sb-border: #262626;
+  --sb-accent: #dc2626;
+
+  background-color: var(--sb-bg);
+
+  /* Custom scrollbar — Firefox */
+  scrollbar-color: var(--sb-thumb) var(--sb-bg);
+  scrollbar-width: thin;
+}
+
+/* Custom scrollbar — Chrome, Safari, Edge */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--sb-bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--sb-thumb);
+  border-radius: 4px;
+  border: 1px solid var(--sb-border);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--sb-accent);
+  border-color: var(--sb-accent);
+}
+
+::-webkit-scrollbar-button {
+  background: var(--sb-bg);
+  height: 0;
+  width: 0;
+}
+
+::-webkit-scrollbar-corner {
+  background: var(--sb-bg);
+}
