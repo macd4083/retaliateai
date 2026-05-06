@@ -649,7 +649,7 @@ function hasLowCheckinSignal(message = '') {
 }
 
 function deriveStageHint(sessionState, classifierChecklist, completedDirectives = [], messageCount = 0, intentData = null, lastUserMessage = '') {
-  const stage = sessionState.current_stage || 'commitment_checkin';
+  const stage = sessionState.current_stage || 'wins';
   const cl = { ...(sessionState.checklist || {}), ...(classifierChecklist || {}) };
   const hasPlan = !!sessionState.tomorrow_commitment;
   const stageOrderSwapped = sessionState.stage_order_swapped === true;
@@ -2941,7 +2941,14 @@ export default async function handler(req, res) {
       : '';
 
     // ── 6. Exercise cooldown + smart blocks ───────────────────────────────
-    const sessionExercisesRun = Array.isArray(session_state.exercises_run) ? session_state.exercises_run : [];
+    // Merge in exercises from recent sessions to prevent cross-session repeats
+    const recentExercisesRun = (recentSessions || [])
+      .flatMap(s => Array.isArray(s.exercises_run) ? s.exercises_run : [])
+      .filter(Boolean);
+    const sessionExercisesRun = [...new Set([
+      ...(session_state.exercises_run || []),
+      ...recentExercisesRun,
+    ])];
     const messageCount = history.length;
 
     // Force commitment_checkin as current stage on INIT when yesterday commitment exists
