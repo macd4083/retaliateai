@@ -243,6 +243,7 @@ async function validateBackend(supabase, userId, simulatedDate, prevGoalWhysCoun
     extract_commitments_check: null,
     goal_commitment_stats_check: null,
     evaluate_commitments_check: null,
+    goal_commitment_log_check: null,
   };
 
   // 1. Commitment stats
@@ -406,6 +407,33 @@ async function validateBackend(supabase, userId, simulatedDate, prevGoalWhysCoun
     }
   } catch (err) {
     console.warn(`    ⚠️  goal-commitment-stats failed: ${err.message}`);
+  }
+
+  // 8. goal_commitment_log — verify rows written with goal_id and commitment_why
+  if (options.sessionId) {
+    try {
+      const { data: logRows } = await supabase
+        .from('goal_commitment_log')
+        .select('id, goal_id, commitment_why, commitment_text, session_id')
+        .eq('user_id', userId)
+        .eq('session_id', options.sessionId);
+      if (logRows && logRows.length > 0) {
+        const withGoalId = logRows.filter(r => !!r.goal_id);
+        const withWhy = logRows.filter(r => !!r.commitment_why);
+        backendState.goal_commitment_log_check = {
+          rows: logRows.length,
+          with_goal_id: withGoalId.length,
+          with_commitment_why: withWhy.length,
+          passed: withGoalId.length > 0,
+        };
+        console.log(`    📋  goal_commitment_log: ${logRows.length} row(s), ${withGoalId.length} with goal_id, ${withWhy.length} with commitment_why`);
+      } else {
+        backendState.goal_commitment_log_check = { rows: 0, passed: false };
+        console.log(`    📋  goal_commitment_log: 0 rows written for session ${options.sessionId}`);
+      }
+    } catch (err) {
+      console.warn(`    ⚠️  goal_commitment_log query failed: ${err.message}`);
+    }
   }
 
   return backendState;
@@ -630,6 +658,36 @@ async function cleanUserData(supabase, userId) {
       rowsDeleted += count;
       tablesCleared.push({ table: 'goals', rows: count });
       console.log(`    🗑️  Cleared goals (${count} rows)`);
+    }
+  }
+
+  // Delete user_insights
+  {
+    const { data: deletedInsights, error: insightsErr } = await supabase
+      .from('user_insights')
+      .delete()
+      .eq('user_id', userId)
+      .select('id');
+    if (!insightsErr) {
+      const count = (deletedInsights ?? []).length;
+      rowsDeleted += count;
+      tablesCleared.push({ table: 'user_insights', rows: count });
+      console.log(`    🗑️  Cleared user_insights (${count} rows)`);
+    }
+  }
+
+  // Delete session_causal_extracts
+  {
+    const { data: deletedExtracts, error: extractsErr } = await supabase
+      .from('session_causal_extracts')
+      .delete()
+      .eq('user_id', userId)
+      .select('id');
+    if (!extractsErr) {
+      const count = (deletedExtracts ?? []).length;
+      rowsDeleted += count;
+      tablesCleared.push({ table: 'session_causal_extracts', rows: count });
+      console.log(`    🗑️  Cleared session_causal_extracts (${count} rows)`);
     }
   }
 
@@ -1486,6 +1544,7 @@ async function runFullCoverageTest({ personaKey, startDate, clean }) {
       user_profile_snapshot: null,
       generated_narratives: [],
       final_goals_snapshot: [],
+      goal_commitment_log_coverage: null,
     },
     coverage_assertions: assertions,
     exercise_coverage: { fired: [], total: ALL_EXERCISES.length, coverage_count: 0 },
@@ -1556,6 +1615,10 @@ async function runFullCoverageTest({ personaKey, startDate, clean }) {
       stage_sequence: [],
       coach_referenced_specific_why: false,
       commitment_made: null,
+      commitment_minimum: null,
+      commitment_stretch: null,
+      commitment_score: null,
+      checkin_outcome: null,
       directives_fired: [],
       commitment_goal_bridge_done: false,
       progress_feeling: null,
@@ -1567,6 +1630,10 @@ async function runFullCoverageTest({ personaKey, startDate, clean }) {
     };
 
     // 2. INIT turn
+    // Track should_have_fired BEFORE the session starts, using previous session's commitment
+    if (crossSessionState.yesterdayCommitment) {
+      report.summary.commitment_checkin_coverage.should_have_fired++;
+    }
     const initResult = await callCoach({
       user_id: userId,
       session_id: sessionId,
@@ -1706,6 +1773,13 @@ async function runFullCoverageTest({ personaKey, startDate, clean }) {
         sessionState.stage_order_swapped = true;
         sessionRecord.stage_order_swapped = true;
       }
+      // Track commitment fields for session record (keep last truthy value)
+      const commitMin = result.commitment_minimum || result.extracted_data?.commitment_minimum;
+      if (commitMin) sessionRecord.commitment_minimum = commitMin;
+      const commitStretch = result.commitment_stretch || result.extracted_data?.commitment_stretch;
+      if (commitStretch) sessionRecord.commitment_stretch = commitStretch;
+      const commitScore = result.commitment_score ?? result.extracted_data?.commitment_score;
+      if (commitScore != null) sessionRecord.commitment_score = commitScore;
       // Detect plan set without real commitment (plan gating check)
       // sessionState.tomorrow_commitment is already updated above from result.extracted_data, so
       // checking sessionState.tomorrow_commitment is sufficient to cover both current and prior turns
@@ -1753,6 +1827,7 @@ async function runFullCoverageTest({ personaKey, startDate, clean }) {
     sessionRecord.commitment_goal_bridge_done = sessionBridgeDone;
     sessionRecord.progress_feeling = sessionProgressFeelingExtracted ? true : null;
     sessionRecord.goal_why_committed = sessionGoalWhyCommitmentPlanningWritten;
+    sessionRecord.checkin_outcome = sessionCheckinOutcome;
 
     // ── Session-level assertions ─────────────────────────────────────────────
     if (sessionState.is_complete && turn < MAX_TURNS) {
@@ -1767,7 +1842,6 @@ async function runFullCoverageTest({ personaKey, startDate, clean }) {
 
     const hadYesterdayCommitment = crossSessionState.yesterdayCommitment !== null;
     if (hadYesterdayCommitment) {
-      report.summary.commitment_checkin_coverage.should_have_fired++;
       if (sessionRecord.checkin_stage_fired) {
         report.summary.commitment_checkin_coverage.fired++;
         if (day >= 2) passAssertion(assertions, 'commitment_checkin_fires', day);
@@ -2206,6 +2280,19 @@ async function runFullCoverageTest({ personaKey, startDate, clean }) {
     }
   }
 
+  // goal_commitment_log_coverage — aggregate from all sessions
+  {
+    const logChecks = (report.sessions || [])
+      .map(s => s.backend_state?.goal_commitment_log_check)
+      .filter(Boolean);
+    report.backend_summary.goal_commitment_log_coverage = {
+      sessions_checked: logChecks.length,
+      sessions_with_rows: logChecks.filter(c => c.rows > 0).length,
+      sessions_with_goal_id: logChecks.filter(c => c.with_goal_id > 0).length,
+      sessions_with_commitment_why: logChecks.filter(c => c.with_commitment_why > 0).length,
+    };
+  }
+
   // ── Day 21 milestone assertions ───────────────────────────────────────────
   try {
     const { data: markers21 } = await supabase.from('growth_markers').select('id, theme').eq('user_id', userId);
@@ -2462,6 +2549,7 @@ async function main() {
       user_profile_snapshot: null,
       generated_narratives: [],
       final_goals_snapshot: [],
+      goal_commitment_log_coverage: null,
     },
     sessions: [],
     flagged_for_review: [],
@@ -2607,6 +2695,10 @@ async function main() {
     let turn = 0;
 
     // ── INIT turn ──────────────────────────────────────────────────────────
+    // Track should_have_fired BEFORE the session starts, using previous session's commitment
+    if (crossSessionState.yesterdayCommitment && scenario !== 'cold_start') {
+      report.summary.commitment_checkin_coverage.should_have_fired++;
+    }
     const initResult = await callCoach({
       user_id: userId,
       session_id: sessionId,
@@ -2854,9 +2946,6 @@ async function main() {
     }
 
     // Update commitment_checkin_coverage stats
-    if (hadYesterdayCommitment) {
-      report.summary.commitment_checkin_coverage.should_have_fired++;
-    }
     if (sessionRecord.checkin_stage_fired) {
       report.summary.commitment_checkin_coverage.fired++;
     }
@@ -2866,7 +2955,12 @@ async function main() {
 
     // Run backend validation and store result
     console.log(`\n🔍  Backend validation:`);
-    const backendState = await validateBackend(supabase, userId, simulatedDate, crossSessionState.prevGoalWhysCounts);
+    const backendState = await validateBackend(supabase, userId, simulatedDate, crossSessionState.prevGoalWhysCounts, {
+      sampleUserMessage: history.filter(m => m.role === 'user').slice(-1)[0]?.content ?? '',
+      commitmentText: sessionState.tomorrow_commitment ?? '',
+      sampleGoals: Object.entries(crossSessionState.goalIds).map(([title, id]) => ({ id, title })),
+      sessionId: sessionId,
+    });
     sessionRecord.backend_state = backendState;
 
     // Build goals_why_snapshot for this session and update prevGoalWhysCounts
@@ -3068,6 +3162,17 @@ function finalizeReport(report, totalQualityScores, totalWhyDeepeningScores = []
       (g) => g.whys_count > 1,
     ).length;
   }
+
+  // goal_commitment_log_coverage — aggregate from all sessions
+  const logChecks = (report.sessions || [])
+    .map(s => s.backend_state?.goal_commitment_log_check)
+    .filter(Boolean);
+  report.backend_summary.goal_commitment_log_coverage = {
+    sessions_checked: logChecks.length,
+    sessions_with_rows: logChecks.filter(c => c.rows > 0).length,
+    sessions_with_goal_id: logChecks.filter(c => c.with_goal_id > 0).length,
+    sessions_with_commitment_why: logChecks.filter(c => c.with_commitment_why > 0).length,
+  };
 
   try {
     writeFileSync(reportPath, JSON.stringify(report, null, 2), 'utf8');
