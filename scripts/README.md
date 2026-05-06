@@ -494,6 +494,12 @@ Copilot will look at the flag reasons, cross-reference with `api/reflection-coac
 | `commitment_goal_bridge_done` | `true` if `commitment_goal_bridge_done: true` appeared in the session response — means both bridge questions completed |
 | `progress_feeling` | `true` if `progress_feeling` was extracted from the user's response at any turn this session |
 | `goal_why_committed` | `true` if `goal_commitment_why: true` was set on any extracted_data response, meaning a `commitment_planning` source why was captured |
+| `stage_order_swapped` | `true` if `stage_order_swapped` was returned by the API at any turn |
+| `checkin_outcome` | `'kept'` / `'missed'` / `'partial'` / `null` — extracted from `extracted_data.checkin_outcome` |
+| `commitment_minimum_why_written` | `true` if `commitment_minimum_why` was non-null on the session row by end of session |
+| `commitment_stretch_why_written` | `true` if `commitment_stretch_why` was non-null on the session row by end of session |
+| `win_cause_extracted` | `true` if a `win_cause` row was written to `session_causal_extracts` for this session |
+| `miss_cause_extracted` | `true` if a `miss_cause` row was written to `session_causal_extracts` for this session |
 | `anomalies` | Array of strings describing unexpected stage skips, e.g. `"commitment_checkin skipped despite yesterday commitment existing"` |
 
 ### `commitment_checkin_coverage` summary stat
