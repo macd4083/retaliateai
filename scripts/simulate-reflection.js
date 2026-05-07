@@ -405,11 +405,23 @@ async function validateBackend(supabase, userId, simulatedDate, prevGoalWhysCoun
       user_id: userId,
       client_local_date: simulatedDate,
     });
-    if (statsResult.per_goal && Array.isArray(statsResult.per_goal)) {
-      backendState.goal_commitment_stats_check = { goal_count: statsResult.per_goal.length, passed: true };
-      if (statsResult.per_goal.length > 0) {
-        console.log(`    📈  Goal commitment stats: ${statsResult.per_goal.length} goal(s) tracked ✅`);
+    if (statsResult.followThrough7 || statsResult.weeklyData) {
+      const ft = statsResult.followThrough7 || { kept: 0, total: 0 };
+      backendState.goal_commitment_stats_check = {
+        passed: true,
+        follow_through_7day: ft,
+        trajectory: statsResult.trajectory ?? null,
+        this_week_kept: statsResult.thisWeekKept ?? 0,
+        this_week_total: statsResult.thisWeekTotal ?? 0,
+        weekly_data_weeks: Array.isArray(statsResult.weeklyData) ? statsResult.weeklyData.length : 0,
+      };
+      if (ft.total > 0) {
+        console.log(`    📈  Commitment stats: ${ft.kept}/${ft.total} kept (7d) | Trajectory: ${statsResult.trajectory ?? 'n/a'} ✅`);
+      } else {
+        console.log(`    📈  Commitment stats: no evaluable commitments yet (expected for early sim days)`);
       }
+    } else {
+      backendState.goal_commitment_stats_check = { passed: false, reason: 'commitment-stats returned no data' };
     }
   } catch (err) {
     console.warn(`    ⚠️  goal-commitment-stats failed: ${err.message}`);
@@ -3181,7 +3193,7 @@ function finalizeReport(report, totalQualityScores, totalWhyDeepeningScores = []
   // Compute commitment_checkin_coverage miss_rate
   const ccc = report.summary.commitment_checkin_coverage;
   if (ccc.should_have_fired > 0) {
-    const misses = ccc.should_have_fired - ccc.fired;
+    const misses = Math.max(0, ccc.should_have_fired - ccc.fired);
     ccc.miss_rate = `${Math.round((misses / ccc.should_have_fired) * 100)}%`;
   } else {
     ccc.miss_rate = 'n/a';
