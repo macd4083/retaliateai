@@ -3865,7 +3865,13 @@ Only return a goal_id that exists in the list.`,
             if (existingIdx >= 0) {
               currentWhys[existingIdx] = newWhy;
             } else {
-              currentWhys.push(newWhy);
+              // Only add if this text isn't already present under any source
+              const isDuplicate = currentWhys.some(
+                w => w.text && w.text.trim().toLowerCase() === newWhy.text.trim().toLowerCase()
+              );
+              if (!isDuplicate) {
+                currentWhys.push(newWhy);
+              }
             }
           } else if (action === 'replace' && typeof replaceIndex === 'number' && currentWhys[replaceIndex]) {
             currentWhys[replaceIndex] = newWhy;
@@ -3915,7 +3921,12 @@ Only return a goal_id that exists in the list.`,
           if (probe.action === 'replace' && typeof probe.replace_index === 'number' && currentWhys[probe.replace_index]) {
             currentWhys[probe.replace_index] = newWhy;
           } else {
-            currentWhys.push(newWhy);
+            const isDuplicate = currentWhys.some(
+              w => w.text && w.text.trim().toLowerCase() === newWhy.text.trim().toLowerCase()
+            );
+            if (!isDuplicate) {
+              currentWhys.push(newWhy);
+            }
           }
 
           // Retention policy: max MAX_WHY_PROBE_WHYS why_probe entries per goal, plus existing caps

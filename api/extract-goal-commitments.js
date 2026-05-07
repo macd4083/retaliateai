@@ -105,7 +105,16 @@ Only link when genuinely relevant. Do not force links. Multiple items can have t
       });
     }
 
-    await supabase.from('goal_commitment_log').insert(insertRows);
+    const { error: insertError } = await supabase.from('goal_commitment_log').insert(insertRows);
+    if (insertError) {
+      console.error('extract-goal-commitments insert error:', insertError.message);
+      // Still return the extracted items so callers know what was found, but surface the error
+      return res.status(200).json({ goal_commitments: insertRows.map((row, i) => ({
+        goal_id: row.goal_id,
+        commitment_fragment: row.commitment_text,
+        confidence: items[i]?.confidence || 'low',
+      })), insert_error: insertError.message });
+    }
 
     const goal_commitments = insertRows.map((row, i) => ({
       goal_id: row.goal_id,
