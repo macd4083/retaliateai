@@ -153,6 +153,7 @@ html {
   --sb-border: #262626;
   --sb-accent: #dc2626;
 
+  color-scheme: dark;
   background-color: var(--sb-bg);
 
   /* Custom scrollbar — Firefox */
