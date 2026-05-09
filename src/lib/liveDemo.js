@@ -203,8 +203,8 @@ export function normalizeLiveDemoData(data) {
           .filter((goal) => goal.title)
       : [],
     commitmentScore:
-      data?.commitmentScore !== '' && Number.isFinite(scoreNum)
-        ? Math.max(0, Math.min(100, scoreNum))
+      data?.commitmentScore !== '' && Number.isFinite(scoreNum) && scoreNum >= 0 && scoreNum <= 100
+        ? scoreNum
         : null,
   };
 }
