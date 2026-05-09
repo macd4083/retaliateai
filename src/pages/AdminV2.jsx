@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Database, Trash2, ChevronDown, ChevronRight, RefreshCw, Play, Video, WandSparkles, Pencil, Monitor } from 'lucide-react';
+import { Database, Trash2, ChevronDown, ChevronRight, RefreshCw, Pencil, Monitor } from 'lucide-react';
 import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase/client';
 import { localDateStr } from '../lib/dateUtils';
 import AppShellV2 from '../components/v2/AppShellV2';
-import AdminToolsNav from '../components/admin/AdminToolsNav';
 
 const ADMIN_SECRET = import.meta.env.VITE_ADMIN_SECRET;
 
@@ -386,10 +385,12 @@ export default function AdminV2() {
   const [isAdmin, setIsAdmin] = useState(null); // null = loading
   const [activeTab, setActiveTab] = useState('sessions');
   const [sessions, setSessions] = useState([]);
+  const [sessionsVisible, setSessionsVisible] = useState(5);
   const [tabData, setTabData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [resultMsg, setResultMsg] = useState('');
   const [commitmentRows, setCommitmentRows] = useState([]);
+  const [commitmentsVisible, setCommitmentsVisible] = useState(5);
   const [commitmentLoading, setCommitmentLoading] = useState(false);
   const [commitmentEdits, setCommitmentEdits] = useState({});
   const [commitmentSaving, setCommitmentSaving] = useState({});
@@ -1021,40 +1022,84 @@ export default function AdminV2() {
             <RefreshCw className="w-4 h-4" />
             Refresh
           </button>
-          <button
-            onClick={() => navigate('/demo-builder')}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 hover:text-white text-sm transition-colors"
-          >
-            <Play className="w-4 h-4" />
-            Demo Builder
-          </button>
-          <button
-            onClick={() => navigate('/ui-editor')}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 hover:text-white text-sm transition-colors"
-          >
-            <WandSparkles className="w-4 h-4 text-red-400" />
-            <span className="text-left">
-              <span className="block">Visual UI Editor</span>
-              <span className="block text-[11px] text-zinc-500">Edit any captured UI snapshot with direct manipulation.</span>
-            </span>
-          </button>
-          <button
-            onClick={() => navigate('/video-export')}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 hover:text-white text-sm transition-colors"
-          >
-            <Video className="w-4 h-4 text-blue-400" />
-            Video Export
-          </button>
-          <button
-            onClick={() => window.open('/admin/live-demo', '_blank')}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 hover:text-white text-sm transition-colors"
-          >
-            <Monitor className="w-4 h-4 text-emerald-400" />
-            Live Demo
-          </button>
         </div>
 
-        <AdminToolsNav />
+        <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 sm:p-6 space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Monitor className="w-4 h-4 text-emerald-400" />
+              <h3 className="text-white font-semibold text-base">Live Demo Script</h3>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => window.open('/admin/live-demo', '_blank')}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-900/40 border border-emerald-800 text-emerald-300 hover:bg-emerald-900 text-sm transition-colors"
+              >
+                <Monitor className="w-3.5 h-3.5" />
+                Open Demo
+              </button>
+              <button
+                onClick={() => {
+                  try {
+                    JSON.parse(demoScript);
+                    window.localStorage.setItem('retaliateai_live_demo_script', demoScript);
+                    setDemoScriptMsg('✓ Script saved');
+                    setTimeout(() => setDemoScriptMsg(''), 2000);
+                  } catch (_e) {
+                    setDemoScriptMsg('⚠ Invalid JSON — fix errors before saving');
+                  }
+                }}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 text-sm transition-colors"
+              >
+                Save Script
+              </button>
+              <button
+                onClick={() => {
+                  setDemoScript(JSON.stringify(DEFAULT_DEMO_SCRIPT_FOR_EDITOR, null, 2));
+                  setDemoScriptMsg('Reset to default');
+                  setTimeout(() => setDemoScriptMsg(''), 2000);
+                }}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-400 hover:bg-zinc-700 text-sm transition-colors"
+              >
+                Reset Default
+              </button>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => liveDemoChannelRef.current?.postMessage({ type: 'PLAY' })}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-700 text-white hover:bg-emerald-600 text-sm transition-colors"
+            >
+              ▶ Play Demo
+            </button>
+            <button
+              onClick={() => liveDemoChannelRef.current?.postMessage({ type: 'RESET' })}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 text-sm transition-colors"
+            >
+              ⏹ Reset Demo
+            </button>
+            <span className="text-zinc-500 text-xs">Controls the Live Demo tab if it's open in another window.</span>
+          </div>
+
+          <p className="text-zinc-500 text-xs">
+            Edit the demo script as JSON. Each turn: <code className="text-zinc-400">{'{ "role": "coach" | "user", "content": "..." }'}</code>. Changes take effect when you open the demo page.
+          </p>
+
+          {demoScriptMsg && (
+            <div className="px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-sm text-zinc-300">
+              {demoScriptMsg}
+            </div>
+          )}
+
+          <textarea
+            value={demoScript}
+            onChange={(e) => setDemoScript(e.target.value)}
+            className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-xs text-zinc-200 font-mono resize-none focus:outline-none focus:border-zinc-500 transition-colors"
+            rows={20}
+            spellCheck={false}
+          />
+        </div>
 
         {resultMsg && (
           <div className="px-4 py-3 rounded-xl bg-zinc-900 border border-zinc-700 text-sm text-zinc-300">
@@ -1090,15 +1135,25 @@ export default function AdminV2() {
             sessions.length === 0 ? (
               <p className="text-zinc-600 text-sm text-center py-8">No sessions found</p>
             ) : (
-              sessions.map((session) => (
-                <SessionCard
-                  key={session.id}
-                  session={session}
-                  userId={user.id}
-                  onDelete={deleteSession}
-                  isToday={session.date === todayStr}
-                />
-              ))
+              <>
+                {sessions.slice(0, sessionsVisible).map((session) => (
+                  <SessionCard
+                    key={session.id}
+                    session={session}
+                    userId={user.id}
+                    onDelete={deleteSession}
+                    isToday={session.date === todayStr}
+                  />
+                ))}
+                {sessions.length > sessionsVisible && (
+                  <button
+                    onClick={() => setSessionsVisible((v) => v + 5)}
+                    className="px-4 py-2 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-white text-sm transition-colors mt-3"
+                  >
+                    Show 5 more
+                  </button>
+                )}
+              </>
             )
           ) : tabData.length === 0 ? (
             <p className="text-zinc-600 text-sm text-center py-8">No data found</p>
@@ -1213,7 +1268,7 @@ export default function AdminV2() {
             <p className="text-zinc-600 text-sm text-center py-6">No sessions found</p>
           ) : (
             <div className="space-y-3">
-              {commitmentRows.map((row) => {
+              {commitmentRows.slice(0, commitmentsVisible).map((row) => {
                 const rowEdits = commitmentEdits[row.id] || {};
                 return (
                   <div
@@ -1392,85 +1447,16 @@ export default function AdminV2() {
                   </div>
                 );
               })}
+              {commitmentRows.length > commitmentsVisible && (
+                <button
+                  onClick={() => setCommitmentsVisible((v) => v + 5)}
+                  className="px-4 py-2 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-white text-sm transition-colors mt-3"
+                >
+                  Show 5 more
+                </button>
+              )}
             </div>
           )}
-        </div>
-
-        <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 sm:p-6 space-y-4">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <Monitor className="w-4 h-4 text-emerald-400" />
-              <h3 className="text-white font-semibold text-base">Live Demo Script</h3>
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => window.open('/admin/live-demo', '_blank')}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-900/40 border border-emerald-800 text-emerald-300 hover:bg-emerald-900 text-sm transition-colors"
-              >
-                <Monitor className="w-3.5 h-3.5" />
-                Open Demo
-              </button>
-              <button
-                onClick={() => {
-                  try {
-                    JSON.parse(demoScript);
-                    window.localStorage.setItem('retaliateai_live_demo_script', demoScript);
-                    setDemoScriptMsg('✓ Script saved');
-                    setTimeout(() => setDemoScriptMsg(''), 2000);
-                  } catch (_e) {
-                    setDemoScriptMsg('⚠ Invalid JSON — fix errors before saving');
-                  }
-                }}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 text-sm transition-colors"
-              >
-                Save Script
-              </button>
-              <button
-                onClick={() => {
-                  setDemoScript(JSON.stringify(DEFAULT_DEMO_SCRIPT_FOR_EDITOR, null, 2));
-                  setDemoScriptMsg('Reset to default');
-                  setTimeout(() => setDemoScriptMsg(''), 2000);
-                }}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-400 hover:bg-zinc-700 text-sm transition-colors"
-              >
-                Reset Default
-              </button>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 flex-wrap">
-            <button
-              onClick={() => liveDemoChannelRef.current?.postMessage({ type: 'PLAY' })}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-700 text-white hover:bg-emerald-600 text-sm transition-colors"
-            >
-              ▶ Play Demo
-            </button>
-            <button
-              onClick={() => liveDemoChannelRef.current?.postMessage({ type: 'RESET' })}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 text-sm transition-colors"
-            >
-              ⏹ Reset Demo
-            </button>
-            <span className="text-zinc-500 text-xs">Controls the Live Demo tab if it's open in another window.</span>
-          </div>
-
-          <p className="text-zinc-500 text-xs">
-            Edit the demo script as JSON. Each turn: <code className="text-zinc-400">{'{ "role": "coach" | "user", "content": "..." }'}</code>. Changes take effect when you open the demo page.
-          </p>
-
-          {demoScriptMsg && (
-            <div className="px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-sm text-zinc-300">
-              {demoScriptMsg}
-            </div>
-          )}
-
-          <textarea
-            value={demoScript}
-            onChange={(e) => setDemoScript(e.target.value)}
-            className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-xs text-zinc-200 font-mono resize-none focus:outline-none focus:border-zinc-500 transition-colors"
-            rows={20}
-            spellCheck={false}
-          />
         </div>
       </div>
     </AppShellV2>
