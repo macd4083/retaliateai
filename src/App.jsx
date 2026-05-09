@@ -7,12 +7,7 @@ import InsightsV2 from './pages/InsightsV2';
 import SettingsV2 from './pages/SettingsV2';
 import OnboardingV2 from './pages/OnboardingV2';
 import AdminV2 from './pages/AdminV2';
-import VideoExport from './pages/admin/VideoExport';
 import LiveDemo from './pages/admin/LiveDemo';
-import DemoBuilder from './pages/DemoBuilder';
-import DemoPlayerPage from './pages/DemoPlayerPage';
-import UIRecorder from './pages/UIRecorder';
-import UIEditor from './pages/UIEditor';
 import Login from './pages/Login';
 import ResetPassword from './pages/ResetPassword';
 import EmailConfirmed from './pages/EmailConfirmed';
@@ -115,7 +110,6 @@ export default function App() {
       <Route path="/privacy" element={<PrivacyPolicy />} />
       <Route path="/terms" element={<TermsOfService />} />
       <Route path="/" element={<Landing />} />
-      <Route path="/demo/:id" element={<DemoPlayerPage />} />
 
       {/* V2 protected routes */}
       <Route
@@ -152,14 +146,6 @@ export default function App() {
         }
       />
       <Route
-        path="/admin/video-export"
-        element={
-          <AuthGuardV2>
-            <VideoExport />
-          </AuthGuardV2>
-        }
-      />
-      <Route
         path="/admin/live-demo"
         element={
           <AuthGuardV2>
@@ -167,47 +153,6 @@ export default function App() {
           </AuthGuardV2>
         }
       />
-      <Route
-        path="/video-export"
-        element={
-          <AuthGuardV2>
-            <VideoExport />
-          </AuthGuardV2>
-        }
-      />
-      <Route
-        path="/admin/demo-builder"
-        element={
-          <AuthGuardV2>
-            <DemoBuilder />
-          </AuthGuardV2>
-        }
-      />
-      <Route
-        path="/demo-builder"
-        element={
-          <AuthGuardV2>
-            <DemoBuilder />
-          </AuthGuardV2>
-        }
-      />
-      <Route
-        path="/recorder"
-        element={
-          <AuthGuardV2>
-            <UIRecorder />
-          </AuthGuardV2>
-        }
-      />
-      <Route
-        path="/ui-editor"
-        element={
-          <AuthGuardV2>
-            <UIEditor />
-          </AuthGuardV2>
-        }
-      />
-
       {/* Catch-all */}
       <Route path="*" element={<Navigate to="/reflection" replace />} />
     </Routes>
