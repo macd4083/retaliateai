@@ -412,6 +412,12 @@ export default function AdminV2() {
   const [goalLinkSaved, setGoalLinkSaved] = useState({});
   const [demoScript, setDemoScript] = useState('');
   const [demoScriptMsg, setDemoScriptMsg] = useState('');
+  const [demoData, setDemoData] = useState({
+    checklist: [],
+    goals: [],
+    commitmentScore: '',
+  });
+  const [demoDataMsg, setDemoDataMsg] = useState('');
 
   // todayStr uses local time getters (not UTC) so the date matches the user's timezone.
   const todayStr = localDateStr();
@@ -457,9 +463,13 @@ export default function AdminV2() {
     const saved = window.localStorage.getItem('retaliateai_live_demo_script');
     if (saved) {
       setDemoScript(saved);
-      return;
+    } else {
+      setDemoScript(JSON.stringify(DEFAULT_DEMO_SCRIPT_FOR_EDITOR, null, 2));
     }
-    setDemoScript(JSON.stringify(DEFAULT_DEMO_SCRIPT_FOR_EDITOR, null, 2));
+    try {
+      const savedData = window.localStorage.getItem('retaliateai_live_demo_data');
+      if (savedData) setDemoData(JSON.parse(savedData));
+    } catch (_e) {}
   }, []);
 
   useEffect(() => {
@@ -908,6 +918,22 @@ export default function AdminV2() {
     setInsertingSession(false);
   }
 
+  function saveDemoData(data) {
+    const scoreNum = Number(data.commitmentScore);
+    const toSave = {
+      ...data,
+      commitmentScore: data.commitmentScore !== '' && !isNaN(scoreNum) ? scoreNum : null,
+    };
+    window.localStorage.setItem('retaliateai_live_demo_data', JSON.stringify(toSave));
+    try {
+      const ch = new BroadcastChannel('retaliateai-live-demo');
+      ch.postMessage({ type: 'UPDATE_DEMO_DATA' });
+      ch.close();
+    } catch (_e) {}
+    setDemoDataMsg('✓ Saved');
+    setTimeout(() => setDemoDataMsg(''), 2000);
+  }
+
   async function deleteTabRow(id) {
     if (!confirm('Delete this row?')) return;
     try {
@@ -1083,7 +1109,7 @@ export default function AdminV2() {
           </div>
 
           <p className="text-zinc-500 text-xs">
-            Edit the demo script as JSON. Each turn: <code className="text-zinc-400">{'{ "role": "coach" | "user", "content": "..." }'}</code>. Changes take effect when you open the demo page.
+            Edit the demo script as JSON. Each turn: <code className="text-zinc-400">{'{ "role": "coach" | "user", "content": "...", "stage": "wins" | "honest" | "tomorrow" | "commitment_checkin" (optional) }'}</code>. The stage field advances the progress bar when that turn plays.
           </p>
 
           {demoScriptMsg && (
@@ -1099,6 +1125,155 @@ export default function AdminV2() {
             rows={20}
             spellCheck={false}
           />
+        </div>
+
+        {/* Demo Data card */}
+        <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 sm:p-6 space-y-4">
+          <div className="flex items-center gap-2">
+            <Monitor className="w-4 h-4 text-emerald-400" />
+            <h3 className="text-white font-semibold text-base">Demo Data</h3>
+          </div>
+
+          {demoDataMsg && (
+            <div className="px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-sm text-zinc-300">
+              {demoDataMsg}
+            </div>
+          )}
+
+          {/* Commitment Score */}
+          <div className="space-y-1.5">
+            <label className="text-xs text-zinc-400">Commitment Score (0–100)</label>
+            <input
+              type="number"
+              min="0"
+              max="100"
+              value={demoData.commitmentScore}
+              onChange={(e) => setDemoData((d) => ({ ...d, commitmentScore: e.target.value }))}
+              className="w-full sm:max-w-[160px] bg-zinc-900 border border-zinc-700 text-white text-sm rounded-xl px-3 py-2 focus:outline-none focus:border-zinc-500 transition-colors block"
+            />
+          </div>
+
+          {/* Checklist Items */}
+          <div className="space-y-2">
+            <p className="text-xs text-zinc-400 font-medium">Checklist Items</p>
+            <div className="space-y-2">
+              {demoData.checklist.map((item, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={item.label}
+                    placeholder="Item label"
+                    onChange={(e) => {
+                      const label = e.target.value;
+                      setDemoData((d) => {
+                        const checklist = [...d.checklist];
+                        checklist[i] = { ...checklist[i], label };
+                        return { ...d, checklist };
+                      });
+                    }}
+                    className="flex-1 bg-zinc-900 border border-zinc-700 text-white text-sm rounded-xl px-3 py-2 focus:outline-none focus:border-zinc-500 transition-colors"
+                  />
+                  <button
+                    onClick={() => {
+                      setDemoData((d) => {
+                        const checklist = [...d.checklist];
+                        checklist[i] = { ...checklist[i], checked: !checklist[i].checked };
+                        return { ...d, checklist };
+                      });
+                    }}
+                    className="px-2 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-sm hover:bg-zinc-700 transition-colors flex-shrink-0"
+                    title="Toggle checked"
+                  >
+                    {item.checked ? '✅' : '⬜'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setDemoData((d) => {
+                        const checklist = d.checklist.filter((_, idx) => idx !== i);
+                        return { ...d, checklist };
+                      });
+                    }}
+                    className="p-2 rounded-lg text-zinc-600 hover:text-red-400 hover:bg-red-900/20 transition-colors flex-shrink-0"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <button
+              onClick={() => setDemoData((d) => ({ ...d, checklist: [...d.checklist, { label: '', checked: false }] }))}
+              className="text-xs text-zinc-400 hover:text-zinc-200 transition-colors px-3 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700"
+            >
+              + Add item
+            </button>
+          </div>
+
+          {/* Goals */}
+          <div className="space-y-2">
+            <p className="text-xs text-zinc-400 font-medium">Goals</p>
+            <div className="space-y-3">
+              {demoData.goals.map((goal, i) => (
+                <div key={i} className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 space-y-2">
+                  <div className="flex items-start gap-2">
+                    <div className="flex-1 space-y-2">
+                      <input
+                        type="text"
+                        value={goal.title}
+                        placeholder="Goal title"
+                        onChange={(e) => {
+                          const title = e.target.value;
+                          setDemoData((d) => {
+                            const goals = [...d.goals];
+                            goals[i] = { ...goals[i], title };
+                            return { ...d, goals };
+                          });
+                        }}
+                        className="w-full bg-zinc-800 border border-zinc-700 text-white text-sm rounded-xl px-3 py-2 focus:outline-none focus:border-zinc-500 transition-colors"
+                      />
+                      <input
+                        type="text"
+                        value={goal.why}
+                        placeholder="Why (reason)"
+                        onChange={(e) => {
+                          const why = e.target.value;
+                          setDemoData((d) => {
+                            const goals = [...d.goals];
+                            goals[i] = { ...goals[i], why };
+                            return { ...d, goals };
+                          });
+                        }}
+                        className="w-full bg-zinc-800 border border-zinc-700 text-white text-sm rounded-xl px-3 py-2 focus:outline-none focus:border-zinc-500 transition-colors"
+                      />
+                    </div>
+                    <button
+                      onClick={() => {
+                        setDemoData((d) => {
+                          const goals = d.goals.filter((_, idx) => idx !== i);
+                          return { ...d, goals };
+                        });
+                      }}
+                      className="p-2 rounded-lg text-zinc-600 hover:text-red-400 hover:bg-red-900/20 transition-colors flex-shrink-0 mt-1"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <button
+              onClick={() => setDemoData((d) => ({ ...d, goals: [...d.goals, { title: '', why: '' }] }))}
+              className="text-xs text-zinc-400 hover:text-zinc-200 transition-colors px-3 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700"
+            >
+              + Add goal
+            </button>
+          </div>
+
+          <button
+            onClick={() => saveDemoData(demoData)}
+            className="bg-red-600 hover:bg-red-700 text-white text-sm px-4 py-2 rounded-xl transition-colors"
+          >
+            Save Demo Data
+          </button>
         </div>
 
         {resultMsg && (

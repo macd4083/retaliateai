@@ -123,9 +123,65 @@ function normalizeScript(parsed) {
     .map((turn) => ({
       role: turn?.role === 'coach' ? 'coach' : turn?.role === 'user' ? 'user' : null,
       content: typeof turn?.content === 'string' ? turn.content : '',
+      stage: typeof turn?.stage === 'string' && turn.stage ? turn.stage : undefined,
     }))
     .filter((turn) => turn.role && turn.content);
   return normalized.length > 0 ? normalized : DEFAULT_DEMO_SCRIPT;
+}
+
+function DemoDataPanel({ demoData }) {
+  const hasChecklist = Array.isArray(demoData?.checklist) && demoData.checklist.length > 0;
+  const hasGoals = Array.isArray(demoData?.goals) && demoData.goals.length > 0;
+  const hasScore = demoData?.commitmentScore != null;
+
+  if (!hasChecklist && !hasGoals && !hasScore) return null;
+
+  return (
+    <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 space-y-4">
+      {hasScore && (
+        <div className="space-y-1">
+          <div className="text-4xl font-bold text-white">
+            {demoData.commitmentScore}<span className="text-xl text-zinc-400">/100</span>
+          </div>
+          <div className="text-xs text-zinc-400 uppercase tracking-wide">Commitment Score</div>
+        </div>
+      )}
+      {hasScore && (hasChecklist || hasGoals) && (
+        <div className="border-t border-zinc-800" />
+      )}
+      {hasChecklist && (
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Today&apos;s Checklist</p>
+          <ul className="space-y-1.5">
+            {demoData.checklist.map((item, i) => (
+              <li key={i} className="flex items-center gap-2 text-sm text-zinc-200">
+                <span>{item.checked ? '✅' : '⬜'}</span>
+                <span>{item.label}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {hasChecklist && hasGoals && (
+        <div className="border-t border-zinc-800" />
+      )}
+      {hasGoals && (
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Goals</p>
+          <div className="space-y-2">
+            {demoData.goals.map((goal, i) => (
+              <div key={i} className="space-y-0.5">
+                <p className="text-sm text-white font-medium">{goal.title}</p>
+                {goal.why && (
+                  <p className="text-xs text-zinc-400 italic">{goal.why}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function LiveDemo() {
@@ -143,6 +199,8 @@ export default function LiveDemo() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTurnIndex, setCurrentTurnIndex] = useState(0);
   const [isComplete, setIsComplete] = useState(false);
+  const [currentStage, setCurrentStage] = useState('wins');
+  const [demoData, setDemoData] = useState(null);
 
   const clearTimers = useCallback(() => {
     timeoutIdsRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
@@ -164,6 +222,7 @@ export default function LiveDemo() {
     setCurrentTurnIndex(0);
     setIsPlaying(false);
     setIsComplete(false);
+    setCurrentStage('wins');
   }, [clearTimers]);
 
   const startPlayback = useCallback(() => {
@@ -173,6 +232,7 @@ export default function LiveDemo() {
     setCurrentTurnIndex(0);
     setIsComplete(false);
     setIsPlaying(true);
+    setCurrentStage('wins');
   }, [clearTimers]);
 
   useEffect(() => {
@@ -214,6 +274,13 @@ export default function LiveDemo() {
   }, []);
 
   useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem('retaliateai_live_demo_data');
+      if (raw) setDemoData(JSON.parse(raw));
+    } catch (_e) {}
+  }, []);
+
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
@@ -234,6 +301,11 @@ export default function LiveDemo() {
         startPlayback();
       } else if (type === 'RESET') {
         resetPlayback();
+      } else if (type === 'UPDATE_DEMO_DATA') {
+        try {
+          const raw = window.localStorage.getItem('retaliateai_live_demo_data');
+          if (raw) setDemoData(JSON.parse(raw));
+        } catch (_e) {}
       }
     };
     return () => channel.close();
@@ -248,6 +320,10 @@ export default function LiveDemo() {
     }
 
     const turn = script[currentTurnIndex];
+
+    if (turn.stage) {
+      setCurrentStage(turn.stage);
+    }
 
     if (turn.role === 'coach') {
       const messageId = makeMessageId();
@@ -315,47 +391,59 @@ export default function LiveDemo() {
   if (!isAdmin) return null;
 
   return (
-    <AppShellV2 title="Live Demo">
-      <div className="flex flex-col h-full">
-        <div className="flex-shrink-0 border-b border-zinc-800 bg-zinc-950">
-          <ProgressBar currentStage={isComplete ? 'complete' : 'wins'} stages={BASE_STAGES} />
-        </div>
+    <AppShellV2 title="Nightly Reflection">
+      <div className="flex flex-col md:flex-row h-full">
+        <div className="flex-1 min-w-0 flex flex-col h-full">
+          <div className="flex-shrink-0 border-b border-zinc-800 bg-zinc-950">
+            <ProgressBar currentStage={isComplete ? 'complete' : currentStage} stages={BASE_STAGES} />
+          </div>
 
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.25 }}
-          className="flex-1 overflow-y-auto px-4 py-4"
-        >
-          {messages.map((message) => (
-            <ChatMessage key={message.id} message={message} />
-          ))}
-          <div ref={messagesEndRef} />
-        </motion.div>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.25 }}
+            className="flex-1 overflow-y-auto px-4 py-4"
+          >
+            {messages.map((message) => (
+              <ChatMessage key={message.id} message={message} />
+            ))}
+            <div ref={messagesEndRef} />
+          </motion.div>
 
-        <div className="flex-shrink-0 border-t border-zinc-800 bg-zinc-950 px-4 py-3">
-          <div className="space-y-2">
-            <div className="flex items-end gap-3">
-              <div className="flex-1">
-                <textarea
-                  ref={textareaRef}
-                  value={inputValue}
+          <div className="flex-shrink-0 border-t border-zinc-800 bg-zinc-950 px-4 py-3">
+            <div className="space-y-2">
+              <div className="flex items-end gap-3">
+                <div className="flex-1">
+                  <textarea
+                    ref={textareaRef}
+                    value={inputValue}
+                    disabled
+                    placeholder="How are you feeling tonight?"
+                    rows={1}
+                    className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-500 resize-none focus:outline-none focus:border-zinc-500 transition-colors"
+                    style={{ minHeight: '44px', maxHeight: '120px' }}
+                  />
+                </div>
+                <button
                   disabled
-                  placeholder="How are you feeling tonight?"
-                  rows={1}
-                  className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-500 resize-none focus:outline-none focus:border-zinc-500 transition-colors"
-                  style={{ minHeight: '44px', maxHeight: '120px' }}
-                />
+                  className="w-10 h-10 rounded-xl bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center flex-shrink-0"
+                >
+                  <Send className="w-4 h-4 text-white" />
+                </button>
               </div>
-              <button
-                disabled
-                className="w-10 h-10 rounded-xl bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center flex-shrink-0"
-              >
-                <Send className="w-4 h-4 text-white" />
-              </button>
             </div>
           </div>
         </div>
+
+        {demoData && (
+          (Array.isArray(demoData.checklist) && demoData.checklist.length > 0) ||
+          (Array.isArray(demoData.goals) && demoData.goals.length > 0) ||
+          demoData.commitmentScore != null
+        ) && (
+          <div className="w-72 flex-shrink-0 overflow-y-auto p-4 border-l border-zinc-800">
+            <DemoDataPanel demoData={demoData} />
+          </div>
+        )}
       </div>
     </AppShellV2>
   );
