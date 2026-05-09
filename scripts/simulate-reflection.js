@@ -266,6 +266,7 @@ async function assertWhysContext(supabase, userId) {
  * @param {object} options       - Optional extra context for extended checks
  *   @param {string}  options.sampleUserMessage - A user message to run embedding/intent checks on
  *   @param {string}  options.commitmentText    - Commitment text for goal extraction
+ *   @param {string}  options.commitmentMinimumText - Minimum commitment text (used for skip diagnostics)
  *   @param {Array}   options.sampleGoals       - Active goal stubs [{ id, title, category }]
  *   @param {string}  options.sessionId         - Current session ID
  * @returns {Promise<object>} - backend_state object for the session record
@@ -437,7 +438,14 @@ async function validateBackend(supabase, userId, simulatedDate, prevGoalWhysCoun
       ? 'no commitment text'
       : 'no active goals passed';
     console.log(`    ⏭️  extract-goal-commitments skipped (${reason})`);
-    backendState.extract_commitments_check = { count: 0, passed: false, skipped: true, reason };
+    backendState.extract_commitments_check = {
+      count: 0,
+      passed: false,
+      skipped: true,
+      reason,
+      commitment_minimum_present: !!options.commitmentMinimumText,
+      tomorrow_commitment_present: !!options.commitmentText,
+    };
   }
 
   // 7. Goal commitment stats (always runs — needs only user_id)
@@ -2089,7 +2097,8 @@ async function runFullCoverageTest({ personaKey, startDate, clean }) {
       supabase, userId, simulatedDate, crossSessionState.prevGoalWhysCounts,
       {
         sampleUserMessage: sampleUserMsg,
-        commitmentText: sessionState.tomorrow_commitment,
+        commitmentText: sessionState.tomorrow_commitment ?? sessionState.commitment_minimum ?? null,
+        commitmentMinimumText: sessionState.commitment_minimum ?? null,
         sampleGoals: sessionGoals,
         sessionId,
       }
@@ -2610,6 +2619,7 @@ async function main() {
       scenario,
       dry_run: dryRun,
       record_only: recordOnly,
+      quality_scoring_mode: recordOnly ? 'why_deepening_only' : 'full',
       pre_run_profile_snapshot: null,
       clean_result: null,
     },
@@ -3029,33 +3039,33 @@ async function main() {
       printCoach(coachMsg);
 
       let quality = null;
-      if (!recordOnly) {
-        // Score the coach message (including why-deepening quality)
-        quality = await scoreCoachMessage({
-          persona,
-          userProfile: persona.profile,
-          currentStage: sessionState.current_stage,
-          turnNumber: turn,
-          previousUserMessage: prevUserMsg,
-          coachMessage: coachMsg,
-          goalWhys: sessionGoalWhys,
-          stageAdvanced,
-        });
+      // Always score why-deepening quality, even in --record-only mode
+      quality = await scoreCoachMessage({
+        persona,
+        userProfile: persona.profile,
+        currentStage: sessionState.current_stage,
+        turnNumber: turn,
+        previousUserMessage: prevUserMsg,
+        coachMessage: coachMsg,
+        goalWhys: sessionGoalWhys,
+        stageAdvanced,
+      });
 
+      if (!recordOnly) {
         printQuality(quality);
 
         sessionQualityScores.push(quality.score);
         totalQualityScores.push(quality.score);
 
-        if (quality.why_deepening_quality != null) {
-          sessionWhyDeepeningScores.push(quality.why_deepening_quality);
-          totalWhyDeepeningScores.push(quality.why_deepening_quality);
-        }
-
         // Track flags globally
         for (const flag of quality.flags) {
           report.summary.flags_by_type[flag] = (report.summary.flags_by_type[flag] || 0) + 1;
         }
+      }
+
+      if (quality.why_deepening_quality != null) {
+        sessionWhyDeepeningScores.push(quality.why_deepening_quality);
+        totalWhyDeepeningScores.push(quality.why_deepening_quality);
       }
 
       const honestForwardActionScan = detectHonestForwardActionLeak(stageAtTurnStart, coachMsg);
@@ -3191,7 +3201,8 @@ async function main() {
     } catch (err) { console.warn(`    ⚠️  live goals fetch failed: ${err.message}`); }
     const backendState = await validateBackend(supabase, userId, simulatedDate, crossSessionState.prevGoalWhysCounts, {
       sampleUserMessage: history.filter(m => m.role === 'user').slice(-1)[0]?.content ?? '',
-      commitmentText: sessionState.tomorrow_commitment ?? null,
+      commitmentText: sessionState.tomorrow_commitment ?? sessionState.commitment_minimum ?? null,
+      commitmentMinimumText: sessionState.commitment_minimum ?? null,
       sampleGoals: sessionGoalsForExtraction,
       sessionId: sessionId,
     });
@@ -3329,6 +3340,9 @@ async function main() {
       personaName: persona.name,
     });
 
+    traitDetectionResult.impaired_by_stage_bug = report.sessions.every(
+      (session) => !session.stage_sequence.includes('honest'),
+    );
     report.trait_detection = traitDetectionResult;
 
     // Log results to terminal
