@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Database, Trash2, ChevronDown, ChevronRight, RefreshCw, Play, Video, WandSparkles, Pencil } from 'lucide-react';
+import { Database, Trash2, ChevronDown, ChevronRight, RefreshCw, Play, Video, WandSparkles, Pencil, Monitor } from 'lucide-react';
 import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase/client';
 import { localDateStr } from '../lib/dateUtils';
@@ -13,6 +13,25 @@ const MAX_WHYS_TOTAL = 5;
 const MAX_SESSION_WHYS = 3;
 const MAX_COMMITMENT_WHYS = 1;
 const MAX_WHY_PROBE_WHYS = 2;
+const DEFAULT_DEMO_SCRIPT_FOR_EDITOR = [
+  { role: 'coach', content: 'Hey — how are you feeling tonight?' },
+  { role: 'user', content: 'honestly pretty decent. had a solid day' },
+  { role: 'coach', content: 'Nice. What made it solid?' },
+  { role: 'user', content: 'I finally got back to working on my app after like 2 weeks of avoiding it. got a decent chunk done' },
+  { role: 'coach', content: 'Two weeks of avoiding it and you got back in. What broke the pattern today?' },
+  { role: 'user', content: 'idk I just told myself to do 20 minutes and it turned into 2 hours' },
+  { role: 'coach', content: "That's the move. What else went well?" },
+  { role: 'user', content: 'not much else honestly. rest of the day was pretty meh' },
+  { role: 'coach', content: "Okay. Is there a part of today you're being honest with yourself about — something that didn't go the way it should have?" },
+  { role: 'user', content: "yeah. I said I'd reach out to 3 potential users this week. haven't done any of it" },
+  { role: 'coach', content: "What's actually in the way — not the surface reason, but what's underneath it?" },
+  { role: 'user', content: "I think I'm scared they'll say the idea is bad. like as long as I don't ask I can still tell myself it might work" },
+  { role: 'coach', content: "That's the real one. Avoiding feedback is protecting the idea more than building it. What's the minimum you're committing to tomorrow — not what you hope to do, what you will do?" },
+  { role: 'user', content: "one user conversation. I'll message two people tonight so it's already in motion" },
+  { role: 'coach', content: "That's a real commitment. Which goal does that connect to most?" },
+  { role: 'user', content: "building something people actually want. I can't know that without talking to them" },
+  { role: 'coach', content: "Exactly. You already know what needs to happen — tonight you're making sure tomorrow it does. Good session." },
+];
 
 async function adminFetch(body) {
   let accessToken = null;
@@ -389,6 +408,8 @@ export default function AdminV2() {
   const [whySaving, setWhySaving] = useState({});
   const [whySaved, setWhySaved] = useState({});
   const [goalLinkSaved, setGoalLinkSaved] = useState({});
+  const [demoScript, setDemoScript] = useState('');
+  const [demoScriptMsg, setDemoScriptMsg] = useState('');
 
   // todayStr uses local time getters (not UTC) so the date matches the user's timezone.
   const todayStr = localDateStr();
@@ -428,6 +449,16 @@ export default function AdminV2() {
       loadActiveGoals();
     }
   }, [isAdmin]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const saved = window.localStorage.getItem('retaliateai_live_demo_script');
+    if (saved) {
+      setDemoScript(saved);
+      return;
+    }
+    setDemoScript(JSON.stringify(DEFAULT_DEMO_SCRIPT_FOR_EDITOR, null, 2));
+  }, []);
 
   // ── Load tab data when tab changes ────────────────────────────────────────
 
@@ -1004,6 +1035,13 @@ export default function AdminV2() {
             <Video className="w-4 h-4 text-blue-400" />
             Video Export
           </button>
+          <button
+            onClick={() => navigate('/admin/live-demo')}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 hover:text-white text-sm transition-colors"
+          >
+            <Monitor className="w-4 h-4 text-emerald-400" />
+            Live Demo
+          </button>
         </div>
 
         <AdminToolsNav />
@@ -1346,6 +1384,67 @@ export default function AdminV2() {
               })}
             </div>
           )}
+        </div>
+
+        <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 sm:p-6 space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Monitor className="w-4 h-4 text-emerald-400" />
+              <h3 className="text-white font-semibold text-base">Live Demo Script</h3>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => navigate('/admin/live-demo')}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-900/40 border border-emerald-800 text-emerald-300 hover:bg-emerald-900 text-sm transition-colors"
+              >
+                <Monitor className="w-3.5 h-3.5" />
+                Open Demo
+              </button>
+              <button
+                onClick={() => {
+                  try {
+                    JSON.parse(demoScript);
+                    window.localStorage.setItem('retaliateai_live_demo_script', demoScript);
+                    setDemoScriptMsg('✓ Script saved');
+                    setTimeout(() => setDemoScriptMsg(''), 2000);
+                  } catch (_e) {
+                    setDemoScriptMsg('⚠ Invalid JSON — fix errors before saving');
+                  }
+                }}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 text-sm transition-colors"
+              >
+                Save Script
+              </button>
+              <button
+                onClick={() => {
+                  setDemoScript(JSON.stringify(DEFAULT_DEMO_SCRIPT_FOR_EDITOR, null, 2));
+                  setDemoScriptMsg('Reset to default');
+                  setTimeout(() => setDemoScriptMsg(''), 2000);
+                }}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-400 hover:bg-zinc-700 text-sm transition-colors"
+              >
+                Reset Default
+              </button>
+            </div>
+          </div>
+
+          <p className="text-zinc-500 text-xs">
+            Edit the demo script as JSON. Each turn: <code className="text-zinc-400">{'{ "role": "coach" | "user", "content": "..." }'}</code>. Changes take effect when you open the demo page.
+          </p>
+
+          {demoScriptMsg && (
+            <div className="px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-sm text-zinc-300">
+              {demoScriptMsg}
+            </div>
+          )}
+
+          <textarea
+            value={demoScript}
+            onChange={(e) => setDemoScript(e.target.value)}
+            className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-xs text-zinc-200 font-mono resize-none focus:outline-none focus:border-zinc-500 transition-colors"
+            rows={20}
+            spellCheck={false}
+          />
         </div>
       </div>
     </AppShellV2>
