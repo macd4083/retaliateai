@@ -59,6 +59,25 @@ const ALL_EXERCISES = [
 // In 'mixed' scenario: probability of missing after keeping, and keeping after missing
 const MISS_AFTER_KEEP_PROBABILITY = 0.4;
 const KEEP_AFTER_MISS_PROBABILITY = 0.7;
+const HONEST_FORWARD_ACTION_PATTERNS = [
+  'small step',
+  'next step',
+  'what can you do',
+  'what will you do',
+  'how will you',
+  'what would you do differently',
+  "what's one thing you could do",
+  "what's one thing you can",
+  'align more with',
+  'moving forward',
+  'going forward',
+  'what would help you',
+  'action you can take',
+  'step you can take',
+  'step toward',
+  'plan for tomorrow',
+  'do tomorrow',
+];
 
 // ── Parse CLI args ─────────────────────────────────────────────────────────────
 function parseArgs() {
@@ -75,6 +94,7 @@ function parseArgs() {
     scenario: 'mixed',     // 'kept_streak' | 'miss_streak' | 'mixed' | 'cold_start'
     dryRun: false,
     reportPath: null,      // custom output path for report JSON
+    recordOnly: false,
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -89,6 +109,7 @@ function parseArgs() {
     else if (args[i] === '--scenario' && args[i + 1]) result.scenario = args[++i];
     else if (args[i] === '--dry-run') result.dryRun = true;
     else if (args[i] === '--report-path' && args[i + 1]) result.reportPath = args[++i];
+    else if (args[i] === '--record-only') result.recordOnly = true;
   }
 
   // Validate scenario
@@ -109,6 +130,22 @@ function parseArgs() {
   }
 
   return result;
+}
+
+function scanHonestForwardActionLeak(stage, coachMsg) {
+  if (stage !== 'honest' || !coachMsg) {
+    return { honest_forward_action_leak: false, honest_forward_action_flags: [] };
+  }
+
+  const coachMsgLower = coachMsg.toLowerCase();
+  const matchedPatterns = HONEST_FORWARD_ACTION_PATTERNS.filter((pattern) => coachMsgLower.includes(pattern));
+
+  return {
+    honest_forward_action_leak: matchedPatterns.length > 0,
+    honest_forward_action_flags: matchedPatterns.map(
+      (pattern) => `HONEST_FORWARD_ACTION_LEAK: matched pattern '${pattern}'`,
+    ),
+  };
 }
 
 // ── Array shuffle utility (Fisher-Yates) ─────────────────────────────────────
@@ -1014,6 +1051,7 @@ async function runWhyBuildingTest({ personaKey, startDate, clean }) {
     };
 
     // INIT
+    const initStageAtTurnStart = sessionState.current_stage;
     const initResult = await callCoach({
       user_id: userId,
       session_id: sessionId,
@@ -2473,7 +2511,20 @@ async function assertWeekFromReport(weekNumber) {
 
 // ── Main simulation ────────────────────────────────────────────────────────────
 async function main() {
-  const { days, startDate, persona: personaKey, clean, testWhyBuilding, testGoalSuggestion, testFullCoverage, assertWeek, scenario, dryRun, reportPath } = parseArgs();
+  const {
+    days,
+    startDate,
+    persona: personaKey,
+    clean,
+    testWhyBuilding,
+    testGoalSuggestion,
+    testFullCoverage,
+    assertWeek,
+    scenario,
+    dryRun,
+    reportPath,
+    recordOnly,
+  } = parseArgs();
 
   // Resolve final report output path
   const REPORT_PATH = reportPath ?? DEFAULT_REPORT_PATH;
@@ -2554,6 +2605,7 @@ async function main() {
       clean: clean,
       scenario,
       dry_run: dryRun,
+      record_only: recordOnly,
       pre_run_profile_snapshot: null,
       clean_result: null,
     },
@@ -2691,10 +2743,16 @@ async function main() {
       current_stage: 'wins',
       checklist: { wins: false, honest: false, plan: false, identity: false },
       tomorrow_commitment: null,
+      commitment_minimum: null,
+      commitment_stretch: null,
       exercises_run: [],
       consecutive_excuses: 0,
       is_complete: false,
       commitment_checkin_done: false,
+      honest_depth: false,
+      wins_asked_for_more: false,
+      directive_queue: [],
+      completed_directives: [],
       yesterday_commitment_in_state: crossSessionState.yesterdayCommitment !== null && scenario !== 'cold_start',
     };
 
@@ -2718,6 +2776,8 @@ async function main() {
       stage_sequence: [],
       anomalies: [],
       conversation: [],
+      stage_transitions: [],
+      session_summary: null,
       backend_state: null,
       goals_why_snapshot: [],
     };
@@ -2756,17 +2816,51 @@ async function main() {
     if (initResult.checklist_updates) {
       sessionState.checklist = { ...sessionState.checklist, ...initResult.checklist_updates };
     }
+    if (initResult.extracted_data?.tomorrow_commitment) {
+      sessionState.tomorrow_commitment = initResult.extracted_data.tomorrow_commitment;
+    }
+    if (initResult.extracted_data?.commitment_minimum || initResult.commitment_minimum) {
+      sessionState.commitment_minimum = initResult.extracted_data?.commitment_minimum || initResult.commitment_minimum;
+    }
+    if (initResult.extracted_data?.commitment_stretch || initResult.commitment_stretch) {
+      sessionState.commitment_stretch = initResult.extracted_data?.commitment_stretch || initResult.commitment_stretch;
+    }
     if (initResult.exercise_run && initResult.exercise_run !== 'none') {
       sessionState.exercises_run = [...sessionState.exercises_run, initResult.exercise_run];
     }
     if (typeof initResult.consecutive_excuses === 'number') {
       sessionState.consecutive_excuses = initResult.consecutive_excuses;
     }
+    if (initResult.honest_depth === true) {
+      sessionState.honest_depth = true;
+    }
+    if (initResult.wins_asked_for_more === true) {
+      sessionState.wins_asked_for_more = true;
+    }
+    if (Array.isArray(initResult.directive_queue)) {
+      sessionState.directive_queue = [...initResult.directive_queue];
+    }
+    if (Array.isArray(initResult.completed_directives)) {
+      sessionState.completed_directives = [...initResult.completed_directives];
+    }
     if (initResult.commitment_checkin_done === true) {
       sessionState.commitment_checkin_done = true;
     }
     if (initResult.is_session_complete) {
       sessionState.is_complete = true;
+    }
+
+    if (initResult.stage_advance === true && initResult.new_stage) {
+      sessionRecord.stage_transitions.push({
+        turn: 0,
+        from_stage: initStageAtTurnStart,
+        to_stage: initResult.new_stage,
+        user_message: '__INIT__',
+        coach_message: initCoachMsg,
+        directive_completed: initResult.directive_completed || null,
+        honest_depth_at_transition: sessionState.honest_depth === true,
+        checklist_at_transition: { ...sessionState.checklist },
+      });
     }
 
     history.push({ role: 'assistant', content: initCoachMsg });
@@ -2827,6 +2921,7 @@ async function main() {
       history.push({ role: 'user', content: userMsg });
 
       // Call the coach
+      const stageAtTurnStart = sessionState.current_stage;
       const result = await callCoach({
         user_id: userId,
         session_id: sessionId,
@@ -2850,7 +2945,7 @@ async function main() {
       }
 
       const prevUserMsg = userMsg;
-      const prevStage = sessionState.current_stage;
+      const prevStage = stageAtTurnStart;
       const stageAdvanced = !!(result.stage_advance && result.new_stage);
 
       // Update session state
@@ -2864,6 +2959,12 @@ async function main() {
       if (result.extracted_data?.tomorrow_commitment) {
         sessionState.tomorrow_commitment = result.extracted_data.tomorrow_commitment;
       }
+      if (result.extracted_data?.commitment_minimum || result.commitment_minimum) {
+        sessionState.commitment_minimum = result.extracted_data?.commitment_minimum || result.commitment_minimum;
+      }
+      if (result.extracted_data?.commitment_stretch || result.commitment_stretch) {
+        sessionState.commitment_stretch = result.extracted_data?.commitment_stretch || result.commitment_stretch;
+      }
       if (result.exercise_run && result.exercise_run !== 'none') {
         if (!sessionState.exercises_run.includes(result.exercise_run)) {
           sessionState.exercises_run = [...sessionState.exercises_run, result.exercise_run];
@@ -2872,11 +2973,36 @@ async function main() {
       if (typeof result.consecutive_excuses === 'number') {
         sessionState.consecutive_excuses = result.consecutive_excuses;
       }
+      if (result.honest_depth === true) {
+        sessionState.honest_depth = true;
+      }
+      if (result.wins_asked_for_more === true) {
+        sessionState.wins_asked_for_more = true;
+      }
+      if (Array.isArray(result.directive_queue)) {
+        sessionState.directive_queue = [...result.directive_queue];
+      }
+      if (Array.isArray(result.completed_directives)) {
+        sessionState.completed_directives = [...result.completed_directives];
+      }
       if (result.commitment_checkin_done === true) {
         sessionState.commitment_checkin_done = true;
       }
       if (result.is_session_complete) {
         sessionState.is_complete = true;
+      }
+
+      if (result.stage_advance === true && result.new_stage) {
+        sessionRecord.stage_transitions.push({
+          turn,
+          from_stage: stageAtTurnStart,
+          to_stage: result.new_stage,
+          user_message: userMsg,
+          coach_message: coachMsg,
+          directive_completed: result.directive_completed || null,
+          honest_depth_at_transition: sessionState.honest_depth === true,
+          checklist_at_transition: { ...sessionState.checklist },
+        });
       }
 
       // Track commitment_checkin stage appearances
@@ -2891,44 +3017,68 @@ async function main() {
 
       printCoach(coachMsg);
 
-      // Score the coach message (including why-deepening quality)
-      const quality = await scoreCoachMessage({
-        persona,
-        userProfile: persona.profile,
-        currentStage: sessionState.current_stage,
-        turnNumber: turn,
-        previousUserMessage: prevUserMsg,
-        coachMessage: coachMsg,
-        goalWhys: sessionGoalWhys,
-        stageAdvanced,
-      });
+      let quality = null;
+      if (!recordOnly) {
+        // Score the coach message (including why-deepening quality)
+        quality = await scoreCoachMessage({
+          persona,
+          userProfile: persona.profile,
+          currentStage: sessionState.current_stage,
+          turnNumber: turn,
+          previousUserMessage: prevUserMsg,
+          coachMessage: coachMsg,
+          goalWhys: sessionGoalWhys,
+          stageAdvanced,
+        });
 
-      printQuality(quality);
+        printQuality(quality);
 
-      sessionQualityScores.push(quality.score);
-      totalQualityScores.push(quality.score);
+        sessionQualityScores.push(quality.score);
+        totalQualityScores.push(quality.score);
 
-      if (quality.why_deepening_quality != null) {
-        sessionWhyDeepeningScores.push(quality.why_deepening_quality);
-        totalWhyDeepeningScores.push(quality.why_deepening_quality);
+        if (quality.why_deepening_quality != null) {
+          sessionWhyDeepeningScores.push(quality.why_deepening_quality);
+          totalWhyDeepeningScores.push(quality.why_deepening_quality);
+        }
+
+        // Track flags globally
+        for (const flag of quality.flags) {
+          report.summary.flags_by_type[flag] = (report.summary.flags_by_type[flag] || 0) + 1;
+        }
       }
 
-      // Track flags globally
-      for (const flag of quality.flags) {
-        report.summary.flags_by_type[flag] = (report.summary.flags_by_type[flag] || 0) + 1;
-      }
+      const honestForwardActionScan = scanHonestForwardActionLeak(stageAtTurnStart, coachMsg);
 
       const conversationEntry = {
         turn,
+        stage: stageAtTurnStart,
+        stage_after: sessionState.current_stage,
+        stage_advanced: result.stage_advance === true,
+        new_stage: result.new_stage || null,
+        active_directive_id: result.active_directive?.id || null,
+        directive_completed: result.directive_completed || null,
+        directive_queue_size: result.directive_queue?.length ?? null,
+        completed_directives_snapshot: Array.isArray(result.completed_directives) ? [...result.completed_directives] : [],
+        checklist_after: { ...sessionState.checklist },
+        honest_depth: result.honest_depth === true || sessionState.honest_depth === true,
+        wins_asked_for_more: result.wins_asked_for_more === true || sessionState.wins_asked_for_more === true,
+        commitment_checkin_done: result.commitment_checkin_done === true,
+        commitment_minimum: result.extracted_data?.commitment_minimum || sessionState.commitment_minimum || null,
+        commitment_stretch: result.extracted_data?.commitment_stretch || sessionState.commitment_stretch || null,
+        tomorrow_commitment: result.extracted_data?.tomorrow_commitment || sessionState.tomorrow_commitment || null,
         coach: coachMsg,
         user: userMsg,
-        quality,
+        honest_forward_action_leak: honestForwardActionScan.honest_forward_action_leak,
+        honest_forward_action_flags: honestForwardActionScan.honest_forward_action_flags,
       };
+      if (quality) {
+        conversationEntry.quality = quality;
+      }
       sessionRecord.conversation.push(conversationEntry);
       report.summary.total_turns++;
 
       // Flag low quality messages for review
-      if (quality.score <= 2 || quality.flags.length > 0) {
+      if (quality && (quality.score <= 2 || quality.flags.length > 0)) {
         report.flagged_for_review.push({
           date: simulatedDate,
           turn,
@@ -2967,6 +3117,35 @@ async function main() {
     const sessionAvgWhyQuality = sessionWhyDeepeningScores.length > 0
       ? Math.round((sessionWhyDeepeningScores.reduce((a, b) => a + b, 0) / sessionWhyDeepeningScores.length) * 100) / 100
       : null;
+    sessionRecord.session_summary = {
+      total_turns: turn,
+      stage_sequence: [...stageSequence],
+      stage_transitions: sessionRecord.stage_transitions,
+      honest_stage_turns: sessionRecord.conversation.filter((entry) => entry.stage === 'honest').length,
+      tomorrow_stage_turns: sessionRecord.conversation.filter((entry) => entry.stage === 'tomorrow').length,
+      honest_forward_action_violations: sessionRecord.conversation.filter((entry) => entry.honest_forward_action_leak).length,
+      honest_forward_action_details: sessionRecord.conversation
+        .filter((entry) => entry.honest_forward_action_leak)
+        .map((entry) => ({ turn: entry.turn, coach: entry.coach, flags: entry.honest_forward_action_flags })),
+      first_tomorrow_message: sessionRecord.conversation.find((entry) => entry.stage === 'tomorrow')?.coach || null,
+      first_tomorrow_turn: sessionRecord.conversation.find((entry) => entry.stage === 'tomorrow')?.turn || null,
+      honest_to_tomorrow_transition: sessionRecord.stage_transitions.find(
+        (transition) => transition.from_stage === 'honest' && transition.to_stage === 'tomorrow',
+      ) || null,
+      honest_depth_before_tomorrow: (() => {
+        const transition = sessionRecord.stage_transitions.find(
+          (item) => item.from_stage === 'honest' && item.to_stage === 'tomorrow',
+        );
+        return transition ? transition.honest_depth_at_transition : null;
+      })(),
+      directives_fired: sessionRecord.conversation
+        .filter((entry) => entry.directive_completed)
+        .map((entry) => ({ turn: entry.turn, stage: entry.stage, directive: entry.directive_completed })),
+      is_complete: sessionState.is_complete,
+      commitment_minimum: sessionState.commitment_minimum || null,
+      commitment_stretch: sessionState.commitment_stretch || null,
+      tomorrow_commitment: sessionState.tomorrow_commitment || null,
+    };
 
     // Update cross-session state for the next day
     crossSessionState.yesterdayCommitment = sessionState.tomorrow_commitment ?? null;
