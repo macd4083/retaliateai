@@ -110,10 +110,11 @@ function PaymentMethodForm({ userId, getAuthHeaders, onUpdated }) {
       if (result.error) throw new Error(result.error.message || 'Failed to create payment method');
 
       const headers = await getAuthHeaders();
-      const response = await fetch('/api/stripe-update-payment', {
+      const response = await fetch('/api/stripe', {
         method: 'POST',
         headers: { ...headers, 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          action: 'update-payment',
           user_id: userId,
           payment_method_id: result.paymentMethod.id,
         }),
@@ -234,10 +235,11 @@ export default function SettingsV2() {
     setCheckoutLoading(true);
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch('/api/stripe-checkout', {
+      const response = await fetch('/api/stripe', {
         method: 'POST',
         headers: { ...headers, 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          action: 'checkout',
           user_id: user.id,
           email: user.email,
           display_name: profile?.display_name || profile?.full_name || '',
@@ -258,10 +260,10 @@ export default function SettingsV2() {
     setCancelLoading(true);
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch('/api/stripe-cancel', {
+      const response = await fetch('/api/stripe', {
         method: 'POST',
         headers: { ...headers, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user.id }),
+        body: JSON.stringify({ action: 'cancel', user_id: user.id }),
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload?.error || 'Failed to cancel subscription');
@@ -280,7 +282,7 @@ export default function SettingsV2() {
     setInvoicesLoading(true);
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch(`/api/stripe-invoices?user_id=${encodeURIComponent(user.id)}`, {
+      const response = await fetch(`/api/stripe?action=invoices&user_id=${encodeURIComponent(user.id)}`, {
         headers,
       });
       const payload = await response.json();
