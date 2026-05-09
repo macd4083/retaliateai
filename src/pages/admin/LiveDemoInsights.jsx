@@ -1,35 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../../lib/AuthContext';
-import { supabase } from '../../lib/supabase/client';
 import AppShellV2 from '../../components/v2/AppShellV2';
-
-const DEMO_DATA_KEY = 'retaliateai_live_demo_data';
-const DEMO_SCRIPT_KEY = 'retaliateai_live_demo_script';
-const CHANNEL_NAME = 'retaliateai-live-demo';
-
-function readDemoData() {
-  try {
-    const raw = window.localStorage.getItem(DEMO_DATA_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
-
-function readChecklistFromScript() {
-  try {
-    const raw = window.localStorage.getItem(DEMO_SCRIPT_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Array.isArray(parsed.turns)) {
-      return Array.isArray(parsed.checklist) ? parsed.checklist : [];
-    }
-    return [];
-  } catch {
-    return [];
-  }
-}
+import {
+  LIVE_DEMO_CHANNEL_NAME,
+  buildLiveDemoChecklist,
+  readLiveDemoData,
+  readLiveDemoScript,
+} from '../../lib/liveDemo';
 
 function scoreLabel(score) {
   if (score >= 80) return 'Strong commitment follow-through';
@@ -39,50 +15,24 @@ function scoreLabel(score) {
 }
 
 export default function LiveDemoInsights() {
-  const auth = /** @type {any} */ (useAuth());
-  const user = auth?.user;
-  const navigate = useNavigate();
-
-  const [isAdmin, setIsAdmin] = useState(null);
-  const [demoData, setDemoData] = useState(null);
+  const [demoData, setDemoData] = useState(readLiveDemoData());
   const [checklist, setChecklist] = useState([]);
 
-  // Admin guard
   useEffect(() => {
-    if (!user?.id) return;
-    supabase
-      .from('user_profiles')
-      .select('role')
-      .eq('id', user.id)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (data?.role === 'admin') {
-          setIsAdmin(true);
-        } else {
-          setIsAdmin(false);
-          navigate('/reflection', { replace: true });
-        }
-      })
-      .catch(() => {
-        setIsAdmin(false);
-        navigate('/reflection', { replace: true });
-      });
-  }, [user?.id]);
-
-  // Load initial data from localStorage
-  useEffect(() => {
-    setDemoData(readDemoData());
-    setChecklist(readChecklistFromScript());
+    const nextScript = readLiveDemoScript();
+    setDemoData(readLiveDemoData());
+    setChecklist(buildLiveDemoChecklist(nextScript, nextScript.turns.length));
   }, []);
 
-  // BroadcastChannel listener
   useEffect(() => {
     let channel;
     try {
-      channel = new BroadcastChannel(CHANNEL_NAME);
+      channel = new BroadcastChannel(LIVE_DEMO_CHANNEL_NAME);
       channel.onmessage = (e) => {
-        if (e.data?.type === 'UPDATE_DEMO_DATA') {
-          setDemoData(readDemoData());
+        if (e.data?.type === 'UPDATE_DEMO_DATA' || e.data?.type === 'UPDATE_DEMO_SCRIPT') {
+          const nextScript = readLiveDemoScript();
+          setDemoData(readLiveDemoData());
+          setChecklist(buildLiveDemoChecklist(nextScript, nextScript.turns.length));
         }
       };
     } catch {
@@ -93,29 +43,19 @@ export default function LiveDemoInsights() {
     };
   }, []);
 
-  if (isAdmin === null) {
-    return (
-      <div className="flex items-center justify-center h-screen bg-zinc-950">
-        <div className="w-8 h-8 border-2 border-zinc-700 border-t-red-500 rounded-full animate-spin" />
-      </div>
-    );
-  }
-
-  if (!isAdmin) return null;
-
   const goals = Array.isArray(demoData?.goals) ? demoData.goals : [];
   const commitmentScore = demoData?.commitmentScore ?? null;
 
   const hasData = commitmentScore !== null || checklist.length > 0 || goals.length > 0;
 
   return (
-    <AppShellV2 title="Insights">
+    <AppShellV2 title="Insights" shellMode="live-demo-user">
       <div className="h-full overflow-y-auto px-4 py-6 space-y-6">
 
         {!hasData && (
           <div className="flex flex-col items-center justify-center py-20 text-center gap-3">
-            <p className="text-zinc-400 text-sm">No demo data configured yet.</p>
-            <p className="text-zinc-500 text-xs">Go to Admin → Live Demo Script to set it up.</p>
+            <p className="text-zinc-400 text-sm">No demo insights available yet.</p>
+            <p className="text-zinc-500 text-xs">Add a score, goals, or scripted checklist items to preview the user experience.</p>
           </div>
         )}
 

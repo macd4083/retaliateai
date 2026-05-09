@@ -12,11 +12,22 @@ const NAV_LINKS = [
   { label: 'Settings', path: '/settings', icon: Settings },
 ];
 
-export default function AppShellV2({ title, children, adminAction = null }) {
+const LIVE_DEMO_USER_NAV_LINKS = [
+  { label: 'Reflection', path: '/admin/live-demo', icon: Moon },
+  { label: 'Insights', path: '/admin/live-demo/insights', icon: BarChart2 },
+];
+
+const LIVE_DEMO_USER_PROFILE = {
+  displayName: 'Alex',
+  email: 'alex@nightlyreflection.demo',
+};
+
+export default function AppShellV2({ title, children, adminAction = null, shellMode = 'default' }) {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, signOut } = useAuth();
   const isLiveDemo = location.pathname.startsWith('/admin/live-demo');
+  const isLiveDemoUserShell = shellMode === 'live-demo-user';
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminTimeOverride, setAdminTimeOverride] = useState(null);
@@ -28,6 +39,10 @@ export default function AppShellV2({ title, children, adminAction = null }) {
     user?.user_metadata?.full_name ||
     user?.email?.split('@')[0] ||
     'You';
+
+  const drawerDisplayName = isLiveDemoUserShell ? LIVE_DEMO_USER_PROFILE.displayName : displayName;
+  const drawerEmail = isLiveDemoUserShell ? LIVE_DEMO_USER_PROFILE.email : user?.email;
+  const drawerNavLinks = isLiveDemoUserShell ? LIVE_DEMO_USER_NAV_LINKS : NAV_LINKS;
 
   useEffect(() => {
     if (!user?.id) return;
@@ -90,7 +105,7 @@ export default function AppShellV2({ title, children, adminAction = null }) {
         {/* Right side actions */}
         <div className="flex-1 flex items-center justify-end gap-1">
           {adminAction && adminAction}
-          {!isLiveDemo && isInstallable && !isStandalone && (
+          {!isLiveDemo && !isLiveDemoUserShell && isInstallable && !isStandalone && (
             <div className="relative">
               <button
                 onClick={handleDownloadClick}
@@ -114,7 +129,7 @@ export default function AppShellV2({ title, children, adminAction = null }) {
               )}
             </div>
           )}
-          {!isLiveDemo && (
+          {!isLiveDemo && !isLiveDemoUserShell && (
             <button
               onClick={() => navigate('/settings')}
               className="w-9 h-9 flex items-center justify-center rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
@@ -160,15 +175,15 @@ export default function AppShellV2({ title, children, adminAction = null }) {
         {/* User info */}
         <div className="px-4 py-5 border-b border-zinc-800">
           <div className="w-10 h-10 rounded-full bg-red-700 flex items-center justify-center text-sm font-bold text-white mb-2">
-            {displayName[0]?.toUpperCase() || 'U'}
+            {drawerDisplayName[0]?.toUpperCase() || 'U'}
           </div>
-          <p className="text-white font-medium text-sm">{displayName}</p>
-          <p className="text-zinc-500 text-xs mt-0.5 truncate">{user?.email}</p>
+          <p className="text-white font-medium text-sm">{drawerDisplayName}</p>
+          <p className="text-zinc-500 text-xs mt-0.5 truncate">{drawerEmail}</p>
         </div>
 
         {/* Nav links */}
         <nav className="flex-1 px-3 py-4 space-y-1">
-          {isLiveDemo ? (
+          {!isLiveDemoUserShell && isLiveDemo ? (
             <button
               onClick={() => { navigate('/admin/live-demo/insights'); setDrawerOpen(false); }}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-colors ${
@@ -182,7 +197,7 @@ export default function AppShellV2({ title, children, adminAction = null }) {
             </button>
           ) : (
             <>
-              {NAV_LINKS.map(({ label, path, icon: Icon }) => {
+              {drawerNavLinks.map(({ label, path, icon: Icon }) => {
                 const isActive = location.pathname === path;
                 return (
                   <button
@@ -202,7 +217,7 @@ export default function AppShellV2({ title, children, adminAction = null }) {
                   </button>
                 );
               })}
-              {isAdmin && (
+              {!isLiveDemoUserShell && isAdmin && (
                 <button
                   onClick={() => {
                     navigate('/admin');
@@ -223,7 +238,7 @@ export default function AppShellV2({ title, children, adminAction = null }) {
           )}
         </nav>
 
-        {!isLiveDemo && isAdmin && (
+        {!isLiveDemo && !isLiveDemoUserShell && isAdmin && (
           <div className="px-3 pb-3">
             <p className="text-zinc-600 text-xs px-1 mb-1.5">Time Override</p>
             <div className="flex gap-1.5">
