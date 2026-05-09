@@ -55,7 +55,7 @@ export default function LiveDemoInsights() {
         {!hasData && (
           <div className="flex flex-col items-center justify-center py-20 text-center gap-3">
             <p className="text-zinc-400 text-sm">No demo insights available yet.</p>
-            <p className="text-zinc-500 text-xs">Add a score, goals, or scripted checklist items to preview the user experience.</p>
+            <p className="text-zinc-500 text-xs">Complete your reflection and set a few goals to see insights here.</p>
           </div>
         )}
 

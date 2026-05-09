@@ -9,6 +9,10 @@ export const LIVE_DEMO_STAGE_LABELS = {
   tomorrow: 'Tomorrow',
 };
 
+function isValidLiveDemoStage(stage) {
+  return typeof stage === 'string' && Boolean(LIVE_DEMO_STAGE_LABELS[stage]);
+}
+
 export const DEFAULT_LIVE_DEMO_SCRIPT = {
   checklist: [
     { label: 'Send two messages to potential users', checked: false },
@@ -94,7 +98,7 @@ export function normalizeLiveDemoScript(parsed) {
       .map((turn) => ({
         role: turn?.role === 'coach' ? 'coach' : turn?.role === 'user' ? 'user' : null,
         content: typeof turn?.content === 'string' ? turn.content : '',
-        stage: typeof turn?.stage === 'string' && LIVE_DEMO_STAGE_LABELS[turn.stage] ? turn.stage : undefined,
+        stage: isValidLiveDemoStage(turn?.stage) ? turn.stage : undefined,
         checkItem: turn?.checkItem,
       }))
       .filter((turn) => turn.role && turn.content);
@@ -110,7 +114,7 @@ export function normalizeLiveDemoScript(parsed) {
       .map((turn) => ({
         role: turn?.role === 'coach' ? 'coach' : turn?.role === 'user' ? 'user' : null,
         content: typeof turn?.content === 'string' ? turn.content : '',
-        stage: typeof turn?.stage === 'string' && LIVE_DEMO_STAGE_LABELS[turn.stage] ? turn.stage : undefined,
+        stage: isValidLiveDemoStage(turn?.stage) ? turn.stage : undefined,
         checkItem: turn?.checkItem,
       }))
       .filter((turn) => turn.role && turn.content);
