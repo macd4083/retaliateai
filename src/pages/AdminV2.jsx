@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Database, Trash2, ChevronDown, ChevronRight, RefreshCw, Play, Video, WandSparkles, Pencil, Monitor } from 'lucide-react';
 import { useAuth } from '../lib/AuthContext';
@@ -381,6 +381,7 @@ function SessionCard({ session, userId, onDelete, isToday }) {
 export default function AdminV2() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const liveDemoChannelRef = useRef(null);
 
   const [isAdmin, setIsAdmin] = useState(null); // null = loading
   const [activeTab, setActiveTab] = useState('sessions');
@@ -458,6 +459,15 @@ export default function AdminV2() {
       return;
     }
     setDemoScript(JSON.stringify(DEFAULT_DEMO_SCRIPT_FOR_EDITOR, null, 2));
+  }, []);
+
+  useEffect(() => {
+    if (typeof BroadcastChannel === 'undefined') return;
+    liveDemoChannelRef.current = new BroadcastChannel('retaliateai-live-demo');
+    return () => {
+      liveDemoChannelRef.current?.close();
+      liveDemoChannelRef.current = null;
+    };
   }, []);
 
   // ── Load tab data when tab changes ────────────────────────────────────────
@@ -1036,7 +1046,7 @@ export default function AdminV2() {
             Video Export
           </button>
           <button
-            onClick={() => navigate('/admin/live-demo')}
+            onClick={() => window.open('/admin/live-demo', '_blank')}
             className="flex items-center gap-2 px-4 py-2 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 hover:text-white text-sm transition-colors"
           >
             <Monitor className="w-4 h-4 text-emerald-400" />
@@ -1394,7 +1404,7 @@ export default function AdminV2() {
             </div>
             <div className="flex gap-2">
               <button
-                onClick={() => navigate('/admin/live-demo')}
+                onClick={() => window.open('/admin/live-demo', '_blank')}
                 className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-900/40 border border-emerald-800 text-emerald-300 hover:bg-emerald-900 text-sm transition-colors"
               >
                 <Monitor className="w-3.5 h-3.5" />
@@ -1426,6 +1436,22 @@ export default function AdminV2() {
                 Reset Default
               </button>
             </div>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => liveDemoChannelRef.current?.postMessage({ type: 'PLAY' })}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-700 text-white hover:bg-emerald-600 text-sm transition-colors"
+            >
+              ▶ Play Demo
+            </button>
+            <button
+              onClick={() => liveDemoChannelRef.current?.postMessage({ type: 'RESET' })}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 text-sm transition-colors"
+            >
+              ⏹ Reset Demo
+            </button>
+            <span className="text-zinc-500 text-xs">Controls the Live Demo tab if it's open in another window.</span>
           </div>
 
           <p className="text-zinc-500 text-xs">
