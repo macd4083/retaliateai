@@ -8,6 +8,7 @@ import SettingsV2 from './pages/SettingsV2';
 import OnboardingV2 from './pages/OnboardingV2';
 import AdminV2 from './pages/AdminV2';
 import LiveDemo from './pages/admin/LiveDemo';
+import LiveDemoInsights from './pages/admin/LiveDemoInsights';
 import Login from './pages/Login';
 import ResetPassword from './pages/ResetPassword';
 import EmailConfirmed from './pages/EmailConfirmed';
@@ -150,6 +151,14 @@ export default function App() {
         element={
           <AuthGuardV2>
             <LiveDemo />
+          </AuthGuardV2>
+        }
+      />
+      <Route
+        path="/admin/live-demo/insights"
+        element={
+          <AuthGuardV2>
+            <LiveDemoInsights />
           </AuthGuardV2>
         }
       />
