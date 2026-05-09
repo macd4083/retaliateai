@@ -642,6 +642,19 @@ const LOW_CHECKIN_SIGNAL_PATTERNS = [
   /\bflat\b/i,
   /\boff\b/i,
 ];
+const WINS_INTELLECTUAL_PATTERNS = [
+  /\bi want to research\b/i,
+  /\bi want to find the right\b/i,
+  /\bi want to make sure\b/i,
+  /\bi want to read more about\b/i,
+  /\bi want to dive into\b/i,
+];
+// Keep "win ... but ..." qualification detection local to one short user thought.
+const MAX_WIN_QUALIFIER_DISTANCE = 120;
+const WINS_VALIDATION_PATTERNS = [
+  new RegExp(`\\bi did\\b[\\s\\S]{0,${MAX_WIN_QUALIFIER_DISTANCE}}\\bbut\\b`, 'i'),
+  new RegExp(`\\bi\\b[\\s\\S]{0,${MAX_WIN_QUALIFIER_DISTANCE}}\\bbut i[' ]?m not sure\\b`, 'i'),
+];
 
 function hasLowCheckinSignal(message = '') {
   if (!message || typeof message !== 'string') return false;
@@ -1407,9 +1420,14 @@ function buildDirectiveQueue({
   const scoreTrajectory = scoreTrajectoryContext ?? commitmentStats?.scoreTrajectory ?? null;
   const mergedChecklist = { ...(sessionState.checklist || {}), ...(intentData?.checklist_content || {}) };
   const hasMissInSession = Array.isArray(sessionState.misses) && sessionState.misses.length > 0;
-  const lastUserMsg = Array.isArray(history) && history.length > 0
-    ? [...history].reverse().find((m) => m.role === 'user')
-    : null;
+  const findLastUserMessage = () => {
+    if (!Array.isArray(history) || history.length === 0) return null;
+    for (let i = history.length - 1; i >= 0; i -= 1) {
+      if (history[i]?.role === 'user') return history[i];
+    }
+    return null;
+  };
+  const lastUserMsg = findLastUserMessage();
   const lastUserText = (lastUserMsg?.content || '').trim();
   const lastUserTextLower = lastUserText.toLowerCase();
   const parsedCommitmentScore = Number(sessionState?.commitment_score);
@@ -1606,15 +1624,8 @@ Do NOT frame this as goal-specific unless the user is directly referencing a goa
   }
 
   // ── wins_trait_probe_intellectual_procrastination ───────────────────────
-  const winsIntellectualPatterns = [
-    /\bi want to research\b/i,
-    /\bi want to find the right\b/i,
-    /\bi want to make sure\b/i,
-    /\bi want to read more about\b/i,
-    /\bi want to dive into\b/i,
-  ];
   const hasWinsIntellectualSignal = currentStage === 'wins'
-    && winsIntellectualPatterns.some((pattern) => pattern.test(lastUserText));
+    && WINS_INTELLECTUAL_PATTERNS.some((pattern) => pattern.test(lastUserText));
   if (hasWinsIntellectualSignal) {
     allDirectives.push({
       id: 'wins_trait_probe_intellectual_procrastination',
@@ -1628,8 +1639,7 @@ Do NOT frame this as goal-specific unless the user is directly referencing a goa
 
   // ── wins_trait_probe_validation_treadmill ───────────────────────────────
   const hasWinsValidationSignal = currentStage === 'wins' && (
-    /\bi did\b[\s\S]{0,120}\bbut\b/i.test(lastUserText)
-    || /\bi\b[\s\S]{0,120}\bbut i[' ]?m not sure\b/i.test(lastUserText)
+    WINS_VALIDATION_PATTERNS.some((pattern) => pattern.test(lastUserText))
   );
   if (hasWinsValidationSignal) {
     allDirectives.push({
@@ -1746,7 +1756,7 @@ Do NOT frame this as goal-specific unless the user is directly referencing a goa
     })();
     allDirectives.push({
       id: 'honest_missing',
-      // NOTE: do NOT use forward-action language here — this fires in the 'honest' stage, not 'tomorrow'
+      // Note: avoid future-action prompts here; in honest stage they can trigger premature tomorrow pivots and skip honest_depth validation.
       instruction: `HONEST MISSING: Gently probe for a miss or honest moment with reflection-first questions. ${patternHint} Goal is self-awareness about TODAY and the underlying truth, not planning. Use prompts like: "What are you not saying yet?", "What's the real friction underneath this?", "What would you tell a friend in this situation?", or "Where does this pattern usually show up for you?" Keep it natural and grounded in their words. Never ask what they will do next, what plan they should make, or how they should act tomorrow in this stage. Once a miss is named, ask the one question that goes underneath it — what was actually happening underneath that surface behavior, not just what they did or didn't do. Do NOT set honest_depth: true until the user has genuinely answered the underneath layer. A surface answer is not enough. Evaluate qualitatively: is this a real answer about why it happened — the actual reason, the emotional truth, the internal conflict? If yes → set honest_depth: true. If no → ask the one question that goes there.${patternContext}${missedFragmentContext}`,
       priority: 2,
       preferred_stage: 'honest',
@@ -2344,7 +2354,8 @@ Set directive_completed: "${probeId}" when done.`,
       id: 'pattern_awareness',
       instruction: `PATTERN AWARENESS: The user's most recurring pattern is "${topInsight.pattern_label}" (${topInsight.sessions_synthesized_from || 0}x). If they say or do something that looks like this pattern — even obliquely — ask a question that helps them SEE it, not name it for them. Never say "I notice you keep doing X" or "this sounds like your ${topInsight.pattern_label} pattern". Instead, ask something like: "What's making it hard to just ship it as-is?" or "You said you'd do this yesterday — what happened between then and now?" The goal is to surface the pattern through their own answer, not your observation. Use naturally. Once per session max. Do NOT interrupt a good moment to force it in. When you name it, briefly frame why noticing patterns matters: e.g. "I keep seeing this come up — and I think it's worth naming because patterns don't change until you see them" or "This is something I've noticed across a few sessions." One sentence, then surface the pattern.`,
       priority: 2,
-      preferred_stage: 'any',
+      // Keep this in wins so light trait probes can happen before honest stage is reached.
+      preferred_stage: 'wins',
       fire_next_session: true,
       followup_question: 'I\'ve been thinking about something that\'s shown up a few times — I want to check in on whether you\'re noticing it too.',
       energy_type: 'reflective',
