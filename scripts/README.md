@@ -82,6 +82,7 @@ node --env-file=.env.simulation.local scripts/simulate-reflection.js \
 | `--clean` | `false` | **Recommended.** Wipes all previous sim data for `SIM_USER_ID` and resets the user profile to the persona definition before running. Without this, leftover patterns and profile data from prior runs will contaminate the coach's context. |
 | `--scenario` | `mixed` | Commitment follow-through arc. Options: `kept_streak`, `miss_streak`, `mixed`, `cold_start`, `bridge_kept_streak`, `bridge_miss_streak` (see below) |
 | `--dry-run` | `false` | Run only 1 day, print the full conversation to stdout, and exit without writing the report JSON. Useful for fast sanity checks. |
+| `--record-only` | `false` | Skip live `scoreCoachMessage` grading and terminal quality printing. This runs faster/cheaper while still recording the full session transcript plus stage-transition metadata for post-run analysis. |
 | `--report-path` | `scripts/simulation-report.json` | Custom output path for the report JSON |
 | `--test-why-building` | `false` | Runs a focused **7-day** simulation specifically testing why evolution (see below). |
 | `--test-goal-suggestion` | `false` | Runs a **single-session** test that checks whether the coach suggests a new goal and validates the full suggestion → acceptance → why-journaling flow (see below). |
@@ -119,6 +120,56 @@ node --env-file=.env.simulation.local scripts/simulate-reflection.js \
   --days 90 \
   --report-path /tmp/sim-run-2026-04.json
 ```
+
+## Record-Only Mode & Post-Run Analysis
+
+If you want the simulator to **record rich report data without paying for live grading on every turn**, run it with `--record-only`:
+
+```bash
+node --env-file=.env.simulation.local scripts/simulate-reflection.js \
+  --days 7 \
+  --persona ambitious_but_inconsistent \
+  --clean \
+  --record-only
+```
+
+This mode:
+
+- skips all `scoreCoachMessage(...)` calls
+- skips the terminal `printQuality(...)` output
+- still runs the real coaching loop normally
+- still writes stage flow, directives, commitments, and per-turn metadata to the JSON report
+
+### New report fields for post-run grading
+
+- `stage_transitions`: first-class per-session stage change records, including the triggering turn, `from_stage`, `to_stage`, the user/coaching messages involved, and the checklist state at transition time
+- `session_summary`: a compact grading block per session with totals, stage sequence, honest-stage leak counts, first tomorrow question, directives fired, completion state, and captured commitments
+- `conversation[].honest_forward_action_leak`: `true` when an honest-stage coach message contains banned forward-action phrasing such as `"small step"` or `"next step"`
+
+These fields are designed so you can inspect the JSON manually **or** paste analyzer output into Copilot and ask it to grade whether the honest → tomorrow routing worked correctly.
+
+### Analyzer
+
+Use the zero-dependency analyzer after a run:
+
+```bash
+node scripts/analyze-simulation-report.js
+node scripts/analyze-simulation-report.js --file scripts/my-report.json
+```
+
+The analyzer prints:
+
+- per-session stage sequences and stage transitions
+- honest-stage forward-action leak counts/details
+- the first tomorrow-stage question and whether it uses **minimum-first** framing
+- directives fired during the session
+- an overall summary table across all sessions
+
+The intended workflow is:
+
+1. run the sim with `--record-only`
+2. run `node scripts/analyze-simulation-report.js`
+3. paste the analyzer output into Copilot (or inspect it yourself) to grade whether the coaching flow behaved correctly
 
 ## Why `--clean` matters
 
@@ -440,7 +491,7 @@ Copilot will look at the flag reasons, cross-reference with `api/reflection-coac
 {
   "meta": {
     "persona": "...", "start_date": "...", "days_simulated": 30, "user_id": "...", "run_at": "...",
-    "scenario": "mixed", "dry_run": false
+    "scenario": "mixed", "dry_run": false, "record_only": false
   },
   "summary": {
     "total_turns": 247,
@@ -487,6 +538,8 @@ Copilot will look at the flag reasons, cross-reference with `api/reflection-coac
 
 | Field | Description |
 |-------|-------------|
+| `stage_transitions` | Array of explicit stage-advance records, including `from_stage`, `to_stage`, triggering messages, directive completion, and checklist snapshot |
+| `session_summary` | Compact post-run analysis block with stage counts, honest-stage violations, first tomorrow question, directives fired, completion state, and commitments |
 | `checkin_stage_fired` | `true` if `commitment_checkin` appeared in the stage sequence for this day |
 | `checkin_stage_resolved` | `true` if `commitment_checkin_done` became `true` by end of session |
 | `stage_sequence` | Array of stages visited in order, e.g. `["wins", "commitment_checkin", "honest", "tomorrow", "close"]` |
@@ -501,6 +554,23 @@ Copilot will look at the flag reasons, cross-reference with `api/reflection-coac
 | `win_cause_extracted` | `true` if a `win_cause` row was written to `session_causal_extracts` for this session |
 | `miss_cause_extracted` | `true` if a `miss_cause` row was written to `session_causal_extracts` for this session |
 | `anomalies` | Array of strings describing unexpected stage skips, e.g. `"commitment_checkin skipped despite yesterday commitment existing"` |
+
+### New per-turn report fields
+
+Each `conversation[]` entry now includes richer metadata for grading stage behavior:
+
+| Field | Description |
+|-------|-------------|
+| `stage` | Stage **before** the coach response on that turn |
+| `stage_after` | Stage after processing the coach result |
+| `stage_advanced` / `new_stage` | Whether the turn advanced the session and which stage it advanced to |
+| `active_directive_id` / `directive_completed` | Directive that was active on the turn, plus any directive completed by that response |
+| `completed_directives_snapshot` | Snapshot of completed directive IDs after that turn |
+| `checklist_after` | Checklist state after the turn completed |
+| `honest_depth`, `wins_asked_for_more`, `commitment_checkin_done` | Session signals captured after the turn |
+| `commitment_minimum`, `commitment_stretch`, `tomorrow_commitment` | Commitment fields visible after that turn |
+| `honest_forward_action_leak` | Auto-tagged honest-stage forward-action leak boolean |
+| `honest_forward_action_flags` | Leak explanation strings, including the matched banned phrase |
 
 ### `commitment_checkin_coverage` summary stat
 
