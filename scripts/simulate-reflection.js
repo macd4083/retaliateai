@@ -2807,7 +2807,13 @@ async function main() {
       if (!stageSequence.includes(initResult.new_stage)) stageSequence.push(initResult.new_stage);
     }
     if (initResult.checklist_updates) {
-      sessionState.checklist = { ...sessionState.checklist, ...initResult.checklist_updates };
+      // Checklist flags are sticky — only ever set true, never reset true→false
+      Object.keys(initResult.checklist_updates).forEach((key) => {
+        if (initResult.checklist_updates[key] === true) {
+          sessionState.checklist[key] = true;
+        }
+        // Never write false — if it's currently true, it stays true
+      });
     }
     const initTomorrowCommitment = resolveCommitmentField(initResult, 'tomorrow_commitment');
     if (initTomorrowCommitment) {
@@ -2933,7 +2939,13 @@ async function main() {
         if (!stageSequence.includes(result.new_stage)) stageSequence.push(result.new_stage);
       }
       if (result.checklist_updates) {
-        sessionState.checklist = { ...sessionState.checklist, ...result.checklist_updates };
+        // Checklist flags are sticky — only ever set true, never reset true→false
+        Object.keys(result.checklist_updates).forEach((key) => {
+          if (result.checklist_updates[key] === true) {
+            sessionState.checklist[key] = true;
+          }
+          // Never write false — if it's currently true, it stays true
+        });
       }
       const resolvedTomorrowCommitment = resolveCommitmentField(result, 'tomorrow_commitment');
       if (resolvedTomorrowCommitment) {
@@ -3095,6 +3107,8 @@ async function main() {
 
     // Run backend validation and store result
     console.log(`\n🔍  Backend validation:`);
+    // Allow fire-and-forget DB writes (e.g. goal_commitment_log fragment insert) to resolve
+    await new Promise((resolve) => setTimeout(resolve, 1500));
     let sessionGoalsForExtraction = Object.entries(crossSessionState.goalIds).map(([title, id]) => ({ id, title }));
     try {
       const { data: liveGoals } = await supabase

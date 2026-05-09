@@ -664,6 +664,10 @@ function hasLowCheckinSignal(message = '') {
 function deriveStageHint(sessionState, classifierChecklist, completedDirectives = [], messageCount = 0, intentData = null, lastUserMessage = '') {
   const stage = sessionState.current_stage || 'wins';
   const cl = { ...(sessionState.checklist || {}), ...(classifierChecklist || {}) };
+  // Guard: honest from classifier can only count if we're in the honest stage or already completed it
+  if (stage !== 'honest' && !sessionState.checklist?.honest) {
+    cl.honest = sessionState.checklist?.honest || false;
+  }
   const hasPlan = !!sessionState.tomorrow_commitment;
   const stageOrderSwapped = sessionState.stage_order_swapped === true;
   const hasYesterdayCommitment = !!(sessionState.yesterday_commitment || sessionState.yesterday_commitment_in_state);
@@ -3343,11 +3347,22 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
     }
 
     result.exercise_run = result.exercise_run || 'none';
+    const stageAtTurnStart = session_state.current_stage || 'commitment_checkin';
     result.checklist_updates = result.checklist_updates || { ...DEFAULT_CHECKLIST };
+    // Checklist flags are sticky — merge result checklist_updates with existing session checklist
+    // so that a flag already set true cannot be reset to false by GPT output
+    if (session_state.checklist) {
+      Object.keys(session_state.checklist).forEach((key) => {
+        if (session_state.checklist[key] === true) {
+          result.checklist_updates[key] = true; // preserve existing true flags
+        }
+      });
+    }
     result.follow_up_queued = result.follow_up_queued || false;
     result.follow_up_triggered = result.follow_up_triggered === true;
     result.wins_asked_for_more = result.wins_asked_for_more === true;
-    result.honest_depth = result.honest_depth === true;
+    // honest_depth can only be set when actually in the honest stage
+    result.honest_depth = result.honest_depth === true && stageAtTurnStart === 'honest';
     result.commitment_checkin_done = result.commitment_checkin_done === true;
     result.stage_order_swapped = result.stage_order_swapped === true || session_state.stage_order_swapped === true;
     result.show_commitment_checklist = result.show_commitment_checklist === true;
@@ -3358,7 +3373,6 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
     }
     result.extracted_data = result.extracted_data || {};
 
-    const stageAtTurnStart = session_state.current_stage || 'commitment_checkin';
     const canCaptureTomorrowCommitment = stageAtTurnStart === 'tomorrow';
     if (!canCaptureTomorrowCommitment) {
       result.extracted_data.commitment_minimum = null;
@@ -3532,7 +3546,11 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
     // Merge classifier checklist detections
     if (intentData?.checklist_content) {
       Object.keys(intentData.checklist_content).forEach((key) => {
-        if (intentData.checklist_content[key]) result.checklist_updates[key] = true;
+        if (!intentData.checklist_content[key]) return; // only merge true values
+        // Gate stage-specific checklist keys so they can't bleed in from wrong stages
+        if (key === 'honest' && stageAtTurnStart !== 'honest') return;
+        if (key === 'identity' && stageAtTurnStart !== 'tomorrow' && stageAtTurnStart !== 'complete') return;
+        result.checklist_updates[key] = true;
       });
     }
 
@@ -3562,6 +3580,15 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
       if (!hasMinimum || !hasStretch) {
         result.stage_advance = false;
         result.new_stage = null;
+      }
+    }
+
+    // Bug B guard: is_session_complete requires both minimum AND stretch to be captured
+    if (result.is_session_complete === true) {
+      const hasStretch = !!(result.extracted_data?.commitment_stretch || session_state.commitment_stretch);
+      const hasMinimum = !!(result.extracted_data?.commitment_minimum || session_state.commitment_minimum);
+      if (!hasMinimum || !hasStretch) {
+        result.is_session_complete = false;
       }
     }
 
@@ -3784,20 +3811,21 @@ Return ONLY valid JSON: { "question": "..." }`,
       }
     }
 
-    // Log minimum/stretch commitment fragments once both are captured.
+    // Log minimum/stretch commitment fragments — fire as soon as minimum is captured; include stretch if available.
+    const minimumText = result.extracted_data?.commitment_minimum || session_state.commitment_minimum;
+    const stretchText = result.extracted_data?.commitment_stretch || session_state.commitment_stretch;
     if (
       client_local_date &&
+      minimumText &&
       (
         (result.extracted_data?.commitment_minimum && !session_state.commitment_minimum)
         || (result.extracted_data?.commitment_stretch && !session_state.commitment_stretch)
       )
-      && (result.extracted_data?.commitment_minimum || session_state.commitment_minimum)
-      && (result.extracted_data?.commitment_stretch || session_state.commitment_stretch)
     ) {
       (async () => {
         try {
-          const minimumCommitmentText = result.extracted_data?.commitment_minimum || session_state.commitment_minimum;
-          const stretchCommitmentText = result.extracted_data?.commitment_stretch || session_state.commitment_stretch;
+          const minimumCommitmentText = minimumText;
+          const stretchCommitmentText = stretchText;
           const goalList = activeGoals.map((g) => ({ id: g.id, title: g.title }));
           const clientToday = today(client_local_date);
 
@@ -3846,7 +3874,7 @@ Only return a goal_id that exists in the list.`,
               fragment_index: 0, // fallback convention for minimum when commitment_type is unavailable
               commitment_type: 'minimum',
             },
-            {
+            ...(stretchCommitmentText ? [{
               user_id: authenticatedUserId,
               session_id: session_id || null,
               goal_id: stretchGoalId,
@@ -3856,7 +3884,7 @@ Only return a goal_id that exists in the list.`,
               kept: null,
               fragment_index: 1, // fallback convention for stretch when commitment_type is unavailable
               commitment_type: 'stretch',
-            },
+            }] : []),
           ];
 
           const { error: insertError } = await supabase.from('goal_commitment_log').insert(fragmentRows);
