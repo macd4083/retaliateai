@@ -1051,7 +1051,6 @@ async function runWhyBuildingTest({ personaKey, startDate, clean }) {
     };
 
     // INIT
-    const initStageAtTurnStart = sessionState.current_stage;
     const initResult = await callCoach({
       user_id: userId,
       session_id: sessionId,
