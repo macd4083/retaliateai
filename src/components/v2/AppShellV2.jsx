@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Settings, Moon, BarChart2, X, Database, Video, Download, Share } from 'lucide-react';
+import { Settings, Moon, BarChart2, X, Database, Download, Share } from 'lucide-react';
 import { useAuth } from '../../lib/AuthContext';
 import { supabase } from '../../lib/supabase/client';
 import { usePWAInstall } from '../../hooks/usePWAInstall';
@@ -16,6 +16,7 @@ export default function AppShellV2({ title, children, adminAction = null }) {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, signOut } = useAuth();
+  const isLiveDemo = location.pathname.startsWith('/admin/live-demo');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminTimeOverride, setAdminTimeOverride] = useState(null);
@@ -89,7 +90,7 @@ export default function AppShellV2({ title, children, adminAction = null }) {
         {/* Right side actions */}
         <div className="flex-1 flex items-center justify-end gap-1">
           {adminAction && adminAction}
-          {isInstallable && !isStandalone && (
+          {!isLiveDemo && isInstallable && !isStandalone && (
             <div className="relative">
               <button
                 onClick={handleDownloadClick}
@@ -113,13 +114,15 @@ export default function AppShellV2({ title, children, adminAction = null }) {
               )}
             </div>
           )}
-          <button
-            onClick={() => navigate('/settings')}
-            className="w-9 h-9 flex items-center justify-center rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
-            aria-label="Settings"
-          >
-            <Settings className="w-4 h-4" />
-          </button>
+          {!isLiveDemo && (
+            <button
+              onClick={() => navigate('/settings')}
+              className="w-9 h-9 flex items-center justify-center rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+              aria-label="Settings"
+            >
+              <Settings className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </div>
 
@@ -165,59 +168,62 @@ export default function AppShellV2({ title, children, adminAction = null }) {
 
         {/* Nav links */}
         <nav className="flex-1 px-3 py-4 space-y-1">
-          {NAV_LINKS.map(({ label, path, icon: Icon }) => {
-            const isActive = location.pathname === path;
-            return (
-              <button
-                key={path}
-                onClick={() => {
-                  navigate(path);
-                  setDrawerOpen(false);
-                }}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-colors ${
-                  isActive
-                    ? 'bg-red-600 text-white'
-                    : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
-                }`}
-              >
-                <Icon className="w-4 h-4 flex-shrink-0" />
-                {label}
-              </button>
-            );
-          })}
-          {isAdmin && (
+          {isLiveDemo ? (
             <button
-              onClick={() => {
-                navigate('/admin');
-                setDrawerOpen(false);
-              }}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-colors mt-2 ${
-                location.pathname === '/admin'
-                  ? 'bg-red-900 text-red-300 border border-red-700'
-                  : 'text-red-500 hover:text-red-300 hover:bg-red-900/30 border border-transparent'
-              }`}
-            >
-              <Database className="w-4 h-4 flex-shrink-0" />
-              Admin
-              <span className="ml-auto px-1.5 py-0.5 rounded text-xs font-bold bg-red-900/60 border border-red-800 text-red-400">DEV</span>
-            </button>
-          )}
-          {isAdmin && (
-            <button
-              onClick={() => { navigate('/recorder'); setDrawerOpen(false); }}
+              onClick={() => { navigate('/admin/live-demo/insights'); setDrawerOpen(false); }}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-colors ${
-                location.pathname === '/recorder'
-                  ? 'bg-red-900 text-red-300 border border-red-700'
-                  : 'text-red-400 hover:text-red-300 hover:bg-red-900/30 border border-transparent'
+                location.pathname === '/admin/live-demo/insights'
+                  ? 'bg-red-600 text-white'
+                  : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
               }`}
             >
-              <Video className="w-4 h-4 flex-shrink-0" />
-              UI Recorder
+              <BarChart2 className="w-4 h-4 flex-shrink-0" />
+              Demo Insights
             </button>
+          ) : (
+            <>
+              {NAV_LINKS.map(({ label, path, icon: Icon }) => {
+                const isActive = location.pathname === path;
+                return (
+                  <button
+                    key={path}
+                    onClick={() => {
+                      navigate(path);
+                      setDrawerOpen(false);
+                    }}
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-colors ${
+                      isActive
+                        ? 'bg-red-600 text-white'
+                        : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
+                    }`}
+                  >
+                    <Icon className="w-4 h-4 flex-shrink-0" />
+                    {label}
+                  </button>
+                );
+              })}
+              {isAdmin && (
+                <button
+                  onClick={() => {
+                    navigate('/admin');
+                    setDrawerOpen(false);
+                  }}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-colors mt-2 ${
+                    location.pathname === '/admin'
+                      ? 'bg-red-900 text-red-300 border border-red-700'
+                      : 'text-red-500 hover:text-red-300 hover:bg-red-900/30 border border-transparent'
+                  }`}
+                >
+                  <Database className="w-4 h-4 flex-shrink-0" />
+                  Admin
+                  <span className="ml-auto px-1.5 py-0.5 rounded text-xs font-bold bg-red-900/60 border border-red-800 text-red-400">DEV</span>
+                </button>
+              )}
+            </>
           )}
         </nav>
 
-        {isAdmin && (
+        {!isLiveDemo && isAdmin && (
           <div className="px-3 pb-3">
             <p className="text-zinc-600 text-xs px-1 mb-1.5">Time Override</p>
             <div className="flex gap-1.5">
