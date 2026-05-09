@@ -10,7 +10,7 @@
  *     --persona ambitious_but_inconsistent
  *
  * Calls api/reflection-coach.js directly as a function (no HTTP server needed).
- * Simulates a full coaching session per day, scoring each coach message with GPT-4o-mini.
+ * Simulates a full coaching session per day, recording behavioral/session data.
  * Writes simulation-report.json to the scripts/ folder on completion.
  *
  * Required in .env.simulation.local:
@@ -31,7 +31,7 @@ import handler from '../api/reflection-coach.js';
 import commitmentStatsHandler from '../api/commitment-stats.js';
 import goalsHandler from '../api/goals.js';
 import { PERSONAS, DEFAULT_PERSONA } from './personas.js';
-import { generateUserResponse, scoreCoachMessage } from './generate-user-response.js';
+import { generateUserResponse } from './generate-user-response.js';
 import { drawTraits } from './hidden-traits.js';
 import { gradeTraitDetection } from './grade-trait-detection.js';
 
@@ -193,13 +193,13 @@ const MIN_KEYWORD_LENGTH = 5;
 
 /**
  * Given a list of active goal rows (with `id` and `whys` fields),
- * returns the whys array of the most relevant goal for coach scoring context.
+ * returns the whys array of the most relevant goal for simulator analysis helpers.
  * Prefers a goal that already has whys; falls back to the first goal.
  *
  * @param {Array} goals - Active goal rows from Supabase
- * @returns {Array} - The whys array to pass to scoreCoachMessage
+ * @returns {Array} - The whys array to reuse in simulator analysis helpers
  */
-function selectGoalWhysForScoring(goals) {
+function selectRelevantGoalWhys(goals) {
   if (!goals || goals.length === 0) return [];
   const goalWithWhys = goals.find((g) => Array.isArray(g.whys) && g.whys.length > 0);
   const selected = goalWithWhys ?? goals[0];
@@ -613,22 +613,6 @@ function printCoach(msg) {
 
 function printUser(msg) {
   console.log(`👤  ${msg}`);
-}
-
-function printQuality(quality) {
-  if (!quality) return;
-  const flagStr = quality.flags.length ? ` | ${quality.flags.join(', ')}` : '';
-  const whyStr = quality.why_deepening_quality != null
-    ? ` | why-depth: ${quality.why_deepening_quality}/5`
-    : '';
-  const extras = [
-    quality.stage_appropriate === false ? 'off-stage' : null,
-    quality.used_their_words === false ? 'generic' : null,
-    quality.asked_one_question === false ? '≠1-question' : null,
-    quality.advanced_correctly === false ? 'bad-advance' : null,
-  ].filter(Boolean);
-  const extrasStr = extras.length ? ` | ⚑ ${extras.join(', ')}` : '';
-  console.log(`    ↳ Quality: ${quality.score}/5${flagStr}${whyStr}${extrasStr}`);
 }
 
 function printSummary({ completed, stage, exercises, turns }) {
@@ -1094,7 +1078,7 @@ async function runWhyBuildingTest({ personaKey, startDate, clean }) {
     try {
       const { data: goalsForWhys } = await supabase
         .from('goals').select('id, whys').eq('user_id', userId).eq('status', 'active');
-      sessionGoalWhys = selectGoalWhysForScoring(goalsForWhys ?? []);
+      sessionGoalWhys = selectRelevantGoalWhys(goalsForWhys ?? []);
     } catch { /* non-fatal */ }
 
     const MAX_TURNS = 14;
@@ -1758,7 +1742,7 @@ async function runFullCoverageTest({ personaKey, startDate, clean }) {
         .select('id, title, category, whys')
         .eq('user_id', userId)
         .eq('status', 'active');
-      sessionGoalWhys = selectGoalWhysForScoring(goalsData ?? []);
+      sessionGoalWhys = selectRelevantGoalWhys(goalsData ?? []);
       sessionGoals = (goalsData ?? []).map((g) => ({ id: g.id, title: g.title, category: g.category }));
     } catch { /* non-fatal */ }
 
@@ -2619,13 +2603,12 @@ async function main() {
       scenario,
       dry_run: dryRun,
       record_only: recordOnly,
-      quality_scoring_mode: recordOnly ? 'why_deepening_only' : 'full',
       pre_run_profile_snapshot: null,
       clean_result: null,
     },
     summary: {
       total_turns: 0,
-      avg_quality_score: 0,
+      avg_quality_score: null,
       sessions_completed: 0,
       sessions_incomplete: 0,
       flags_by_type: {},
@@ -2654,9 +2637,6 @@ async function main() {
     flagged_for_review: [],
   };
 
-  let totalQualityScores = [];
-  let totalWhyDeepeningScores = [];
-
   // ── Cross-session state — carries forward across days ─────────────────────
   const crossSessionState = {
     yesterdayCommitment: null,
@@ -2670,7 +2650,7 @@ async function main() {
   process.on('SIGINT', () => {
     interrupted = true;
     console.log('\n\n⚠️  Interrupted — writing partial report...');
-    finalizeReport(report, totalQualityScores, totalWhyDeepeningScores, REPORT_PATH);
+    finalizeReport(report, REPORT_PATH);
     process.exit(0);
   });
 
@@ -2796,8 +2776,6 @@ async function main() {
       goals_why_snapshot: [],
     };
 
-    const sessionQualityScores = [];
-    const sessionWhyDeepeningScores = [];
     const MAX_TURNS = 16;
     let turn = 0;
 
@@ -2887,25 +2865,10 @@ async function main() {
       turn: 0,
       coach: initCoachMsg,
       user: null,
-      quality: null,
     });
 
     // ── Assert whys context after INIT (pre-conversation) ─────────────────
     await assertWhysContext(supabase, userId);
-
-    // ── Conversation loop ──────────────────────────────────────────────────
-    // Fetch current goal whys once per session to pass to scoring
-    let sessionGoalWhys = [];
-    try {
-      const { data: goalsForWhys } = await supabase
-        .from('goals')
-        .select('id, title, whys')
-        .eq('user_id', userId)
-        .eq('status', 'active');
-      sessionGoalWhys = selectGoalWhysForScoring(goalsForWhys ?? []);
-    } catch {
-      // Non-fatal — scoring will just have no whys context
-    }
 
     while (!sessionState.is_complete && turn < MAX_TURNS) {
       turn++;
@@ -2955,16 +2918,14 @@ async function main() {
 
       const coachMsg = result.assistant_message || '';
 
-      // Guard: skip empty coach messages — don't push to history or score
+      // Guard: skip empty coach messages — don't push to history
       if (!coachMsg.trim()) {
         console.warn(`    ⚠️  Turn ${turn}: coach returned empty message — skipping turn`);
         turn--; // don't count this as a real turn
         continue;
       }
 
-      const prevUserMsg = userMsg;
       const prevStage = stageAtTurnStart;
-      const stageAdvanced = !!(result.stage_advance && result.new_stage);
 
       // Update session state
       if (result.stage_advance && result.new_stage) {
@@ -3038,36 +2999,6 @@ async function main() {
 
       printCoach(coachMsg);
 
-      let quality = null;
-      // Always score why-deepening quality, even in --record-only mode
-      quality = await scoreCoachMessage({
-        persona,
-        userProfile: persona.profile,
-        currentStage: sessionState.current_stage,
-        turnNumber: turn,
-        previousUserMessage: prevUserMsg,
-        coachMessage: coachMsg,
-        goalWhys: sessionGoalWhys,
-        stageAdvanced,
-      });
-
-      if (!recordOnly) {
-        printQuality(quality);
-
-        sessionQualityScores.push(quality.score);
-        totalQualityScores.push(quality.score);
-
-        // Track flags globally
-        for (const flag of quality.flags) {
-          report.summary.flags_by_type[flag] = (report.summary.flags_by_type[flag] || 0) + 1;
-        }
-      }
-
-      if (quality.why_deepening_quality != null) {
-        sessionWhyDeepeningScores.push(quality.why_deepening_quality);
-        totalWhyDeepeningScores.push(quality.why_deepening_quality);
-      }
-
       const honestForwardActionScan = detectHonestForwardActionLeak(stageAtTurnStart, coachMsg);
 
       const conversationEntry = {
@@ -3092,26 +3023,8 @@ async function main() {
         honest_forward_action_leak: honestForwardActionScan.honest_forward_action_leak,
         honest_forward_action_flags: honestForwardActionScan.honest_forward_action_flags,
       };
-      if (quality) {
-        conversationEntry.quality = quality;
-      }
       sessionRecord.conversation.push(conversationEntry);
       report.summary.total_turns++;
-
-      // Flag low quality messages for review
-      if (quality && (quality.score <= 2 || quality.flags.length > 0)) {
-        report.flagged_for_review.push({
-          date: simulatedDate,
-          turn,
-          coach_message: coachMsg,
-          user_message_before: prevUserMsg,
-          session_stage: sessionState.current_stage,
-          quality_score: quality.score,
-          flags: quality.flags,
-          reason: quality.reason,
-          session_id: sessionId,
-        });
-      }
 
       if (sessionState.is_complete) break;
     }
@@ -3131,13 +3044,7 @@ async function main() {
       sessionRecord.anomalies.push('commitment_checkin skipped despite yesterday commitment existing');
     }
 
-    sessionRecord.avg_quality =
-      sessionQualityScores.length > 0
-        ? Math.round((sessionQualityScores.reduce((a, b) => a + b, 0) / sessionQualityScores.length) * 100) / 100
-        : null;
-    const sessionAvgWhyQuality = sessionWhyDeepeningScores.length > 0
-      ? Math.round((sessionWhyDeepeningScores.reduce((a, b) => a + b, 0) / sessionWhyDeepeningScores.length) * 100) / 100
-      : null;
+    sessionRecord.avg_quality = null;
     sessionRecord.session_summary = {
       total_turns: turn,
       stage_sequence: [...stageSequence],
@@ -3214,8 +3121,7 @@ async function main() {
         goal_title: g.title,
         whys_count: g.whys_count,
         latest_why: g.latest_why,
-        // session_avg_why_deepening_quality is a session-wide average across all turns, not goal-specific
-        session_avg_why_deepening_quality: sessionAvgWhyQuality,
+        session_avg_why_deepening_quality: null,
       }));
       // Update cross-session prev counts for next day's comparison
       for (const g of backendState.goals_snapshot) {
@@ -3374,7 +3280,7 @@ async function main() {
     report.trait_detection = null;
   }
 
-  finalizeReport(report, totalQualityScores, totalWhyDeepeningScores, REPORT_PATH);
+  finalizeReport(report, REPORT_PATH);
   console.log(`\n✅  Simulation complete. Report saved to:\n    ${REPORT_PATH}\n`);
   if (clean) {
     console.log(`✅  Clean run complete. Pre-run snapshot saved to report.meta.pre_run_profile_snapshot\n`);
@@ -3382,17 +3288,9 @@ async function main() {
 }
 
 // ── Finalize and write report ──────────────────────────────────────────────────
-function finalizeReport(report, totalQualityScores, totalWhyDeepeningScores = [], reportPath = DEFAULT_REPORT_PATH) {
-  report.summary.avg_quality_score =
-    totalQualityScores.length > 0
-      ? Math.round((totalQualityScores.reduce((a, b) => a + b, 0) / totalQualityScores.length) * 100) / 100
-      : 0;
-
-  // Why-deepening summary
-  report.summary.avg_why_deepening_quality =
-    totalWhyDeepeningScores.length > 0
-      ? Math.round((totalWhyDeepeningScores.reduce((a, b) => a + b, 0) / totalWhyDeepeningScores.length) * 100) / 100
-      : null;
+function finalizeReport(report, reportPath = DEFAULT_REPORT_PATH) {
+  report.summary.avg_quality_score = null;
+  report.summary.avg_why_deepening_quality = null;
 
   // Compute commitment_checkin_coverage miss_rate
   const ccc = report.summary.commitment_checkin_coverage;

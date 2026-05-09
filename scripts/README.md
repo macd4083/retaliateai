@@ -1,6 +1,6 @@
 # Reflection Simulator
 
-Simulates months of nightly reflection sessions end-to-end to test coaching quality, data tracking, and insight generation.
+Simulates months of nightly reflection sessions end-to-end to test coaching flow, data tracking, and insight generation.
 
 ## How It Works
 
@@ -11,8 +11,7 @@ For each simulated day it:
 2. Sends `__INIT__` to get the coach's opening message
 3. Uses GPT-4o-mini to generate realistic persona-appropriate responses
 4. Loops through ~8–12 turns until `is_session_complete: true` or a max turn limit
-5. Scores each coach message for quality (1–5) using GPT-4o-mini
-6. Writes `simulation-report.json` with full session data and flagged messages
+5. Writes `simulation-report.json` with full session data and backend snapshots
 
 ---
 
@@ -82,7 +81,7 @@ node --env-file=.env.simulation.local scripts/simulate-reflection.js \
 | `--clean` | `false` | **Recommended.** Wipes all previous sim data for `SIM_USER_ID` and resets the user profile to the persona definition before running. Without this, leftover patterns and profile data from prior runs will contaminate the coach's context. |
 | `--scenario` | `mixed` | Commitment follow-through arc. Options: `kept_streak`, `miss_streak`, `mixed`, `cold_start`, `bridge_kept_streak`, `bridge_miss_streak` (see below) |
 | `--dry-run` | `false` | Run only 1 day, print the full conversation to stdout, and exit without writing the report JSON. Useful for fast sanity checks. |
-| `--record-only` | `false` | Skip live `scoreCoachMessage` grading and terminal quality printing. This runs faster/cheaper while still recording the full session transcript plus stage-transition metadata for post-run analysis. |
+| `--record-only` | `false` | Legacy no-op flag kept for compatibility. The simulator no longer grades coach-message quality in any mode. |
 | `--report-path` | `scripts/simulation-report.json` | Custom output path for the report JSON |
 | `--test-why-building` | `false` | Runs a focused **7-day** simulation specifically testing why evolution (see below). |
 | `--test-goal-suggestion` | `false` | Runs a **single-session** test that checks whether the coach suggests a new goal and validates the full suggestion → acceptance → why-journaling flow (see below). |
@@ -121,9 +120,9 @@ node --env-file=.env.simulation.local scripts/simulate-reflection.js \
   --report-path /tmp/sim-run-2026-04.json
 ```
 
-## Record-Only Mode & Post-Run Analysis
+## `--record-only` (legacy compatibility flag)
 
-If you want the simulator to **record rich report data without paying for live grading on every turn**, run it with `--record-only`:
+`--record-only` is still accepted on the CLI, but it no longer changes simulator behavior because coach-message quality grading has been removed entirely:
 
 ```bash
 node --env-file=.env.simulation.local scripts/simulate-reflection.js \
@@ -133,12 +132,11 @@ node --env-file=.env.simulation.local scripts/simulate-reflection.js \
   --record-only
 ```
 
-This mode:
+The simulator always:
 
-- skips all `scoreCoachMessage(...)` calls
-- skips the terminal `printQuality(...)` output
-- still runs the real coaching loop normally
-- still writes stage flow, directives, commitments, and per-turn metadata to the JSON report
+- runs the real coaching loop normally
+- writes stage flow, directives, commitments, and per-turn metadata to the JSON report
+- leaves quality-related summary fields as `null`
 
 ### New report fields for post-run grading
 
@@ -167,9 +165,9 @@ The analyzer prints:
 
 The intended workflow is:
 
-1. run the sim with `--record-only`
+1. run the sim
 2. run `node scripts/analyze-simulation-report.js`
-3. paste the analyzer output into Copilot (or inspect it yourself) to grade whether the coaching flow behaved correctly
+3. paste the analyzer output into Copilot (or inspect it yourself) to evaluate whether the coaching flow behaved correctly
 
 ## Why `--clean` matters
 
@@ -456,33 +454,6 @@ Log in as your test user and check:
 - **Profile** — is `short_term_state` evolving realistically?
 - **Reflection history** — do sessions feel coherent?
 
-### Sharing flagged issues with Copilot
-
-1. Open `simulation-report.json`
-2. Find the `flagged_for_review` array at the bottom
-3. Copy the flagged entries you want to fix
-4. Paste them in a Copilot chat and say:
-   > "Here are flagged coach messages from the simulator — can you fix the system prompt?"
-
-Copilot will look at the flag reasons, cross-reference with `api/reflection-coach.js` SYSTEM_PROMPT, and write the fix.
-
----
-
-## Flag Types
-
-| Flag | Meaning | Where to fix |
-|------|---------|-------------|
-| `GENERIC` | Didn't use user's actual words/context | SYSTEM_PROMPT core rules |
-| `THERAPIST_LANGUAGE` | "How does that make you feel" etc. | SYSTEM_PROMPT personality |
-| `TWO_QUESTIONS` | Asked more than one question | SYSTEM_PROMPT core rules |
-| `VALIDATED_EXCUSE` | Let user off the hook | ANTI-EXCUSE SYSTEM section |
-| `REPEATED_TOPIC` | Re-asked something already answered | ON KNOWING WHEN TO CLOSE section |
-| `WEAK_DEPTH` | Missed a depth opportunity | SELF-REFLECTION PRIORITY section |
-| `OFF_STAGE` | Wrong stage for context | Stage advancement logic |
-| `TOO_LONG` | More than 3 sentences | SYSTEM_PROMPT personality |
-
----
-
 ## Report Structure
 
 `simulation-report.json` contains:
@@ -495,11 +466,11 @@ Copilot will look at the flag reasons, cross-reference with `api/reflection-coac
   },
   "summary": {
     "total_turns": 247,
-    "avg_quality_score": 3.8,
+    "avg_quality_score": null,
     "sessions_completed": 28,
     "sessions_incomplete": 2,
-    "flags_by_type": { "GENERIC": 12, "THERAPIST_LANGUAGE": 3 },
-    "avg_why_deepening_quality": 3.4,
+    "flags_by_type": {},
+    "avg_why_deepening_quality": null,
     "why_evolution_events": 4,
     "goals_with_multiple_whys": 2,
     "commitment_checkin_coverage": {
@@ -515,7 +486,7 @@ Copilot will look at the flag reasons, cross-reference with `api/reflection-coac
       "session_id": "...",
       "completed": true,
       "turns": 9,
-      "avg_quality": 4.1,
+      "avg_quality": null,
       "exercises_run": ["depth_probe"],
       "checklist": { "wins": true, "honest": true, "plan": true, "identity": true },
       "checkin_stage_fired": true,
@@ -530,7 +501,7 @@ Copilot will look at the flag reasons, cross-reference with `api/reflection-coac
       "conversation": [...]
     }
   ],
-  "flagged_for_review": [...]
+  "flagged_for_review": []
 }
 ```
 
@@ -581,26 +552,12 @@ Each `conversation[]` entry now includes richer metadata for grading stage behav
 | `should_have_fired` | Number of days where a yesterday commitment existed (so the stage should have fired) |
 | `miss_rate` | `(should_have_fired - fired) / should_have_fired` as a percentage |
 
-### Enhanced `scoreCoachMessage` output fields
-
-Each message-level quality object in `conversation[].quality` now includes:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `score` | 1–5 | Overall quality score |
-| `flags` | string[] | Quality flags (GENERIC, THERAPIST_LANGUAGE, etc.) |
-| `reason` | string | One-sentence explanation |
-| `why_deepening_quality` | 1–5 or null | Only scored when coach asked about motivation/why |
-| `stage_appropriate` | boolean | Was this message appropriate for the current stage? |
-| `used_their_words` | boolean | Did the coach reference something specific the user said? |
-| `asked_one_question` | boolean | Did the coach ask exactly one question (not zero, not two+)? |
-| `advanced_correctly` | boolean or null | If a stage advance fired, was the transition appropriate? `null` if no advance. |
-
 ### `summary` why fields
 
 | Field | Description |
 |-------|-------------|
-| `avg_why_deepening_quality` | Average why-deepening quality score (1–5) across all turns where it was scored. `null` if no why questions were asked. |
+| `avg_quality_score` | Always `null`. The simulator records behavior but does not score coach-message quality. |
+| `avg_why_deepening_quality` | Always `null`. Why-deepening quality is no longer computed by the simulator. |
 | `why_evolution_events` | Total number of sessions where a goal's why was added or replaced. |
 | `goals_with_multiple_whys` | Number of active goals that ended the simulation with 2+ whys. |
 
@@ -613,7 +570,7 @@ Each session record now includes a `goals_why_snapshot` array — one entry per 
 | `goal_title` | Goal title |
 | `whys_count` | How many whys are in the goal's `whys[]` array at end of this session |
 | `latest_why` | The text of the most recently added/updated why |
-| `session_avg_why_deepening_quality` | Session-wide average why-deepening score from all coach messages in this session (not goal-specific) |
+| `session_avg_why_deepening_quality` | Always `null`. Retained only as a placeholder in the snapshot shape. |
 
 ---
 
