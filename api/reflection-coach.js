@@ -642,6 +642,19 @@ const LOW_CHECKIN_SIGNAL_PATTERNS = [
   /\bflat\b/i,
   /\boff\b/i,
 ];
+const WINS_INTELLECTUAL_PATTERNS = [
+  /\bi want to research\b/i,
+  /\bi want to find the right\b/i,
+  /\bi want to make sure\b/i,
+  /\bi want to read more about\b/i,
+  /\bi want to dive into\b/i,
+];
+// Keep "win ... but ..." qualification detection local to one short user thought.
+const MAX_WIN_QUALIFIER_DISTANCE = 120;
+const WINS_VALIDATION_PATTERNS = [
+  new RegExp(`\\bi did\\b[\\s\\S]{0,${MAX_WIN_QUALIFIER_DISTANCE}}\\bbut\\b`, 'i'),
+  new RegExp(`\\bi\\b[\\s\\S]{0,${MAX_WIN_QUALIFIER_DISTANCE}}\\bbut i[' ]?m not sure\\b`, 'i'),
+];
 
 function hasLowCheckinSignal(message = '') {
   if (!message || typeof message !== 'string') return false;
@@ -1407,6 +1420,16 @@ function buildDirectiveQueue({
   const scoreTrajectory = scoreTrajectoryContext ?? commitmentStats?.scoreTrajectory ?? null;
   const mergedChecklist = { ...(sessionState.checklist || {}), ...(intentData?.checklist_content || {}) };
   const hasMissInSession = Array.isArray(sessionState.misses) && sessionState.misses.length > 0;
+  const findLastUserMessage = () => {
+    if (!Array.isArray(history) || history.length === 0) return null;
+    for (let i = history.length - 1; i >= 0; i -= 1) {
+      if (history[i]?.role === 'user') return history[i];
+    }
+    return null;
+  };
+  const lastUserMsg = findLastUserMessage();
+  const lastUserText = (lastUserMsg?.content || '').trim();
+  const lastUserTextLower = lastUserText.toLowerCase();
   const parsedCommitmentScore = Number(sessionState?.commitment_score);
   const commitmentScore = Number.isFinite(parsedCommitmentScore) ? parsedCommitmentScore : null;
   // Priority: explicit kept outcome > score-based >=50 > partial fallback when score is unavailable.
@@ -1600,6 +1623,35 @@ Do NOT frame this as goal-specific unless the user is directly referencing a goa
     });
   }
 
+  // ── wins_trait_probe_intellectual_procrastination ───────────────────────
+  const hasWinsIntellectualSignal = currentStage === 'wins'
+    && WINS_INTELLECTUAL_PATTERNS.some((pattern) => pattern.test(lastUserText));
+  if (hasWinsIntellectualSignal) {
+    allDirectives.push({
+      id: 'wins_trait_probe_intellectual_procrastination',
+      instruction: 'WINS TRAIT PROBE (INTELLECTUAL PROCRASTINATION): Keep this light and warm in wins stage. Ask one reflective probe that surfaces resistance to imperfect action. Example: "You mentioned wanting to research this — when you imagine just shipping something imperfect, what comes up for you?" Do not shame, and do not jump to planning yet.',
+      priority: 2,
+      preferred_stage: 'wins',
+      fire_next_session: false,
+      energy_type: 'reflective',
+    });
+  }
+
+  // ── wins_trait_probe_validation_treadmill ───────────────────────────────
+  const hasWinsValidationSignal = currentStage === 'wins' && (
+    WINS_VALIDATION_PATTERNS.some((pattern) => pattern.test(lastUserText))
+  );
+  if (hasWinsValidationSignal) {
+    allDirectives.push({
+      id: 'wins_trait_probe_validation_treadmill',
+      instruction: 'WINS TRAIT PROBE (VALIDATION TREADMILL): In wins stage, gently name the fast pivot from win to doubt and ask one soft reflection question. Example: "You led with the win and then quickly moved to doubt — what would it take to just let that win land?" Keep it reflective, not corrective.',
+      priority: 2,
+      preferred_stage: 'wins',
+      fire_next_session: false,
+      energy_type: 'reflective',
+    });
+  }
+
   // ── wins_callback ──────────────────────────────────────────────────────
   if (Array.isArray(sessionState.wins) && sessionState.wins.length > 0 && currentStage !== 'wins' && currentStage !== 'close') {
     const winsText = sessionState.wins.map(w => typeof w === 'string' ? w : w?.text).filter(Boolean).join(', ');
@@ -1704,7 +1756,8 @@ Do NOT frame this as goal-specific unless the user is directly referencing a goa
     })();
     allDirectives.push({
       id: 'honest_missing',
-      instruction: `HONEST MISSING: Gently probe for a miss or honest moment with self-awareness questions. ${patternHint} Goal is self-awareness about TODAY, not action planning. Do NOT ask "what would you do differently" — that belongs in tomorrow. Do NOT ask "what's one small step", "what can you do tomorrow", "how will you change this", "what will you do about it", or any question about future plans or actions. Every question in the honest stage must be about understanding what happened today and what was happening underneath it — never about what to do next. Weave it naturally. Once a miss is named, ask the one question that goes underneath it — what was actually happening underneath that surface behavior, not just what they did or didn't do. Do NOT set honest_depth: true until the user has genuinely answered the underneath layer. A surface answer is not enough. Evaluate qualitatively: is this a real answer about why it happened — the actual reason, the emotional truth, the internal conflict? If yes → set honest_depth: true. If no → ask the one question that goes there. When probing for the honest moment, you can briefly frame what this part of the session is for — e.g. "Before we talk about tomorrow, I want to make sure we've gone there — the part of today that's worth being honest about" or "This is the part most people skip, but it's usually the most useful." Keep it to one sentence — then ask.${patternContext}${missedFragmentContext}`,
+      // Note: avoid future-action prompts here; in honest stage they can trigger premature tomorrow pivots and skip honest_depth validation.
+      instruction: `HONEST MISSING: Gently probe for a miss or honest moment with reflection-first questions. ${patternHint} Goal is self-awareness about TODAY and the underlying truth, not planning. Use prompts like: "What are you not saying yet?", "What's the real friction underneath this?", "What would you tell a friend in this situation?", or "Where does this pattern usually show up for you?" Keep it natural and grounded in their words. Never ask what they will do next, what plan they should make, or how they should act tomorrow in this stage. Once a miss is named, ask the one question that goes underneath it — what was actually happening underneath that surface behavior, not just what they did or didn't do. Do NOT set honest_depth: true until the user has genuinely answered the underneath layer. A surface answer is not enough. Evaluate qualitatively: is this a real answer about why it happened — the actual reason, the emotional truth, the internal conflict? If yes → set honest_depth: true. If no → ask the one question that goes there.${patternContext}${missedFragmentContext}`,
       priority: 2,
       preferred_stage: 'honest',
       fire_next_session: true,
@@ -2301,7 +2354,8 @@ Set directive_completed: "${probeId}" when done.`,
       id: 'pattern_awareness',
       instruction: `PATTERN AWARENESS: The user's most recurring pattern is "${topInsight.pattern_label}" (${topInsight.sessions_synthesized_from || 0}x). If they say or do something that looks like this pattern — even obliquely — ask a question that helps them SEE it, not name it for them. Never say "I notice you keep doing X" or "this sounds like your ${topInsight.pattern_label} pattern". Instead, ask something like: "What's making it hard to just ship it as-is?" or "You said you'd do this yesterday — what happened between then and now?" The goal is to surface the pattern through their own answer, not your observation. Use naturally. Once per session max. Do NOT interrupt a good moment to force it in. When you name it, briefly frame why noticing patterns matters: e.g. "I keep seeing this come up — and I think it's worth naming because patterns don't change until you see them" or "This is something I've noticed across a few sessions." One sentence, then surface the pattern.`,
       priority: 2,
-      preferred_stage: 'honest',
+      // Keep this in wins so light trait probes can happen before honest stage is reached.
+      preferred_stage: 'wins',
       fire_next_session: true,
       followup_question: 'I\'ve been thinking about something that\'s shown up a few times — I want to check in on whether you\'re noticing it too.',
       energy_type: 'reflective',
@@ -2333,10 +2387,10 @@ Set directive_completed: "${probeId}" when done.`,
   // ── stage_hint ─────────────────────────────────────────────────────────
   if (suggestedNextStage && !isMemoryMode) {
     // Determine if the user's last message signals they're done with wins
-    const lastUserMsg = Array.isArray(history) && history.length > 0
-      ? [...history].reverse().find(m => m.role === 'user')
-      : null;
-    const lastUserText = (lastUserMsg?.content || '').trim().toLowerCase();
+    const lastUserTextNormalized = lastUserTextLower;
+    const winsUserTurnCount = Array.isArray(history)
+      ? history.filter((m) => m.role === 'user').length
+      : 0;
     const doneWithWinsPatterns = [
       /^nah\b/,
       /^nope\b/,
@@ -2348,13 +2402,19 @@ Set directive_completed: "${probeId}" when done.`,
       /\bdone\b/,
       /\bnot really\b/,
     ];
-    const userSignaledDone = lastUserText.length < 15
-      || doneWithWinsPatterns.some((pattern) => pattern.test(lastUserText));
+    const userSignaledDone = lastUserTextNormalized.length < 15
+      || doneWithWinsPatterns.some((pattern) => pattern.test(lastUserTextNormalized));
 
     const isWinsToHonest = sessionState.current_stage === 'wins' && suggestedNextStage === 'honest';
     const isHonestToTomorrow = sessionState.current_stage === 'honest' && suggestedNextStage === 'tomorrow';
+    const canSoftHintWinsToHonest = isWinsToHonest
+      && !userSignaledDone
+      && sessionState.wins_asked_for_more === true
+      && winsUserTurnCount >= 3;
     const stageHintInstruction = (isWinsToHonest && userSignaledDone)
       ? 'STAGE HINT: You MUST set stage_advance:true, new_stage:"honest" on this response. Do not wait — the user has signaled they are done with wins. Transition with a soft pivot phrase (e.g. "Okay — I want to shift for a second.") and ask the honest question. Never announce the stage name.'
+      : canSoftHintWinsToHonest
+        ? 'STAGE HINT: The user has shared enough wins and you have invited them to share more. It is now appropriate to gently transition to the honest stage. You MAY set stage_advance:true, new_stage:"honest" if the conversation naturally supports it — use a soft bridging phrase. Do not force it if the user is mid-thought, but do not wait indefinitely.'
       : isHonestToTomorrow
         ? `STAGE HINT: Ready to move to "tomorrow". On THIS response, set stage_advance:true, new_stage:"tomorrow" and use only a soft bridging phrase that signals the shift without announcing stage names (e.g. "Alright, I've got a good picture of today. Let's talk about tomorrow."). For honest→tomorrow: Only transition if honest_depth has been confirmed for this session. Do NOT transition just because the user mentioned something they want to do differently — that belongs in honest. CRITICAL: Do NOT ask any planning question, commitment question, "small step", "next step", or future-action question on this same response turn. The transition response should be bridge-only. Then, on the NEXT turn after stage advancement, ask the minimum-first tomorrow commitment question grounded in their honest insight. Never announce the stage name.`
         : `STAGE HINT: Ready to move to "${suggestedNextStage}". Transition naturally if conversation supports it — use a soft bridging phrase that signals the shift without announcing it. E.g. for wins→honest: "Okay — I want to shift for a second." For honest→tomorrow: "Alright, I've got a good picture of today. Let's talk about tomorrow." For tomorrow→complete: Do not announce a stage shift. Name the arc — what they committed to and the why behind it — in one sentence. Then set is_session_complete:true and deliver a warm specific closing message using their actual words. Never announce the stage name. Set stage_advance:true, new_stage:"${suggestedNextStage}".`;
@@ -3482,6 +3542,17 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
     if (result.stage_advance === true && result.new_stage === 'honest' && winsCapture && !askedForMore) {
       result.stage_advance = false;
       result.new_stage = null;
+    }
+
+    // Safeguard: allow wins→honest transition when model sets new_stage but misses stage_advance flag
+    if (
+      stageAtTurnStart === 'wins'
+      && result.stage_advance !== true
+      && result.new_stage === 'honest'
+      && askedForMore
+      && messageCount >= 4
+    ) {
+      result.stage_advance = true;
     }
 
     // Bug 2D: Block tomorrow→complete advance when commitment_minimum or commitment_stretch is missing
