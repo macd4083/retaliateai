@@ -199,7 +199,7 @@ const MIN_KEYWORD_LENGTH = 5;
  * @param {Array} goals - Active goal rows from Supabase
  * @returns {Array} - The whys array to reuse in simulator analysis helpers
  */
-function selectGoalWhysForScoring(goals) {
+function selectRelevantGoalWhys(goals) {
   if (!goals || goals.length === 0) return [];
   const goalWithWhys = goals.find((g) => Array.isArray(g.whys) && g.whys.length > 0);
   const selected = goalWithWhys ?? goals[0];
@@ -1078,7 +1078,7 @@ async function runWhyBuildingTest({ personaKey, startDate, clean }) {
     try {
       const { data: goalsForWhys } = await supabase
         .from('goals').select('id, whys').eq('user_id', userId).eq('status', 'active');
-      sessionGoalWhys = selectGoalWhysForScoring(goalsForWhys ?? []);
+      sessionGoalWhys = selectRelevantGoalWhys(goalsForWhys ?? []);
     } catch { /* non-fatal */ }
 
     const MAX_TURNS = 14;
@@ -1742,7 +1742,7 @@ async function runFullCoverageTest({ personaKey, startDate, clean }) {
         .select('id, title, category, whys')
         .eq('user_id', userId)
         .eq('status', 'active');
-      sessionGoalWhys = selectGoalWhysForScoring(goalsData ?? []);
+      sessionGoalWhys = selectRelevantGoalWhys(goalsData ?? []);
       sessionGoals = (goalsData ?? []).map((g) => ({ id: g.id, title: g.title, category: g.category }));
     } catch { /* non-fatal */ }
 
