@@ -132,7 +132,7 @@ function parseArgs() {
   return result;
 }
 
-function scanHonestForwardActionLeak(stage, coachMsg) {
+function detectHonestForwardActionLeak(stage, coachMsg) {
   if (stage !== 'honest' || !coachMsg) {
     return { honest_forward_action_leak: false, honest_forward_action_flags: [] };
   }
@@ -146,6 +146,10 @@ function scanHonestForwardActionLeak(stage, coachMsg) {
       (pattern) => `HONEST_FORWARD_ACTION_LEAK: matched pattern '${pattern}'`,
     ),
   };
+}
+
+function resolveCommitmentField(result, fieldName, fallback = null) {
+  return result?.extracted_data?.[fieldName] || result?.[fieldName] || fallback;
 }
 
 // ── Array shuffle utility (Fisher-Yates) ─────────────────────────────────────
@@ -2815,14 +2819,17 @@ async function main() {
     if (initResult.checklist_updates) {
       sessionState.checklist = { ...sessionState.checklist, ...initResult.checklist_updates };
     }
-    if (initResult.extracted_data?.tomorrow_commitment) {
-      sessionState.tomorrow_commitment = initResult.extracted_data.tomorrow_commitment;
+    const initTomorrowCommitment = resolveCommitmentField(initResult, 'tomorrow_commitment');
+    if (initTomorrowCommitment) {
+      sessionState.tomorrow_commitment = initTomorrowCommitment;
     }
-    if (initResult.extracted_data?.commitment_minimum || initResult.commitment_minimum) {
-      sessionState.commitment_minimum = initResult.extracted_data?.commitment_minimum || initResult.commitment_minimum;
+    const initCommitmentMinimum = resolveCommitmentField(initResult, 'commitment_minimum');
+    if (initCommitmentMinimum) {
+      sessionState.commitment_minimum = initCommitmentMinimum;
     }
-    if (initResult.extracted_data?.commitment_stretch || initResult.commitment_stretch) {
-      sessionState.commitment_stretch = initResult.extracted_data?.commitment_stretch || initResult.commitment_stretch;
+    const initCommitmentStretch = resolveCommitmentField(initResult, 'commitment_stretch');
+    if (initCommitmentStretch) {
+      sessionState.commitment_stretch = initCommitmentStretch;
     }
     if (initResult.exercise_run && initResult.exercise_run !== 'none') {
       sessionState.exercises_run = [...sessionState.exercises_run, initResult.exercise_run];
@@ -2955,14 +2962,17 @@ async function main() {
       if (result.checklist_updates) {
         sessionState.checklist = { ...sessionState.checklist, ...result.checklist_updates };
       }
-      if (result.extracted_data?.tomorrow_commitment) {
-        sessionState.tomorrow_commitment = result.extracted_data.tomorrow_commitment;
+      const resolvedTomorrowCommitment = resolveCommitmentField(result, 'tomorrow_commitment');
+      if (resolvedTomorrowCommitment) {
+        sessionState.tomorrow_commitment = resolvedTomorrowCommitment;
       }
-      if (result.extracted_data?.commitment_minimum || result.commitment_minimum) {
-        sessionState.commitment_minimum = result.extracted_data?.commitment_minimum || result.commitment_minimum;
+      const resolvedCommitmentMinimum = resolveCommitmentField(result, 'commitment_minimum');
+      if (resolvedCommitmentMinimum) {
+        sessionState.commitment_minimum = resolvedCommitmentMinimum;
       }
-      if (result.extracted_data?.commitment_stretch || result.commitment_stretch) {
-        sessionState.commitment_stretch = result.extracted_data?.commitment_stretch || result.commitment_stretch;
+      const resolvedCommitmentStretch = resolveCommitmentField(result, 'commitment_stretch');
+      if (resolvedCommitmentStretch) {
+        sessionState.commitment_stretch = resolvedCommitmentStretch;
       }
       if (result.exercise_run && result.exercise_run !== 'none') {
         if (!sessionState.exercises_run.includes(result.exercise_run)) {
@@ -3046,7 +3056,7 @@ async function main() {
         }
       }
 
-      const honestForwardActionScan = scanHonestForwardActionLeak(stageAtTurnStart, coachMsg);
+      const honestForwardActionScan = detectHonestForwardActionLeak(stageAtTurnStart, coachMsg);
 
       const conversationEntry = {
         turn,
@@ -3062,9 +3072,9 @@ async function main() {
         honest_depth: result.honest_depth === true || sessionState.honest_depth === true,
         wins_asked_for_more: result.wins_asked_for_more === true || sessionState.wins_asked_for_more === true,
         commitment_checkin_done: result.commitment_checkin_done === true,
-        commitment_minimum: result.extracted_data?.commitment_minimum || sessionState.commitment_minimum || null,
-        commitment_stretch: result.extracted_data?.commitment_stretch || sessionState.commitment_stretch || null,
-        tomorrow_commitment: result.extracted_data?.tomorrow_commitment || sessionState.tomorrow_commitment || null,
+        commitment_minimum: resolveCommitmentField(result, 'commitment_minimum', sessionState.commitment_minimum),
+        commitment_stretch: resolveCommitmentField(result, 'commitment_stretch', sessionState.commitment_stretch),
+        tomorrow_commitment: resolveCommitmentField(result, 'tomorrow_commitment', sessionState.tomorrow_commitment),
         coach: coachMsg,
         user: userMsg,
         honest_forward_action_leak: honestForwardActionScan.honest_forward_action_leak,

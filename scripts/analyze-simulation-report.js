@@ -3,6 +3,8 @@ import path from 'path';
 import process from 'process';
 
 const DEFAULT_REPORT_PATH = path.resolve(process.cwd(), 'scripts', 'simulation-report.json');
+// These are intentionally separate from the honest-stage leak patterns: they detect
+// whether the first tomorrow question uses explicit minimum-floor framing.
 const MINIMUM_FIRST_KEYWORDS = ['minimum', 'floor', 'at least', 'guarantee', 'what you know you can'];
 const HONEST_FORWARD_ACTION_PATTERNS = [
   'small step',
@@ -209,7 +211,8 @@ function buildSessionSummary(session, index) {
     honest_to_tomorrow_transition: providedSummary.honest_to_tomorrow_transition ?? honestToTomorrowTransition,
     honest_depth_before_tomorrow:
       providedSummary.honest_depth_before_tomorrow
-      ?? (honestToTomorrowTransition ? honestToTomorrowTransition.honest_depth_at_transition === true : null),
+      ?? honestToTomorrowTransition?.honest_depth_at_transition
+      ?? null,
     directives_fired: buildDirectivesFired(session, conversation),
     is_complete: providedSummary.is_complete ?? session?.completed ?? false,
     commitment_minimum: providedSummary.commitment_minimum ?? session?.commitment_minimum ?? null,
@@ -221,7 +224,7 @@ function buildSessionSummary(session, index) {
 function printSessionAnalysis(summary) {
   const stageSequenceText = summary.stage_sequence.length > 0 ? summary.stage_sequence.join(' → ') : '(unknown)';
   const minimumFirst = hasKeyword(summary.first_tomorrow_message, MINIMUM_FIRST_KEYWORDS);
-  const forwardActionOnly =
+  const hasForwardActionOnly =
     hasKeyword(summary.first_tomorrow_message, HONEST_FORWARD_ACTION_PATTERNS) && !minimumFirst;
 
   console.log('═══════════════════════════════════════');
@@ -269,7 +272,7 @@ function printSessionAnalysis(summary) {
     console.log(formatQuote(summary.first_tomorrow_message, '  '));
   }
   console.log(`  Contains 'minimum': ${minimumFirst ? 'YES ✅' : 'NO'}`);
-  console.log(`  Contains forward-action only language: ${forwardActionOnly ? 'YES' : 'NO ✅'}`);
+  console.log(`  Contains forward-action only language: ${hasForwardActionOnly ? 'YES' : 'NO ✅'}`);
   console.log('');
 
   console.log('DIRECTIVES FIRED THIS SESSION:');
@@ -296,7 +299,7 @@ function printOverallSummary(summaries) {
   console.log(`OVERALL SUMMARY (${totalSessions} session${totalSessions === 1 ? '' : 's'})`);
   console.log('─────────────────────────────────────────');
   console.log(
-    `Honest forward-action leaks:    ${sessionsWithoutLeaks} / ${totalSessions} sessions${sessionsWithoutLeaks === totalSessions ? ' ✅' : ''}`,
+    `Sessions without honest forward-action leaks: ${sessionsWithoutLeaks} / ${totalSessions}${sessionsWithoutLeaks === totalSessions ? ' ✅' : ''}`,
   );
   console.log(
     `Honest→tomorrow w/ depth:       ${sessionsWithDepthAtTransition} / ${totalSessions} sessions${sessionsWithDepthAtTransition === totalSessions ? ' ✅' : ''}`,
