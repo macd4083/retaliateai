@@ -3545,12 +3545,11 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
 
     // Merge classifier checklist detections
     if (intentData?.checklist_content) {
-      const stageNow = stageAtTurnStart; // already declared earlier in the handler
       Object.keys(intentData.checklist_content).forEach((key) => {
         if (!intentData.checklist_content[key]) return; // only merge true values
         // Gate stage-specific checklist keys so they can't bleed in from wrong stages
-        if (key === 'honest' && stageNow !== 'honest') return;
-        if (key === 'identity' && stageNow !== 'tomorrow' && stageNow !== 'complete') return;
+        if (key === 'honest' && stageAtTurnStart !== 'honest') return;
+        if (key === 'identity' && stageAtTurnStart !== 'tomorrow' && stageAtTurnStart !== 'complete') return;
         result.checklist_updates[key] = true;
       });
     }
