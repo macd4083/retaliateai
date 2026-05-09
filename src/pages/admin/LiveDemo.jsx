@@ -118,21 +118,36 @@ function makeMessageId() {
 }
 
 function normalizeScript(parsed) {
-  if (!Array.isArray(parsed)) return DEFAULT_DEMO_SCRIPT;
-  const normalized = parsed
-    .map((turn) => ({
-      role: turn?.role === 'coach' ? 'coach' : turn?.role === 'user' ? 'user' : null,
-      content: typeof turn?.content === 'string' ? turn.content : '',
-      stage: typeof turn?.stage === 'string' && turn.stage ? turn.stage : undefined,
-    }))
-    .filter((turn) => turn.role && turn.content);
-  return normalized.length > 0 ? normalized : DEFAULT_DEMO_SCRIPT;
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Array.isArray(parsed.turns)) {
+    const checklist = Array.isArray(parsed.checklist) ? parsed.checklist : [];
+    const turns = parsed.turns
+      .map((turn) => ({
+        role: turn?.role === 'coach' ? 'coach' : turn?.role === 'user' ? 'user' : null,
+        content: typeof turn?.content === 'string' ? turn.content : '',
+        stage: typeof turn?.stage === 'string' && turn.stage ? turn.stage : undefined,
+        checkItem: typeof turn?.checkItem === 'number' ? turn.checkItem : undefined,
+      }))
+      .filter((turn) => turn.role && turn.content);
+    return { checklist, turns: turns.length > 0 ? turns : DEFAULT_DEMO_SCRIPT };
+  }
+  if (Array.isArray(parsed)) {
+    const turns = parsed
+      .map((turn) => ({
+        role: turn?.role === 'coach' ? 'coach' : turn?.role === 'user' ? 'user' : null,
+        content: typeof turn?.content === 'string' ? turn.content : '',
+        stage: typeof turn?.stage === 'string' && turn.stage ? turn.stage : undefined,
+        checkItem: undefined,
+      }))
+      .filter((turn) => turn.role && turn.content);
+    return { checklist: [], turns: turns.length > 0 ? turns : DEFAULT_DEMO_SCRIPT };
+  }
+  return { checklist: [], turns: DEFAULT_DEMO_SCRIPT };
 }
 
-function DemoDataPanel({ demoData }) {
-  const hasChecklist = Array.isArray(demoData?.checklist) && demoData.checklist.length > 0;
-  const hasGoals = Array.isArray(demoData?.goals) && demoData.goals.length > 0;
-  const hasScore = demoData?.commitmentScore != null;
+function DemoDataPanel({ checklist, goals, commitmentScore }) {
+  const hasChecklist = Array.isArray(checklist) && checklist.length > 0;
+  const hasGoals = Array.isArray(goals) && goals.length > 0;
+  const hasScore = commitmentScore != null;
 
   if (!hasChecklist && !hasGoals && !hasScore) return null;
 
@@ -141,7 +156,7 @@ function DemoDataPanel({ demoData }) {
       {hasScore && (
         <div className="space-y-1">
           <div className="text-4xl font-bold text-white">
-            {demoData.commitmentScore}<span className="text-xl text-zinc-400">/100</span>
+            {commitmentScore}<span className="text-xl text-zinc-400">/100</span>
           </div>
           <div className="text-xs text-zinc-400 uppercase tracking-wide">Commitment Score</div>
         </div>
@@ -153,7 +168,7 @@ function DemoDataPanel({ demoData }) {
         <div className="space-y-2">
           <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Today&apos;s Checklist</p>
           <ul className="space-y-1.5">
-            {demoData.checklist.map((item, i) => (
+            {checklist.map((item, i) => (
               <li key={i} className="flex items-center gap-2 text-sm text-zinc-200">
                 <span>{item.checked ? '✅' : '⬜'}</span>
                 <span>{item.label}</span>
@@ -169,7 +184,7 @@ function DemoDataPanel({ demoData }) {
         <div className="space-y-2">
           <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Goals</p>
           <div className="space-y-2">
-            {demoData.goals.map((goal, i) => (
+            {goals.map((goal, i) => (
               <div key={i} className="space-y-0.5">
                 <p className="text-sm text-white font-medium">{goal.title}</p>
                 {goal.why && (
@@ -193,7 +208,8 @@ export default function LiveDemo() {
   const timeoutIdsRef = useRef([]);
 
   const [isAdmin, setIsAdmin] = useState(null);
-  const [script, setScript] = useState(DEFAULT_DEMO_SCRIPT);
+  const [script, setScript] = useState({ checklist: [], turns: DEFAULT_DEMO_SCRIPT });
+  const [checklist, setChecklist] = useState([]);
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState('');
   const [isPlaying, setIsPlaying] = useState(false);
@@ -223,6 +239,7 @@ export default function LiveDemo() {
     setIsPlaying(false);
     setIsComplete(false);
     setCurrentStage('wins');
+    setChecklist((prev) => prev.map((item) => ({ ...item, checked: false })));
   }, [clearTimers]);
 
   const startPlayback = useCallback(() => {
@@ -233,6 +250,7 @@ export default function LiveDemo() {
     setIsComplete(false);
     setIsPlaying(true);
     setCurrentStage('wins');
+    setChecklist((prev) => prev.map((item) => ({ ...item, checked: false })));
   }, [clearTimers]);
 
   useEffect(() => {
@@ -269,7 +287,9 @@ export default function LiveDemo() {
       const saved = window.localStorage.getItem(DEMO_SCRIPT_KEY);
       if (!saved) return;
       const parsed = JSON.parse(saved);
-      setScript(normalizeScript(parsed));
+      const normalized = normalizeScript(parsed);
+      setScript(normalized);
+      setChecklist(normalized.checklist);
     } catch (_e) {}
   }, []);
 
@@ -313,16 +333,21 @@ export default function LiveDemo() {
 
   useEffect(() => {
     if (!isPlaying) return;
-    if (currentTurnIndex >= script.length) {
+    if (currentTurnIndex >= script.turns.length) {
       setIsPlaying(false);
       setIsComplete(true);
       return;
     }
 
-    const turn = script[currentTurnIndex];
+    const turn = script.turns[currentTurnIndex];
 
     if (turn.stage) {
       setCurrentStage(turn.stage);
+    }
+    if (typeof turn.checkItem === 'number') {
+      setChecklist((prev) => prev.map((item, i) => (
+        i === turn.checkItem ? { ...item, checked: true } : item
+      )));
     }
 
     if (turn.role === 'coach') {
@@ -380,6 +405,10 @@ export default function LiveDemo() {
     typeUserNext(1);
   }, [isPlaying, currentTurnIndex, script, schedule]);
 
+  const goals = Array.isArray(demoData?.goals) ? demoData.goals : [];
+  const commitmentScore = demoData?.commitmentScore ?? null;
+  const hasDemoPanelData = checklist.length > 0 || goals.length > 0 || commitmentScore != null;
+
   if (isAdmin === null) {
     return (
       <div className="flex items-center justify-center h-screen bg-zinc-950">
@@ -435,13 +464,9 @@ export default function LiveDemo() {
           </div>
         </div>
 
-        {demoData && (
-          (Array.isArray(demoData.checklist) && demoData.checklist.length > 0) ||
-          (Array.isArray(demoData.goals) && demoData.goals.length > 0) ||
-          demoData.commitmentScore != null
-        ) && (
+        {hasDemoPanelData && (
           <div className="w-72 flex-shrink-0 overflow-y-auto p-4 border-l border-zinc-800">
-            <DemoDataPanel demoData={demoData} />
+            <DemoDataPanel checklist={checklist} goals={goals} commitmentScore={commitmentScore} />
           </div>
         )}
       </div>

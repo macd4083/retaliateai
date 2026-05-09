@@ -12,25 +12,30 @@ const MAX_WHYS_TOTAL = 5;
 const MAX_SESSION_WHYS = 3;
 const MAX_COMMITMENT_WHYS = 1;
 const MAX_WHY_PROBE_WHYS = 2;
-const DEFAULT_DEMO_SCRIPT_FOR_EDITOR = [
-  { role: 'coach', content: 'Hey — how are you feeling tonight?' },
-  { role: 'user', content: 'honestly pretty decent. had a solid day' },
-  { role: 'coach', content: 'Nice. What made it solid?' },
-  { role: 'user', content: 'I finally got back to working on my app after like 2 weeks of avoiding it. got a decent chunk done' },
-  { role: 'coach', content: 'Two weeks of avoiding it and you got back in. What broke the pattern today?' },
-  { role: 'user', content: 'idk I just told myself to do 20 minutes and it turned into 2 hours' },
-  { role: 'coach', content: "That's the move. What else went well?" },
-  { role: 'user', content: 'not much else honestly. rest of the day was pretty meh' },
-  { role: 'coach', content: "Okay. Is there a part of today you're being honest with yourself about — something that didn't go the way it should have?" },
-  { role: 'user', content: "yeah. I said I'd reach out to 3 potential users this week. haven't done any of it" },
-  { role: 'coach', content: "What's actually in the way — not the surface reason, but what's underneath it?" },
-  { role: 'user', content: "I think I'm scared they'll say the idea is bad. like as long as I don't ask I can still tell myself it might work" },
-  { role: 'coach', content: "That's the real one. Avoiding feedback is protecting the idea more than building it. What's the minimum you're committing to tomorrow — not what you hope to do, what you will do?" },
-  { role: 'user', content: "one user conversation. I'll message two people tonight so it's already in motion" },
-  { role: 'coach', content: "That's a real commitment. Which goal does that connect to most?" },
-  { role: 'user', content: "building something people actually want. I can't know that without talking to them" },
-  { role: 'coach', content: "Exactly. You already know what needs to happen — tonight you're making sure tomorrow it does. Good session." },
-];
+const DEFAULT_DEMO_SCRIPT_FOR_EDITOR = {
+  checklist: [
+    { label: 'Example checklist item', checked: false },
+  ],
+  turns: [
+    { role: 'coach', content: 'Hey — how are you feeling tonight?', stage: 'wins' },
+    { role: 'user', content: 'honestly pretty decent. had a solid day' },
+    { role: 'coach', content: 'Nice. What made it solid?' },
+    { role: 'user', content: 'I finally got back to working on my app after like 2 weeks of avoiding it. got a decent chunk done' },
+    { role: 'coach', content: 'Two weeks of avoiding it and you got back in. What broke the pattern today?' },
+    { role: 'user', content: 'idk I just told myself to do 20 minutes and it turned into 2 hours' },
+    { role: 'coach', content: "That's the move. What else went well?" },
+    { role: 'user', content: 'not much else honestly. rest of the day was pretty meh' },
+    { role: 'coach', content: "Okay. Is there a part of today you're being honest with yourself about — something that didn't go the way it should have?" },
+    { role: 'user', content: "yeah. I said I'd reach out to 3 potential users this week. haven't done any of it" },
+    { role: 'coach', content: "What's actually in the way — not the surface reason, but what's underneath it?" },
+    { role: 'user', content: "I think I'm scared they'll say the idea is bad. like as long as I don't ask I can still tell myself it might work" },
+    { role: 'coach', content: "That's the real one. Avoiding feedback is protecting the idea more than building it. What's the minimum you're committing to tomorrow — not what you hope to do, what you will do?" },
+    { role: 'user', content: "one user conversation. I'll message two people tonight so it's already in motion" },
+    { role: 'coach', content: "That's a real commitment. Which goal does that connect to most?" },
+    { role: 'user', content: "building something people actually want. I can't know that without talking to them" },
+    { role: 'coach', content: "Exactly. You already know what needs to happen — tonight you're making sure tomorrow it does. Good session." },
+  ],
+};
 
 async function adminFetch(body) {
   let accessToken = null;
@@ -413,7 +418,6 @@ export default function AdminV2() {
   const [demoScript, setDemoScript] = useState('');
   const [demoScriptMsg, setDemoScriptMsg] = useState('');
   const [demoData, setDemoData] = useState({
-    checklist: [],
     goals: [],
     commitmentScore: '',
   });
@@ -468,7 +472,13 @@ export default function AdminV2() {
     }
     try {
       const savedData = window.localStorage.getItem('retaliateai_live_demo_data');
-      if (savedData) setDemoData(JSON.parse(savedData));
+      if (savedData) {
+        const parsedDemoData = JSON.parse(savedData);
+        setDemoData({
+          goals: Array.isArray(parsedDemoData?.goals) ? parsedDemoData.goals : [],
+          commitmentScore: parsedDemoData?.commitmentScore ?? '',
+        });
+      }
     } catch (_e) {}
   }, []);
 
@@ -921,7 +931,7 @@ export default function AdminV2() {
   function saveDemoData(data) {
     const scoreNum = Number(data.commitmentScore);
     const toSave = {
-      ...data,
+      goals: Array.isArray(data.goals) ? data.goals : [],
       commitmentScore: data.commitmentScore !== '' && !isNaN(scoreNum) ? scoreNum : null,
     };
     window.localStorage.setItem('retaliateai_live_demo_data', JSON.stringify(toSave));
@@ -1067,7 +1077,15 @@ export default function AdminV2() {
               <button
                 onClick={() => {
                   try {
-                    JSON.parse(demoScript);
+                    const parsed = JSON.parse(demoScript);
+                    const isOldFormat = Array.isArray(parsed);
+                    const isNewFormat = parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Array.isArray(parsed.turns);
+                    if (!isOldFormat && !isNewFormat) {
+                      throw new Error('Invalid script format');
+                    }
+                    if (isNewFormat && parsed.checklist !== undefined && !Array.isArray(parsed.checklist)) {
+                      throw new Error('Invalid checklist format');
+                    }
                     window.localStorage.setItem('retaliateai_live_demo_script', demoScript);
                     setDemoScriptMsg('✓ Script saved');
                     setTimeout(() => setDemoScriptMsg(''), 2000);
@@ -1109,7 +1127,7 @@ export default function AdminV2() {
           </div>
 
           <p className="text-zinc-500 text-xs">
-            Edit the demo script as JSON. Each turn: <code className="text-zinc-400">{'{ "role": "coach" | "user", "content": "...", "stage": "wins" | "honest" | "tomorrow" | "commitment_checkin" (optional) }'}</code>. The stage field advances the progress bar when that turn plays.
+            Script format: <code className="text-zinc-400">{'{ "checklist": [{ "label": "...", "checked": false }], "turns": [...] }'}</code>. Each turn: <code className="text-zinc-400">{'{ "role": "coach"|"user", "content": "...", "stage": "wins"|"honest"|"tomorrow"|"commitment_checkin" (optional), "checkItem": 0 (optional, checks checklist item at index) }'}</code>.
           </p>
 
           {demoScriptMsg && (
@@ -1151,61 +1169,6 @@ export default function AdminV2() {
               onChange={(e) => setDemoData((d) => ({ ...d, commitmentScore: e.target.value }))}
               className="w-full sm:max-w-[160px] bg-zinc-900 border border-zinc-700 text-white text-sm rounded-xl px-3 py-2 focus:outline-none focus:border-zinc-500 transition-colors block"
             />
-          </div>
-
-          {/* Checklist Items */}
-          <div className="space-y-2">
-            <p className="text-xs text-zinc-400 font-medium">Checklist Items</p>
-            <div className="space-y-2">
-              {demoData.checklist.map((item, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={item.label}
-                    placeholder="Item label"
-                    onChange={(e) => {
-                      const label = e.target.value;
-                      setDemoData((d) => {
-                        const checklist = [...d.checklist];
-                        checklist[i] = { ...checklist[i], label };
-                        return { ...d, checklist };
-                      });
-                    }}
-                    className="flex-1 bg-zinc-900 border border-zinc-700 text-white text-sm rounded-xl px-3 py-2 focus:outline-none focus:border-zinc-500 transition-colors"
-                  />
-                  <button
-                    onClick={() => {
-                      setDemoData((d) => {
-                        const checklist = [...d.checklist];
-                        checklist[i] = { ...checklist[i], checked: !checklist[i].checked };
-                        return { ...d, checklist };
-                      });
-                    }}
-                    className="px-2 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-sm hover:bg-zinc-700 transition-colors flex-shrink-0"
-                    title="Toggle checked"
-                  >
-                    {item.checked ? '✅' : '⬜'}
-                  </button>
-                  <button
-                    onClick={() => {
-                      setDemoData((d) => {
-                        const checklist = d.checklist.filter((_, idx) => idx !== i);
-                        return { ...d, checklist };
-                      });
-                    }}
-                    className="p-2 rounded-lg text-zinc-600 hover:text-red-400 hover:bg-red-900/20 transition-colors flex-shrink-0"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ))}
-            </div>
-            <button
-              onClick={() => setDemoData((d) => ({ ...d, checklist: [...d.checklist, { label: '', checked: false }] }))}
-              className="text-xs text-zinc-400 hover:text-zinc-200 transition-colors px-3 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700"
-            >
-              + Add item
-            </button>
           </div>
 
           {/* Goals */}
