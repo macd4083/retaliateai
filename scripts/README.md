@@ -228,7 +228,7 @@ node --env-file=.env.simulation.local scripts/simulate-reflection.js \
 Runs a **single-session** test that validates the full goal suggestion flow:
 
 1. Simulates a session where the coach surfaces a suggested goal via `extracted_data.goal_suggestion`
-2. Accepts the suggested goal (calls `api/create-goal.js`)
+2. Accepts the suggested goal (calls `api/goals.js` with `action: "create"`)
 3. Journals a why for the new goal
 4. Verifies the new goal appears in the DB with at least one why entry
 

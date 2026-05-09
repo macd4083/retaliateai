@@ -29,8 +29,7 @@ import { randomUUID } from 'crypto';
 
 import handler from '../api/reflection-coach.js';
 import commitmentStatsHandler from '../api/commitment-stats.js';
-import createGoalHandler from '../api/create-goal.js';
-import extractGoalCommitmentsHandler from '../api/extract-goal-commitments.js';
+import goalsHandler from '../api/goals.js';
 import { PERSONAS, DEFAULT_PERSONA } from './personas.js';
 import { generateUserResponse, scoreCoachMessage } from './generate-user-response.js';
 import { drawTraits } from './hidden-traits.js';
@@ -416,7 +415,8 @@ async function validateBackend(supabase, userId, simulatedDate, prevGoalWhysCoun
   // 6. Extract goal commitments (runs when a commitment was made this session)
   if (options.commitmentText && Array.isArray(options.sampleGoals) && options.sampleGoals.length > 0) {
     try {
-      const extractResult = await callHandler(extractGoalCommitmentsHandler, {
+      const extractResult = await callHandler(goalsHandler, {
+        action: 'extract-commitments',
         user_id: userId,
         session_id: options.sessionId || null,
         commitment_text: options.commitmentText,
@@ -1471,7 +1471,8 @@ async function runGoalSuggestionTest({ personaKey, startDate, clean }) {
     console.log(`    Why they journal: "${whyText}"`);
 
     try {
-      const createResult = await callHandler(createGoalHandler, {
+      const createResult = await callHandler(goalsHandler, {
+        action: 'create',
         user_id: userId,
         title: goalTitle,
         category: goalCategory,

@@ -1109,10 +1109,10 @@ export default function ReflectionV2() {
     const { title } = pendingGoalSuggestion;
     setPendingGoalSuggestion(null);
     try {
-      const res = await fetch('/api/create-goal', {
+      const res = await fetch('/api/goals', {
         method: 'POST',
         headers: await getAuthHeaders(),
-        body: JSON.stringify({ user_id: user.id, title }),
+        body: JSON.stringify({ action: 'create', user_id: user.id, title }),
       });
       if (!res.ok) return;
       const data = await res.json();
