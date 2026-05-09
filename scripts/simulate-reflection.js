@@ -478,6 +478,8 @@ async function validateBackend(supabase, userId, simulatedDate, prevGoalWhysCoun
 
   // 8. goal_commitment_log — verify rows written with goal_id and commitment_why
   if (options.sessionId) {
+    // Wait for fire-and-forget async operations (goal_commitment_log insert, etc.) to complete
+    await new Promise((resolve) => setTimeout(resolve, 2000));
     try {
       const { data: logRows } = await supabase
         .from('goal_commitment_log')
@@ -3026,7 +3028,7 @@ async function main() {
         checklist_after: { ...sessionState.checklist },
         honest_depth: result.honest_depth === true || sessionState.honest_depth === true,
         wins_asked_for_more: result.wins_asked_for_more === true || sessionState.wins_asked_for_more === true,
-        commitment_checkin_done: result.commitment_checkin_done === true,
+        commitment_checkin_done: sessionState.commitment_checkin_done === true,
         commitment_minimum: resolveCommitmentField(result, 'commitment_minimum', sessionState.commitment_minimum),
         commitment_stretch: resolveCommitmentField(result, 'commitment_stretch', sessionState.commitment_stretch),
         tomorrow_commitment: resolveCommitmentField(result, 'tomorrow_commitment', sessionState.tomorrow_commitment),

@@ -1761,7 +1761,7 @@ Do NOT frame this as goal-specific unless the user is directly referencing a goa
     allDirectives.push({
       id: 'honest_missing',
       // Note: avoid future-action prompts here; in honest stage they can trigger premature tomorrow pivots and skip honest_depth validation.
-      instruction: `HONEST MISSING: Gently probe for a miss or honest moment with reflection-first questions. ${patternHint} Goal is self-awareness about TODAY and the underlying truth, not planning. Use prompts like: "What are you not saying yet?", "What's the real friction underneath this?", "What would you tell a friend in this situation?", or "Where does this pattern usually show up for you?" Keep it natural and grounded in their words. Never ask what they will do next, what plan they should make, or how they should act tomorrow in this stage. Once a miss is named, ask the one question that goes underneath it — what was actually happening underneath that surface behavior, not just what they did or didn't do. Do NOT set honest_depth: true until the user has genuinely answered the underneath layer. A surface answer is not enough. Evaluate qualitatively: is this a real answer about why it happened — the actual reason, the emotional truth, the internal conflict? If yes → set honest_depth: true. If no → ask the one question that goes there.${patternContext}${missedFragmentContext}`,
+      instruction: `HONEST MISSING: Gently probe for a miss or honest moment with reflection-first questions. ${patternHint} Goal is self-awareness about TODAY and the underlying truth, not planning. Use prompts like: "What are you not saying yet?", "What's the real friction underneath this?", "What would you tell a friend in this situation?", or "Where does this pattern usually show up for you?" Keep it natural and grounded in their words. Never ask what they will do next, what plan they should make, or how they should act tomorrow in this stage. Once a miss is named, ask the one question that goes underneath it — what was actually happening underneath that surface behavior, not just what they did or didn't do. Do NOT set honest_depth: true until the user has genuinely answered the underneath layer. A surface answer is not enough. Evaluate qualitatively: is this a real answer about why it happened — the actual reason, the emotional truth, the internal conflict? If yes → set honest_depth: true. If no → ask the one question that goes there. STRICT: Do NOT ask what the user will do, what step they will take, how they will change, or what they can do differently. The honest question looks backward — it is about what happened today, not what to do tomorrow. Any forward-action question here is a critical error.${patternContext}${missedFragmentContext}`,
       priority: 2,
       preferred_stage: 'honest',
       fire_next_session: true,
@@ -3360,7 +3360,7 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
     }
     result.follow_up_queued = result.follow_up_queued || false;
     result.follow_up_triggered = result.follow_up_triggered === true;
-    result.wins_asked_for_more = result.wins_asked_for_more === true;
+    result.wins_asked_for_more = result.wins_asked_for_more === true && stageAtTurnStart === 'wins';
     // honest_depth can only be set when actually in the honest stage
     result.honest_depth = result.honest_depth === true && stageAtTurnStart === 'honest';
     result.commitment_checkin_done = result.commitment_checkin_done === true;
@@ -3389,6 +3389,15 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
     result.commitment_stretch_why = resolvedStretchWhy;
     if (!resolvedMinimumCommitmentForOutput || !resolvedStretchCommitmentForOutput) {
       result.extracted_data.tomorrow_commitment = null;
+    }
+    // Auto-assemble tomorrow_commitment server-side when both parts exist but GPT didn't set it
+    if (
+      resolvedMinimumCommitmentForOutput &&
+      resolvedStretchCommitmentForOutput &&
+      !session_state.tomorrow_commitment &&
+      !result.extracted_data.tomorrow_commitment
+    ) {
+      result.extracted_data.tomorrow_commitment = `Minimum: ${resolvedMinimumCommitmentForOutput}. Stretch: ${resolvedStretchCommitmentForOutput}.`;
     }
 
     if (isInit && Array.isArray(yesterdayFragments) && yesterdayFragments.length > 0 && !session_state.commitment_checkin_done) {
