@@ -5,6 +5,7 @@ import { supabase } from '../../lib/supabase/client';
 import AppShellV2 from '../../components/v2/AppShellV2';
 
 const DEMO_DATA_KEY = 'retaliateai_live_demo_data';
+const DEMO_SCRIPT_KEY = 'retaliateai_live_demo_script';
 const CHANNEL_NAME = 'retaliateai-live-demo';
 
 function readDemoData() {
@@ -13,6 +14,20 @@ function readDemoData() {
     return raw ? JSON.parse(raw) : null;
   } catch {
     return null;
+  }
+}
+
+function readChecklistFromScript() {
+  try {
+    const raw = window.localStorage.getItem(DEMO_SCRIPT_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Array.isArray(parsed.turns)) {
+      return Array.isArray(parsed.checklist) ? parsed.checklist : [];
+    }
+    return [];
+  } catch {
+    return [];
   }
 }
 
@@ -30,6 +45,7 @@ export default function LiveDemoInsights() {
 
   const [isAdmin, setIsAdmin] = useState(null);
   const [demoData, setDemoData] = useState(null);
+  const [checklist, setChecklist] = useState([]);
 
   // Admin guard
   useEffect(() => {
@@ -56,6 +72,7 @@ export default function LiveDemoInsights() {
   // Load initial data from localStorage
   useEffect(() => {
     setDemoData(readDemoData());
+    setChecklist(readChecklistFromScript());
   }, []);
 
   // BroadcastChannel listener
@@ -86,7 +103,6 @@ export default function LiveDemoInsights() {
 
   if (!isAdmin) return null;
 
-  const checklist = Array.isArray(demoData?.checklist) ? demoData.checklist : [];
   const goals = Array.isArray(demoData?.goals) ? demoData.goals : [];
   const commitmentScore = demoData?.commitmentScore ?? null;
 
@@ -99,7 +115,7 @@ export default function LiveDemoInsights() {
         {!hasData && (
           <div className="flex flex-col items-center justify-center py-20 text-center gap-3">
             <p className="text-zinc-400 text-sm">No demo data configured yet.</p>
-            <p className="text-zinc-500 text-xs">Go to Admin → Live Demo Script → Demo Data to set it up.</p>
+            <p className="text-zinc-500 text-xs">Go to Admin → Live Demo Script to set it up.</p>
           </div>
         )}
 
