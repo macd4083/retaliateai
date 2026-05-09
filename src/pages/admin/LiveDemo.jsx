@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { Send, Moon, Play, Square, ArrowLeft } from 'lucide-react';
+import { Send, Moon } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../lib/AuthContext';
 import { supabase } from '../../lib/supabase/client';
@@ -166,6 +166,15 @@ export default function LiveDemo() {
     setIsComplete(false);
   }, [clearTimers]);
 
+  const startPlayback = useCallback(() => {
+    clearTimers();
+    setMessages([]);
+    setInputValue('');
+    setCurrentTurnIndex(0);
+    setIsComplete(false);
+    setIsPlaying(true);
+  }, [clearTimers]);
+
   useEffect(() => {
     if (!user?.id) return;
     let cancelled = false;
@@ -215,6 +224,20 @@ export default function LiveDemo() {
   }, [inputValue]);
 
   useEffect(() => () => clearTimers(), [clearTimers]);
+
+  useEffect(() => {
+    if (typeof BroadcastChannel === 'undefined') return;
+    const channel = new BroadcastChannel('retaliateai-live-demo');
+    channel.onmessage = (event) => {
+      const { type } = event.data || {};
+      if (type === 'PLAY') {
+        startPlayback();
+      } else if (type === 'RESET') {
+        resetPlayback();
+      }
+    };
+    return () => channel.close();
+  }, [startPlayback, resetPlayback]);
 
   useEffect(() => {
     if (!isPlaying) return;
@@ -291,57 +314,11 @@ export default function LiveDemo() {
 
   if (!isAdmin) return null;
 
-  const totalTurns = script.length;
-  const turnLabel = totalTurns > 0
-    ? `${Math.min(currentTurnIndex + 1, totalTurns)} of ${totalTurns}`
-    : '0 of 0';
-
   return (
     <AppShellV2 title="Live Demo">
       <div className="flex flex-col h-full">
         <div className="flex-shrink-0 border-b border-zinc-800 bg-zinc-950">
           <ProgressBar currentStage={isComplete ? 'complete' : 'wins'} stages={BASE_STAGES} />
-        </div>
-
-        <div className="flex-shrink-0 border-b border-zinc-800 bg-zinc-950 px-4 py-3">
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => {
-                  clearTimers();
-                  if (isComplete) {
-                    setMessages([]);
-                    setInputValue('');
-                    setCurrentTurnIndex(0);
-                    setIsComplete(false);
-                  }
-                  setIsPlaying(true);
-                }}
-                disabled={isPlaying || totalTurns === 0}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed text-sm transition-colors"
-              >
-                <Play className="w-3.5 h-3.5" />
-                Play
-              </button>
-              <button
-                onClick={resetPlayback}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 hover:text-white text-sm transition-colors"
-              >
-                <Square className="w-3.5 h-3.5" />
-                Reset
-              </button>
-            </div>
-
-            <p className="text-zinc-500 text-sm">Turn {turnLabel}</p>
-
-            <button
-              onClick={() => navigate('/admin')}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 hover:text-white text-sm transition-colors"
-            >
-              <ArrowLeft className="w-3.5 h-3.5" />
-              Back to Admin
-            </button>
-          </div>
         </div>
 
         <motion.div
