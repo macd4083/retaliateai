@@ -8,6 +8,7 @@ import SettingsV2 from './pages/SettingsV2';
 import OnboardingV2 from './pages/OnboardingV2';
 import AdminV2 from './pages/AdminV2';
 import VideoExport from './pages/admin/VideoExport';
+import LiveDemo from './pages/admin/LiveDemo';
 import DemoBuilder from './pages/DemoBuilder';
 import DemoPlayerPage from './pages/DemoPlayerPage';
 import UIRecorder from './pages/UIRecorder';
@@ -155,6 +156,14 @@ export default function App() {
         element={
           <AuthGuardV2>
             <VideoExport />
+          </AuthGuardV2>
+        }
+      />
+      <Route
+        path="/admin/live-demo"
+        element={
+          <AuthGuardV2>
+            <LiveDemo />
           </AuthGuardV2>
         }
       />
