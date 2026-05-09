@@ -2796,6 +2796,7 @@ async function main() {
     if (crossSessionState.yesterdayCommitment && scenario !== 'cold_start') {
       report.summary.commitment_checkin_coverage.should_have_fired++;
     }
+    const initStageAtTurnStart = sessionState.current_stage;
     const initResult = await callCoach({
       user_id: userId,
       session_id: sessionId,
