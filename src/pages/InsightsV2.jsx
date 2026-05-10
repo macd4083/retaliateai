@@ -391,9 +391,10 @@ export default function InsightsV2() {
                 };
               });
 
+              const todayStr = localDateStr(0);
               const lineParts = [];
               weekDays.forEach((d, i) => {
-                if (d.score === null) return;
+                if (d.score === null || d.date > todayStr) return;
                 const x = getX(i).toFixed(1);
                 const y = getY(d.score).toFixed(1);
                 lineParts.push(lineParts.length === 0 ? `M ${x} ${y}` : `L ${x} ${y}`);
