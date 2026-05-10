@@ -206,6 +206,54 @@ export function normalizeLiveDemoData(data) {
       data?.commitmentScore !== '' && Number.isFinite(scoreNum) && scoreNum >= 0 && scoreNum <= 100
         ? scoreNum
         : null,
+    weeklyScores: Array.from({ length: 7 }, (_, i) => {
+      const d = Array.isArray(data?.weeklyScores) ? data.weeklyScores[i] : null;
+      return {
+        score:
+          Number.isFinite(Number(d?.score)) && Number(d.score) >= 0 && Number(d.score) <= 100
+            ? Number(d.score)
+            : null,
+        status: ['kept', 'missed', 'pending'].includes(d?.status) ? d.status : null,
+      };
+    }),
+    streak:
+      Number.isFinite(Number(data?.streak)) && Number(data.streak) >= 0
+        ? Math.round(Number(data.streak))
+        : 0,
+    yesterdayCommitment: data?.yesterdayCommitment?.text
+      ? {
+          text: String(data.yesterdayCommitment.text).trim(),
+          status: ['kept', 'missed', 'pending'].includes(data.yesterdayCommitment.status)
+            ? data.yesterdayCommitment.status
+            : 'pending',
+          minimum:
+            typeof data.yesterdayCommitment.minimum === 'string'
+              ? data.yesterdayCommitment.minimum.trim()
+              : '',
+          stretch:
+            typeof data.yesterdayCommitment.stretch === 'string'
+              ? data.yesterdayCommitment.stretch.trim()
+              : '',
+        }
+      : null,
+    keptFragments: Array.isArray(data?.keptFragments)
+      ? data.keptFragments
+          .filter((f) => f?.text?.trim())
+          .map((f) => ({
+            text: String(f.text).trim(),
+            goalTitle: typeof f.goalTitle === 'string' ? f.goalTitle.trim() : '',
+            goalWhy: typeof f.goalWhy === 'string' ? f.goalWhy.trim() : '',
+          }))
+      : [],
+    missedFragments: Array.isArray(data?.missedFragments)
+      ? data.missedFragments
+          .filter((f) => f?.text?.trim())
+          .map((f) => ({
+            text: String(f.text).trim(),
+            goalTitle: typeof f.goalTitle === 'string' ? f.goalTitle.trim() : '',
+            goalWhy: typeof f.goalWhy === 'string' ? f.goalWhy.trim() : '',
+          }))
+      : [],
   };
 }
 
@@ -226,7 +274,8 @@ export function readLiveDemoData() {
 
   try {
     const raw = window.localStorage.getItem(LIVE_DEMO_DATA_KEY);
-    return raw ? normalizeLiveDemoData(JSON.parse(raw)) : normalizeLiveDemoData(null);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return normalizeLiveDemoData(parsed);
   } catch {
     return normalizeLiveDemoData(null);
   }

@@ -402,6 +402,11 @@ export default function AdminV2() {
   const [demoData, setDemoData] = useState({
     goals: [],
     commitmentScore: '',
+    streak: '',
+    weeklyScores: Array.from({ length: 7 }, () => ({ score: '', status: '' })),
+    yesterdayCommitment: { text: '', status: 'pending', minimum: '', stretch: '' },
+    keptFragments: [],
+    missedFragments: [],
   });
   const [demoDataMsg, setDemoDataMsg] = useState('');
 
@@ -458,7 +463,26 @@ export default function AdminV2() {
         const parsedDemoData = normalizeLiveDemoData(JSON.parse(savedData));
         setDemoData({
           goals: Array.isArray(parsedDemoData?.goals) ? parsedDemoData.goals : [],
-          commitmentScore: parsedDemoData?.commitmentScore ?? '',
+          commitmentScore: parsedDemoData?.commitmentScore != null ? String(parsedDemoData.commitmentScore) : '',
+          streak: parsedDemoData?.streak != null ? String(parsedDemoData.streak) : '',
+          weeklyScores: Array.from({ length: 7 }, (_, i) => ({
+            score: parsedDemoData?.weeklyScores?.[i]?.score != null ? String(parsedDemoData.weeklyScores[i].score) : '',
+            status: typeof parsedDemoData?.weeklyScores?.[i]?.status === 'string'
+              ? parsedDemoData.weeklyScores[i].status
+              : '',
+          })),
+          yesterdayCommitment: {
+            text: parsedDemoData?.yesterdayCommitment?.text ?? '',
+            status: parsedDemoData?.yesterdayCommitment?.status ?? 'pending',
+            minimum: parsedDemoData?.yesterdayCommitment?.minimum ?? '',
+            stretch: parsedDemoData?.yesterdayCommitment?.stretch ?? '',
+          },
+          keptFragments: Array.isArray(parsedDemoData?.keptFragments)
+            ? parsedDemoData.keptFragments
+            : [],
+          missedFragments: Array.isArray(parsedDemoData?.missedFragments)
+            ? parsedDemoData.missedFragments
+            : [],
         });
       }
     } catch (_e) {}
@@ -1148,6 +1172,281 @@ export default function AdminV2() {
               onChange={(e) => setDemoData((d) => ({ ...d, commitmentScore: e.target.value }))}
               className="w-full sm:max-w-[160px] bg-zinc-900 border border-zinc-700 text-white text-sm rounded-xl px-3 py-2 focus:outline-none focus:border-zinc-500 transition-colors block"
             />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs text-zinc-400">Streak (nights)</label>
+            <input
+              type="number"
+              min="0"
+              value={demoData.streak}
+              onChange={(e) => setDemoData((d) => ({ ...d, streak: e.target.value }))}
+              className="w-full sm:max-w-[160px] bg-zinc-900 border border-zinc-700 text-white text-sm rounded-xl px-3 py-2 focus:outline-none focus:border-zinc-500 transition-colors block"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <div>
+              <p className="text-xs text-zinc-400 font-medium">Weekly Scores (Mon–Sun)</p>
+              <p className="text-[11px] text-zinc-500">Controls the consistency graph in insights</p>
+            </div>
+            <div className="space-y-2">
+              {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, i) => (
+                <div key={day} className="flex items-center gap-2">
+                  <p className="text-zinc-400 text-xs w-10">{day}</p>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={demoData.weeklyScores?.[i]?.score ?? ''}
+                    onChange={(e) => {
+                      const score = e.target.value;
+                      setDemoData((d) => {
+                        const weeklyScores = Array.from({ length: 7 }, (_, idx) => ({
+                          score: d.weeklyScores?.[idx]?.score ?? '',
+                          status: d.weeklyScores?.[idx]?.status ?? '',
+                        }));
+                        weeklyScores[i] = { ...weeklyScores[i], score };
+                        return { ...d, weeklyScores };
+                      });
+                    }}
+                    className="w-20 bg-zinc-900 border border-zinc-700 text-white text-sm rounded-lg px-2 py-1.5 focus:outline-none focus:border-zinc-500 transition-colors"
+                  />
+                  <select
+                    value={demoData.weeklyScores?.[i]?.status ?? ''}
+                    onChange={(e) => {
+                      const status = e.target.value;
+                      setDemoData((d) => {
+                        const weeklyScores = Array.from({ length: 7 }, (_, idx) => ({
+                          score: d.weeklyScores?.[idx]?.score ?? '',
+                          status: d.weeklyScores?.[idx]?.status ?? '',
+                        }));
+                        weeklyScores[i] = { ...weeklyScores[i], status };
+                        return { ...d, weeklyScores };
+                      });
+                    }}
+                    className="flex-1 bg-zinc-900 border border-zinc-700 text-white text-sm rounded-lg px-2 py-1.5 focus:outline-none focus:border-zinc-500 transition-colors"
+                  >
+                    <option value="">—</option>
+                    <option value="kept">kept</option>
+                    <option value="missed">missed</option>
+                    <option value="pending">pending</option>
+                  </select>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-xs text-zinc-400 font-medium">Yesterday&apos;s Commitment</p>
+            <input
+              type="text"
+              value={demoData.yesterdayCommitment?.text ?? ''}
+              placeholder="Commitment text"
+              onChange={(e) => {
+                const text = e.target.value;
+                setDemoData((d) => ({
+                  ...d,
+                  yesterdayCommitment: { ...d.yesterdayCommitment, text },
+                }));
+              }}
+              className="w-full bg-zinc-900 border border-zinc-700 text-white text-sm rounded-xl px-3 py-2 focus:outline-none focus:border-zinc-500 transition-colors"
+            />
+            <div className="grid sm:grid-cols-3 gap-2">
+              <select
+                value={demoData.yesterdayCommitment?.status ?? 'pending'}
+                onChange={(e) => {
+                  const status = e.target.value;
+                  setDemoData((d) => ({
+                    ...d,
+                    yesterdayCommitment: { ...d.yesterdayCommitment, status },
+                  }));
+                }}
+                className="bg-zinc-900 border border-zinc-700 text-white text-sm rounded-xl px-3 py-2 focus:outline-none focus:border-zinc-500 transition-colors"
+              >
+                <option value="pending">pending</option>
+                <option value="kept">kept</option>
+                <option value="missed">missed</option>
+              </select>
+              <input
+                type="text"
+                value={demoData.yesterdayCommitment?.minimum ?? ''}
+                placeholder="Minimum"
+                onChange={(e) => {
+                  const minimum = e.target.value;
+                  setDemoData((d) => ({
+                    ...d,
+                    yesterdayCommitment: { ...d.yesterdayCommitment, minimum },
+                  }));
+                }}
+                className="bg-zinc-900 border border-zinc-700 text-white text-sm rounded-xl px-3 py-2 focus:outline-none focus:border-zinc-500 transition-colors"
+              />
+              <input
+                type="text"
+                value={demoData.yesterdayCommitment?.stretch ?? ''}
+                placeholder="Stretch"
+                onChange={(e) => {
+                  const stretch = e.target.value;
+                  setDemoData((d) => ({
+                    ...d,
+                    yesterdayCommitment: { ...d.yesterdayCommitment, stretch },
+                  }));
+                }}
+                className="bg-zinc-900 border border-zinc-700 text-white text-sm rounded-xl px-3 py-2 focus:outline-none focus:border-zinc-500 transition-colors"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-xs text-zinc-400 font-medium">Kept Commitments (shown in Insights)</p>
+            <div className="space-y-3">
+              {demoData.keptFragments.map((fragment, i) => (
+                <div key={`kept-fragment-${i}`} className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 space-y-2">
+                  <input
+                    type="text"
+                    value={fragment.text}
+                    placeholder="Commitment text"
+                    onChange={(e) => {
+                      const text = e.target.value;
+                      setDemoData((d) => {
+                        const keptFragments = [...d.keptFragments];
+                        keptFragments[i] = { ...keptFragments[i], text };
+                        return { ...d, keptFragments };
+                      });
+                    }}
+                    className="w-full bg-zinc-800 border border-zinc-700 text-white text-sm rounded-xl px-3 py-2 focus:outline-none focus:border-zinc-500 transition-colors"
+                  />
+                  <input
+                    type="text"
+                    value={fragment.goalTitle || ''}
+                    placeholder="Goal title (optional)"
+                    onChange={(e) => {
+                      const goalTitle = e.target.value;
+                      setDemoData((d) => {
+                        const keptFragments = [...d.keptFragments];
+                        keptFragments[i] = { ...keptFragments[i], goalTitle };
+                        return { ...d, keptFragments };
+                      });
+                    }}
+                    className="w-full bg-zinc-800 border border-zinc-700 text-white text-sm rounded-xl px-3 py-2 focus:outline-none focus:border-zinc-500 transition-colors"
+                  />
+                  <div className="flex items-start gap-2">
+                    <input
+                      type="text"
+                      value={fragment.goalWhy || ''}
+                      placeholder="Goal why (optional)"
+                      onChange={(e) => {
+                        const goalWhy = e.target.value;
+                        setDemoData((d) => {
+                          const keptFragments = [...d.keptFragments];
+                          keptFragments[i] = { ...keptFragments[i], goalWhy };
+                          return { ...d, keptFragments };
+                        });
+                      }}
+                      className="w-full bg-zinc-800 border border-zinc-700 text-white text-sm rounded-xl px-3 py-2 focus:outline-none focus:border-zinc-500 transition-colors"
+                    />
+                    <button
+                      onClick={() => {
+                        setDemoData((d) => ({
+                          ...d,
+                          keptFragments: d.keptFragments.filter((_, idx) => idx !== i),
+                        }));
+                      }}
+                      className="p-2 rounded-lg text-zinc-600 hover:text-red-400 hover:bg-red-900/20 transition-colors flex-shrink-0"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <button
+              onClick={() =>
+                setDemoData((d) => ({
+                  ...d,
+                  keptFragments: [...d.keptFragments, { text: '', goalTitle: '', goalWhy: '' }],
+                }))
+              }
+              className="text-xs text-zinc-400 hover:text-zinc-200 transition-colors px-3 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700"
+            >
+              + Add kept
+            </button>
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-xs text-zinc-400 font-medium">Missed Commitments (shown in Insights)</p>
+            <div className="space-y-3">
+              {demoData.missedFragments.map((fragment, i) => (
+                <div key={`missed-fragment-${i}`} className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 space-y-2">
+                  <input
+                    type="text"
+                    value={fragment.text}
+                    placeholder="Commitment text"
+                    onChange={(e) => {
+                      const text = e.target.value;
+                      setDemoData((d) => {
+                        const missedFragments = [...d.missedFragments];
+                        missedFragments[i] = { ...missedFragments[i], text };
+                        return { ...d, missedFragments };
+                      });
+                    }}
+                    className="w-full bg-zinc-800 border border-zinc-700 text-white text-sm rounded-xl px-3 py-2 focus:outline-none focus:border-zinc-500 transition-colors"
+                  />
+                  <input
+                    type="text"
+                    value={fragment.goalTitle || ''}
+                    placeholder="Goal title (optional)"
+                    onChange={(e) => {
+                      const goalTitle = e.target.value;
+                      setDemoData((d) => {
+                        const missedFragments = [...d.missedFragments];
+                        missedFragments[i] = { ...missedFragments[i], goalTitle };
+                        return { ...d, missedFragments };
+                      });
+                    }}
+                    className="w-full bg-zinc-800 border border-zinc-700 text-white text-sm rounded-xl px-3 py-2 focus:outline-none focus:border-zinc-500 transition-colors"
+                  />
+                  <div className="flex items-start gap-2">
+                    <input
+                      type="text"
+                      value={fragment.goalWhy || ''}
+                      placeholder="Goal why (optional)"
+                      onChange={(e) => {
+                        const goalWhy = e.target.value;
+                        setDemoData((d) => {
+                          const missedFragments = [...d.missedFragments];
+                          missedFragments[i] = { ...missedFragments[i], goalWhy };
+                          return { ...d, missedFragments };
+                        });
+                      }}
+                      className="w-full bg-zinc-800 border border-zinc-700 text-white text-sm rounded-xl px-3 py-2 focus:outline-none focus:border-zinc-500 transition-colors"
+                    />
+                    <button
+                      onClick={() => {
+                        setDemoData((d) => ({
+                          ...d,
+                          missedFragments: d.missedFragments.filter((_, idx) => idx !== i),
+                        }));
+                      }}
+                      className="p-2 rounded-lg text-zinc-600 hover:text-red-400 hover:bg-red-900/20 transition-colors flex-shrink-0"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <button
+              onClick={() =>
+                setDemoData((d) => ({
+                  ...d,
+                  missedFragments: [...d.missedFragments, { text: '', goalTitle: '', goalWhy: '' }],
+                }))
+              }
+              className="text-xs text-zinc-400 hover:text-zinc-200 transition-colors px-3 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700"
+            >
+              + Add missed
+            </button>
           </div>
 
           {/* Goals */}
