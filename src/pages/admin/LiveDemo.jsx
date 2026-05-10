@@ -8,12 +8,10 @@ import AppShellV2 from '../../components/v2/AppShellV2';
 import {
   DEFAULT_LIVE_DEMO_SCRIPT,
   LIVE_DEMO_CHANNEL_NAME,
-  LIVE_DEMO_DATA_KEY,
   buildLiveDemoChecklist,
   getLiveDemoInitialStage,
   getLiveDemoStageForTurn,
   getLiveDemoStages,
-  normalizeLiveDemoData,
   readLiveDemoScript,
 } from '../../lib/liveDemo';
 
@@ -101,61 +99,6 @@ function makeMessageId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function DemoDataPanel({ checklist, goals, commitmentScore }) {
-  const hasChecklist = Array.isArray(checklist) && checklist.length > 0;
-  const hasGoals = Array.isArray(goals) && goals.length > 0;
-  const hasScore = commitmentScore != null;
-
-  if (!hasChecklist && !hasGoals && !hasScore) return null;
-
-  return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 space-y-4">
-      {hasScore && (
-        <div className="space-y-1">
-          <div className="text-4xl font-bold text-white">
-            {commitmentScore}<span className="text-xl text-zinc-400">/100</span>
-          </div>
-          <div className="text-xs text-zinc-400 uppercase tracking-wide">Commitment Score</div>
-        </div>
-      )}
-      {hasScore && (hasChecklist || hasGoals) && (
-        <div className="border-t border-zinc-800" />
-      )}
-      {hasChecklist && (
-        <div className="space-y-2">
-          <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Today&apos;s Checklist</p>
-          <ul className="space-y-1.5">
-            {checklist.map((item, i) => (
-              <li key={i} className="flex items-center gap-2 text-sm text-zinc-200">
-                <span>{item.checked ? '✅' : '⬜'}</span>
-                <span>{item.label}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {hasChecklist && hasGoals && (
-        <div className="border-t border-zinc-800" />
-      )}
-      {hasGoals && (
-        <div className="space-y-2">
-          <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Goals</p>
-          <div className="space-y-2">
-            {goals.map((goal, i) => (
-              <div key={i} className="space-y-0.5">
-                <p className="text-sm text-white font-medium">{goal.title}</p>
-                {goal.why && (
-                  <p className="text-xs text-zinc-400 italic">{goal.why}</p>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 export default function LiveDemo() {
   const auth = /** @type {any} */ (useAuth());
   const user = auth?.user;
@@ -173,7 +116,6 @@ export default function LiveDemo() {
   const [currentTurnIndex, setCurrentTurnIndex] = useState(0);
   const [isComplete, setIsComplete] = useState(false);
   const [currentStage, setCurrentStage] = useState(() => getLiveDemoInitialStage(DEFAULT_LIVE_DEMO_SCRIPT));
-  const [demoData, setDemoData] = useState(null);
   const stages = useMemo(() => getLiveDemoStages(script), [script]);
   const initialStage = useMemo(() => getLiveDemoInitialStage(script), [script]);
 
@@ -249,13 +191,6 @@ export default function LiveDemo() {
   }, []);
 
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(LIVE_DEMO_DATA_KEY);
-      if (raw) setDemoData(normalizeLiveDemoData(JSON.parse(raw)));
-    } catch (_e) {}
-  }, []);
-
-  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
@@ -276,11 +211,6 @@ export default function LiveDemo() {
         startPlayback();
       } else if (type === 'RESET') {
         resetPlayback();
-      } else if (type === 'UPDATE_DEMO_DATA') {
-        try {
-          const raw = window.localStorage.getItem(LIVE_DEMO_DATA_KEY);
-          if (raw) setDemoData(normalizeLiveDemoData(JSON.parse(raw)));
-        } catch (_e) {}
       } else if (type === 'UPDATE_DEMO_SCRIPT') {
         const nextScript = readLiveDemoScript();
         clearTimers();
@@ -365,10 +295,6 @@ export default function LiveDemo() {
     typeUserNext(1);
   }, [isPlaying, currentTurnIndex, script, schedule]);
 
-  const goals = Array.isArray(demoData?.goals) ? demoData.goals : [];
-  const commitmentScore = demoData?.commitmentScore ?? null;
-  const hasDemoPanelData = checklist.length > 0 || goals.length > 0 || commitmentScore != null;
-
   if (isAdmin === null) {
     return (
       <div className="flex items-center justify-center h-screen bg-zinc-950">
@@ -423,12 +349,6 @@ export default function LiveDemo() {
             </div>
           </div>
         </div>
-
-        {hasDemoPanelData && (
-          <div className="w-72 flex-shrink-0 overflow-y-auto p-4 border-l border-zinc-800">
-            <DemoDataPanel checklist={checklist} goals={goals} commitmentScore={commitmentScore} />
-          </div>
-        )}
       </div>
     </AppShellV2>
   );
