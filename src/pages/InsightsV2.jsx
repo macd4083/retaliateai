@@ -707,7 +707,7 @@ export default function InsightsV2() {
                       key={goal.id || i}
                       className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4"
                     >
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-start gap-3">
                         <span className="text-lg mt-0.5 self-start">🎯</span>
                         <div className="flex-1 min-w-0">
                           <p className="text-white font-medium text-sm leading-snug">{goal.title}</p>
@@ -819,7 +819,7 @@ export default function InsightsV2() {
 
                       return (
                         <div key={goal.id || i} className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 opacity-80">
-                          <div className="flex items-center gap-3">
+                          <div className="flex items-start gap-3">
                             <span className="text-lg mt-0.5 self-start">🎯</span>
                             <div className="flex-1 min-w-0">
                               <p className="text-zinc-300 font-medium text-sm leading-snug">{goal.title}</p>
