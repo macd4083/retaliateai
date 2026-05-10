@@ -3037,6 +3037,10 @@ async function main() {
         honest_forward_action_leak: honestForwardActionScan.honest_forward_action_leak,
         honest_forward_action_flags: honestForwardActionScan.honest_forward_action_flags,
       };
+      // Ensure new_stage is always null when stage_advanced is false
+      if (!conversationEntry.stage_advanced) {
+        conversationEntry.new_stage = null;
+      }
       sessionRecord.conversation.push(conversationEntry);
       report.summary.total_turns++;
 

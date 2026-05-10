@@ -289,7 +289,7 @@ GOAL WHYS (whys array):
   c. SKIP: If the user didn't articulate anything meaningful → skip (leave goal_why_action null)
 - Set extracted_data.goal_why_action: "replace" | "add" | null
 - Set extracted_data.goal_why_replace_index: (number, 0-based index in whys array) only if action="replace"
-- Set extracted_data.goal_why_insight: the captured why text (their actual words)
+- Set extracted_data.goal_why_insight: only if the user expressed a genuine personal motivation — a real reason this goal emotionally matters to them or connects to their identity. Extract the core motivation as a clean, concise first-person statement (1–2 sentences max). If the user deflected, made a plan, said they'd think about it, gave a non-answer, or said anything that is not a genuine statement of personal motivation, do NOT set this field. Leave it null.
 - Set extracted_data.goal_id_referenced: the goal's id
 - **CRITICAL: When you capture a why (set goal_why_insight), you MUST also set goal_id_referenced to the exact 'id' field of the matching goal from the goals array. The why is silently discarded if goal_id_referenced is missing or null. This is not optional.**
 
@@ -1619,7 +1619,7 @@ Do NOT frame this as goal-specific unless the user is directly referencing a goa
   ) {
     allDirectives.push({
       id: 'wins_invite_more',
-      instruction: `WINS — INVITE MORE: The user just shared a win. Do NOT ask an identity question, depth question, or stage-transition question yet. Your only job right now is to invite them to share more wins. Ask exactly one open question: something like "What else went well?" or "What's another one?" or "What else are you proud of today?" — keep it short and warm. Set wins_asked_for_more: true. Do NOT advance to the next stage until this is done.`,
+      instruction: `WINS — INVITE MORE: The user just shared a win. Do NOT ask an identity question, depth question, or stage-transition question yet. Your only job right now is to invite them to share more wins. Ask exactly one open question: something like "What else went well?" or "What's another one?" or "What else are you proud of today?" — keep it short and warm. STRICT: The only valid question here is an open invitation to share more wins — something the user already did or experienced today. Ask only "What else went well?" or equivalent backward-facing phrasing. Do NOT ask what the user will do, plans to do, how they'll prepare, or any forward-action question. This stage is exclusively about what already happened. Set wins_asked_for_more: true. Do NOT advance to the next stage until this is done.`,
       priority: 1,
       preferred_stage: 'wins',
       fire_next_session: false,
@@ -3361,6 +3361,10 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
     result.follow_up_queued = result.follow_up_queued || false;
     result.follow_up_triggered = result.follow_up_triggered === true;
     result.wins_asked_for_more = result.wins_asked_for_more === true && stageAtTurnStart === 'wins';
+    // If wins_invite_more just completed in the wins stage, treat it as asked-for-more regardless of GPT flag
+    if (result.directive_completed === 'wins_invite_more' && stageAtTurnStart === 'wins') {
+      result.wins_asked_for_more = true;
+    }
     // honest_depth can only be set when actually in the honest stage
     result.honest_depth = result.honest_depth === true && stageAtTurnStart === 'honest';
     result.commitment_checkin_done = result.commitment_checkin_done === true;
