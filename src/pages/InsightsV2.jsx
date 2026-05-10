@@ -582,7 +582,7 @@ export default function InsightsV2() {
             {missedFragments.length > 0 ? (
               <div className="space-y-2">
                 {missedFragments.map((f) => (
-                  <div key={f.id} className="bg-zinc-900 border border-zinc-800 border-l-4 border-l-zinc-600 rounded-xl px-4 py-3">
+                  <div key={f.id} className="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3">
                     <p className="text-zinc-200 text-sm leading-relaxed">
                       {f.commitment_text}
                       {f.goal_title && (
@@ -591,9 +591,6 @@ export default function InsightsV2() {
                           {f.goal_why && `, it was important because ${f.goal_why}`}
                         </span>
                       )}
-                    </p>
-                    <p className="text-zinc-500 text-xs mt-2 italic">
-                      Hey, I noticed you missed this — think about how you can better prioritize it throughout your day.
                     </p>
                   </div>
                 ))}
