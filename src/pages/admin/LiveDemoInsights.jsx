@@ -277,6 +277,12 @@ export default function LiveDemoInsights() {
           <section>
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-white font-semibold text-base">Your Goals</h2>
+              <button
+                className="text-zinc-400 hover:text-white text-sm flex items-center gap-1 transition-colors"
+                disabled
+              >
+                + Add
+              </button>
             </div>
 
             {goals.length === 0 && (
@@ -288,19 +294,12 @@ export default function LiveDemoInsights() {
             {goals.length > 0 && (
               <div className="space-y-3">
                 {goals.map((goal, i) => {
-                  const badge = signalBadge(goal?.last_motivation_signal);
                   return (
                     <div key={`goal-${i}`} className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
                       <div className="flex items-start gap-3">
                         <span className="text-lg mt-0.5 self-start">🎯</span>
                         <div className="flex-1 min-w-0">
                           <p className="text-white font-medium text-sm leading-snug">{goal?.title}</p>
-                          {badge && (
-                            <span className="inline-flex mt-1 items-center gap-1 px-2 py-0.5 rounded-full bg-zinc-800 border border-zinc-700 text-xs text-zinc-400">
-                              <span className={`w-1.5 h-1.5 rounded-full ${badge.dot}`} />
-                              {badge.text}
-                            </span>
-                          )}
                           {goal?.baseline_snapshot && (
                             <p className="text-zinc-500 text-xs mt-1 leading-relaxed">
                               Started: <span className="text-zinc-400">{goal.baseline_snapshot}</span>
@@ -318,6 +317,13 @@ export default function LiveDemoInsights() {
                             <p className="text-zinc-600 text-xs mt-1 italic">No why yet — talk about this in your next session</p>
                           )}
                         </div>
+                        <button
+                          className="flex-shrink-0 text-zinc-500 hover:text-white transition-colors self-center"
+                          disabled
+                          title="Actions"
+                        >
+                          ⋯
+                        </button>
                       </div>
                     </div>
                   );
@@ -346,6 +352,13 @@ export default function LiveDemoInsights() {
                         <p className="text-zinc-300 font-medium text-sm leading-snug">{goal?.title}</p>
                         <p className="text-xs mt-0.5 text-zinc-500">{goal?.status || 'Archived'}</p>
                       </div>
+                      <button
+                        className="flex-shrink-0 text-zinc-500 hover:text-white transition-colors self-center"
+                        disabled
+                        title="Actions"
+                      >
+                        ⋯
+                      </button>
                     </div>
                   </div>
                 ))}
