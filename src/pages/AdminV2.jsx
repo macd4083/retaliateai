@@ -5,6 +5,13 @@ import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase/client';
 import { localDateStr } from '../lib/dateUtils';
 import AppShellV2 from '../components/v2/AppShellV2';
+import {
+  DEFAULT_LIVE_DEMO_SCRIPT,
+  LIVE_DEMO_CHANNEL_NAME,
+  LIVE_DEMO_DATA_KEY,
+  LIVE_DEMO_SCRIPT_KEY,
+  normalizeLiveDemoData,
+} from '../lib/liveDemo';
 
 const ADMIN_SECRET = import.meta.env.VITE_ADMIN_SECRET;
 
@@ -12,31 +19,6 @@ const MAX_WHYS_TOTAL = 5;
 const MAX_SESSION_WHYS = 3;
 const MAX_COMMITMENT_WHYS = 1;
 const MAX_WHY_PROBE_WHYS = 2;
-const DEFAULT_DEMO_SCRIPT_FOR_EDITOR = {
-  checklist: [
-    { label: 'Example checklist item', checked: false },
-  ],
-  turns: [
-    { role: 'coach', content: 'Hey — how are you feeling tonight?', stage: 'wins' },
-    { role: 'user', content: 'honestly pretty decent. had a solid day' },
-    { role: 'coach', content: 'Nice. What made it solid?' },
-    { role: 'user', content: 'I finally got back to working on my app after like 2 weeks of avoiding it. got a decent chunk done' },
-    { role: 'coach', content: 'Two weeks of avoiding it and you got back in. What broke the pattern today?' },
-    { role: 'user', content: 'idk I just told myself to do 20 minutes and it turned into 2 hours' },
-    { role: 'coach', content: "That's the move. What else went well?" },
-    { role: 'user', content: 'not much else honestly. rest of the day was pretty meh' },
-    { role: 'coach', content: "Okay. Is there a part of today you're being honest with yourself about — something that didn't go the way it should have?" },
-    { role: 'user', content: "yeah. I said I'd reach out to 3 potential users this week. haven't done any of it" },
-    { role: 'coach', content: "What's actually in the way — not the surface reason, but what's underneath it?" },
-    { role: 'user', content: "I think I'm scared they'll say the idea is bad. like as long as I don't ask I can still tell myself it might work" },
-    { role: 'coach', content: "That's the real one. Avoiding feedback is protecting the idea more than building it. What's the minimum you're committing to tomorrow — not what you hope to do, what you will do?" },
-    { role: 'user', content: "one user conversation. I'll message two people tonight so it's already in motion" },
-    { role: 'coach', content: "That's a real commitment. Which goal does that connect to most?" },
-    { role: 'user', content: "building something people actually want. I can't know that without talking to them" },
-    { role: 'coach', content: "Exactly. You already know what needs to happen — tonight you're making sure tomorrow it does. Good session." },
-  ],
-};
-
 async function adminFetch(body) {
   let accessToken = null;
   try {
@@ -464,16 +446,16 @@ export default function AdminV2() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const saved = window.localStorage.getItem('retaliateai_live_demo_script');
+    const saved = window.localStorage.getItem(LIVE_DEMO_SCRIPT_KEY);
     if (saved) {
       setDemoScript(saved);
     } else {
-      setDemoScript(JSON.stringify(DEFAULT_DEMO_SCRIPT_FOR_EDITOR, null, 2));
+      setDemoScript(JSON.stringify(DEFAULT_LIVE_DEMO_SCRIPT, null, 2));
     }
     try {
-      const savedData = window.localStorage.getItem('retaliateai_live_demo_data');
+      const savedData = window.localStorage.getItem(LIVE_DEMO_DATA_KEY);
       if (savedData) {
-        const parsedDemoData = JSON.parse(savedData);
+        const parsedDemoData = normalizeLiveDemoData(JSON.parse(savedData));
         setDemoData({
           goals: Array.isArray(parsedDemoData?.goals) ? parsedDemoData.goals : [],
           commitmentScore: parsedDemoData?.commitmentScore ?? '',
@@ -484,7 +466,7 @@ export default function AdminV2() {
 
   useEffect(() => {
     if (typeof BroadcastChannel === 'undefined') return;
-    liveDemoChannelRef.current = new BroadcastChannel('retaliateai-live-demo');
+    liveDemoChannelRef.current = new BroadcastChannel(LIVE_DEMO_CHANNEL_NAME);
     return () => {
       liveDemoChannelRef.current?.close();
       liveDemoChannelRef.current = null;
@@ -929,14 +911,10 @@ export default function AdminV2() {
   }
 
   function saveDemoData(data) {
-    const scoreNum = Number(data.commitmentScore);
-    const toSave = {
-      goals: Array.isArray(data.goals) ? data.goals : [],
-      commitmentScore: data.commitmentScore !== '' && !isNaN(scoreNum) ? scoreNum : null,
-    };
-    window.localStorage.setItem('retaliateai_live_demo_data', JSON.stringify(toSave));
+    const toSave = normalizeLiveDemoData(data);
+    window.localStorage.setItem(LIVE_DEMO_DATA_KEY, JSON.stringify(toSave));
     try {
-      const ch = new BroadcastChannel('retaliateai-live-demo');
+      const ch = new BroadcastChannel(LIVE_DEMO_CHANNEL_NAME);
       ch.postMessage({ type: 'UPDATE_DEMO_DATA' });
       ch.close();
     } catch (_e) {}
@@ -1086,7 +1064,8 @@ export default function AdminV2() {
                     if (isNewFormat && parsed.checklist !== undefined && !Array.isArray(parsed.checklist)) {
                       throw new Error('Invalid checklist format');
                     }
-                    window.localStorage.setItem('retaliateai_live_demo_script', demoScript);
+                    window.localStorage.setItem(LIVE_DEMO_SCRIPT_KEY, demoScript);
+                    liveDemoChannelRef.current?.postMessage({ type: 'UPDATE_DEMO_SCRIPT' });
                     setDemoScriptMsg('✓ Script saved');
                     setTimeout(() => setDemoScriptMsg(''), 2000);
                   } catch (_e) {
@@ -1099,7 +1078,7 @@ export default function AdminV2() {
               </button>
               <button
                 onClick={() => {
-                  setDemoScript(JSON.stringify(DEFAULT_DEMO_SCRIPT_FOR_EDITOR, null, 2));
+                  setDemoScript(JSON.stringify(DEFAULT_LIVE_DEMO_SCRIPT, null, 2));
                   setDemoScriptMsg('Reset to default');
                   setTimeout(() => setDemoScriptMsg(''), 2000);
                 }}
@@ -1127,7 +1106,7 @@ export default function AdminV2() {
           </div>
 
           <p className="text-zinc-500 text-xs">
-            Script format: <code className="text-zinc-400">{'{ "checklist": [{ "label": "...", "checked": false }], "turns": [...] }'}</code>. Each turn: <code className="text-zinc-400">{'{ "role": "coach"|"user", "content": "...", "stage": "wins"|"honest"|"tomorrow"|"commitment_checkin" (optional), "checkItem": 0 (optional, checks checklist item at index) }'}</code>.
+            Script format: <code className="text-zinc-400">{'{ "checklist": [{ "label": "...", "checked": false }], "turns": [...] }'}</code>. Each turn: <code className="text-zinc-400">{'{ "role": "coach"|"user", "content": "...", "stage": "wins"|"honest"|"tomorrow"|"commitment_checkin" (optional), "checkItem": 0 | "Send follow-up" | { "label": "Send follow-up", "checked": true } (optional) }'}</code>.
           </p>
 
           {demoScriptMsg && (

@@ -1,37 +1,21 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Send, Moon } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../lib/AuthContext';
 import { supabase } from '../../lib/supabase/client';
 import AppShellV2 from '../../components/v2/AppShellV2';
-
-const DEMO_SCRIPT_KEY = 'retaliateai_live_demo_script';
-const BASE_STAGES = [
-  { id: 'commitment_checkin', label: 'Check-in' },
-  { id: 'wins', label: 'Wins' },
-  { id: 'honest', label: 'Honest' },
-  { id: 'tomorrow', label: 'Tomorrow' },
-];
-const DEFAULT_DEMO_SCRIPT = [
-  { role: 'coach', content: 'Hey — how are you feeling tonight?' },
-  { role: 'user', content: 'honestly pretty decent. had a solid day' },
-  { role: 'coach', content: 'Nice. What made it solid?' },
-  { role: 'user', content: 'I finally got back to working on my app after like 2 weeks of avoiding it. got a decent chunk done' },
-  { role: 'coach', content: 'Two weeks of avoiding it and you got back in. What broke the pattern today?' },
-  { role: 'user', content: 'idk I just told myself to do 20 minutes and it turned into 2 hours' },
-  { role: 'coach', content: "That's the move. What else went well?" },
-  { role: 'user', content: 'not much else honestly. rest of the day was pretty meh' },
-  { role: 'coach', content: "Okay. Is there a part of today you're being honest with yourself about — something that didn't go the way it should have?" },
-  { role: 'user', content: "yeah. I said I'd reach out to 3 potential users this week. haven't done any of it" },
-  { role: 'coach', content: "What's actually in the way — not the surface reason, but what's underneath it?" },
-  { role: 'user', content: "I think I'm scared they'll say the idea is bad. like as long as I don't ask I can still tell myself it might work" },
-  { role: 'coach', content: "That's the real one. Avoiding feedback is protecting the idea more than building it. What's the minimum you're committing to tomorrow — not what you hope to do, what you will do?" },
-  { role: 'user', content: "one user conversation. I'll message two people tonight so it's already in motion" },
-  { role: 'coach', content: "That's a real commitment. Which goal does that connect to most?" },
-  { role: 'user', content: "building something people actually want. I can't know that without talking to them" },
-  { role: 'coach', content: "Exactly. You already know what needs to happen — tonight you're making sure tomorrow it does. Good session." },
-];
+import {
+  DEFAULT_LIVE_DEMO_SCRIPT,
+  LIVE_DEMO_CHANNEL_NAME,
+  LIVE_DEMO_DATA_KEY,
+  buildLiveDemoChecklist,
+  getLiveDemoInitialStage,
+  getLiveDemoStageForTurn,
+  getLiveDemoStages,
+  normalizeLiveDemoData,
+  readLiveDemoScript,
+} from '../../lib/liveDemo';
 
 function ProgressBar({ currentStage, stages }) {
   const rawStageIndex = stages.findIndex((s) => s.id === currentStage);
@@ -117,33 +101,6 @@ function makeMessageId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function normalizeScript(parsed) {
-  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Array.isArray(parsed.turns)) {
-    const checklist = Array.isArray(parsed.checklist) ? parsed.checklist : [];
-    const turns = parsed.turns
-      .map((turn) => ({
-        role: turn?.role === 'coach' ? 'coach' : turn?.role === 'user' ? 'user' : null,
-        content: typeof turn?.content === 'string' ? turn.content : '',
-        stage: typeof turn?.stage === 'string' && turn.stage ? turn.stage : undefined,
-        checkItem: typeof turn?.checkItem === 'number' ? turn.checkItem : undefined,
-      }))
-      .filter((turn) => turn.role && turn.content);
-    return { checklist, turns: turns.length > 0 ? turns : DEFAULT_DEMO_SCRIPT };
-  }
-  if (Array.isArray(parsed)) {
-    const turns = parsed
-      .map((turn) => ({
-        role: turn?.role === 'coach' ? 'coach' : turn?.role === 'user' ? 'user' : null,
-        content: typeof turn?.content === 'string' ? turn.content : '',
-        stage: typeof turn?.stage === 'string' && turn.stage ? turn.stage : undefined,
-        checkItem: undefined,
-      }))
-      .filter((turn) => turn.role && turn.content);
-    return { checklist: [], turns: turns.length > 0 ? turns : DEFAULT_DEMO_SCRIPT };
-  }
-  return { checklist: [], turns: DEFAULT_DEMO_SCRIPT };
-}
-
 function DemoDataPanel({ checklist, goals, commitmentScore }) {
   const hasChecklist = Array.isArray(checklist) && checklist.length > 0;
   const hasGoals = Array.isArray(goals) && goals.length > 0;
@@ -208,15 +165,17 @@ export default function LiveDemo() {
   const timeoutIdsRef = useRef([]);
 
   const [isAdmin, setIsAdmin] = useState(null);
-  const [script, setScript] = useState({ checklist: [], turns: DEFAULT_DEMO_SCRIPT });
-  const [checklist, setChecklist] = useState([]);
+  const [script, setScript] = useState(DEFAULT_LIVE_DEMO_SCRIPT);
+  const [checklist, setChecklist] = useState(() => buildLiveDemoChecklist(DEFAULT_LIVE_DEMO_SCRIPT, 0));
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState('');
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTurnIndex, setCurrentTurnIndex] = useState(0);
   const [isComplete, setIsComplete] = useState(false);
-  const [currentStage, setCurrentStage] = useState('wins');
+  const [currentStage, setCurrentStage] = useState(() => getLiveDemoInitialStage(DEFAULT_LIVE_DEMO_SCRIPT));
   const [demoData, setDemoData] = useState(null);
+  const stages = useMemo(() => getLiveDemoStages(script), [script]);
+  const initialStage = useMemo(() => getLiveDemoInitialStage(script), [script]);
 
   const clearTimers = useCallback(() => {
     timeoutIdsRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
@@ -238,9 +197,9 @@ export default function LiveDemo() {
     setCurrentTurnIndex(0);
     setIsPlaying(false);
     setIsComplete(false);
-    setCurrentStage('wins');
-    setChecklist((prev) => prev.map((item) => ({ ...item, checked: false })));
-  }, [clearTimers]);
+    setCurrentStage(initialStage);
+    setChecklist(buildLiveDemoChecklist(script, 0));
+  }, [clearTimers, initialStage, script]);
 
   const startPlayback = useCallback(() => {
     clearTimers();
@@ -249,9 +208,9 @@ export default function LiveDemo() {
     setCurrentTurnIndex(0);
     setIsComplete(false);
     setIsPlaying(true);
-    setCurrentStage('wins');
-    setChecklist((prev) => prev.map((item) => ({ ...item, checked: false })));
-  }, [clearTimers]);
+    setCurrentStage(initialStage);
+    setChecklist(buildLiveDemoChecklist(script, 0));
+  }, [clearTimers, initialStage, script]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -283,20 +242,16 @@ export default function LiveDemo() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    try {
-      const saved = window.localStorage.getItem(DEMO_SCRIPT_KEY);
-      if (!saved) return;
-      const parsed = JSON.parse(saved);
-      const normalized = normalizeScript(parsed);
-      setScript(normalized);
-      setChecklist(normalized.checklist);
-    } catch (_e) {}
+    const nextScript = readLiveDemoScript();
+    setScript(nextScript);
+    setChecklist(buildLiveDemoChecklist(nextScript, 0));
+    setCurrentStage(getLiveDemoInitialStage(nextScript));
   }, []);
 
   useEffect(() => {
     try {
-      const raw = window.localStorage.getItem('retaliateai_live_demo_data');
-      if (raw) setDemoData(JSON.parse(raw));
+      const raw = window.localStorage.getItem(LIVE_DEMO_DATA_KEY);
+      if (raw) setDemoData(normalizeLiveDemoData(JSON.parse(raw)));
     } catch (_e) {}
   }, []);
 
@@ -314,7 +269,7 @@ export default function LiveDemo() {
 
   useEffect(() => {
     if (typeof BroadcastChannel === 'undefined') return;
-    const channel = new BroadcastChannel('retaliateai-live-demo');
+    const channel = new BroadcastChannel(LIVE_DEMO_CHANNEL_NAME);
     channel.onmessage = (event) => {
       const { type } = event.data || {};
       if (type === 'PLAY') {
@@ -323,32 +278,37 @@ export default function LiveDemo() {
         resetPlayback();
       } else if (type === 'UPDATE_DEMO_DATA') {
         try {
-          const raw = window.localStorage.getItem('retaliateai_live_demo_data');
-          if (raw) setDemoData(JSON.parse(raw));
+          const raw = window.localStorage.getItem(LIVE_DEMO_DATA_KEY);
+          if (raw) setDemoData(normalizeLiveDemoData(JSON.parse(raw)));
         } catch (_e) {}
+      } else if (type === 'UPDATE_DEMO_SCRIPT') {
+        const nextScript = readLiveDemoScript();
+        clearTimers();
+        setScript(nextScript);
+        setMessages([]);
+        setInputValue('');
+        setCurrentTurnIndex(0);
+        setIsPlaying(false);
+        setIsComplete(false);
+        setChecklist(buildLiveDemoChecklist(nextScript, 0));
+        setCurrentStage(getLiveDemoInitialStage(nextScript));
       }
     };
     return () => channel.close();
-  }, [startPlayback, resetPlayback]);
+  }, [clearTimers, startPlayback, resetPlayback]);
 
   useEffect(() => {
     if (!isPlaying) return;
     if (currentTurnIndex >= script.turns.length) {
+      setChecklist(buildLiveDemoChecklist(script, script.turns.length));
       setIsPlaying(false);
       setIsComplete(true);
       return;
     }
 
     const turn = script.turns[currentTurnIndex];
-
-    if (turn.stage) {
-      setCurrentStage(turn.stage);
-    }
-    if (typeof turn.checkItem === 'number') {
-      setChecklist((prev) => prev.map((item, i) => (
-        i === turn.checkItem ? { ...item, checked: true } : item
-      )));
-    }
+    setCurrentStage(getLiveDemoStageForTurn(script, currentTurnIndex));
+    setChecklist(buildLiveDemoChecklist(script, currentTurnIndex + 1));
 
     if (turn.role === 'coach') {
       const messageId = makeMessageId();
@@ -420,11 +380,11 @@ export default function LiveDemo() {
   if (!isAdmin) return null;
 
   return (
-    <AppShellV2 title="Nightly Reflection">
+    <AppShellV2 title="Nightly Reflection" shellMode="live-demo-user">
       <div className="flex flex-col md:flex-row h-full">
         <div className="flex-1 min-w-0 flex flex-col h-full">
           <div className="flex-shrink-0 border-b border-zinc-800 bg-zinc-950">
-            <ProgressBar currentStage={isComplete ? 'complete' : currentStage} stages={BASE_STAGES} />
+            <ProgressBar currentStage={isComplete ? 'complete' : currentStage} stages={stages} />
           </div>
 
           <motion.div
@@ -447,7 +407,7 @@ export default function LiveDemo() {
                     ref={textareaRef}
                     value={inputValue}
                     disabled
-                    placeholder="How are you feeling tonight?"
+                    placeholder="Nightly Reflection"
                     rows={1}
                     className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-500 resize-none focus:outline-none focus:border-zinc-500 transition-colors"
                     style={{ minHeight: '44px', maxHeight: '120px' }}
