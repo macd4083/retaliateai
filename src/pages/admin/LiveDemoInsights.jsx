@@ -102,9 +102,10 @@ export default function LiveDemoInsights() {
     };
   });
 
+  const currentDayIdx = todayWeekdayIndex();
   const lineParts = [];
   weekDays.forEach((d, i) => {
-    if (d.score === null) return;
+    if (d.score === null || i > currentDayIdx) return;
     const x = getX(i).toFixed(1);
     const y = getY(d.score).toFixed(1);
     lineParts.push(lineParts.length === 0 ? `M ${x} ${y}` : `L ${x} ${y}`);
