@@ -254,7 +254,7 @@ export default function LiveDemoInsights() {
             {missedFragments.length > 0 ? (
               <div className="space-y-2">
                 {missedFragments.map((f, i) => (
-                  <div key={`missed-${i}`} className="bg-zinc-900 border border-zinc-800 border-l-4 border-l-zinc-600 rounded-xl px-4 py-3">
+                  <div key={`missed-${i}`} className="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3">
                     <p className="text-zinc-200 text-sm leading-relaxed">
                       {f.text}
                       {f.goalTitle && (
@@ -263,9 +263,6 @@ export default function LiveDemoInsights() {
                           {f.goalWhy && `, it was important because ${f.goalWhy}`}
                         </span>
                       )}
-                    </p>
-                    <p className="text-zinc-500 text-xs mt-2 italic">
-                      Hey, I noticed you missed this — think about how you can better prioritize it throughout your day.
                     </p>
                   </div>
                 ))}
