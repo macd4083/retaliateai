@@ -391,10 +391,12 @@ export default function InsightsV2() {
                 };
               });
 
-              const lineParts = weekDays.map((d, i) => {
+              const lineParts = [];
+              weekDays.forEach((d, i) => {
+                if (d.score === null) return;
                 const x = getX(i).toFixed(1);
                 const y = getY(d.score).toFixed(1);
-                return i === 0 ? `M ${x} ${y}` : `L ${x} ${y}`;
+                lineParts.push(lineParts.length === 0 ? `M ${x} ${y}` : `L ${x} ${y}`);
               });
 
               const todayWeekdayIndex = weekdayIndexFromDateStr(localDateStr(0));
@@ -474,31 +476,6 @@ export default function InsightsV2() {
                                 }}
                                 style={{ cursor: 'pointer' }}
                               >
-                                {isSelected && (
-                                  <>
-                                    <rect
-                                      x={x - 12}
-                                      y={y - 20}
-                                      width={24}
-                                      height={15}
-                                      rx={6}
-                                      fill="#27272a"
-                                      stroke="#3f3f46"
-                                      strokeWidth={1}
-                                    />
-                                    <text
-                                      x={x}
-                                      y={y - 10}
-                                      textAnchor="middle"
-                                      fill="white"
-                                      fontSize={9}
-                                      fontWeight="bold"
-                                      fontFamily="sans-serif"
-                                    >
-                                      {d.score != null ? Math.round(d.score) : '–'}
-                                    </text>
-                                  </>
-                                )}
                                 <circle cx={x} cy={y} r={isSelected ? 3 : 2} fill={dotColor(d, isSelected)} />
                                 <text
                                   x={x}
