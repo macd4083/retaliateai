@@ -6,6 +6,9 @@ import {
   readLiveDemoScript,
 } from '../../lib/liveDemo';
 
+const STRONG_SCORE_THRESHOLD = 80;
+const MEDIUM_SCORE_THRESHOLD = 60;
+
 function todayWeekdayIndex() {
   const day = new Date().getDay();
   return day === 0 ? 6 : day - 1;
@@ -111,8 +114,8 @@ export default function LiveDemoInsights() {
     if (day.status === 'pending') return '#f97316';
     if (day.status === 'kept') {
       if (isSelected) return '#ef4444';
-      if (day.score != null && day.score >= 80) return '#fb7185';
-      if (day.score != null && day.score >= 60) return '#fdba74';
+      if (day.score != null && day.score >= STRONG_SCORE_THRESHOLD) return '#fb7185';
+      if (day.score != null && day.score >= MEDIUM_SCORE_THRESHOLD) return '#fdba74';
       return '#fca5a5';
     }
     return '#71717a';
