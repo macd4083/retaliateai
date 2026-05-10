@@ -120,7 +120,7 @@ export function normalizeLiveDemoScript(parsed) {
       .filter((turn) => turn.role && turn.content);
 
     return {
-      checklist: [],
+      checklist: DEFAULT_LIVE_DEMO_SCRIPT.checklist,
       turns: turns.length > 0 ? turns : DEFAULT_LIVE_DEMO_SCRIPT.turns,
     };
   }

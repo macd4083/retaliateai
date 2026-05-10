@@ -349,6 +349,26 @@ export default function LiveDemo() {
             </div>
           </div>
         </div>
+
+        {checklist.length > 0 && (
+          <div role="region" aria-label="Tonight's Commitments" className="hidden md:flex flex-col w-64 border-l border-zinc-800 bg-zinc-950 p-4 gap-3 flex-shrink-0">
+            <h3 className="text-zinc-400 text-xs font-semibold uppercase tracking-wider">Tonight&apos;s Commitments</h3>
+            <ul className="space-y-2">
+              {checklist.map((item) => (
+                <li key={item.label} className="flex items-center gap-2 text-sm">
+                  <span className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${
+                    item.checked ? 'bg-red-600 border-red-500' : 'border-zinc-600'
+                  }`}>
+                    {item.checked && <span className="text-white text-xs">✓</span>}
+                  </span>
+                  <span className={item.checked ? 'text-zinc-400 line-through' : 'text-zinc-200'}>
+                    {item.label}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
     </AppShellV2>
   );
