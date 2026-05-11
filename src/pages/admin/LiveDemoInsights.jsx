@@ -8,6 +8,10 @@ import {
 
 const STRONG_SCORE_THRESHOLD = 80;
 const MEDIUM_SCORE_THRESHOLD = 60;
+const WEEK_DAYS_COUNT = 7;
+const SUNDAY_INDEX = 6;
+const SATURDAY_INDEX = 5;
+const DAYS_WITH_TRACKED_DATA = 6;
 
 function localDateStr() {
   const date = new Date();
@@ -60,8 +64,8 @@ export default function LiveDemoInsights() {
     };
   }, []);
 
-  const dayLabels = ['M', 'T', 'W', 'T', 'F', 'S'];
-  const weeklyScores = Array.isArray(demoData?.weeklyScores) ? demoData.weeklyScores.slice(0, 6) : [];
+  const dayLabels = ['M', 'T', 'W', 'T', 'F', 'Sa', 'Su'];
+  const weeklyScores = Array.isArray(demoData?.weeklyScores) ? demoData.weeklyScores.slice(0, WEEK_DAYS_COUNT) : [];
   const streak = Number.isFinite(Number(demoData?.streak)) ? Math.max(0, Math.round(Number(demoData.streak))) : 0;
   const yesterdayCommitment = demoData?.yesterdayCommitment?.text ? demoData.yesterdayCommitment : null;
   const keptFragments = Array.isArray(demoData?.keptFragments) ? demoData.keptFragments : [];
@@ -69,21 +73,22 @@ export default function LiveDemoInsights() {
   const goals = Array.isArray(demoData?.goals) ? demoData.goals : [];
   const archivedGoals = Array.isArray(demoData?.archivedGoals) ? demoData.archivedGoals : [];
   const yesterdayDate = addDays(localDateStr(), -1);
-  const hasWeeklyData = weeklyScores.length === 6 && weeklyScores.some((d) => d?.score !== null || d?.status);
-  const clampDayIndex = (index) => Math.max(0, Math.min(5, index));
-  const resolvedDayIndex = selectedDayIndex !== null ? clampDayIndex(selectedDayIndex) : 5;
+  const hasWeeklyData = weeklyScores.length >= DAYS_WITH_TRACKED_DATA
+    && weeklyScores.slice(0, DAYS_WITH_TRACKED_DATA).some((d) => d?.score !== null || d?.status);
+  const clampDayIndex = (index) => Math.max(0, Math.min(SUNDAY_INDEX, index));
+  const resolvedDayIndex = selectedDayIndex !== null ? clampDayIndex(selectedDayIndex) : SATURDAY_INDEX;
 
   const padX = 28;
   const baseline = 88;
   const chartTop = 12;
   const chartH = baseline - chartTop;
   const totalW = 320;
-  const xStep = (totalW - 2 * padX) / 5;
+  const xStep = (totalW - 2 * padX) / (WEEK_DAYS_COUNT - 1);
   const getX = (i) => padX + i * xStep;
   const getY = (score) => (score === null ? baseline : baseline - (score / 100) * chartH);
 
-  const weekDays = Array.from({ length: 6 }, (_, i) => {
-    const source = weeklyScores[i];
+  const weekDays = Array.from({ length: WEEK_DAYS_COUNT }, (_, i) => {
+    const source = i === SUNDAY_INDEX ? null : weeklyScores[i];
     const rawScore = source && typeof source === 'object' ? source.score : null;
     const rawStatus = source && typeof source === 'object' ? source.status : null;
     const score = Number.isFinite(Number(rawScore)) ? Number(rawScore) : null;
