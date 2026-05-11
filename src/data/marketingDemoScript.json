@@ -1,7 +1,7 @@
 {
   "stageOrder": ["commitment_checkin", "honest", "wins", "tomorrow"],
   "checklist": [
-    { "label": "Study for 90 min — no phone on the desk", "checked": false },
+    { "label": "Study 90 min — phone in another room", "checked": false },
     { "label": "Review lecture notes before bed", "checked": false }
   ],
   "turns": [
@@ -12,7 +12,7 @@
     },
     {
       "role": "user",
-      "content": "mostly. got like 90 minutes in then lost focus"
+      "content": "mostly. got like 90 minutes in then just lost it"
     },
     {
       "role": "coach",
@@ -21,33 +21,33 @@
     },
     {
       "role": "user",
-      "content": "kept checking my phone. like every 20 minutes"
+      "content": "kept checking my phone. like every 20 minutes I was just reaching for it"
     },
     {
       "role": "coach",
-      "content": "And why didn't you just put it in another room?"
+      "content": "Why didn't you just put it in another room?"
     },
     {
       "role": "user",
-      "content": "honestly I didn't even think about it. I just let it sit there"
+      "content": "honestly didn't even think about it. it was just sitting there and I let it"
     },
     {
       "role": "coach",
-      "content": "That's the real blocker — not the phone, the default. Okay, what actually went well today?",
+      "content": "That's the real blocker — not the phone, the default. You didn't decide to get distracted, you just never decided not to. Alright, what actually went well today?",
       "stage": "wins"
     },
     {
       "role": "user",
-      "content": "got through the hardest lecture and didn't quit early for once"
+      "content": "got through the hardest lecture and didn't quit early. that's been a thing for me lately"
     },
     {
       "role": "coach",
-      "content": "That's real. Two hours avoided for weeks — and today you didn't quit. What's your minimum commitment for tomorrow?",
+      "content": "That's real progress. Sitting through the hard stuff instead of bailing — that's the actual work. What's your minimum commitment for tomorrow?",
       "stage": "tomorrow"
     },
     {
       "role": "user",
-      "content": "90 minutes, phone in the other room before I even sit down",
+      "content": "90 minutes. and phone goes in the other room before I even sit down",
       "checkItem": [0]
     },
     {
@@ -61,7 +61,7 @@
     },
     {
       "role": "coach",
-      "content": "That's the version of you that finishes strong. You already know what to do — tonight you're making sure tomorrow you actually do it. 🔥"
+      "content": "That's the version of you that actually finishes the semester strong. You already know what to do — tonight you're making sure tomorrow you do it. 🔥"
     }
   ]
 }
