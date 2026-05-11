@@ -60,8 +60,8 @@ export default function LiveDemoInsights() {
     };
   }, []);
 
-  const dayLabels = ['M', 'T', 'W', 'T', 'F', 'S'];
-  const weeklyScores = Array.isArray(demoData?.weeklyScores) ? demoData.weeklyScores.slice(0, 6) : [];
+  const dayLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+  const weeklyScores = Array.isArray(demoData?.weeklyScores) ? demoData.weeklyScores.slice(0, 7) : [];
   const streak = Number.isFinite(Number(demoData?.streak)) ? Math.max(0, Math.round(Number(demoData.streak))) : 0;
   const yesterdayCommitment = demoData?.yesterdayCommitment?.text ? demoData.yesterdayCommitment : null;
   const keptFragments = Array.isArray(demoData?.keptFragments) ? demoData.keptFragments : [];
@@ -69,8 +69,8 @@ export default function LiveDemoInsights() {
   const goals = Array.isArray(demoData?.goals) ? demoData.goals : [];
   const archivedGoals = Array.isArray(demoData?.archivedGoals) ? demoData.archivedGoals : [];
   const yesterdayDate = addDays(localDateStr(), -1);
-  const hasWeeklyData = weeklyScores.length === 6 && weeklyScores.some((d) => d?.score !== null || d?.status);
-  const clampDayIndex = (index) => Math.max(0, Math.min(5, index));
+  const hasWeeklyData = weeklyScores.length >= 6 && weeklyScores.slice(0, 6).some((d) => d?.score !== null || d?.status);
+  const clampDayIndex = (index) => Math.max(0, Math.min(6, index));
   const resolvedDayIndex = selectedDayIndex !== null ? clampDayIndex(selectedDayIndex) : 5;
 
   const padX = 28;
@@ -78,12 +78,12 @@ export default function LiveDemoInsights() {
   const chartTop = 12;
   const chartH = baseline - chartTop;
   const totalW = 320;
-  const xStep = (totalW - 2 * padX) / 5;
+  const xStep = (totalW - 2 * padX) / 6;
   const getX = (i) => padX + i * xStep;
   const getY = (score) => (score === null ? baseline : baseline - (score / 100) * chartH);
 
-  const weekDays = Array.from({ length: 6 }, (_, i) => {
-    const source = weeklyScores[i];
+  const weekDays = Array.from({ length: 7 }, (_, i) => {
+    const source = i === 6 ? null : weeklyScores[i];
     const rawScore = source && typeof source === 'object' ? source.score : null;
     const rawStatus = source && typeof source === 'object' ? source.status : null;
     const score = Number.isFinite(Number(rawScore)) ? Number(rawScore) : null;
