@@ -103,7 +103,7 @@ export default function LiveDemoInsights() {
 
   const lineParts = [];
   weekDays.forEach((d, i) => {
-    if (d.score === null) return;
+    if (i === SUNDAY_INDEX || d.score === null) return;
     const x = getX(i).toFixed(1);
     const y = getY(d.score).toFixed(1);
     lineParts.push(lineParts.length === 0 ? `M ${x} ${y}` : `L ${x} ${y}`);
@@ -149,7 +149,6 @@ export default function LiveDemoInsights() {
                   stroke="#27272a" strokeWidth={1} strokeDasharray="2 4" />
                 <path d={lineParts.join(' ')} fill="none" stroke="#52525b" strokeWidth={0.8} />
                 {weekDays.map((d, i) => {
-                  if (i === SUNDAY_INDEX) return null;
                   const x = getX(i);
                   const y = getY(d.score);
                   const isSelected = i === resolvedDayIndex;
