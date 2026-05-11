@@ -90,6 +90,10 @@ function normalizeCheckDirective(value) {
 
 export function normalizeLiveDemoScript(parsed) {
   if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Array.isArray(parsed.turns)) {
+    const stageOrder = Array.isArray(parsed.stageOrder)
+      ? parsed.stageOrder.filter(isValidLiveDemoStage)
+      : undefined;
+
     const checklist = parsed.checklist
       ?.map(normalizeChecklistItem)
       .filter(Boolean) ?? [];
@@ -104,6 +108,7 @@ export function normalizeLiveDemoScript(parsed) {
       .filter((turn) => turn.role && turn.content);
 
     return {
+      ...(stageOrder && stageOrder.length > 0 ? { stageOrder } : {}),
       checklist,
       turns: turns.length > 0 ? turns : DEFAULT_LIVE_DEMO_SCRIPT.turns,
     };
@@ -129,6 +134,12 @@ export function normalizeLiveDemoScript(parsed) {
 }
 
 export function getLiveDemoStages(script) {
+  if (Array.isArray(script?.stageOrder) && script.stageOrder.length > 0) {
+    return script.stageOrder
+      .filter(isValidLiveDemoStage)
+      .map((id) => ({ id, label: LIVE_DEMO_STAGE_LABELS[id] }));
+  }
+
   const seen = new Set();
   const stages = [];
 
