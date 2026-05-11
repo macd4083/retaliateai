@@ -1,0 +1,67 @@
+{
+  "stageOrder": ["commitment_checkin", "honest", "wins", "tomorrow"],
+  "checklist": [
+    { "label": "Study for 90 min — no phone on the desk", "checked": false },
+    { "label": "Review lecture notes before bed", "checked": false }
+  ],
+  "turns": [
+    {
+      "role": "coach",
+      "content": "Hey — you committed to studying for 2 hours last night. Did you follow through?",
+      "stage": "commitment_checkin"
+    },
+    {
+      "role": "user",
+      "content": "mostly. got like 90 minutes in then lost focus"
+    },
+    {
+      "role": "coach",
+      "content": "Okay. Before we talk about what went well — what actually got in the way? Not the surface reason.",
+      "stage": "honest"
+    },
+    {
+      "role": "user",
+      "content": "kept checking my phone. like every 20 minutes"
+    },
+    {
+      "role": "coach",
+      "content": "And why didn't you just put it in another room?"
+    },
+    {
+      "role": "user",
+      "content": "honestly I didn't even think about it. I just let it sit there"
+    },
+    {
+      "role": "coach",
+      "content": "That's the real blocker — not the phone, the default. Okay, what actually went well today?",
+      "stage": "wins"
+    },
+    {
+      "role": "user",
+      "content": "got through the hardest lecture and didn't quit early for once"
+    },
+    {
+      "role": "coach",
+      "content": "That's real. Two hours avoided for weeks — and today you didn't quit. What's your minimum commitment for tomorrow?",
+      "stage": "tomorrow"
+    },
+    {
+      "role": "user",
+      "content": "90 minutes, phone in the other room before I even sit down",
+      "checkItem": [0]
+    },
+    {
+      "role": "coach",
+      "content": "Good. Stretch goal if you're locked in?"
+    },
+    {
+      "role": "user",
+      "content": "review my lecture notes before bed",
+      "checkItem": [1]
+    },
+    {
+      "role": "coach",
+      "content": "That's the version of you that finishes strong. You already know what to do — tonight you're making sure tomorrow you actually do it. 🔥"
+    }
+  ]
+}

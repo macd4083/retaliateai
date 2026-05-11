@@ -1088,6 +1088,9 @@ export default function AdminV2() {
                     if (isNewFormat && parsed.checklist !== undefined && !Array.isArray(parsed.checklist)) {
                       throw new Error('Invalid checklist format');
                     }
+                    if (isNewFormat && parsed.stageOrder !== undefined && !Array.isArray(parsed.stageOrder)) {
+                      throw new Error('Invalid stageOrder format — must be an array');
+                    }
                     window.localStorage.setItem(LIVE_DEMO_SCRIPT_KEY, demoScript);
                     liveDemoChannelRef.current?.postMessage({ type: 'UPDATE_DEMO_SCRIPT' });
                     setDemoScriptMsg('✓ Script saved');
@@ -1130,7 +1133,7 @@ export default function AdminV2() {
           </div>
 
           <p className="text-zinc-500 text-xs">
-            Script format: <code className="text-zinc-400">{'{ "checklist": [{ "label": "...", "checked": false }], "turns": [...] }'}</code>. Each turn: <code className="text-zinc-400">{'{ "role": "coach"|"user", "content": "...", "stage": "wins"|"honest"|"tomorrow"|"commitment_checkin" (optional), "checkItem": 0 | "Send follow-up" | { "label": "Send follow-up", "checked": true } (optional) }'}</code>.
+            Script format: <code className="text-zinc-400">{'{ "stageOrder?": ["commitment_checkin","honest","wins","tomorrow"], "checklist": [{ "label": "...", "checked": false }], "turns": [...] }'}</code>. Each turn: <code className="text-zinc-400">{'{ "role": "coach"|"user", "content": "...", "stage?": "commitment_checkin|wins|honest|tomorrow", "checkItem?": [0,1] }'}</code>. <code className="text-zinc-400">stageOrder</code> is optional — omit it to derive order from first stage appearance in turns.
           </p>
 
           {demoScriptMsg && (
