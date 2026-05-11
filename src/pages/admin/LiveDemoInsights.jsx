@@ -64,7 +64,7 @@ export default function LiveDemoInsights() {
     };
   }, []);
 
-  const dayLabels = ['M', 'T', 'W', 'T', 'F', 'Sa', 'Su'];
+  const dayLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
   const weeklyScores = Array.isArray(demoData?.weeklyScores) ? demoData.weeklyScores.slice(0, WEEK_DAYS_COUNT) : [];
   const streak = Number.isFinite(Number(demoData?.streak)) ? Math.max(0, Math.round(Number(demoData.streak))) : 0;
   const yesterdayCommitment = demoData?.yesterdayCommitment?.text ? demoData.yesterdayCommitment : null;
@@ -149,6 +149,7 @@ export default function LiveDemoInsights() {
                   stroke="#27272a" strokeWidth={1} strokeDasharray="2 4" />
                 <path d={lineParts.join(' ')} fill="none" stroke="#52525b" strokeWidth={0.8} />
                 {weekDays.map((d, i) => {
+                  if (i === SUNDAY_INDEX) return null;
                   const x = getX(i);
                   const y = getY(d.score);
                   const isSelected = i === resolvedDayIndex;
