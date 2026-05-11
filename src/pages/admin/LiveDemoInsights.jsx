@@ -9,11 +9,6 @@ import {
 const STRONG_SCORE_THRESHOLD = 80;
 const MEDIUM_SCORE_THRESHOLD = 60;
 
-function todayWeekdayIndex() {
-  const day = new Date().getDay();
-  return day === 0 ? 6 : day - 1;
-}
-
 function localDateStr() {
   const date = new Date();
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -65,8 +60,8 @@ export default function LiveDemoInsights() {
     };
   }, []);
 
-  const dayLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
-  const weeklyScores = Array.isArray(demoData?.weeklyScores) ? demoData.weeklyScores.slice(0, 7) : [];
+  const dayLabels = ['M', 'T', 'W', 'T', 'F', 'S'];
+  const weeklyScores = Array.isArray(demoData?.weeklyScores) ? demoData.weeklyScores.slice(0, 6) : [];
   const streak = Number.isFinite(Number(demoData?.streak)) ? Math.max(0, Math.round(Number(demoData.streak))) : 0;
   const yesterdayCommitment = demoData?.yesterdayCommitment?.text ? demoData.yesterdayCommitment : null;
   const keptFragments = Array.isArray(demoData?.keptFragments) ? demoData.keptFragments : [];
@@ -74,21 +69,20 @@ export default function LiveDemoInsights() {
   const goals = Array.isArray(demoData?.goals) ? demoData.goals : [];
   const archivedGoals = Array.isArray(demoData?.archivedGoals) ? demoData.archivedGoals : [];
   const yesterdayDate = addDays(localDateStr(), -1);
-  const hasWeeklyData = weeklyScores.length === 7 && weeklyScores.some((d) => d?.score !== null || d?.status);
-  const resolvedDayIndex = selectedDayIndex !== null
-    ? Math.max(0, Math.min(6, selectedDayIndex))
-    : todayWeekdayIndex();
+  const hasWeeklyData = weeklyScores.length === 6 && weeklyScores.some((d) => d?.score !== null || d?.status);
+  const clampDayIndex = (index) => Math.max(0, Math.min(5, index));
+  const resolvedDayIndex = selectedDayIndex !== null ? clampDayIndex(selectedDayIndex) : 5;
 
   const padX = 28;
   const baseline = 88;
   const chartTop = 12;
   const chartH = baseline - chartTop;
   const totalW = 320;
-  const xStep = (totalW - 2 * padX) / 6;
+  const xStep = (totalW - 2 * padX) / 5;
   const getX = (i) => padX + i * xStep;
   const getY = (score) => (score === null ? baseline : baseline - (score / 100) * chartH);
 
-  const weekDays = Array.from({ length: 7 }, (_, i) => {
+  const weekDays = Array.from({ length: 6 }, (_, i) => {
     const source = weeklyScores[i];
     const rawScore = source && typeof source === 'object' ? source.score : null;
     const rawStatus = source && typeof source === 'object' ? source.status : null;
@@ -102,10 +96,9 @@ export default function LiveDemoInsights() {
     };
   });
 
-  const currentDayIdx = todayWeekdayIndex();
   const lineParts = [];
   weekDays.forEach((d, i) => {
-    if (d.score === null || i > currentDayIdx) return;
+    if (d.score === null) return;
     const x = getX(i).toFixed(1);
     const y = getY(d.score).toFixed(1);
     lineParts.push(lineParts.length === 0 ? `M ${x} ${y}` : `L ${x} ${y}`);
@@ -157,13 +150,13 @@ export default function LiveDemoInsights() {
                   return (
                     <g
                       key={`day-${i}`}
-                      onClick={() => setSelectedDayIndex(i)}
+                      onClick={() => setSelectedDayIndex(clampDayIndex(i))}
                       tabIndex={0}
-                      onFocus={() => setSelectedDayIndex(i)}
+                      onFocus={() => setSelectedDayIndex(clampDayIndex(i))}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' || e.key === ' ') {
                           e.preventDefault();
-                          setSelectedDayIndex(i);
+                          setSelectedDayIndex(clampDayIndex(i));
                         }
                       }}
                       style={{ cursor: 'pointer' }}
