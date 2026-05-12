@@ -30,12 +30,6 @@ function getMondayOf(dateStr) {
   return `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')}`;
 }
 
-function weekdayIndexFromDateStr(dateStr) {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  const day = new Date(y, m - 1, d).getDay();
-  return day === 0 ? 6 : day - 1;
-}
-
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function InsightsV2() {
@@ -391,6 +385,8 @@ export default function InsightsV2() {
                 };
               });
 
+              const DEMO_TODAY_WEEKDAY = 5; // Saturday — locked for demo
+              const todayWeekdayIndex = DEMO_TODAY_WEEKDAY;
               const lineParts = [];
               weekDays.forEach((d, i) => {
                 if (d.score === null || i > DEMO_TODAY_WEEKDAY) return;
@@ -398,9 +394,6 @@ export default function InsightsV2() {
                 const y = getY(d.score).toFixed(1);
                 lineParts.push(lineParts.length === 0 ? `M ${x} ${y}` : `L ${x} ${y}`);
               });
-
-              const DEMO_TODAY_WEEKDAY = 5; // Saturday — locked for demo
-              const todayWeekdayIndex = DEMO_TODAY_WEEKDAY;
               const lastDayWithCommitment = (() => {
                 for (let i = 6; i >= 0; i -= 1) {
                   if (weekDays[i].hasCommitment) return i;
