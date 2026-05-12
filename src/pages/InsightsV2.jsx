@@ -391,16 +391,16 @@ export default function InsightsV2() {
                 };
               });
 
-              const todayStr = localDateStr(0);
               const lineParts = [];
               weekDays.forEach((d, i) => {
-                if (d.score === null || d.date > todayStr) return;
+                if (d.score === null || i > DEMO_TODAY_WEEKDAY) return;
                 const x = getX(i).toFixed(1);
                 const y = getY(d.score).toFixed(1);
                 lineParts.push(lineParts.length === 0 ? `M ${x} ${y}` : `L ${x} ${y}`);
               });
 
-              const todayWeekdayIndex = weekdayIndexFromDateStr(localDateStr(0));
+              const DEMO_TODAY_WEEKDAY = 5; // Saturday — locked for demo
+              const todayWeekdayIndex = DEMO_TODAY_WEEKDAY;
               const lastDayWithCommitment = (() => {
                 for (let i = 6; i >= 0; i -= 1) {
                   if (weekDays[i].hasCommitment) return i;
@@ -460,6 +460,7 @@ export default function InsightsV2() {
                             stroke="#27272a" strokeWidth={1} strokeDasharray="2 4" />
                           <path d={lineParts.join(' ')} fill="none" stroke="#52525b" strokeWidth={0.8} />
                           {weekDays.map((d, i) => {
+                            if (i > DEMO_TODAY_WEEKDAY) return null; // Sunday: future day, no dot
                             const x = getX(i);
                             const y = getY(d.score);
                             const isSelected = i === resolvedDayIndex;
