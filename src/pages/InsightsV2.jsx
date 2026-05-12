@@ -453,7 +453,7 @@ export default function InsightsV2() {
                             stroke="#27272a" strokeWidth={1} strokeDasharray="2 4" />
                           <path d={lineParts.join(' ')} fill="none" stroke="#52525b" strokeWidth={0.8} />
                           {weekDays.map((d, i) => {
-                            if (i > DEMO_TODAY_WEEKDAY) return null; // Sunday: future day, no dot
+                            if (i > DEMO_TODAY_WEEKDAY) return null; // Skip Sunday (index 6): future day, no dot
                             const x = getX(i);
                             const y = getY(d.score);
                             const isSelected = i === resolvedDayIndex;
