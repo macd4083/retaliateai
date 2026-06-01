@@ -115,6 +115,9 @@ export default function Landing() {
                     className="w-full aspect-video rounded-2xl"
                   >
                     <source src="/hero-video.mp4" type="video/mp4" />
+                    <div className="w-full aspect-video bg-red-950/30 flex items-center justify-center rounded-2xl">
+                      <p className="text-gray-400 text-sm">Your browser does not support video playback.</p>
+                    </div>
                   </video>
                   {/* Subtle red gradient overlay */}
                   <div className="absolute inset-0 bg-gradient-to-t from-red-900/20 via-transparent to-transparent pointer-events-none rounded-2xl" />
@@ -167,7 +170,7 @@ export default function Landing() {
                   "What went well today? What didn't — and what got in the way?"
                 </p>
                 <p className="text-gray-400 leading-relaxed">
-                  Most people end their day on autopilot. This forces a real reckoning — not to judge you, but to surface the patterns you can't see in the moment. Over weeks, the AI starts to recognise the recurring blockers and wins that shape your trajectory. You stop being surprised by your own behaviour.
+                  Most people end their day on autopilot. This forces a real reckoning — not to judge you, but to surface the patterns you can't see in the moment. Over weeks, the AI starts to recognize the recurring blockers and wins that shape your trajectory. You stop being surprised by your own behavior.
                 </p>
               </div>
 
