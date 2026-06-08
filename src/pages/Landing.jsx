@@ -61,10 +61,10 @@ export default function Landing() {
 
           {/* ── 2. HERO ── */}
           <div className="pt-20 pb-32">
-            <div className="grid md:grid-cols-2 gap-12 lg:gap-16 items-center">
+            <div className="grid lg:grid-cols-12 gap-10 lg:gap-14 items-center">
 
               {/* Left column: headline + subtext + CTA */}
-              <div>
+              <div className="order-1 lg:order-2 lg:col-span-5">
                 <div className="inline-block mb-6">
                   <span className="px-6 py-2 bg-red-950/50 text-red-500 border border-red-900 rounded-full text-sm font-bold uppercase tracking-wider">
                     Free Week Trial — No Credit Card
@@ -88,24 +88,10 @@ export default function Landing() {
                   Retaliate AI is the system that closes the loop — it remembers what you said,
                   holds you to it, and helps you actually become who you keep saying you'll be.
                 </p>
-
-                <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4">
-                  <button
-                    onClick={handleGetStarted}
-                    className="px-10 py-5 bg-red-600 text-white rounded-lg hover:bg-red-700 font-bold text-lg transition-all shadow-2xl shadow-red-900/50 hover:shadow-red-900/70 flex items-center gap-3 uppercase tracking-wide group"
-                  >
-                    Start Your Free Week
-                    <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-                  </button>
-                </div>
-
-                <p className="text-sm text-gray-500 mt-6 tracking-wide">
-                  7 days free • No credit card • Feedback earns you another week
-                </p>
               </div>
 
               {/* Right column: hero video */}
-              <div className="relative mt-10 md:mt-0">
+              <div className="relative order-2 lg:order-1 lg:col-span-7 mt-6 lg:mt-0">
                 <div className="relative rounded-2xl overflow-hidden shadow-2xl shadow-red-900/40 border border-red-900/30">
                   <video
                     autoPlay
@@ -124,6 +110,20 @@ export default function Landing() {
                 </div>
               </div>
 
+            </div>
+
+            <div className="mt-12 flex flex-col items-center gap-6 text-center">
+              <button
+                onClick={handleGetStarted}
+                className="px-10 py-5 bg-red-600 text-white rounded-lg hover:bg-red-700 font-bold text-lg transition-all shadow-2xl shadow-red-900/50 hover:shadow-red-900/70 flex items-center gap-3 uppercase tracking-wide group"
+              >
+                Start Your Free Week
+                <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+              </button>
+
+              <p className="text-sm text-gray-500 tracking-wide">
+                7 days free • No credit card • Feedback earns you another week
+              </p>
             </div>
           </div>
 
