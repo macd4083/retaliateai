@@ -29,7 +29,7 @@ export default function Landing() {
       
       {/* Content */}
       <div className="relative z-10">
-        <div className="max-w-7xl 2xl:max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 2xl:px-16">
+        <div className="max-w-7xl 2xl:max-w-none mx-auto px-4 sm:px-6 lg:px-8 2xl:px-10">
 
           {/* ── 1. HEADER ── */}
           <header className="pt-8 pb-4">
