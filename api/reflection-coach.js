@@ -117,7 +117,7 @@ const supabase = createClient(
  * -- $$;
  */
 
-const DEFAULT_CHECKLIST = { wins: false, honest: false, plan: false };
+const DEFAULT_CHECKLIST = { wins: false, commitment_checkin: false, honest: false, plan: false };
 const CHECKLIST_INIT_MESSAGE = "Here are your commitments from yesterday — check off what you actually did so I can get a sense of where we're starting tonight.";
 const CHECKLIST_SUBMITTED_SENTINEL = '__checklist_submitted__';
 const MIN_DEEP_SESSION_MESSAGE_COUNT = 6;

@@ -26,7 +26,7 @@ Return ONLY valid JSON:
   "accountability_signal": "<excuse|ownership|neutral>",
   "emotional_state": "<frustrated|proud|anxious|flat|motivated|overwhelmed|reflective>",
   "depth_opportunity": <true|false>,
-  "checklist_content": {"wins": false, "honest": false, "plan": false, "identity": false},
+  "checklist_content": {"wins": false, "commitment_checkin": false, "honest": false, "plan": false},
   "suggested_exercise": "<${EXERCISE_ENUM}>",
   "energy_type": "<momentum|depth|reflective|planning|identity>",
   "depth_opportunity_count": <0-3>
@@ -84,7 +84,7 @@ export const DEFAULT_CLASSIFICATION = {
   accountability_signal: 'neutral',
   emotional_state: 'flat',
   depth_opportunity: false,
-  checklist_content: { wins: false, honest: false, plan: false, identity: false },
+  checklist_content: { wins: false, commitment_checkin: false, honest: false, plan: false },
   suggested_exercise: 'none',
   energy_type: 'momentum',
   depth_opportunity_count: 0,
