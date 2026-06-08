@@ -3791,7 +3791,14 @@ Return ONLY valid JSON: { "question": "..." }`,
 
     if (session_id && (result.stage_advance || result.extracted_data || result.is_session_complete || result.commitment_checkin_done || result.stage_order_swapped)) {
       const updates = {};
-      if (result.stage_advance && result.new_stage) updates.current_stage = result.new_stage;
+      const new_stage = result.new_stage;
+      if (session_state.is_complete) {
+        session_state.current_stage = 'complete';
+        updates.current_stage = 'complete';
+      } else if (new_stage && VALID_STAGES.includes(new_stage)) {
+        session_state.current_stage = new_stage;
+        updates.current_stage = new_stage;
+      }
       const resolvedMinimumCommitment = result.extracted_data?.commitment_minimum || session_state.commitment_minimum;
       const resolvedStretchCommitment = result.extracted_data?.commitment_stretch || session_state.commitment_stretch;
       if (result.extracted_data?.tomorrow_commitment && resolvedMinimumCommitment && resolvedStretchCommitment) {
@@ -3818,6 +3825,8 @@ Return ONLY valid JSON: { "question": "..." }`,
       if (Array.isArray(result.insight_exercises_triggered)) updates.insight_exercises_triggered = result.insight_exercises_triggered;
       if (result.insight_exercise_skipped === true) updates.insight_exercise_skipped = true;
       if (result.is_session_complete) {
+        session_state.current_stage = 'complete';
+        updates.current_stage = 'complete';
         updates.is_complete = true;
         updates.completed_at = new Date().toISOString();
       }
@@ -3853,86 +3862,100 @@ Return ONLY valid JSON: { "question": "..." }`,
     // Log minimum/stretch commitment fragments — fire as soon as minimum is captured; include stretch if available.
     const minimumText = result.extracted_data?.commitment_minimum || session_state.commitment_minimum;
     const stretchText = result.extracted_data?.commitment_stretch || session_state.commitment_stretch;
+    const hasMinimumCommitment = typeof minimumText === 'string' && minimumText.trim().length > 0;
+    const hasStretchCommitment = typeof stretchText === 'string' && stretchText.trim().length > 0;
+    if (!session_state.commitment_minimum && !session_state.commitment_stretch) {
+      console.warn('[goal_commitment_log] Skipped — no commitment data captured', {
+        session_id: session_state?.session_id,
+        current_stage: session_state?.current_stage,
+      });
+    }
     if (
       client_local_date &&
-      minimumText &&
+      (hasMinimumCommitment || hasStretchCommitment) &&
       (
         (result.extracted_data?.commitment_minimum && !session_state.commitment_minimum)
         || (result.extracted_data?.commitment_stretch && !session_state.commitment_stretch)
       )
     ) {
       (async () => {
-        try {
-          const minimumCommitmentText = minimumText;
-          const stretchCommitmentText = stretchText;
-          const goalList = activeGoals.map((g) => ({ id: g.id, title: g.title }));
-          const clientToday = today(client_local_date);
+        const minimumCommitmentText = minimumText;
+        const stretchCommitmentText = stretchText;
+        const goalList = activeGoals.map((g) => ({ id: g.id, title: g.title }));
+        const clientToday = today(client_local_date);
 
-          const resolveGoalId = async (commitmentText) => {
-            if (!commitmentText || goalList.length === 0) return null;
-            try {
-              const extraction = await openai.chat.completions.create({
-                model: 'gpt-4o-mini',
-                messages: [
-                  {
-                    role: 'system',
-                    content: `You map one commitment line to one goal_id from the provided list, or null if no clear match.
+        const resolveGoalId = async (commitmentText) => {
+          if (!commitmentText || goalList.length === 0) return null;
+          try {
+            const extraction = await openai.chat.completions.create({
+              model: 'gpt-4o-mini',
+              messages: [
+                {
+                  role: 'system',
+                  content: `You map one commitment line to one goal_id from the provided list, or null if no clear match.
 Return ONLY valid JSON: { "goal_id": "uuid or null" }
 Only return a goal_id that exists in the list.`,
-                  },
-                  {
-                    role: 'user',
-                    content: JSON.stringify({ commitment: commitmentText, goals: goalList }),
-                  },
-                ],
-                response_format: { type: 'json_object' },
-                temperature: 0.2,
-                max_tokens: 80,
-              });
-              const extracted = JSON.parse(extraction.choices[0].message.content || '{}');
-              return (extracted.goal_id && activeGoals.some((g) => g.id === extracted.goal_id)) ? extracted.goal_id : null;
-            } catch (_e) {
-              return null;
-            }
-          };
-
-          const [minimumGoalId, stretchGoalId] = await Promise.all([
-            resolveGoalId(minimumCommitmentText),
-            resolveGoalId(stretchCommitmentText),
-          ]);
-
-          const fragmentRows = [
-            {
-              user_id: authenticatedUserId,
-              session_id: session_id || null,
-              goal_id: minimumGoalId,
-              commitment_text: minimumCommitmentText,
-              commitment_why: resolvedMinimumWhy || null,
-              date: clientToday,
-              kept: null,
-              fragment_index: 0, // fallback convention for minimum when commitment_type is unavailable
-              commitment_type: 'minimum',
-            },
-            ...(stretchCommitmentText ? [{
-              user_id: authenticatedUserId,
-              session_id: session_id || null,
-              goal_id: stretchGoalId,
-              commitment_text: stretchCommitmentText,
-              commitment_why: resolvedStretchWhy || null,
-              date: clientToday,
-              kept: null,
-              fragment_index: 1, // fallback convention for stretch when commitment_type is unavailable
-              commitment_type: 'stretch',
-            }] : []),
-          ];
-
-          const { error: insertError } = await supabase.from('goal_commitment_log').insert(fragmentRows);
-          if (insertError && /commitment_type/i.test(insertError.message || '')) {
-            const fallbackRows = fragmentRows.map(({ commitment_type: _ct, commitment_why: _cw, ...row }) => row);
-            await supabase.from('goal_commitment_log').insert(fallbackRows);
+                },
+                {
+                  role: 'user',
+                  content: JSON.stringify({ commitment: commitmentText, goals: goalList }),
+                },
+              ],
+              response_format: { type: 'json_object' },
+              temperature: 0.2,
+              max_tokens: 80,
+            });
+            const extracted = JSON.parse(extraction.choices[0].message.content || '{}');
+            return (extracted.goal_id && activeGoals.some((g) => g.id === extracted.goal_id)) ? extracted.goal_id : null;
+          } catch (_e) {
+            return null;
           }
-        } catch (_e) { /* fail silently */ }
-      })();
+        };
+
+        const [minimumGoalId, stretchGoalId] = await Promise.all([
+          resolveGoalId(minimumCommitmentText),
+          resolveGoalId(stretchCommitmentText),
+        ]);
+
+        const fragmentRows = [
+          ...(hasMinimumCommitment ? [{
+            user_id: authenticatedUserId,
+            session_id: session_id || null,
+            goal_id: minimumGoalId,
+            commitment_text: minimumCommitmentText,
+            commitment_why: resolvedMinimumWhy || null,
+            date: clientToday,
+            kept: null,
+            fragment_index: 0, // fallback convention for minimum when commitment_type is unavailable
+            commitment_type: 'minimum',
+          }] : []),
+          ...(hasStretchCommitment ? [{
+            user_id: authenticatedUserId,
+            session_id: session_id || null,
+            goal_id: stretchGoalId,
+            commitment_text: stretchCommitmentText,
+            commitment_why: resolvedStretchWhy || null,
+            date: clientToday,
+            kept: null,
+            fragment_index: 1, // fallback convention for stretch when commitment_type is unavailable
+            commitment_type: 'stretch',
+          }] : []),
+        ];
+
+        const { error: insertError } = await supabase.from('goal_commitment_log').insert(fragmentRows);
+        if (insertError && /commitment_type/i.test(insertError.message || '')) {
+          const fallbackRows = fragmentRows.map(({ commitment_type: _ct, commitment_why: _cw, ...row }) => row);
+          await supabase.from('goal_commitment_log').insert(fallbackRows);
+        }
+      })().catch((err) => {
+        console.error('[goal_commitment_log] Insert failed:', {
+          error: err?.message || err,
+          session_id: session_state?.session_id,
+          user_id: session_state?.user_id,
+          commitment_minimum: session_state?.commitment_minimum,
+          commitment_stretch: session_state?.commitment_stretch,
+        });
+      });
     }
 
     // Write wins to session row atomically (avoids read-then-write race condition)
