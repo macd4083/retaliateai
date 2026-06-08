@@ -60,50 +60,64 @@ export default function Landing() {
           </header>
 
           {/* ── 2. HERO ── */}
-          <div className="pt-20 pb-32">
-            <div className="grid lg:grid-cols-12 gap-10 lg:gap-14 items-center">
+          <div className="pt-16 pb-24 md:pb-32">
+            {/* 
+              Grid: single column on mobile (< 768px), 12-col side-by-side at md+ (768px+)
+              Text is first in DOM → always renders on LEFT when side-by-side
+              Video is second in DOM → always renders on RIGHT when side-by-side
+              No order overrides needed or wanted.
+            */}
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-8 md:gap-10 lg:gap-16 items-center">
 
-              {/* Left column: headline + subtext + CTA */}
-              <div className="order-1 lg:order-2 lg:col-span-5">
-                <div className="inline-block mb-6">
-                  <span className="px-6 py-2 bg-red-950/50 text-red-500 border border-red-900 rounded-full text-sm font-bold uppercase tracking-wider">
+              {/* ── LEFT: Text column ──
+                   md (768px): 5/12 cols — text is compact, video gets 7/12 (58% of width)
+                   lg (1024px): 4/12 cols — text even more compact, video gets 8/12 (67% of width)
+                   No order classes — DOM order is correct */}
+              <div className="md:col-span-5 lg:col-span-4">
+
+                <div className="inline-block mb-4 lg:mb-6">
+                  <span className="px-5 lg:px-6 py-1.5 lg:py-2 bg-red-950/50 text-red-500 border border-red-900 rounded-full text-xs lg:text-sm font-bold uppercase tracking-wider">
                     Free Week Trial — No Credit Card
                   </span>
                 </div>
 
-                <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold text-white mb-6 leading-[1.1] tracking-tight">
-                  Are you struggling to keep up
-                  <br />
-                  with your ambitions?
-                  <br />
+                {/* Headline:
+                    - Mobile (stacked): text-4xl — large, comfortable at full width
+                    - md (768px, side-by-side starts): text-2xl — shrinks to give video room
+                    - lg (1024px): text-3xl — screen wider, text can grow
+                    - xl (1280px): text-4xl — more room
+                    - 2xl (1536px): text-5xl — wide screens, near full size
+                    No explicit <br /> tags — let text wrap naturally at all column widths */}
+                <h1 className="text-4xl md:text-2xl lg:text-3xl xl:text-4xl 2xl:text-5xl font-bold text-white mb-4 lg:mb-6 leading-[1.15] tracking-tight">
+                  Are you struggling to keep up with your ambitions?{' '}
                   <span className="text-red-600">
-                    More pressure won't bridge the gap —
-                    <br />
-                    a consistent system will.
+                    More pressure won't bridge the gap — a consistent system will.
                   </span>
                 </h1>
 
-                <p className="text-xl md:text-2xl text-gray-400 mb-12 leading-relaxed">
+                {/* Subtext: also shrinks when side-by-side to preserve video size */}
+                <p className="text-base md:text-xs lg:text-sm xl:text-base 2xl:text-lg text-gray-400 leading-relaxed">
                   Every night, that familiar feeling. Another day where your goals stayed goals.
                   Retaliate AI is the system that closes the loop — it remembers what you said,
                   holds you to it, and helps you actually become who you keep saying you'll be.
                 </p>
+
               </div>
 
-              {/* Right column: hero video */}
-              <div className="relative order-2 lg:order-1 lg:col-span-7 mt-6 lg:mt-0">
-                <div className="relative rounded-2xl overflow-hidden shadow-2xl shadow-red-900/40 border border-red-900/30">
+              {/* ── RIGHT: Video column ──
+                   md (768px): 7/12 cols — video takes 58% of width
+                   lg (1024px): 8/12 cols — video takes 67% of width, clearly dominant
+                   No order classes — DOM order keeps video on right */}
+              <div className="md:col-span-7 lg:col-span-8">
+                <div className="relative rounded-2xl overflow-hidden shadow-2xl shadow-red-900/50 border border-red-900/40 ring-2 ring-red-900/10">
                   <video
                     autoPlay
                     muted
                     loop
                     playsInline
-                    className="w-full aspect-video rounded-2xl"
+                    className="w-full aspect-video block rounded-2xl"
                   >
                     <source src="/hero-video.mp4" type="video/mp4" />
-                    <div className="w-full aspect-video bg-red-950/30 flex items-center justify-center rounded-2xl">
-                      <p className="text-gray-400 text-sm">Your browser does not support video playback.</p>
-                    </div>
                   </video>
                   {/* Subtle red gradient overlay */}
                   <div className="absolute inset-0 bg-gradient-to-t from-red-900/20 via-transparent to-transparent pointer-events-none rounded-2xl" />
@@ -112,15 +126,17 @@ export default function Landing() {
 
             </div>
 
-            <div className="mt-12 flex flex-col items-center gap-6 text-center">
+            {/* ── CTA: centered below BOTH columns, visually detached ──
+                mt-12 md:mt-14 ensures clear visual separation from the grid above
+                flex flex-col items-center centers the button horizontally within the full container width */}
+            <div className="mt-12 md:mt-14 flex flex-col items-center gap-5 text-center">
               <button
                 onClick={handleGetStarted}
-                className="px-10 py-5 bg-red-600 text-white rounded-lg hover:bg-red-700 font-bold text-lg transition-all shadow-2xl shadow-red-900/50 hover:shadow-red-900/70 flex items-center gap-3 uppercase tracking-wide group"
+                className="group px-10 py-5 bg-red-600 text-white rounded-lg hover:bg-red-700 font-bold text-lg transition-all shadow-2xl shadow-red-900/50 hover:shadow-red-900/70 flex items-center gap-3 uppercase tracking-wide"
               >
                 Start Your Free Week
                 <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
               </button>
-
               <p className="text-sm text-gray-500 tracking-wide">
                 7 days free • No credit card • Feedback earns you another week
               </p>
