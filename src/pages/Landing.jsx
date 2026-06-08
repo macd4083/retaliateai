@@ -67,13 +67,13 @@ export default function Landing() {
               Video is second in DOM → always renders on RIGHT when side-by-side
               No order overrides needed or wanted.
             */}
-            <div className="grid grid-cols-1 md:grid-cols-12 gap-8 md:gap-10 lg:gap-16 items-center">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-16 items-center">
 
               {/* ── LEFT: Text column ──
                    md (768px): 5/12 cols — text is compact, video gets 7/12 (58% of width)
                    lg (1024px): 4/12 cols — text even more compact, video gets 8/12 (67% of width)
                    No order classes — DOM order is correct */}
-              <div className="md:col-span-5 lg:col-span-4">
+              <div className="lg:col-span-4">
 
                 <div className="inline-block mb-4 lg:mb-6">
                   <span className="px-5 lg:px-6 py-1.5 lg:py-2 bg-red-950/50 text-red-500 border border-red-900 rounded-full text-xs lg:text-sm font-bold uppercase tracking-wider">
@@ -88,7 +88,7 @@ export default function Landing() {
                     - xl (1280px): text-4xl — more room
                     - 2xl (1536px): text-5xl — wide screens, near full size
                     No explicit <br /> tags — let text wrap naturally at all column widths */}
-                <h1 className="text-4xl md:text-2xl lg:text-3xl xl:text-4xl 2xl:text-5xl font-bold text-white mb-4 lg:mb-6 leading-[1.15] tracking-tight">
+                <h1 className="text-4xl lg:text-3xl xl:text-4xl 2xl:text-5xl font-bold text-white mb-4 lg:mb-6 leading-[1.15] tracking-tight">
                   Are you struggling to keep up with your ambitions?{' '}
                   <span className="text-red-600">
                     More pressure won't bridge the gap — a consistent system will.
@@ -96,7 +96,7 @@ export default function Landing() {
                 </h1>
 
                 {/* Subtext: also shrinks when side-by-side to preserve video size */}
-                <p className="text-base md:text-xs lg:text-sm xl:text-base 2xl:text-lg text-gray-400 leading-relaxed">
+                <p className="text-base lg:text-sm xl:text-base 2xl:text-lg text-gray-400 leading-relaxed">
                   Every night, that familiar feeling. Another day where your goals stayed goals.
                   Retaliate AI is the system that closes the loop — it remembers what you said,
                   holds you to it, and helps you actually become who you keep saying you'll be.
@@ -108,7 +108,7 @@ export default function Landing() {
                    md (768px): 7/12 cols — video takes 58% of width
                    lg (1024px): 8/12 cols — video takes 67% of width, clearly dominant
                    No order classes — DOM order keeps video on right */}
-              <div className="md:col-span-7 lg:col-span-8">
+              <div className="lg:col-span-8">
                 {/*
                   HeroVideoPlayer — self-contained video with custom controls.
                   To resize or reposition the video, only change the `className` prop below.
@@ -874,7 +874,7 @@ function HeroVideoPlayer({ src, className = '' }) {
     >
       <video
         ref={videoRef}
-        className="w-full aspect-video block"
+        className="w-full aspect-video block object-cover"
         playsInline
         loop
         preload="auto"
