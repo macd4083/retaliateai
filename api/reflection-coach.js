@@ -872,8 +872,6 @@ function computePreSessionState(clientDate, { recentSessions = [], followUpQueue
       const lastMs = new Date(ly, lm - 1, ld).getTime();
       days_since_last_session = Math.round((todayMs - lastMs) / (1000 * 60 * 60 * 24));
       cold_start = days_since_last_session > 7;
-    } else {
-      cold_start = true;
     }
 
     const follow_up_due = followUpQueue.length > 0
@@ -1443,6 +1441,7 @@ function buildDirectiveQueue({
   const hasYesterdayCommitment = ((enrichedYesterdayFragments || yesterdayFragments || []).length > 0);
 
   // ── cold_start_opener ──────────────────────────────────────────────────
+  // cold_start_opener: only fires for returning users with >7 day gap, never for first-ever sessions
   if (preSessionState?.cold_start) {
     allDirectives.push({
       id: 'cold_start_opener',
@@ -1764,6 +1763,7 @@ Do NOT frame this as goal-specific unless the user is directly referencing a goa
       instruction: `HONEST MISSING: Gently probe for a miss or honest moment with reflection-first questions. ${patternHint} Goal is self-awareness about TODAY and the underlying truth, not planning. Use prompts like: "What are you not saying yet?", "What's the real friction underneath this?", "What would you tell a friend in this situation?", or "Where does this pattern usually show up for you?" Keep it natural and grounded in their words. Never ask what they will do next, what plan they should make, or how they should act tomorrow in this stage. Once a miss is named, ask the one question that goes underneath it — what was actually happening underneath that surface behavior, not just what they did or didn't do. Do NOT set honest_depth: true until the user has genuinely answered the underneath layer. A surface answer is not enough. Evaluate qualitatively: is this a real answer about why it happened — the actual reason, the emotional truth, the internal conflict? If yes → set honest_depth: true. If no → ask the one question that goes there. STRICT: Do NOT ask what the user will do, what step they will take, how they will change, or what they can do differently. The honest question looks backward — it is about what happened today, not what to do tomorrow. Any forward-action question here is a critical error.${patternContext}${missedFragmentContext}`,
       priority: 2,
       preferred_stage: 'honest',
+      allowed_stages: ['wins'],
       fire_next_session: true,
       followup_question: 'Before we close — was there a moment from last time that\'s still sitting with you, something you didn\'t fully land on?',
       energy_type: 'depth',
@@ -2536,7 +2536,14 @@ function dispatchNextDirective(directiveQueue, currentStage, intentEmotionalStat
   if (p2Stage.length > 0) return pickBest(p2Stage);
 
   // Priority 2, any stage
-  const p2Any = directiveQueue.filter(d => d.priority === 2);
+  const p2Any = [];
+  for (const directive of directiveQueue) {
+    if (directive.priority !== 2) continue;
+    if (directive.allowed_stages && !directive.allowed_stages.includes(currentStage)) {
+      continue;
+    }
+    p2Any.push(directive);
+  }
   if (p2Any.length > 0) return pickBest(p2Any);
 
   // Priority 3+ / fallback
