@@ -2762,7 +2762,7 @@ export default async function handler(req, res) {
   try {
     const { data: profile, error: profileError } = await supabase
       .from('user_profiles')
-      .select('subscription_status, trial_ends_at, trial_extended, feedback_submitted')
+      .select('subscription_status, trial_ends_at, trial_extended, feedback_submitted, role')
       .eq('id', authenticatedUserId)
       .maybeSingle();
 
@@ -2776,8 +2776,9 @@ export default async function handler(req, res) {
     const isActive =
       profile?.subscription_status === 'active' ||
       profile?.subscription_status === 'canceling';
+    const isAdminUser = profile?.role === 'admin';
 
-    if (trialExpired && !isActive) {
+    if (trialExpired && !isActive && !isAdminUser) {
       return res.status(403).json({ error: 'trial_expired', message: 'Your trial has ended.' });
     }
   } catch (subscriptionCheckError) {

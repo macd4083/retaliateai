@@ -79,7 +79,7 @@ function AuthGuardV2({ children }) {
 
     supabase
       .from('user_profiles')
-      .select('onboarding_completed, trial_ends_at, subscription_status, feedback_submitted, trial_extended')
+      .select('onboarding_completed, trial_ends_at, subscription_status, feedback_submitted, trial_extended, role')
       .eq('id', user.id)
       .maybeSingle()
       .then(({ data }) => {
@@ -122,7 +122,8 @@ function AuthGuardV2({ children }) {
       trialExpired &&
       !isActive &&
       (!profileData?.feedback_submitted || extendedTrialExpired) &&
-      !isTrialing
+      !isTrialing &&
+      profileData?.role !== 'admin'
   );
 
   return (
