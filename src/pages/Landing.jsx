@@ -29,7 +29,7 @@ export default function Landing() {
       
       {/* Content */}
       <div className="relative z-10">
-        <div className="max-w-7xl 2xl:max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="max-w-7xl 2xl:max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 2xl:px-16">
 
           {/* ── 1. HEADER ── */}
           <header className="pt-8 pb-4">
@@ -45,9 +45,6 @@ export default function Landing() {
                 </span>
               </div>
               <div className="flex items-center gap-4">
-                <span className="hidden sm:inline-block px-4 py-1.5 bg-red-950/60 text-red-400 border border-red-800 rounded-full text-xs font-semibold tracking-wide">
-                  🎁 Free 7-Day Trial — No Card Required
-                </span>
                 <button
                   onClick={() => navigate('/login')}
                   className="px-6 py-2 text-red-500 hover:text-red-400 font-semibold transition-colors border border-red-900 hover:border-red-700 rounded"
@@ -75,12 +72,6 @@ export default function Landing() {
                    No order classes — DOM order is correct */}
               <div className="lg:col-span-4 2xl:col-span-3 text-center lg:text-left mb-10 lg:mb-0">
 
-                <div className="inline-flex justify-center lg:inline-block mb-4 lg:mb-6">
-                  <span className="px-5 lg:px-6 py-1.5 lg:py-2 bg-red-950/50 text-red-500 border border-red-900 rounded-full text-xs lg:text-sm font-bold uppercase tracking-wider">
-                    Free Week Trial — No Credit Card
-                  </span>
-                </div>
-
                 {/* Headline:
                     - Mobile (stacked): text-4xl — large, comfortable at full width
                     - md (768px, side-by-side starts): text-2xl — shrinks to give video room
@@ -88,7 +79,7 @@ export default function Landing() {
                     - xl (1280px): text-4xl — more room
                     - 2xl (1536px): text-5xl — wide screens, near full size
                     No explicit <br /> tags — let text wrap naturally at all column widths */}
-                <h1 className="text-5xl lg:text-3xl xl:text-4xl 2xl:text-3xl font-bold text-white mb-4 lg:mb-6 leading-[1.15] tracking-tight">
+                <h1 className="text-5xl lg:text-3xl xl:text-4xl 2xl:text-4xl font-bold text-white mb-4 lg:mb-6 leading-[1.15] tracking-tight">
                   Are you struggling to keep up with your ambitions?
                   <br />
                   <span className="text-red-600">
