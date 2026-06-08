@@ -89,9 +89,10 @@ export default function Landing() {
                     - 2xl (1536px): text-5xl — wide screens, near full size
                     No explicit <br /> tags — let text wrap naturally at all column widths */}
                 <h1 className="text-5xl lg:text-3xl xl:text-4xl 2xl:text-5xl font-bold text-white mb-4 lg:mb-6 leading-[1.15] tracking-tight">
-                  Are you struggling to keep up with your ambitions?{' '}
+                  Are you struggling to keep up with your ambitions?
+                  <br />
                   <span className="text-red-600">
-                    More pressure won't bridge the gap — a consistent system will.
+                    More pressure won't bridge the gap. A consistent system will.
                   </span>
                 </h1>
 
