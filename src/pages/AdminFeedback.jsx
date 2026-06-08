@@ -35,7 +35,7 @@ export default function AdminFeedback() {
         setIsAdmin(false);
         navigate('/reflection', { replace: true });
       });
-  }, [user?.id]);
+  }, [user?.id, navigate]);
 
   // ── Load feedback ─────────────────────────────────────────────────────────
 
