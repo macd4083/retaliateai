@@ -3375,13 +3375,20 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
     result.exercise_run = result.exercise_run || 'none';
     const stageAtTurnStart = session_state.current_stage || 'commitment_checkin';
     result.checklist_updates = result.checklist_updates || { ...DEFAULT_CHECKLIST };
+    const VALID_STAGES = ['wins', 'commitment_checkin', 'honest', 'tomorrow', 'complete'];
+    const VALID_TRANSITIONS = {
+      commitment_checkin: ['wins', 'honest'],
+      wins: ['honest', 'tomorrow'],
+      honest: ['tomorrow'],
+      tomorrow: ['complete'],
+    };
+    const CHECKLIST_STAGE_GATES = {
+      wins: ['wins'],
+      honest: ['honest'],
+      plan: ['tomorrow', 'complete'],
+    };
     const filterChecklistUpdatesByStage = (checklistUpdates, stageName) => {
       const gatedChecklistUpdates = { ...DEFAULT_CHECKLIST };
-      const CHECKLIST_STAGE_GATES = {
-        wins: ['wins'],
-        honest: ['honest'],
-        plan: ['tomorrow', 'complete'],
-      };
       Object.keys(checklistUpdates || {}).forEach((key) => {
         if (!checklistUpdates[key]) return;
         const allowedStages = CHECKLIST_STAGE_GATES[key];
@@ -3589,18 +3596,6 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
     }
 
     // Safety guard — prevent hallucinated stage values from GPT
-    const VALID_STAGES = ['wins', 'commitment_checkin', 'honest', 'tomorrow', 'complete'];
-    const VALID_TRANSITIONS = {
-      commitment_checkin: ['wins', 'honest'],
-      wins: ['honest', 'tomorrow'],
-      honest: ['tomorrow'],
-      tomorrow: ['complete'],
-    };
-    const CHECKLIST_STAGE_GATES = {
-      wins: ['wins'],
-      honest: ['honest'],
-      plan: ['tomorrow', 'complete'],
-    };
     if (result.new_stage && !VALID_STAGES.includes(result.new_stage)) {
       result.new_stage = null;
       result.stage_advance = false;
