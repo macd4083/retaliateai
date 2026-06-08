@@ -105,8 +105,9 @@ function AuthGuardV2({ children }) {
     );
   }
 
+  const now = new Date();
   const trialExpired = profileData?.trial_ends_at
-    ? new Date(profileData.trial_ends_at) < new Date()
+    ? new Date(profileData.trial_ends_at) < now
     : false;
   const isActive =
     profileData?.subscription_status === 'active' ||

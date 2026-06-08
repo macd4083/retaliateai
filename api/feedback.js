@@ -36,7 +36,10 @@ export default async function handler(req, res) {
     }
 
     if (profile?.feedback_submitted && profile?.trial_extended) {
-      return res.status(403).json({ error: 'already_extended' });
+      return res.status(403).json({
+        error: 'already_extended',
+        message: 'Feedback was already submitted and your trial has already been extended.',
+      });
     }
 
     const { error: insertError } = await supabase

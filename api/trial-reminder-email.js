@@ -77,7 +77,8 @@ export default async function handler(req, res) {
     try {
       if (profile.last_trial_email_sent_at) {
         const lastSent = new Date(profile.last_trial_email_sent_at);
-        if (!Number.isNaN(lastSent.getTime()) && now.getTime() - lastSent.getTime() < TWO_DAYS_MS) {
+        const lastSentAt = lastSent.getTime();
+        if (!Number.isNaN(lastSentAt) && now.getTime() - lastSentAt < TWO_DAYS_MS) {
           continue;
         }
       }
@@ -89,15 +90,15 @@ export default async function handler(req, res) {
       let html = '';
       let emailType = '';
 
-      if (trialEndsAt >= now && trialEndsAt <= twoDaysFromNow) {
+      if (trialEndsAt > now && trialEndsAt <= twoDaysFromNow) {
         subject = '2 days left on your Retaliate AI trial';
         html = trialEndingSoonHtml();
         emailType = 'ending_soon';
-      } else if (trialEndsAt < now && profile.feedback_submitted === false) {
+      } else if (trialEndsAt < now && !profile.feedback_submitted) {
         subject = "Your trial ended — here's how to get one more week free";
         html = trialExpiredFeedbackOfferHtml();
         emailType = 'trial_expired_feedback_offer';
-      } else if (trialEndsAt < now && profile.feedback_submitted === true && profile.trial_extended === true) {
+      } else if (trialEndsAt < now && profile.feedback_submitted && profile.trial_extended) {
         subject = 'Your extended trial is up — time to decide';
         html = extendedTrialExpiredHtml();
         emailType = 'extended_trial_expired';

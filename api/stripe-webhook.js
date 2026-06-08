@@ -39,10 +39,21 @@ function sanitizeSubject(text = '') {
 }
 
 function formatCurrency(amount = 0, currency = 'usd') {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: String(currency || 'usd').toUpperCase(),
-  }).format((Number(amount) || 0) / 100);
+  const trimmedCurrency = typeof currency === 'string' ? currency.trim() : '';
+  const normalizedCurrency = trimmedCurrency.length === 3
+    ? trimmedCurrency.toUpperCase()
+    : 'USD';
+  try {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: normalizedCurrency,
+    }).format((Number(amount) || 0) / 100);
+  } catch (_err) {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+    }).format((Number(amount) || 0) / 100);
+  }
 }
 
 function formatDate(iso) {
