@@ -29,7 +29,7 @@ export default function Landing() {
       
       {/* Content */}
       <div className="relative z-10">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="max-w-7xl 2xl:max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8">
 
           {/* ── 1. HEADER ── */}
           <header className="pt-8 pb-4">
@@ -88,7 +88,7 @@ export default function Landing() {
                     - xl (1280px): text-4xl — more room
                     - 2xl (1536px): text-5xl — wide screens, near full size
                     No explicit <br /> tags — let text wrap naturally at all column widths */}
-                <h1 className="text-5xl lg:text-3xl xl:text-4xl 2xl:text-5xl font-bold text-white mb-4 lg:mb-6 leading-[1.15] tracking-tight">
+                <h1 className="text-5xl lg:text-3xl xl:text-4xl 2xl:text-3xl font-bold text-white mb-4 lg:mb-6 leading-[1.15] tracking-tight">
                   Are you struggling to keep up with your ambitions?
                   <br />
                   <span className="text-red-600">
