@@ -73,7 +73,7 @@ export default function Landing() {
                    md (768px): 5/12 cols — text is compact, video gets 7/12 (58% of width)
                    lg (1024px): 4/12 cols — text even more compact, video gets 8/12 (67% of width)
                    No order classes — DOM order is correct */}
-              <div className="lg:col-span-4 text-center lg:text-left mb-10 lg:mb-0">
+              <div className="lg:col-span-4 2xl:col-span-3 text-center lg:text-left mb-10 lg:mb-0">
 
                 <div className="inline-flex justify-center lg:inline-block mb-4 lg:mb-6">
                   <span className="px-5 lg:px-6 py-1.5 lg:py-2 bg-red-950/50 text-red-500 border border-red-900 rounded-full text-xs lg:text-sm font-bold uppercase tracking-wider">
@@ -109,7 +109,7 @@ export default function Landing() {
                    md (768px): 7/12 cols — video takes 58% of width
                    lg (1024px): 8/12 cols — video takes 67% of width, clearly dominant
                    No order classes — DOM order keeps video on right */}
-              <div className="lg:col-span-8">
+              <div className="lg:col-span-8 2xl:col-span-9">
                 {/*
                   HeroVideoPlayer — self-contained video with custom controls.
                   To resize or reposition the video, only change the `className` prop below.
@@ -737,13 +737,8 @@ function HeroVideoPlayer({ src, className = '' }) {
           video.muted = true;
           setIsMuted(true);
           setAutoMuted(true);
-          video.play()
-            .then(() => {
-              setIsPlaying(true);
-            })
-            .catch(() => {
-              setIsPlaying(false);
-            });
+          // Don't autoplay when muted — user must click the unmute button to start
+          setIsPlaying(false);
         });
     }, 1500);
 
