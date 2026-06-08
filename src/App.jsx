@@ -15,6 +15,7 @@ import EmailConfirmed from './pages/EmailConfirmed';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import TermsOfService from './pages/TermsOfService';
 import Landing from './pages/Landing';
+import TrialExpiredModal from './components/TrialExpiredModal';
 
 import { useAuth } from './lib/AuthContext';
 import { supabase } from './lib/supabase/client';
@@ -58,7 +59,13 @@ function AuthGuardV2({ children }) {
   // false = "checked, not completed" → show onboarding
   // true = "checked, completed" → show app
   const [onboardingCompleted, setOnboardingCompleted] = React.useState(null);
+  const [profileData, setProfileData] = React.useState(null);
   const [profileLoading, setProfileLoading] = React.useState(true);
+  const [feedbackDismissed, setFeedbackDismissed] = React.useState(false);
+
+  React.useEffect(() => {
+    setFeedbackDismissed(false);
+  }, [user?.id]);
 
   React.useEffect(() => {
     // If auth is still resolving, don't do anything yet
@@ -72,11 +79,12 @@ function AuthGuardV2({ children }) {
 
     supabase
       .from('user_profiles')
-      .select('onboarding_completed')
+      .select('onboarding_completed, trial_ends_at, subscription_status, feedback_submitted, trial_extended')
       .eq('id', user.id)
       .maybeSingle()
       .then(({ data }) => {
         setOnboardingCompleted(data?.onboarding_completed ?? false);
+        setProfileData(data || null);
         setProfileLoading(false);
       });
   }, [user?.id, loading]); // FIX: also depend on loading so we wait for auth to settle
@@ -97,7 +105,45 @@ function AuthGuardV2({ children }) {
     );
   }
 
-  return children;
+  const now = new Date();
+  const trialExpired = profileData?.trial_ends_at
+    ? new Date(profileData.trial_ends_at) < now
+    : false;
+  const isActive =
+    profileData?.subscription_status === 'active' ||
+    profileData?.subscription_status === 'canceling';
+  const isTrialing =
+    profileData?.subscription_status === 'trialing' && !trialExpired;
+  const extendedTrialExpired = Boolean(
+    trialExpired && profileData?.feedback_submitted && profileData?.trial_extended
+  );
+  const showFeedbackModal = Boolean(
+    !feedbackDismissed &&
+      trialExpired &&
+      !isActive &&
+      (!profileData?.feedback_submitted || extendedTrialExpired) &&
+      !isTrialing
+  );
+
+  return (
+    <>
+      {children}
+      {showFeedbackModal && (
+        <TrialExpiredModal
+          isSecondExpiry={extendedTrialExpired}
+          onFeedbackExtended={(newTrialEndsAt) => {
+            setFeedbackDismissed(true);
+            setProfileData((prev) => ({
+              ...(prev || {}),
+              trial_ends_at: newTrialEndsAt || prev?.trial_ends_at,
+              feedback_submitted: true,
+              trial_extended: true,
+            }));
+          }}
+        />
+      )}
+    </>
+  );
 }
 
 // ── App ──────────────────────────────────────────────────────────────────

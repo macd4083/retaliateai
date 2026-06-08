@@ -330,6 +330,17 @@ export default function OnboardingV2({ onOnboardingComplete } = {}) {
     setSaving(true);
     try {
       await saveProfile({ onboarding_completed: true, onboarding_step: 8 });
+      const { data: profileCheck } = await supabase
+        .from('user_profiles')
+        .select('trial_ends_at')
+        .eq('id', user.id)
+        .single();
+      // Ensure trial_ends_at is set if not already
+      if (!profileCheck?.trial_ends_at) {
+        await supabase.from('user_profiles').update({
+          trial_ends_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        }).eq('id', user.id);
+      }
       trackCompleteRegistration({
         id: user?.id,
         email: user?.email,

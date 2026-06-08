@@ -30,3 +30,6 @@ Run files in filename order (alphabetical / chronological).
 21. `20260428_add_commitment_type_to_goal_commitment_log.sql` — Ensures commitment_type text and fragment_index integer columns exist on goal_commitment_log (idempotent re-run of 19–20)
 22. `20260429_session_causal_extracts.sql` — Creates session_causal_extracts table for storing win/miss cause raw text per session; used by synthesize-insights.js
 23. `20260504_commitment_why.sql` — Adds commitment_why text column to goal_commitment_log; required for reflection-coach.js to persist fragment-level whys and for synthesize-insights.js to read them
+24. `20260509_stripe_columns.sql` — Adds Stripe customer/subscription columns and trial fields to user_profiles
+25. `20260609_fix_trial_start.sql` — Ensures trial default behavior on signup and backfills missing trial_ends_at for trialing users
+26. `20260609_user_feedback.sql` — Creates user_feedback table and adds feedback/trial email tracking columns to user_profiles

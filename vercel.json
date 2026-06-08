@@ -15,6 +15,10 @@
     {
       "path": "/api/missed-sessions-email",
       "schedule": "0 12 * * *"
+    },
+    {
+      "path": "/api/trial-reminder-email",
+      "schedule": "0 10 * * *"
     }
   ]
 }

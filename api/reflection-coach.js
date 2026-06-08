@@ -2760,6 +2760,31 @@ export default async function handler(req, res) {
   }
 
   try {
+    const { data: profile, error: profileError } = await supabase
+      .from('user_profiles')
+      .select('subscription_status, trial_ends_at, trial_extended, feedback_submitted')
+      .eq('id', authenticatedUserId)
+      .maybeSingle();
+
+    if (profileError) {
+      return res.status(500).json({ error: profileError.message || 'Failed to check subscription' });
+    }
+
+    const trialExpired = profile?.trial_ends_at
+      ? new Date(profile.trial_ends_at) < new Date()
+      : false;
+    const isActive =
+      profile?.subscription_status === 'active' ||
+      profile?.subscription_status === 'canceling';
+
+    if (trialExpired && !isActive) {
+      return res.status(403).json({ error: 'trial_expired', message: 'Your trial has ended.' });
+    }
+  } catch (subscriptionCheckError) {
+    return res.status(500).json({ error: subscriptionCheckError.message || 'Failed to check subscription' });
+  }
+
+  try {
     const {
       user_id, session_id,
       session_state = {}, history = [],
