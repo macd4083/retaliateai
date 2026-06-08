@@ -3864,7 +3864,11 @@ Return ONLY valid JSON: { "question": "..." }`,
     const stretchText = result.extracted_data?.commitment_stretch || session_state.commitment_stretch;
     const hasMinimumCommitment = typeof minimumText === 'string' && minimumText.trim().length > 0;
     const hasStretchCommitment = typeof stretchText === 'string' && stretchText.trim().length > 0;
-    if (!session_state.commitment_minimum && !session_state.commitment_stretch) {
+    const shouldInsertCommitmentLog = (
+      (result.extracted_data?.commitment_minimum && !session_state.commitment_minimum)
+      || (result.extracted_data?.commitment_stretch && !session_state.commitment_stretch)
+    );
+    if (shouldInsertCommitmentLog && !session_state.commitment_minimum && !session_state.commitment_stretch) {
       console.warn('[goal_commitment_log] Skipped — no commitment data captured', {
         session_id: session_state?.session_id,
         current_stage: session_state?.current_stage,
@@ -3873,10 +3877,7 @@ Return ONLY valid JSON: { "question": "..." }`,
     if (
       client_local_date &&
       (hasMinimumCommitment || hasStretchCommitment) &&
-      (
-        (result.extracted_data?.commitment_minimum && !session_state.commitment_minimum)
-        || (result.extracted_data?.commitment_stretch && !session_state.commitment_stretch)
-      )
+      shouldInsertCommitmentLog
     ) {
       (async () => {
         const minimumCommitmentText = minimumText;
