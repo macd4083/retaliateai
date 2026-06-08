@@ -3182,7 +3182,7 @@ export default async function handler(req, res) {
     const mergedChecklist = { ...(session_state.checklist || {}), ...(intentData?.checklist_content || {}) };
     const tomorrowFilled = !!session_state.tomorrow_commitment;
     const hasMissInSession = Array.isArray(session_state.misses) && session_state.misses.length > 0;
-    const honestMissing = !mergedChecklist.honest && !hasMissInSession;
+    const honestMissing = current_stage === 'wins' && !mergedChecklist.honest && !hasMissInSession;
     const bridgeDone = session_state.commitment_goal_bridge_done === true;
     const sessionReadyToClose = tomorrowFilled && !!session_state.commitment_minimum && bridgeDone;
     const EMERGENCY_CLOSE_THRESHOLD = 20;
@@ -3375,6 +3375,28 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
     result.exercise_run = result.exercise_run || 'none';
     const stageAtTurnStart = session_state.current_stage || 'commitment_checkin';
     result.checklist_updates = result.checklist_updates || { ...DEFAULT_CHECKLIST };
+    const filterChecklistUpdatesByStage = (checklistUpdates, stageName) => {
+      const gatedChecklistUpdates = { ...DEFAULT_CHECKLIST };
+      const CHECKLIST_STAGE_GATES = {
+        wins: ['wins'],
+        honest: ['honest'],
+        plan: ['tomorrow', 'complete'],
+      };
+      Object.keys(checklistUpdates || {}).forEach((key) => {
+        if (!checklistUpdates[key]) return;
+        const allowedStages = CHECKLIST_STAGE_GATES[key];
+        if (!Array.isArray(allowedStages)) {
+          console.warn(`[checklist-guard] Rejected checklist.${key}=true from stage ${stageName}`);
+          return;
+        }
+        if (!allowedStages.includes(stageName)) {
+          console.warn(`[checklist-guard] Rejected checklist.${key}=true from stage ${stageName}`);
+          return;
+        }
+        gatedChecklistUpdates[key] = true;
+      });
+      return gatedChecklistUpdates;
+    };
     // Checklist flags are sticky — merge result checklist_updates with existing session checklist
     // so that a flag already set true cannot be reset to false by GPT output
     if (session_state.checklist) {
@@ -3384,6 +3406,7 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
         }
       });
     }
+    result.checklist_updates = filterChecklistUpdatesByStage(result.checklist_updates, stageAtTurnStart);
     result.follow_up_queued = result.follow_up_queued || false;
     result.follow_up_triggered = result.follow_up_triggered === true;
     result.wins_asked_for_more = result.wins_asked_for_more === true && stageAtTurnStart === 'wins';
@@ -3567,9 +3590,33 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
 
     // Safety guard — prevent hallucinated stage values from GPT
     const VALID_STAGES = ['wins', 'commitment_checkin', 'honest', 'tomorrow', 'complete'];
+    const VALID_TRANSITIONS = {
+      commitment_checkin: ['wins', 'honest'],
+      wins: ['honest', 'tomorrow'],
+      honest: ['tomorrow'],
+      tomorrow: ['complete'],
+    };
+    const CHECKLIST_STAGE_GATES = {
+      wins: ['wins'],
+      honest: ['honest'],
+      plan: ['tomorrow', 'complete'],
+    };
     if (result.new_stage && !VALID_STAGES.includes(result.new_stage)) {
       result.new_stage = null;
       result.stage_advance = false;
+    }
+    if (result.new_stage === 'complete' && !session_state.commitment_goal_bridge_done) {
+      console.warn('[stage-guard] Blocked complete: commitment_goal_bridge_done is not true');
+      result.new_stage = null;
+      result.stage_advance = false;
+    }
+    if (result.new_stage && result.new_stage !== stageAtTurnStart) {
+      const allowedTransitions = VALID_TRANSITIONS[stageAtTurnStart] || [];
+      if (!allowedTransitions.includes(result.new_stage)) {
+        console.warn(`[stage-guard] Rejected invalid transition: ${stageAtTurnStart} → ${result.new_stage}`);
+        result.new_stage = null;
+        result.stage_advance = false;
+      }
     }
 
     // Plan checklist correctness: cl.plan should only be true if tomorrow_commitment is actually captured
@@ -3581,14 +3628,26 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
         intentData.checklist_content.plan = false;
       }
     }
+    if (
+      session_state.commitment_minimum &&
+      typeof session_state.commitment_minimum === 'string' &&
+      session_state.commitment_minimum.trim().length > 0 &&
+      session_state.commitment_stretch &&
+      typeof session_state.commitment_stretch === 'string' &&
+      session_state.commitment_stretch.trim().length > 0
+    ) {
+      session_state.checklist = { ...session_state.checklist, plan: true };
+    }
 
     // Merge classifier checklist detections
     if (intentData?.checklist_content) {
       Object.keys(intentData.checklist_content).forEach((key) => {
         if (!intentData.checklist_content[key]) return; // only merge true values
-        // Gate stage-specific checklist keys so they can't bleed in from wrong stages
-        if (key === 'honest' && stageAtTurnStart !== 'honest') return;
-        if (key === 'identity' && stageAtTurnStart !== 'tomorrow' && stageAtTurnStart !== 'complete') return;
+        const allowedStages = CHECKLIST_STAGE_GATES[key];
+        if (!Array.isArray(allowedStages) || !allowedStages.includes(stageAtTurnStart)) {
+          console.warn(`[checklist-guard] Rejected checklist.${key}=true from stage ${stageAtTurnStart}`);
+          return;
+        }
         result.checklist_updates[key] = true;
       });
     }
@@ -3620,6 +3679,14 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
         result.stage_advance = false;
         result.new_stage = null;
       }
+    }
+    if (
+      result.stage_advance === true &&
+      result.new_stage &&
+      result.new_stage !== stageAtTurnStart &&
+      (result.directive_completed === null || result.directive_completed === undefined)
+    ) {
+      console.warn(`[stage-guard] Stage advanced to ${result.new_stage} without directive_completed (turn ${turn_number})`);
     }
 
     // Bug B guard: is_session_complete requires both minimum AND stretch to be captured
@@ -3669,6 +3736,7 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
     // ── 11. Post-response DB writes ───────────────────────────────────────
     const dbPromises = [];
 
+    result.checklist_updates = filterChecklistUpdatesByStage(result.checklist_updates, stageAtTurnStart);
     if (session_id && Object.values(result.checklist_updates).some(Boolean)) {
       dbPromises.push(updateSessionChecklist(session_id, result.checklist_updates));
     }
