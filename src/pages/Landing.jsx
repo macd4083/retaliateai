@@ -109,19 +109,16 @@ export default function Landing() {
                    lg (1024px): 8/12 cols — video takes 67% of width, clearly dominant
                    No order classes — DOM order keeps video on right */}
               <div className="md:col-span-7 lg:col-span-8">
-                <div className="relative rounded-2xl overflow-hidden shadow-2xl shadow-red-900/50 border border-red-900/40 ring-2 ring-red-900/10">
-                  <video
-                    autoPlay
-                    muted
-                    loop
-                    playsInline
-                    className="w-full aspect-video block rounded-2xl"
-                  >
-                    <source src="/hero-video.mp4" type="video/mp4" />
-                  </video>
-                  {/* Subtle red gradient overlay */}
-                  <div className="absolute inset-0 bg-gradient-to-t from-red-900/20 via-transparent to-transparent pointer-events-none rounded-2xl" />
-                </div>
+                {/*
+                  HeroVideoPlayer — self-contained video with custom controls.
+                  To resize or reposition the video, only change the `className` prop below.
+                  All controls (seek bar, buttons, overlays) are sized relatively and will scale automatically.
+                  The aspect-video class on the <video> element maintains 16:9 ratio at any width.
+                */}
+                <HeroVideoPlayer
+                  src="/hero-video.mp4"
+                  className="rounded-2xl overflow-hidden shadow-2xl shadow-red-900/50 border border-red-900/40 ring-2 ring-red-900/10"
+                />
               </div>
 
             </div>
@@ -705,5 +702,337 @@ function BenefitItem({ text }) {
       <CheckCircle className="w-5 h-5 flex-shrink-0 text-red-500" />
       <span className="text-white">{text}</span>
     </div>
+  );
+}
+
+function HeroVideoPlayer({ src, className = '' }) {
+  const videoRef = useRef(null);
+  const containerRef = useRef(null);
+  const seekBarRef = useRef(null);
+  const hideTimer = useRef(null);
+
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [showControls, setShowControls] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [autoMuted, setAutoMuted] = useState(false);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.muted = false;
+    video.play()
+      .then(() => {
+        setIsPlaying(true);
+      })
+      .catch(() => {
+        video.muted = true;
+        setIsMuted(true);
+        setAutoMuted(true);
+        video.play()
+          .then(() => {
+            setIsPlaying(true);
+          })
+          .catch(() => {
+            setIsPlaying(false);
+          });
+      });
+  }, []);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const onTimeUpdate = () => {
+      setCurrentTime(video.currentTime);
+      setProgress(video.duration ? (video.currentTime / video.duration) * 100 : 0);
+    };
+    const onLoadedMetadata = () => {
+      setDuration(video.duration || 0);
+      setCurrentTime(video.currentTime || 0);
+      setProgress(video.duration ? (video.currentTime / video.duration) * 100 : 0);
+    };
+    const onPlay = () => setIsPlaying(true);
+    const onPause = () => setIsPlaying(false);
+
+    video.addEventListener('timeupdate', onTimeUpdate);
+    video.addEventListener('loadedmetadata', onLoadedMetadata);
+    video.addEventListener('play', onPlay);
+    video.addEventListener('pause', onPause);
+
+    return () => {
+      video.removeEventListener('timeupdate', onTimeUpdate);
+      video.removeEventListener('loadedmetadata', onLoadedMetadata);
+      video.removeEventListener('play', onPlay);
+      video.removeEventListener('pause', onPause);
+    };
+  }, []);
+
+  const revealControls = () => {
+    setShowControls(true);
+    if (hideTimer.current) clearTimeout(hideTimer.current);
+    hideTimer.current = setTimeout(() => {
+      if (videoRef.current && !videoRef.current.paused) {
+        setShowControls(false);
+      }
+    }, 3000);
+  };
+
+  const togglePlay = () => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (v.paused) {
+      v.play().catch(() => {});
+    } else {
+      v.pause();
+    }
+  };
+
+  const toggleMute = () => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.muted = !v.muted;
+    setIsMuted(v.muted);
+    if (!v.muted) setAutoMuted(false);
+  };
+
+  const seek = (e) => {
+    const v = videoRef.current;
+    const bar = seekBarRef.current;
+    if (!v || !bar || !v.duration) return;
+    const rect = bar.getBoundingClientRect();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    v.currentTime = ratio * v.duration;
+  };
+
+  const beginDragSeek = (e) => {
+    seek(e);
+    const handleMouseMove = (moveEvent) => seek(moveEvent);
+    const handleTouchMove = (moveEvent) => seek(moveEvent);
+    const stopDrag = () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', stopDrag);
+      document.removeEventListener('touchmove', handleTouchMove);
+      document.removeEventListener('touchend', stopDrag);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', stopDrag);
+    document.addEventListener('touchmove', handleTouchMove, { passive: true });
+    document.addEventListener('touchend', stopDrag);
+  };
+
+  const toggleFullscreen = () => {
+    const el = containerRef.current;
+    if (!el) return;
+    if (!document.fullscreenElement) {
+      el.requestFullscreen?.() || el.webkitRequestFullscreen?.();
+    } else {
+      const webkitExit = document['webkitExitFullscreen'];
+      document.exitFullscreen?.() || webkitExit?.call(document);
+    }
+  };
+
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', onChange);
+    document.addEventListener('webkitfullscreenchange', onChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', onChange);
+      document.removeEventListener('webkitfullscreenchange', onChange);
+    };
+  }, []);
+
+  const fmt = (s) => {
+    if (!s || Number.isNaN(s)) return '0:00';
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60);
+    return `${m}:${sec.toString().padStart(2, '0')}`;
+  };
+
+  useEffect(() => {
+    return () => {
+      if (hideTimer.current) clearTimeout(hideTimer.current);
+    };
+  }, []);
+
+  return (
+    <div
+      ref={containerRef}
+      className={`relative ${className}`}
+      onMouseMove={revealControls}
+      onMouseEnter={revealControls}
+      onMouseLeave={() => {
+        if (hideTimer.current) clearTimeout(hideTimer.current);
+        if (videoRef.current && !videoRef.current.paused) setShowControls(false);
+      }}
+      onTouchStart={revealControls}
+    >
+      <video
+        ref={videoRef}
+        className="w-full aspect-video block"
+        playsInline
+        loop
+        preload="auto"
+        onClick={togglePlay}
+        style={{ cursor: 'pointer' }}
+      >
+        <source src={src} type="video/mp4" />
+      </video>
+
+      <div className="absolute inset-0 bg-gradient-to-t from-red-900/20 via-transparent to-transparent pointer-events-none" />
+
+      {autoMuted && (
+        <button
+          onClick={toggleMute}
+          className="absolute top-3 right-3 z-20 flex items-center gap-1.5 px-3 py-1.5 bg-black/70 hover:bg-black/90 text-white text-xs font-semibold rounded-full backdrop-blur-sm border border-white/10 transition-all"
+          aria-label="Unmute video"
+        >
+          <VolumeOffIcon className="w-3.5 h-3.5" />
+          🔊 Tap to unmute
+        </button>
+      )}
+
+      {!isPlaying && (
+        <button
+          onClick={togglePlay}
+          className="absolute inset-0 z-10 flex items-center justify-center bg-black/30 backdrop-blur-[2px] transition-all"
+          aria-label="Play video"
+        >
+          <div className="w-16 h-16 rounded-full bg-red-600/90 hover:bg-red-600 flex items-center justify-center shadow-2xl shadow-red-900/60 transition-all hover:scale-105">
+            <PlayIcon className="w-7 h-7 text-white translate-x-0.5" />
+          </div>
+        </button>
+      )}
+
+      <div
+        className={`absolute inset-0 flex flex-col justify-end pointer-events-none transition-opacity duration-300 ${
+          showControls || !isPlaying ? 'opacity-100' : 'opacity-0'
+        }`}
+        style={{ zIndex: 15 }}
+      >
+        <div className="absolute bottom-0 left-0 right-0 h-20 bg-gradient-to-t from-black/75 via-black/40 to-transparent" />
+
+        {/*
+          Controls scale with container: icon sizes use w-4 h-4, text uses text-[11px],
+          seek bar height is 1–1.5 Tailwind units. All relative — no fixed pixel sizes.
+          To make controls larger on a bigger video, adjust w-4/h-4 → w-5/h-5 and text-[11px] → text-xs here.
+        */}
+        <div className="relative px-3 pb-3 flex flex-col gap-2 pointer-events-auto">
+          <div
+            ref={seekBarRef}
+            role="slider"
+            aria-label="Video progress"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(progress)}
+            className="w-full h-1 bg-white/25 rounded-full cursor-pointer group/seek hover:h-1.5 transition-all duration-150"
+            onClick={seek}
+            onMouseDown={beginDragSeek}
+            onTouchStart={beginDragSeek}
+          >
+            <div
+              className="h-full bg-red-500 group-hover/seek:bg-red-400 rounded-full relative transition-colors"
+              style={{ width: `${progress}%` }}
+            >
+              <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 w-3 h-3 bg-white rounded-full shadow opacity-0 group-hover/seek:opacity-100 transition-opacity" />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={togglePlay}
+                className="p-1.5 text-white hover:text-red-400 transition-colors rounded"
+                aria-label={isPlaying ? 'Pause' : 'Play'}
+              >
+                {isPlaying
+                  ? <PauseIcon className="w-4 h-4" />
+                  : <PlayIcon className="w-4 h-4 translate-x-px" />
+                }
+              </button>
+
+              <button
+                onClick={toggleMute}
+                className="p-1.5 text-white hover:text-red-400 transition-colors rounded"
+                aria-label={isMuted ? 'Unmute' : 'Mute'}
+              >
+                {isMuted
+                  ? <VolumeOffIcon className="w-4 h-4" />
+                  : <VolumeOnIcon className="w-4 h-4" />
+                }
+              </button>
+
+              <span className="text-white/70 text-[11px] tabular-nums leading-none select-none">
+                {fmt(currentTime)} / {fmt(duration)}
+              </span>
+            </div>
+
+            <button
+              onClick={toggleFullscreen}
+              className="p-1.5 text-white hover:text-red-400 transition-colors rounded"
+              aria-label={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+            >
+              {isFullscreen
+                ? <ExitFullscreenIcon className="w-4 h-4" />
+                : <FullscreenIcon className="w-4 h-4" />
+              }
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PlayIcon({ className = 'w-4 h-4' }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M8 5.14v14l11-7-11-7z" />
+    </svg>
+  );
+}
+
+function PauseIcon({ className = 'w-4 h-4' }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+    </svg>
+  );
+}
+
+function VolumeOnIcon({ className = 'w-4 h-4' }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
+    </svg>
+  );
+}
+
+function VolumeOffIcon({ className = 'w-4 h-4' }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z" />
+    </svg>
+  );
+}
+
+function FullscreenIcon({ className = 'w-4 h-4' }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" />
+    </svg>
+  );
+}
+
+function ExitFullscreenIcon({ className = 'w-4 h-4' }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z" />
+    </svg>
   );
 }
