@@ -1,12 +1,43 @@
 import React, { useState } from 'react';
 import { supabase } from '../lib/supabase/client';
+import { useAuth } from '../lib/AuthContext';
 
 export default function TrialExpiredModal({ isSecondExpiry = false, onFeedbackExtended }) {
+  const { user } = useAuth();
   const [q1, setQ1] = useState('');
   const [q2, setQ2] = useState('');
   const [loading, setLoading] = useState(false);
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [error, setError] = useState('');
   const [closed, setClosed] = useState(false);
+
+  const startCheckout = async () => {
+    if (!user?.id || !user?.email) return;
+    setCheckoutLoading(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      const response = await fetch('/api/stripe', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(accessToken ? { Authorization: 'Bearer '.concat(accessToken) } : {}),
+        },
+        body: JSON.stringify({
+          action: 'checkout',
+          user_id: user.id,
+          email: user.email,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload?.url) throw new Error(payload?.error || 'Checkout failed');
+      window.location.href = payload.url;
+    } catch (err) {
+      setError(err.message || 'Could not start checkout.');
+    } finally {
+      setCheckoutLoading(false);
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -101,9 +132,14 @@ export default function TrialExpiredModal({ isSecondExpiry = false, onFeedbackEx
                 {loading ? 'Submitting...' : 'Submit Feedback & Get Another Week Free'}
               </button>
               <div className="text-center">
-                <a href="/settings" className="text-sm text-zinc-300 hover:text-white">
-                  Already paying? Upgrade now →
-                </a>
+                <button
+                  type="button"
+                  onClick={startCheckout}
+                  disabled={checkoutLoading}
+                  className="text-sm text-zinc-300 hover:text-white disabled:opacity-50 transition-colors"
+                >
+                  {checkoutLoading ? 'Loading...' : 'Already paying? Upgrade now →'}
+                </button>
               </div>
             </form>
           )}
