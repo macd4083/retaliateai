@@ -911,7 +911,9 @@ function HeroVideoPlayer({ src, className = '' }) {
           className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 flex items-center gap-3 px-6 py-4 bg-black/50 hover:bg-black/70 backdrop-blur-sm text-white font-semibold text-base rounded-xl border border-white/20 hover:border-white/40 transition-all shadow-xl"
           aria-label="Play with sound"
         >
-          <VolumeOffIcon className="w-6 h-6 flex-shrink-0" />
+          <span aria-hidden="true">
+            <VolumeOffIcon className="w-6 h-6 flex-shrink-0" />
+          </span>
           Tap to play with sound
         </button>
       )}
