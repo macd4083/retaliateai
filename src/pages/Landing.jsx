@@ -724,23 +724,30 @@ function HeroVideoPlayer({ src, className = '' }) {
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-    video.muted = false;
-    video.play()
-      .then(() => {
-        setIsPlaying(true);
-      })
-      .catch(() => {
-        video.muted = true;
-        setIsMuted(true);
-        setAutoMuted(true);
-        video.play()
-          .then(() => {
-            setIsPlaying(true);
-          })
-          .catch(() => {
-            setIsPlaying(false);
-          });
-      });
+
+    // Wait 1.5s before starting — gives the page a moment to settle before audio kicks in
+    const startTimer = setTimeout(() => {
+      video.muted = false;
+      video.play()
+        .then(() => {
+          setIsPlaying(true);
+        })
+        .catch(() => {
+          // Browser blocked unmuted autoplay — fall back to muted
+          video.muted = true;
+          setIsMuted(true);
+          setAutoMuted(true);
+          video.play()
+            .then(() => {
+              setIsPlaying(true);
+            })
+            .catch(() => {
+              setIsPlaying(false);
+            });
+        });
+    }, 1500);
+
+    return () => clearTimeout(startTimer);
   }, []);
 
   useEffect(() => {
@@ -886,6 +893,30 @@ function HeroVideoPlayer({ src, className = '' }) {
       </video>
 
       <div className="absolute inset-0 bg-gradient-to-t from-red-900/20 via-transparent to-transparent pointer-events-none" />
+
+      {/* Big centered unmute button — only shown when browser forced muted autoplay */}
+      {autoMuted && (
+        <button
+          onClick={() => {
+            const v = videoRef.current;
+            if (!v) return;
+            v.muted = false;
+            setIsMuted(false);
+            setAutoMuted(false);
+            // Also ensure video is playing when user unmutes
+            if (v.paused) {
+              v.play().then(() => setIsPlaying(true)).catch(() => {});
+            }
+          }}
+          className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 flex items-center gap-3 px-6 py-4 bg-black/50 hover:bg-black/70 backdrop-blur-sm text-white font-semibold text-base rounded-xl border border-white/20 hover:border-white/40 transition-all shadow-xl"
+          aria-label="Play with sound"
+        >
+          <span aria-hidden="true">
+            <VolumeOffIcon className="w-6 h-6 flex-shrink-0" />
+          </span>
+          Tap to play with sound
+        </button>
+      )}
 
       {!isPlaying && (
         <button
