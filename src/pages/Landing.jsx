@@ -89,7 +89,7 @@ export default function Landing() {
 
                 {/* Subtext: also shrinks when side-by-side to preserve video size */}
                 <p className="text-lg lg:text-sm xl:text-base 2xl:text-xl text-gray-400 leading-relaxed">
-                  Retaliate AI is a nightly reflection that holds you accountable to your commitments, helps you understand what went well and what didn't, and keeps you connected to why your goals matter. Night after night, until the person you're trying to become is just who you are.
+                  Retaliate AI is a nightly reflection that holds you accountable to your commitments, helps you understand what went well and what didn't, and keeps you connected to why your goals matter.
                 </p>
 
               </div>
@@ -127,6 +127,38 @@ export default function Landing() {
               <p className="text-sm text-gray-500 tracking-wide">
                 7 days free • No credit card • Feedback earns you another week
               </p>
+            </div>
+          </div>
+
+          {/* ── 4. GUIDE SECTION ── */}
+          <div className="pb-32">
+            <div className="text-center mb-16">
+              <p className="text-red-500 text-sm font-bold uppercase tracking-widest mb-4">
+                Why This Works
+              </p>
+              <h2 className="text-4xl md:text-5xl font-bold text-white mb-6 leading-tight">
+                We've figured out what actually makes people follow through.
+              </h2>
+              <p className="text-xl text-gray-400 max-w-3xl mx-auto leading-relaxed">
+                Most apps track what you want. We track whether you did it, and why you didn't.
+                Retaliate AI was built around one insight from behavioral research and real interviews:
+                people change when they're consistently reconnected to why their goals matter and held
+                accountable to what they said yesterday.
+              </p>
+            </div>
+            <div className="grid md:grid-cols-3 gap-8">
+              <div className="bg-gradient-to-b from-red-950/30 to-transparent border border-red-900/40 rounded-xl p-8 text-center">
+                <div className="text-4xl font-bold text-red-500 mb-3">7 data points</div>
+                <p className="text-gray-400 text-sm">captured every session</p>
+              </div>
+              <div className="bg-gradient-to-b from-red-950/30 to-transparent border border-red-900/40 rounded-xl p-8 text-center">
+                <div className="text-2xl font-bold text-red-500 mb-3">Cross-session memory</div>
+                <p className="text-gray-400 text-sm">AI remembers your patterns, not just your last message</p>
+              </div>
+              <div className="bg-gradient-to-b from-red-950/30 to-transparent border border-red-900/40 rounded-xl p-8 text-center">
+                <div className="text-2xl font-bold text-red-500 mb-3">Commitment tracking</div>
+                <p className="text-gray-400 text-sm">Knows if you did what you said</p>
+              </div>
             </div>
           </div>
 
@@ -214,38 +246,6 @@ export default function Landing() {
           {/* ── 3b. PWA INSTALL ── */}
           <div className="pb-20">
             <PWALandingSection />
-          </div>
-
-          {/* ── 4. GUIDE SECTION ── */}
-          <div className="pb-32">
-            <div className="text-center mb-16">
-              <p className="text-red-500 text-sm font-bold uppercase tracking-widest mb-4">
-                Why This Works
-              </p>
-              <h2 className="text-4xl md:text-5xl font-bold text-white mb-6 leading-tight">
-                We've figured out what actually makes people follow through.
-              </h2>
-              <p className="text-xl text-gray-400 max-w-3xl mx-auto leading-relaxed">
-                Most apps track what you want. We track whether you did it, and why you didn't.
-                Retaliate AI was built around one insight from behavioral research and real interviews:
-                people change when they're consistently reconnected to why their goals matter and held
-                accountable to what they said yesterday.
-              </p>
-            </div>
-            <div className="grid md:grid-cols-3 gap-8">
-              <div className="bg-gradient-to-b from-red-950/30 to-transparent border border-red-900/40 rounded-xl p-8 text-center">
-                <div className="text-4xl font-bold text-red-500 mb-3">7 data points</div>
-                <p className="text-gray-400 text-sm">captured every session</p>
-              </div>
-              <div className="bg-gradient-to-b from-red-950/30 to-transparent border border-red-900/40 rounded-xl p-8 text-center">
-                <div className="text-2xl font-bold text-red-500 mb-3">Cross-session memory</div>
-                <p className="text-gray-400 text-sm">AI remembers your patterns, not just your last message</p>
-              </div>
-              <div className="bg-gradient-to-b from-red-950/30 to-transparent border border-red-900/40 rounded-xl p-8 text-center">
-                <div className="text-2xl font-bold text-red-500 mb-3">Commitment tracking</div>
-                <p className="text-gray-400 text-sm">Knows if you did what you said</p>
-              </div>
-            </div>
           </div>
 
           {/* ── 7. FEATURES ── */}
