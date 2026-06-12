@@ -8,6 +8,7 @@ import SettingsV2 from './pages/SettingsV2';
 import OnboardingV2 from './pages/OnboardingV2';
 import AdminV2 from './pages/AdminV2';
 import AdminFeedback from './pages/AdminFeedback';
+import AdminSessionLog from './pages/AdminSessionLog';
 import LiveDemo from './pages/admin/LiveDemo';
 import LiveDemoInsights from './pages/admin/LiveDemoInsights';
 import Login from './pages/Login';
@@ -199,6 +200,14 @@ export default function App() {
         element={
           <AuthGuardV2>
             <AdminFeedback />
+          </AuthGuardV2>
+        }
+      />
+      <Route
+        path="/admin/session-log"
+        element={
+          <AuthGuardV2>
+            <AdminSessionLog />
           </AuthGuardV2>
         }
       />

@@ -603,6 +603,34 @@ async function createSessionRow(supabase, userId, simulatedDate) {
   return sessionId;
 }
 
+async function saveReflectionMessage(supabase, {
+  sessionId,
+  userId,
+  role,
+  content,
+  stage = null,
+  messageType = null,
+  chips = null,
+  extractedData = null,
+  aiReasoning = null,
+}) {
+  if (!sessionId || !userId || !role || !content) return;
+  const { error } = await supabase.from('reflection_messages').insert({
+    session_id: sessionId,
+    user_id: userId,
+    role,
+    content,
+    stage,
+    message_type: messageType,
+    chips,
+    extracted_data: extractedData,
+    ai_reasoning: aiReasoning,
+  });
+  if (error) {
+    console.warn(`    ⚠️  Could not save ${role} reflection message: ${error.message}`);
+  }
+}
+
 // ── Terminal output helpers ────────────────────────────────────────────────────
 function separator(day, dateStr) {
   const line = `━━━ DAY ${day} — ${dateStr} `;
@@ -621,6 +649,32 @@ function printSummary({ completed, stage, exercises, turns }) {
   const icon = completed ? '✅' : '⚠️ ';
   const exStr = exercises.length ? exercises.join(', ') : 'none';
   console.log(`${icon}  ${completed ? 'Complete' : 'Incomplete'} | Stage: ${stage} | Exercises: ${exStr} | Turns: ${turns}`);
+}
+
+function printThinkingEvents(thinkingEvents = []) {
+  if (!Array.isArray(thinkingEvents) || thinkingEvents.length === 0) return;
+  console.log('\n── AI Thinking Events ──────────────────────────────────────────');
+  for (const event of thinkingEvents) {
+    console.log(`Turn ${event.turn_index ?? '—'}  [${event.event_type}]`);
+    if (event.event_type === 'classifier_output') {
+      console.log(`        intent=${event.classifier_intent || '—'} | emotional_state=${event.classifier_emotional_state || '—'} | suggested_exercise=${event.classifier_suggested_exercise || 'none'}`);
+      console.log(`        energy=${event.classifier_energy_level || '—'} | accountability=${event.classifier_accountability_signal || '—'}`);
+    } else if (event.event_type === 'exercise_fire') {
+      console.log(`        Exercise: "${event.exercise_label || event.exercise_id}" (${event.exercise_id || '—'})`);
+      console.log(`        Trigger path: ${event.exercise_trigger_path || '—'}`);
+    } else if (event.event_type === 'stage_shift') {
+      console.log(`        ${event.stage_from || '—'} → ${event.stage_to || '—'}`);
+      console.log(`        Reason: ${event.stage_trigger_condition || '—'}`);
+    } else if (event.event_type === 'directive_dispatch') {
+      console.log(`        Directive: ${event.directive_type || '—'} | priority=${event.directive_priority ?? '—'} | stage=${event.directive_stage || '—'}`);
+      console.log(`        Reason: ${event.directive_reason || '—'}`);
+    } else if (event.event_type === 'ai_reasoning') {
+      console.log(`        Why this question: ${event.ai_why_this_question || '—'}`);
+      console.log(`        Emotional read: ${event.ai_emotional_read || '—'}`);
+      console.log(`        Strategic intent: ${event.ai_strategic_intent || '—'}`);
+    }
+    console.log('');
+  }
 }
 
 // ── Clean user data — wipe all sim user rows before a fresh run ───────────────
@@ -967,6 +1021,7 @@ async function runWhyBuildingTest({ personaKey, startDate, clean }) {
   }
 
   const supabase = getSupabase();
+  const simRunId = randomUUID();
 
   console.log(`\n🔬  Starting --test-why-building (7-day focused run)`);
   console.log(`    Persona:    ${personaKey} (${persona.name})`);
@@ -982,6 +1037,7 @@ async function runWhyBuildingTest({ personaKey, startDate, clean }) {
 
   const whyBuildingReport = {
     meta: {
+      sim_run_id: simRunId,
       persona: personaKey,
       start_date: startDate,
       run_at: new Date().toISOString(),
@@ -2761,6 +2817,7 @@ async function main() {
     const sessionRecord = {
       date: simulatedDate,
       session_id: sessionId,
+      sim_run_id: simRunId,
       daily_event: dailyEvent,
       completed: false,
       turns: 0,
@@ -2773,6 +2830,7 @@ async function main() {
       anomalies: [],
       conversation: [],
       stage_transitions: [],
+      thinking_events: [],
       session_summary: null,
       backend_state: null,
       goals_why_snapshot: [],
@@ -2790,6 +2848,7 @@ async function main() {
     const initResult = await callCoach({
       user_id: userId,
       session_id: sessionId,
+      sim_run_id: simRunId,
       session_state: {
         ...sessionState,
         yesterday_commitment: (scenario !== 'cold_start' ? crossSessionState.yesterdayCommitment : null) || null,
@@ -2802,6 +2861,20 @@ async function main() {
 
     const initCoachMsg = initResult.assistant_message || '';
     printCoach(initCoachMsg);
+    await saveReflectionMessage(supabase, {
+      sessionId,
+      userId,
+      role: 'assistant',
+      content: initCoachMsg,
+      stage: initStageAtTurnStart,
+      messageType: initResult.message_type || 'question',
+      chips: initResult.chips || null,
+      extractedData: initResult.extracted_data || null,
+      aiReasoning: initResult.reasoning || null,
+    });
+    if (Array.isArray(initResult.thinking_events)) {
+      sessionRecord.thinking_events.push(...initResult.thinking_events);
+    }
 
     // Update session state from INIT
     if (initResult.stage_advance && initResult.new_stage) {
@@ -2873,6 +2946,7 @@ async function main() {
       turn: 0,
       coach: initCoachMsg,
       user: null,
+      ai_reasoning: initResult.reasoning || null,
     });
 
     // ── Assert whys context after INIT (pre-conversation) ─────────────────
@@ -2914,6 +2988,7 @@ async function main() {
       const result = await callCoach({
         user_id: userId,
         session_id: sessionId,
+        sim_run_id: simRunId,
         session_state: {
           ...sessionState,
           yesterday_commitment: (scenario !== 'cold_start' ? crossSessionState.yesterdayCommitment : null) || null,
@@ -2922,6 +2997,13 @@ async function main() {
         history,
         user_message: userMsg,
         context: { client_local_date: simulatedDate },
+      });
+      await saveReflectionMessage(supabase, {
+        sessionId,
+        userId,
+        role: 'user',
+        content: userMsg,
+        stage: stageAtTurnStart,
       });
 
       const coachMsg = result.assistant_message || '';
@@ -3012,6 +3094,20 @@ async function main() {
       history.push({ role: 'assistant', content: coachMsg });
 
       printCoach(coachMsg);
+      await saveReflectionMessage(supabase, {
+        sessionId,
+        userId,
+        role: 'assistant',
+        content: coachMsg,
+        stage: stageAtTurnStart,
+        messageType: result.message_type || 'question',
+        chips: result.chips || null,
+        extractedData: result.extracted_data || null,
+        aiReasoning: result.reasoning || null,
+      });
+      if (Array.isArray(result.thinking_events)) {
+        sessionRecord.thinking_events.push(...result.thinking_events);
+      }
 
       const honestForwardActionScan = detectHonestForwardActionLeak(stageAtTurnStart, coachMsg);
 
@@ -3034,6 +3130,7 @@ async function main() {
         tomorrow_commitment: resolveCommitmentField(result, 'tomorrow_commitment', sessionState.tomorrow_commitment),
         coach: coachMsg,
         user: userMsg,
+        ai_reasoning: result.reasoning || null,
         honest_forward_action_leak: honestForwardActionScan.honest_forward_action_leak,
         honest_forward_action_flags: honestForwardActionScan.honest_forward_action_flags,
       };
@@ -3067,6 +3164,7 @@ async function main() {
       total_turns: turn,
       stage_sequence: [...stageSequence],
       stage_transitions: sessionRecord.stage_transitions,
+      thinking_events_count: sessionRecord.thinking_events.length,
       honest_stage_turns: sessionRecord.conversation.filter((entry) => entry.stage === 'honest').length,
       tomorrow_stage_turns: sessionRecord.conversation.filter((entry) => entry.stage === 'tomorrow').length,
       honest_forward_action_violations: sessionRecord.conversation.filter((entry) => entry.honest_forward_action_leak).length,
@@ -3167,6 +3265,7 @@ async function main() {
       exercises: sessionState.exercises_run,
       turns: turn,
     });
+    printThinkingEvents(sessionRecord.thinking_events);
 
     // Small delay between days to avoid rate limiting
     if (day < totalDays) {

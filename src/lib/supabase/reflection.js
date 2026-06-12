@@ -49,6 +49,7 @@ export const reflectionHelpers = {
         chips: messageData.chips || null,
         chip_selected: messageData.chip_selected || null,
         extracted_data: messageData.extracted_data || null,
+        ai_reasoning: messageData.ai_reasoning || null,
       })
       .select()
       .single();

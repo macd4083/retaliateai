@@ -528,6 +528,7 @@ export default function ReflectionV2() {
           content: m.content,
           chips: m.chips || null,
           message_type: m.message_type || null,
+          ai_reasoning: m.ai_reasoning || null,
           card_data: m.extracted_data?.card_data || null,
           isTyping: false,
         }));
@@ -816,6 +817,7 @@ export default function ReflectionV2() {
         // canonical checklist intro so a stray wins/honest question never appears as a chat bubble.
         content: (shouldShowChecklist && !isInit) ? CHECKLIST_INIT_MESSAGE : (data.assistant_message || ''),
         chips: data.chips || null,
+        ai_reasoning: data.reasoning || null,
         message_type: isSummaryCard
           ? 'summary_card'
           : data.message_type || 'question',
@@ -837,6 +839,7 @@ export default function ReflectionV2() {
           message_type: isSummaryCard ? 'summary_card' : data.message_type || 'question',
           chips: data.chips || null,
           extracted_data: isSummaryCard ? { card_data: newSummaryData } : null,
+          ai_reasoning: data.reasoning || null,
         })
         .catch(() => {});
 
