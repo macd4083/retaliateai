@@ -70,7 +70,7 @@ export default function Landing() {
                    md (768px): 5/12 cols — text is compact, video gets 7/12 (58% of width)
                    lg (1024px): 4/12 cols — text even more compact, video gets 8/12 (67% of width)
                    No order classes — DOM order is correct */}
-              <div className="lg:col-span-4 2xl:col-span-3 text-center lg:text-left mb-10 lg:mb-0">
+              <div className="md:col-span-5 lg:col-span-4 2xl:col-span-4 text-center lg:text-left mb-10 lg:mb-0">
 
                 {/* Headline:
                     - Mobile (stacked): text-4xl — large, comfortable at full width
@@ -79,16 +79,16 @@ export default function Landing() {
                     - xl (1280px): text-4xl — more room
                     - 2xl (1536px): text-5xl — wide screens, near full size
                     No explicit <br /> tags — let text wrap naturally at all column widths */}
-                <h1 className="text-5xl lg:text-3xl xl:text-4xl 2xl:text-4xl font-bold text-white mb-4 lg:mb-6 leading-[1.15] tracking-tight">
+                <h1 className="text-5xl lg:text-3xl xl:text-4xl 2xl:text-5xl font-bold text-white mb-6 lg:mb-8 leading-[1.15] tracking-tight">
                   Are you struggling to keep up with your ambitions?
-                  <br />
+                  <br /><br />
                   <span className="text-red-600">
                     More pressure won't bridge the gap. A consistent system will.
                   </span>
                 </h1>
 
                 {/* Subtext: also shrinks when side-by-side to preserve video size */}
-                <p className="text-lg lg:text-sm xl:text-base 2xl:text-lg text-gray-400 leading-relaxed">
+                <p className="text-lg lg:text-sm xl:text-base 2xl:text-xl text-gray-400 leading-relaxed">
                   Every night, that familiar feeling. Another day where your goals stayed goals.
                   Retaliate AI is the system that closes the loop — it remembers what you said,
                   holds you to it, and helps you actually become who you keep saying you'll be.
@@ -100,7 +100,7 @@ export default function Landing() {
                    md (768px): 7/12 cols — video takes 58% of width
                    lg (1024px): 8/12 cols — video takes 67% of width, clearly dominant
                    No order classes — DOM order keeps video on right */}
-              <div className="lg:col-span-8 2xl:col-span-9">
+              <div className="md:col-span-7 lg:col-span-8 2xl:col-span-8">
                 {/*
                   HeroVideoPlayer — self-contained video with custom controls.
                   To resize or reposition the video, only change the `className` prop below.
