@@ -456,6 +456,8 @@ const EXERCISE_PROMPTS = Object.fromEntries(practices.map((practice) => [practic
 const EXERCISE_FIRST_TIME_INTROS = Object.fromEntries(
   practices.map((practice) => [practice.id, practice.first_time_intro]).filter(([, intro]) => intro)
 );
+// Keep directive previews under 280 chars so admin timeline cards stay readable without aggressive UI truncation.
+const MAX_DIRECTIVE_REASON_LENGTH = 280;
 
 async function logThinkingEvent(supabaseClient, eventData) {
   try {
@@ -467,17 +469,22 @@ async function logThinkingEvent(supabaseClient, eventData) {
 
 function normalizeReasoning(reasoning) {
   if (!reasoning || typeof reasoning !== 'object' || Array.isArray(reasoning)) return null;
+  const normalizeReasoningField = (value) => {
+    if (typeof value !== 'string') return null;
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  };
   const normalized = {
-    why_this_question: typeof reasoning.why_this_question === 'string' ? reasoning.why_this_question.trim() : null,
-    emotional_read: typeof reasoning.emotional_read === 'string' ? reasoning.emotional_read.trim() : null,
-    strategic_intent: typeof reasoning.strategic_intent === 'string' ? reasoning.strategic_intent.trim() : null,
+    why_this_question: normalizeReasoningField(reasoning.why_this_question),
+    emotional_read: normalizeReasoningField(reasoning.emotional_read),
+    strategic_intent: normalizeReasoningField(reasoning.strategic_intent),
   };
   return Object.values(normalized).some(Boolean) ? normalized : null;
 }
 
 function summarizeDirectiveReason(directive) {
   if (!directive?.instruction || typeof directive.instruction !== 'string') return null;
-  return directive.instruction.replace(/\s+/g, ' ').trim().slice(0, 280);
+  return directive.instruction.replace(/\s+/g, ' ').trim().slice(0, MAX_DIRECTIVE_REASON_LENGTH);
 }
 
 function buildStageShiftReason({
@@ -3473,6 +3480,7 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
         follow_up_queued: false, is_session_complete: false,
       };
     }
+    result.reasoning = normalizeReasoning(result.reasoning);
 
     // Safety sanitizer: if assistant_message is itself a JSON object string, unwrap it and merge fields.
     // Find the first '{' in case there is non-JSON preamble text before it.
@@ -3484,6 +3492,7 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
           if (inner && typeof inner.assistant_message === 'string') {
             // Merge all fields from the inner object so is_session_complete etc. are preserved
             Object.assign(result, inner);
+            result.reasoning = normalizeReasoning(result.reasoning);
           }
         } catch (_e) { /* not valid JSON — leave as-is */ }
       }
@@ -3496,7 +3505,6 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
     if (typeof result.assistant_message === 'string') {
       result.assistant_message = result.assistant_message.trim();
     }
-    result.reasoning = normalizeReasoning(result.reasoning);
 
     result.exercise_run = result.exercise_run || 'none';
     const stageAtTurnStart = session_state.current_stage || 'commitment_checkin';
@@ -4005,7 +4013,7 @@ Return ONLY valid JSON: { "question": "..." }`,
     if (session_id && (result.stage_advance || result.extracted_data || result.is_session_complete || result.commitment_checkin_done || result.stage_order_swapped)) {
       const updates = {};
       const new_stage = result.new_stage;
-      const previousStage = session_state.current_stage || 'commitment_checkin';
+      const previousStage = stageAtTurnStart;
       if (session_state.is_complete) {
         session_state.current_stage = 'complete';
         updates.current_stage = 'complete';

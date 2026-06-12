@@ -40,7 +40,7 @@ function downloadSessionJson(session, detail) {
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
-  const datePart = (session.created_at || session.date || new Date().toISOString()).slice(0, 10);
+  const datePart = (session.created_at || session.date || 'unknown-date').slice(0, 10);
   link.href = url;
   link.download = `session-${session.id}-${datePart}.json`;
   document.body.appendChild(link);
@@ -94,7 +94,8 @@ function renderThinkingEvent(event) {
 }
 
 export default function AdminSessionLog() {
-  const auth = /** @type {any} */ (useAuth());
+  /** @type {{ user?: { id?: string } } | null} */
+  const auth = useAuth();
   const user = auth?.user;
   const navigate = useNavigate();
 
@@ -178,7 +179,11 @@ export default function AdminSessionLog() {
   };
 
   const loadSessionDetail = async (sessionId, force = false) => {
-    if (!force && detailsBySession[sessionId]?.messages && detailsBySession[sessionId]?.thinkingEvents) {
+    if (
+      !force &&
+      detailsBySession[sessionId]?.messages !== undefined &&
+      detailsBySession[sessionId]?.thinkingEvents !== undefined
+    ) {
       return detailsBySession[sessionId];
     }
 
@@ -291,7 +296,7 @@ export default function AdminSessionLog() {
                 <div className="space-y-2 min-w-0">
                   <p className="text-zinc-400 text-xs">{formatDateTime(session.created_at || session.updated_at || session.date)}</p>
                   <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
-                    <span>User: {session.user_id?.slice(0, 8)}…</span>
+                    <span title={session.user_id || ''}>User: {session.user_id?.slice(0, 8)}…</span>
                     <span className="px-2 py-0.5 rounded border border-zinc-700 bg-zinc-800 text-zinc-300">Stage: {session.current_stage || '—'}</span>
                     <span className="px-2 py-0.5 rounded border border-zinc-700 bg-zinc-800 text-zinc-300">Turns: {session.turn_count || 0}</span>
                     {session.is_sim && (
