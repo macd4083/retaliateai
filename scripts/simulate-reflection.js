@@ -2611,6 +2611,7 @@ async function main() {
   }
 
   const supabase = getSupabase();
+  const simRunId = randomUUID();
 
   console.log(`\n🚀  Starting simulation`);
   console.log(`    Persona:    ${personaKey} (${persona.name})`);
