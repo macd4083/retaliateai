@@ -19,7 +19,7 @@ import OpenAI from 'openai';
 import { createClient } from '@supabase/supabase-js';
 import { classifyIntent, DEFAULT_CLASSIFICATION } from '../src/lib/classifier.js';
 import { getAuthenticatedUserId } from '../src/lib/auth.js';
-import { practices } from '../src/lib/practiceLibrary.js';
+import { practices, getPractice } from '../src/lib/practiceLibrary.js';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -405,6 +405,11 @@ RETURN JSON EXACTLY (no markdown, no extra keys):
 {
   "assistant_message": "your message (2-3 sentences, one question)",
   "chips": [{"label": "string", "value": "string"}] | null,
+  "reasoning": {
+    "why_this_question": "<one sentence: why you're asking this right now, given the stage and what you just read from the user>",
+    "emotional_read": "<your read on the user's emotional state this turn>",
+    "strategic_intent": "<what you're trying to accomplish with this response in the arc of the session>"
+  },
   "stage_advance": false,
   "new_stage": "wins|commitment_checkin|honest|tomorrow|complete" | null,
   "extracted_data": {
@@ -451,6 +456,72 @@ const EXERCISE_PROMPTS = Object.fromEntries(practices.map((practice) => [practic
 const EXERCISE_FIRST_TIME_INTROS = Object.fromEntries(
   practices.map((practice) => [practice.id, practice.first_time_intro]).filter(([, intro]) => intro)
 );
+// Keep directive previews under 280 chars so admin timeline cards stay readable without aggressive UI truncation.
+const MAX_DIRECTIVE_REASON_LENGTH = 280;
+
+async function logThinkingEvent(supabaseClient, eventData) {
+  try {
+    await supabaseClient.from('session_thinking_events').insert(eventData);
+  } catch (e) {
+    console.warn('[thinking-log] insert failed:', e.message);
+  }
+}
+
+function normalizeReasoning(reasoning) {
+  if (!reasoning || typeof reasoning !== 'object' || Array.isArray(reasoning)) return null;
+  const normalizeReasoningField = (value) => {
+    if (typeof value !== 'string') return null;
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  };
+  const normalized = {
+    why_this_question: normalizeReasoningField(reasoning.why_this_question),
+    emotional_read: normalizeReasoningField(reasoning.emotional_read),
+    strategic_intent: normalizeReasoningField(reasoning.strategic_intent),
+  };
+  return Object.values(normalized).some(Boolean) ? normalized : null;
+}
+
+function summarizeDirectiveReason(directive) {
+  if (!directive?.instruction || typeof directive.instruction !== 'string') return null;
+  return directive.instruction.replace(/\s+/g, ' ').trim().slice(0, MAX_DIRECTIVE_REASON_LENGTH);
+}
+
+function buildStageShiftReason({
+  previousStage,
+  newStage,
+  isInit,
+  precomputedScore,
+  stageOrderSwapped,
+  suggestedNextStage,
+  winsCaptured,
+  winsAskedForMore,
+  honestDepth,
+  hasMinimumCommitment,
+  hasStretchCommitment,
+  commitmentGoalBridgeDone,
+}) {
+  if (!newStage || newStage === previousStage) return null;
+  if (isInit && newStage === 'commitment_checkin') {
+    return 'init=true → moving to commitment_checkin';
+  }
+  if (previousStage === 'commitment_checkin' && (newStage === 'wins' || newStage === 'honest')) {
+    if (precomputedScore !== null) {
+      return `commitment_score=${precomputedScore} → moving to ${newStage}`;
+    }
+    return `commitment_checkin_done=true AND stage_order_swapped=${stageOrderSwapped === true} → moving to ${newStage}`;
+  }
+  if (previousStage === 'wins' && newStage === 'honest') {
+    return `wins_captured=${winsCaptured} AND wins_asked_for_more=${winsAskedForMore} → moving to honest`;
+  }
+  if (previousStage === 'honest' && newStage === 'tomorrow') {
+    return `honest_depth=${honestDepth} AND suggested_next_stage=${suggestedNextStage || 'unknown'} → moving to tomorrow`;
+  }
+  if (previousStage === 'tomorrow' && newStage === 'complete') {
+    return `commitment_minimum=${hasMinimumCommitment} AND commitment_stretch=${hasStretchCommitment} AND commitment_goal_bridge_done=${commitmentGoalBridgeDone} → moving to complete`;
+  }
+  return `${previousStage} → ${newStage}`;
+}
 
 /**
  * Sanitize user-provided text before interpolating into AI prompts.
@@ -2798,9 +2869,26 @@ export default async function handler(req, res) {
       session_state: _session_state_init = {}, history = [],
       user_message, context = {},
       intent_data: clientIntentData = null,
+      sim_run_id: simRunId = null,
     } = req.body;
     let session_state = _session_state_init;
     const originalUserMessage = user_message;
+    const currentTurnIndex = Array.isArray(history)
+      ? history.filter((entry) => entry?.role === 'assistant').length
+      : 0;
+    const thinkingEventsThisTurn = [];
+    const queueThinkingEvent = (eventData) => {
+      const payload = {
+        session_id: session_id || null,
+        user_id: authenticatedUserId,
+        sim_run_id: simRunId || null,
+        turn_index: currentTurnIndex,
+        created_at: new Date().toISOString(),
+        ...eventData,
+      };
+      thinkingEventsThisTurn.push(payload);
+      void logThinkingEvent(supabase, payload);
+    };
 
     // Extract client-supplied local date and timezone offset (sent by the browser)
     // client_local_date: YYYY-MM-DD string in the user's local time
@@ -2868,6 +2956,17 @@ export default async function handler(req, res) {
     if (!intentData) {
       intentData = { ...DEFAULT_CLASSIFICATION };
     }
+    queueThinkingEvent({
+      event_type: 'classifier_output',
+      classifier_intent: intentData.intent,
+      classifier_energy_level: intentData.energy_level,
+      classifier_accountability_signal: intentData.accountability_signal,
+      classifier_emotional_state: intentData.emotional_state,
+      classifier_suggested_exercise: intentData.suggested_exercise,
+      classifier_energy_type: intentData.energy_type,
+      classifier_depth_opportunity: intentData.depth_opportunity,
+      classifier_full_output: intentData,
+    });
 
     // ── 1b. Evaluate goal commitments before loading stats ────────────────
     if (client_local_date) {
@@ -3124,6 +3223,11 @@ export default async function handler(req, res) {
     // ── 8. Build compact context block ───────────────────────────────────
     const exercisesExplained = Array.from(historicalExplainedExercises);
     const effectiveSuggestedExercise = insightTriggeredExercise?.exerciseId || suggestedExercise;
+    const exerciseTriggerPath = insightTriggeredExercise
+      ? 'insight_triggered'
+      : (activeDirective && ['run_exercise', 'depth_probe'].includes(activeDirective.id))
+        ? 'directive_promoted'
+        : 'classifier';
     const isFirstTimeExercise = effectiveSuggestedExercise !== 'none' && !historicalExplainedExercises.has(effectiveSuggestedExercise);
 
     // ── 8b. Memory search for question/advice/memory_query/reflective intents ────────
@@ -3248,6 +3352,17 @@ export default async function handler(req, res) {
     const activeDirective = isInit
       ? null
       : dispatchNextDirective(combinedDirectiveQueue, currentStage, intentData?.emotional_state, messageCount, sessionExercisesRun);
+    if (activeDirective) {
+      queueThinkingEvent({
+        event_type: 'directive_dispatch',
+        directive_type: activeDirective.id,
+        directive_priority: Number.isFinite(Number(activeDirective.priority))
+          ? Math.round(Number(activeDirective.priority))
+          : null,
+        directive_stage: activeDirective.preferred_stage || currentStage,
+        directive_reason: summarizeDirectiveReason(activeDirective),
+      });
+    }
 
     const contextBlock = buildSessionContext({
       profile,
@@ -3293,6 +3408,14 @@ export default async function handler(req, res) {
       ? `\n\nINSIGHT MATCH: The user just said something that matches a known pattern: "${insightTriggeredExercise.insightContext}". Consider opening with: "${EXERCISE_FIRST_TIME_INTROS[insightTriggeredExercise.exerciseId] || 'I want to try something here.'}" then running "${insightTriggeredExercise.exerciseId}".`
       : '';
     const effectiveSystemPrompt = SYSTEM_PROMPT + followUpInstruction + growthMarkerInstruction + exerciseInstruction + insightMatchInstruction + checklistResultContextInstruction;
+    if (exerciseInstruction && effectiveSuggestedExercise !== 'none') {
+      queueThinkingEvent({
+        event_type: 'exercise_fire',
+        exercise_id: effectiveSuggestedExercise,
+        exercise_label: getPractice(effectiveSuggestedExercise)?.label || effectiveSuggestedExercise,
+        exercise_trigger_path: exerciseTriggerPath,
+      });
+    }
     const messages = [{ role: 'system', content: effectiveSystemPrompt }, contextBlock, ...history.slice(-18)];
 
     if (!isInit) {
@@ -3349,6 +3472,7 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
     } catch (_parseErr) {
       result = {
         assistant_message: completion.choices[0].message.content,
+        reasoning: null,
         chips: null, stage_advance: false, new_stage: null,
         extracted_data: {}, exercise_run: 'none',
         checklist_updates: { ...DEFAULT_CHECKLIST },
@@ -3356,6 +3480,7 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
         follow_up_queued: false, is_session_complete: false,
       };
     }
+    result.reasoning = normalizeReasoning(result.reasoning);
 
     // Safety sanitizer: if assistant_message is itself a JSON object string, unwrap it and merge fields.
     // Find the first '{' in case there is non-JSON preamble text before it.
@@ -3367,6 +3492,7 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
           if (inner && typeof inner.assistant_message === 'string') {
             // Merge all fields from the inner object so is_session_complete etc. are preserved
             Object.assign(result, inner);
+            result.reasoning = normalizeReasoning(result.reasoning);
           }
         } catch (_e) { /* not valid JSON — leave as-is */ }
       }
@@ -3735,6 +3861,30 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
     result.commitment_goal_bridge_done = firedDirectiveId === 'commitment_goal_why_depth'
       ? true
       : (session_state.commitment_goal_bridge_done === true);
+    const stageShiftReason = buildStageShiftReason({
+      previousStage: stageAtTurnStart,
+      newStage: result.new_stage,
+      isInit,
+      precomputedScore,
+      stageOrderSwapped: result.stage_order_swapped,
+      suggestedNextStage,
+      winsCaptured: winsCapture,
+      winsAskedForMore: askedForMore,
+      honestDepth: result.honest_depth === true || session_state.honest_depth === true,
+      hasMinimumCommitment: !!(result.extracted_data?.commitment_minimum || session_state.commitment_minimum),
+      hasStretchCommitment: !!(result.extracted_data?.commitment_stretch || session_state.commitment_stretch),
+      commitmentGoalBridgeDone: result.commitment_goal_bridge_done === true,
+    });
+    result.stage_shift_reason = stageShiftReason;
+    if (result.reasoning) {
+      queueThinkingEvent({
+        event_type: 'ai_reasoning',
+        ai_why_this_question: result.reasoning.why_this_question,
+        ai_emotional_read: result.reasoning.emotional_read,
+        ai_strategic_intent: result.reasoning.strategic_intent,
+        ai_raw_reasoning: result.reasoning,
+      });
+    }
 
     // ── 11. Post-response DB writes ───────────────────────────────────────
     const dbPromises = [];
@@ -3863,6 +4013,7 @@ Return ONLY valid JSON: { "question": "..." }`,
     if (session_id && (result.stage_advance || result.extracted_data || result.is_session_complete || result.commitment_checkin_done || result.stage_order_swapped)) {
       const updates = {};
       const new_stage = result.new_stage;
+      const previousStage = stageAtTurnStart;
       if (session_state.is_complete) {
         session_state.current_stage = 'complete';
         updates.current_stage = 'complete';
@@ -3907,6 +4058,28 @@ Return ONLY valid JSON: { "question": "..." }`,
             .update({ ...updates, updated_at: new Date().toISOString() })
             .eq('id', session_id).then(() => {}).catch(() => {})
         );
+        if (updates.current_stage && updates.current_stage !== previousStage) {
+          const resolvedStageShiftReason = stageShiftReason || buildStageShiftReason({
+            previousStage,
+            newStage: updates.current_stage,
+            isInit,
+            precomputedScore,
+            stageOrderSwapped: result.stage_order_swapped,
+            suggestedNextStage,
+            winsCaptured: winsCapture,
+            winsAskedForMore: askedForMore,
+            honestDepth: result.honest_depth === true || session_state.honest_depth === true,
+            hasMinimumCommitment: !!(result.extracted_data?.commitment_minimum || session_state.commitment_minimum),
+            hasStretchCommitment: !!(result.extracted_data?.commitment_stretch || session_state.commitment_stretch),
+            commitmentGoalBridgeDone: result.commitment_goal_bridge_done === true,
+          });
+          queueThinkingEvent({
+            event_type: 'stage_shift',
+            stage_from: previousStage,
+            stage_to: updates.current_stage,
+            stage_trigger_condition: resolvedStageShiftReason,
+          });
+        }
       }
 
       // Propagate checkin_outcome to goal_commitment_log rows for yesterday
@@ -4397,6 +4570,7 @@ Return ONLY valid JSON: { "question": "...", "context": "brief context on why th
         .then(() => {}).catch(() => {});
     }
 
+    result.thinking_events = thinkingEventsThisTurn;
     return res.status(200).json(result);
 
   } catch (error) {
