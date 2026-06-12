@@ -297,35 +297,6 @@ export default function Landing() {
             </div>
           </div>
 
-          {/* ── 5. THREE-STEP PLAN ── */}
-          <div className="pb-32">
-            <div className="text-center mb-16">
-              <h2 className="text-4xl md:text-5xl font-bold text-white mb-4 uppercase tracking-tight">
-                How It Works
-              </h2>
-              <p className="text-xl text-gray-400">
-                Three steps. Every night. Takes five minutes.
-              </p>
-            </div>
-            <div className="grid md:grid-cols-3 gap-8">
-              <StepCard
-                number="1"
-                title="Tell it how your day went"
-                description="Open the app, share your wins and where you fell short. No blank page. The AI leads the conversation."
-              />
-              <StepCard
-                number="2"
-                title="It holds you to yesterday. You commit to tomorrow."
-                description="It remembers what you said last night. Asks about it. Then helps you make a specific, realistic plan for tomorrow — not a vague intention."
-              />
-              <StepCard
-                number="3"
-                title="Over time, it knows you better than you know yourself."
-                description="It tracks your patterns, your excuses, your breakthroughs. The longer you use it, the harder it is to bullshit."
-              />
-            </div>
-          </div>
-
           {/* ── 7. FEATURES ── */}
           <div className="pb-32">
             <div className="text-center mb-16">
@@ -672,18 +643,6 @@ function FeatureCard({ icon, title, description, tooltip }) {
           <div className="absolute left-1/2 -translate-x-1/2 -bottom-2 w-4 h-4 bg-red-950/95 border-r border-b border-red-900/60 rotate-45"></div>
         </div>
       )}
-    </div>
-  );
-}
-
-function StepCard({ number, title, description }) {
-  return (
-    <div className="text-center group">
-      <div className="w-16 h-16 bg-gradient-to-br from-red-600 to-red-800 text-white rounded-lg flex items-center justify-center text-3xl font-bold mx-auto mb-6 shadow-lg shadow-red-900/50 group-hover:scale-110 transition-transform">
-        {number}
-      </div>
-      <h3 className="text-2xl font-bold text-white mb-3 uppercase tracking-wide">{title}</h3>
-      <p className="text-gray-400 leading-relaxed">{description}</p>
     </div>
   );
 }
