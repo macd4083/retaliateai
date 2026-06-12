@@ -2795,10 +2795,11 @@ export default async function handler(req, res) {
   try {
     const {
       user_id, session_id,
-      session_state = {}, history = [],
+      session_state: _session_state_init = {}, history = [],
       user_message, context = {},
       intent_data: clientIntentData = null,
     } = req.body;
+    let session_state = _session_state_init;
     const originalUserMessage = user_message;
 
     // Extract client-supplied local date and timezone offset (sent by the browser)
@@ -3189,7 +3190,7 @@ export default async function handler(req, res) {
     const mergedChecklist = { ...(session_state.checklist || {}), ...(intentData?.checklist_content || {}) };
     const tomorrowFilled = !!session_state.tomorrow_commitment;
     const hasMissInSession = Array.isArray(session_state.misses) && session_state.misses.length > 0;
-    const honestMissing = current_stage === 'wins' && !mergedChecklist.honest && !hasMissInSession;
+    const honestMissing = (session_state.current_stage || 'commitment_checkin') === 'wins' && !mergedChecklist.honest && !hasMissInSession;
     const bridgeDone = session_state.commitment_goal_bridge_done === true;
     const sessionReadyToClose = tomorrowFilled && !!session_state.commitment_minimum && bridgeDone;
     const EMERGENCY_CLOSE_THRESHOLD = 20;
@@ -3688,7 +3689,7 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
       result.new_stage !== stageAtTurnStart &&
       (result.directive_completed === null || result.directive_completed === undefined)
     ) {
-      console.warn(`[stage-guard] Stage advanced to ${result.new_stage} without directive_completed (turn ${turn_number})`);
+      console.warn(`[stage-guard] Stage advanced to ${result.new_stage} without directive_completed (turn ${messageCount})`);
     }
 
     // Bug B guard: is_session_complete requires both minimum AND stretch to be captured
