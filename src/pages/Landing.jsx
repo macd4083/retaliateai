@@ -67,18 +67,18 @@ export default function Landing() {
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-16 items-center">
 
               {/* ── LEFT: Text column ──
-                   md (768px): 5/12 cols — text is compact, video gets 7/12 (58% of width)
-                   lg (1024px): 4/12 cols — text even more compact, video gets 8/12 (67% of width)
-                   No order classes — DOM order is correct */}
+                   md (768px): 5/12 cols: text is compact, video gets 7/12 (58% of width)
+                   lg (1024px): 4/12 cols: text even more compact, video gets 8/12 (67% of width)
+                   No order classes. DOM order is correct */}
               <div className="md:col-span-5 lg:col-span-4 2xl:col-span-4 text-center lg:text-left mb-10 lg:mb-0">
 
                 {/* Headline:
-                    - Mobile (stacked): text-4xl — large, comfortable at full width
-                    - md (768px, side-by-side starts): text-2xl — shrinks to give video room
-                    - lg (1024px): text-3xl — screen wider, text can grow
-                    - xl (1280px): text-4xl — more room
-                    - 2xl (1536px): text-5xl — wide screens, near full size
-                    No explicit <br /> tags — let text wrap naturally at all column widths */}
+                    - Mobile (stacked): text-4xl, large, comfortable at full width
+                    - md (768px, side-by-side starts): text-2xl, shrinks to give video room
+                    - lg (1024px): text-3xl, screen wider, text can grow
+                    - xl (1280px): text-4xl, more room
+                    - 2xl (1536px): text-5xl, wide screens, near full size
+                    No explicit <br /> tags. Let text wrap naturally at all column widths */}
                 <h1 className="text-5xl lg:text-3xl xl:text-4xl 2xl:text-5xl font-bold text-white mb-6 lg:mb-8 leading-[1.15] tracking-tight">
                   Are you struggling to keep up with your ambitions?
                   <br /><br />
@@ -89,20 +89,18 @@ export default function Landing() {
 
                 {/* Subtext: also shrinks when side-by-side to preserve video size */}
                 <p className="text-lg lg:text-sm xl:text-base 2xl:text-xl text-gray-400 leading-relaxed">
-                  Every night, that familiar feeling. Another day where your goals stayed goals.
-                  Retaliate AI is the system that closes the loop — it remembers what you said,
-                  holds you to it, and helps you actually become who you keep saying you'll be.
+                  Retaliate AI is a nightly reflection that holds you accountable to your commitments, helps you understand what went well and what didn't, and keeps you connected to why your goals matter. Night after night, until the person you're trying to become is just who you are.
                 </p>
 
               </div>
 
               {/* ── RIGHT: Video column ──
-                   md (768px): 7/12 cols — video takes 58% of width
-                   lg (1024px): 8/12 cols — video takes 67% of width, clearly dominant
-                   No order classes — DOM order keeps video on right */}
+                   md (768px): 7/12 cols: video takes 58% of width
+                   lg (1024px): 8/12 cols: video takes 67% of width, clearly dominant
+                   No order classes. DOM order keeps video on right */}
               <div className="md:col-span-7 lg:col-span-8 2xl:col-span-8">
                 {/*
-                  HeroVideoPlayer — self-contained video with custom controls.
+                  HeroVideoPlayer: self-contained video with custom controls.
                   To resize or reposition the video, only change the `className` prop below.
                   All controls (seek bar, buttons, overlays) are sized relatively and will scale automatically.
                   The aspect-video class on the <video> element maintains 16:9 ratio at any width.
@@ -139,15 +137,15 @@ export default function Landing() {
                 Inside Every Session
               </p>
               <h2 className="text-4xl md:text-5xl font-bold text-white mb-6 leading-tight">
-                Four questions. Five minutes. The compound interest of showing up.
+                Four phases. Designed to do something specific to you.
               </h2>
               <p className="text-xl text-gray-400 max-w-3xl mx-auto leading-relaxed">
-                Every session is built around the same four phases. Each one is designed to do something specific to you — not just record information, but change how you think about your day and your future.
+                Not just record what happened. Build who you're becoming.
               </p>
             </div>
 
             <div className="grid md:grid-cols-2 gap-6">
-              {/* Phase 1 — Accountability */}
+              {/* Phase 1. Accountability */}
               <div className="bg-gradient-to-b from-red-950/30 to-transparent border border-red-900/40 rounded-xl p-8">
                 <div className="flex items-center gap-4 mb-4">
                   <span className="w-10 h-10 flex-shrink-0 rounded-full bg-red-600 text-white font-bold text-lg flex items-center justify-center">
@@ -159,103 +157,56 @@ export default function Landing() {
                   "You said you'd do [X] yesterday. Did you?"
                 </p>
                 <p className="text-gray-400 leading-relaxed">
-                  Closes the loop that every other system leaves open. No more letting yourself quietly off the hook. When you have to answer for yesterday's commitment out loud, you start taking tomorrow's more seriously. This is where discipline is actually built — one honest answer at a time.
+                  Close the loop every other system skips. Answering honestly for yesterday's commitment is where real discipline forms. No quiet exits. No letting yourself off the hook unnoticed.
                 </p>
               </div>
 
-              {/* Phase 2 — Reflection */}
+              {/* Phase 2. Wins and Momentum */}
               <div className="bg-gradient-to-b from-red-950/30 to-transparent border border-red-900/40 rounded-xl p-8">
                 <div className="flex items-center gap-4 mb-4">
                   <span className="w-10 h-10 flex-shrink-0 rounded-full bg-red-600 text-white font-bold text-lg flex items-center justify-center">
                     2
                   </span>
-                  <h3 className="text-xl font-bold text-white uppercase tracking-wide">Honest Reflection</h3>
+                  <h3 className="text-xl font-bold text-white uppercase tracking-wide">Wins and Momentum</h3>
                 </div>
                 <p className="text-red-400 italic mb-4">
-                  "What went well today? What didn't — and what got in the way?"
+                  "What moved forward today? Where is it taking you?"
                 </p>
                 <p className="text-gray-400 leading-relaxed">
-                  Most people end their day on autopilot. This forces a real reckoning — not to judge you, but to surface the patterns you can't see in the moment. Over weeks, the AI starts to recognize the recurring blockers and wins that shape your trajectory. You stop being surprised by your own behavior.
+                  Not a highlight reel. A practice. Recognizing real wins and understanding what they signal about your trajectory is how confidence compounds into something you can actually feel.
                 </p>
               </div>
 
-              {/* Phase 3 — Commitment */}
+              {/* Phase 3. Honest Reflection */}
               <div className="bg-gradient-to-b from-red-950/30 to-transparent border border-red-900/40 rounded-xl p-8">
                 <div className="flex items-center gap-4 mb-4">
                   <span className="w-10 h-10 flex-shrink-0 rounded-full bg-red-600 text-white font-bold text-lg flex items-center justify-center">
                     3
                   </span>
-                  <h3 className="text-xl font-bold text-white uppercase tracking-wide">Tomorrow's Commitment</h3>
+                  <h3 className="text-xl font-bold text-white uppercase tracking-wide">Honest Reflection</h3>
                 </div>
                 <p className="text-red-400 italic mb-4">
-                  "What's the one thing you're committing to tomorrow?"
+                  "What didn't go as planned? What got in the way?"
                 </p>
                 <p className="text-gray-400 leading-relaxed">
-                  Vague intentions don't survive contact with a real day. This phase turns "I'll try to be better" into a specific, concrete promise — one the AI will hold you to tomorrow night. The score that matters isn't how motivated you feel. It's how often you do what you said you would.
+                  Most people skip this and wonder why nothing changes. The AI hears excuses, acknowledges them, and pivots to what's actually in your control. Warm but direct. No shame, no coddling.
                 </p>
               </div>
 
-              {/* Phase 4 — The Why */}
+              {/* Phase 4. Tomorrow's Commitment */}
               <div className="bg-gradient-to-b from-red-950/30 to-transparent border border-red-900/40 rounded-xl p-8">
                 <div className="flex items-center gap-4 mb-4">
                   <span className="w-10 h-10 flex-shrink-0 rounded-full bg-red-600 text-white font-bold text-lg flex items-center justify-center">
                     4
                   </span>
-                  <h3 className="text-xl font-bold text-white uppercase tracking-wide">Your Deeper Why</h3>
+                  <h3 className="text-xl font-bold text-white uppercase tracking-wide">Tomorrow's Commitment</h3>
                 </div>
                 <p className="text-red-400 italic mb-4">
-                  "Why does this matter to you — and how does it move you closer to who you're becoming?"
+                  "What are you committing to tomorrow, and why does it matter to you?"
                 </p>
                 <p className="text-gray-400 leading-relaxed">
-                  Goals without roots don't survive hard days. This phase reconnects your daily actions to your long-term identity — not as a motivational exercise, but as a structural one. The AI tracks whether your why is deepening or eroding over time, and adjusts when it senses you're losing the thread.
+                  Vague intentions don't survive a real day. This phase turns intention into a specific promise tied to your long-term vision. The AI tracks whether you kept it and brings it back tomorrow night.
                 </p>
-              </div>
-            </div>
-
-            <p className="text-xl text-gray-300 italic max-w-3xl mx-auto mt-10 text-center">
-              "The AI remembers every answer. Every session builds on the last. That's not a journal — that's a system."
-            </p>
-          </div>
-
-          {/* ── 3. PROMO BANNER ── */}
-          <div className="pb-32">
-            <div className="bg-red-950/60 border border-red-700 rounded-2xl p-12 backdrop-blur">
-              <div className="text-center mb-10">
-                <h2 className="text-2xl font-bold text-white uppercase tracking-wide">
-                  Launch Offer — Limited Time
-                </h2>
-              </div>
-              <div className="grid md:grid-cols-3 gap-8 mb-10">
-                <div className="text-center">
-                  <div className="text-3xl mb-3">🗓️</div>
-                  <h3 className="font-bold text-white mb-2">7 Days Free</h3>
-                  <p className="text-gray-400 text-sm leading-relaxed">
-                    Full access, no credit card needed. See if this changes how you show up.
-                  </p>
-                </div>
-                <div className="text-center">
-                  <div className="text-3xl mb-3">💬</div>
-                  <h3 className="font-bold text-white mb-2">Feedback = Another Week</h3>
-                  <p className="text-gray-400 text-sm leading-relaxed">
-                    Submit honest feedback during your trial and we'll add a second free week automatically.
-                  </p>
-                </div>
-                <div className="text-center">
-                  <div className="text-3xl mb-3">🔒</div>
-                  <h3 className="font-bold text-white mb-2">No Risk</h3>
-                  <p className="text-gray-400 text-sm leading-relaxed">
-                    Cancel anytime. But most people don't want to.
-                  </p>
-                </div>
-              </div>
-              <div className="text-center">
-                <button
-                  onClick={handleGetStarted}
-                  className="px-10 py-4 bg-red-600 text-white rounded-lg hover:bg-red-700 font-bold text-lg transition-all shadow-xl shadow-red-900/50 uppercase tracking-wide inline-flex items-center gap-3 group"
-                >
-                  Claim Your Free Week
-                  <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-                </button>
               </div>
             </div>
           </div>
@@ -275,7 +226,7 @@ export default function Landing() {
                 We've figured out what actually makes people follow through.
               </h2>
               <p className="text-xl text-gray-400 max-w-3xl mx-auto leading-relaxed">
-                Most apps track what you want. We track whether you did it — and why you didn't.
+                Most apps track what you want. We track whether you did it, and why you didn't.
                 Retaliate AI was built around one insight from behavioral research and real interviews:
                 people change when they're consistently reconnected to why their goals matter and held
                 accountable to what they said yesterday.
@@ -308,10 +259,10 @@ export default function Landing() {
               <FeatureCard
                 icon={<Brain className="w-7 h-7" />}
                 title="It Remembers"
-                description="Every session is stored. Your wins, your misses, your excuses. The AI builds a picture of you over time — not just what you did, but why you keep doing it."
+                description="Every session is stored. Your wins, your misses, your excuses. The AI builds a picture of you over time. Not just what you did, but why you keep doing it."
                 tooltip={{
                   title: 'Long-term memory',
-                  description: 'Vector-embedded session history lets the AI surface semantically similar moments from weeks ago — connecting patterns you\'d never notice in the moment.'
+                  description: 'Vector-embedded session history lets the AI surface semantically similar moments from weeks ago, connecting patterns you\'d never notice in the moment.'
                 }}
               />
               <FeatureCard
@@ -320,16 +271,16 @@ export default function Landing() {
                 description="You committed to something last night. It knows. Tonight it's going to ask you about it. That's the loop most apps don't close."
                 tooltip={{
                   title: 'Commitment accountability',
-                  description: 'Commitment kept/missed rates, trajectory (improving, stable, declining), and a live gauge for the current week — behavioral data, not self-reported feelings.'
+                  description: 'Commitment kept/missed rates, trajectory (improving, stable, declining), and a live gauge for the current week: behavioral data, not self-reported feelings.'
                 }}
               />
               <FeatureCard
                 icon={<Shield className="w-7 h-7" />}
                 title="It Won't Let You Off the Hook"
-                description="It hears excuses. It acknowledges them — and pivots to what's in your control. Warm but direct. No shame, no coddling."
+                description="It hears excuses. It acknowledges them, and pivots to what's in your control. Warm but direct. No shame, no coddling."
                 tooltip={{
                   title: 'Anti-excuse system',
-                  description: 'Intent classification detects excuse patterns in real-time. After three consecutive excuse signals, it escalates — pulling your future self vision into the conversation.'
+                  description: 'Intent classification detects excuse patterns in real-time. After three consecutive excuse signals, it escalates, pulling your future self vision into the conversation.'
                 }}
               />
               <FeatureCard
@@ -338,13 +289,13 @@ export default function Landing() {
                 description="The blockers that keep showing up. The wins that keep happening. The gap between who you say you are and what you actually do. It names it."
                 tooltip={{
                   title: 'Behavioral pattern synthesis',
-                  description: 'Cross-session insight synthesis runs after every completed session — identifying recurring themes, emerging strengths, and persistent blockers from up to 30 sessions of data.'
+                  description: 'Cross-session insight synthesis runs after every completed session, identifying recurring themes, emerging strengths, and persistent blockers from up to 30 sessions of data.'
                 }}
               />
               <FeatureCard
                 icon={<Sparkles className="w-7 h-7" />}
                 title="It Builds Your Why"
-                description="Goals without a reason behind them don't survive hard days. This AI works to deepen your understanding of why your goals actually matter to you — not the surface answer, the real one."
+                description="Goals without a reason behind them don't survive hard days. This AI works to deepen your understanding of why your goals actually matter to you, not the surface answer, the real one."
                 tooltip={{
                   title: 'Motivation architecture',
                   description: 'Why-building is tracked per goal over time. The system knows when your motivation signal is declining and prioritizes reconnecting you to your why before you quietly quit.'
@@ -356,7 +307,7 @@ export default function Landing() {
                 description="After every session, your profile updates. Your strengths, your patterns, your identity. The AI that talks to you in month three knows things about you that month-one you couldn't have told it."
                 tooltip={{
                   title: 'Adaptive profile evolution',
-                  description: 'Post-session GPT-4o pass updates your short-term state, long-term patterns, growth areas, values, and strengths — building a behavioral profile that makes every future session more accurate.'
+                  description: 'Post-session GPT-4o pass updates your short-term state, long-term patterns, growth areas, values, and strengths, building a behavioral profile that makes every future session more accurate.'
                 }}
               />
             </div>
@@ -398,7 +349,7 @@ export default function Landing() {
                   {[
                     'You know exactly what you committed to and whether you kept it',
                     'You understand the pattern behind your own inconsistency',
-                    'Your goals have a real why behind them — one you\'ve tested',
+                    'Your goals have a real why behind them. One you\'ve tested',
                     'You\'re becoming someone who does what they say',
                   ].map((item) => (
                     <li key={item} className="flex items-start gap-3 text-white">
@@ -536,7 +487,7 @@ function PWALandingSection() {
             Add to Your Home Screen
           </h3>
           <p className="text-gray-400 leading-relaxed max-w-xl">
-            Install Retaliate AI as an app — no App Store needed. Loads instantly and
+            Install Retaliate AI as an app. No App Store needed. Loads instantly and
             feels native on every device. One tap to open, every night.
           </p>
         </div>
@@ -675,7 +626,7 @@ function HeroVideoPlayer({ src, className = '' }) {
     const video = videoRef.current;
     if (!video) return;
 
-    // Wait 1.5s before starting — gives the page a moment to settle before audio kicks in
+    // Wait 1.5s before starting. Gives the page a moment to settle before audio kicks in
     const startTimer = setTimeout(() => {
       video.muted = false;
       video.play()
@@ -683,11 +634,11 @@ function HeroVideoPlayer({ src, className = '' }) {
           setIsPlaying(true);
         })
         .catch(() => {
-          // Browser blocked unmuted autoplay — fall back to muted
+          // Browser blocked unmuted autoplay. Fall back to muted
           video.muted = true;
           setIsMuted(true);
           setAutoMuted(true);
-          // Don't autoplay when muted — user must click the unmute button to start
+          // Don't autoplay when muted. User must click the unmute button to start
           setIsPlaying(false);
         });
     }, 1500);
@@ -839,7 +790,7 @@ function HeroVideoPlayer({ src, className = '' }) {
 
       <div className="absolute inset-0 bg-gradient-to-t from-red-900/20 via-transparent to-transparent pointer-events-none" />
 
-      {/* Big centered unmute button — only shown when browser forced muted autoplay */}
+      {/* Big centered unmute button, only shown when browser forced muted autoplay */}
       {autoMuted && (
         <button
           onClick={() => {
@@ -885,7 +836,7 @@ function HeroVideoPlayer({ src, className = '' }) {
 
         {/*
           Controls scale with container: icon sizes use w-4 h-4, text uses text-[11px],
-          seek bar height is 1–1.5 Tailwind units. All relative — no fixed pixel sizes.
+          seek bar height is 1–1.5 Tailwind units. All relative, no fixed pixel sizes.
           To make controls larger on a bigger video, adjust w-4/h-4 → w-5/h-5 and text-[11px] → text-xs here.
         */}
         <div className="relative px-3 pb-3 flex flex-col gap-2 pointer-events-auto">
