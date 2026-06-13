@@ -36,7 +36,7 @@ export default function Landing() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <img 
-                  src="/inverselogo.png" 
+                  src="/android-chrome2-192x192.png" 
                   alt="Retaliate AI" 
                   className="w-12 h-12 object-contain"
                 />
@@ -328,7 +328,7 @@ export default function Landing() {
           <footer className="border-t border-red-900/30 py-8">
             <div className="flex flex-col md:flex-row items-center justify-between gap-4">
               <div className="flex items-center gap-2">
-                <img src="/inverselogo.png" alt="Retaliate AI" className="w-5 h-5" />
+                <img src="/android-chrome2-192x192.png" alt="Retaliate AI" className="w-5 h-5" />
                 <p className="text-gray-600 text-sm">
                   © 2026 Retaliate AI. Built for people who are done making excuses.
                 </p>
