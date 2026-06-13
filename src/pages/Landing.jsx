@@ -283,10 +283,10 @@ export default function Landing() {
           <div className="pb-16">
             <div className="bg-gradient-to-b from-red-950/40 to-transparent border-2 border-red-900 rounded-2xl p-16 backdrop-blur text-center">
               <h2 className="text-4xl md:text-5xl font-bold text-white mb-4 leading-tight">
-                One week. No card. No commitment.
+                One week. No card. Real Commitment.
               </h2>
               <p className="text-xl text-gray-400 mb-10 max-w-2xl mx-auto">
-                Just seven nights to find out if this is the thing that actually works for you.
+                Ultimately it's your responsibility to create your success and happiness in your life. Treat your future-self with the habit that will give you everything.
               </p>
               {/* Promo reminder card */}
               <div className="inline-block bg-red-950/60 border border-red-800 rounded-xl px-8 py-6 mb-10 text-left">
