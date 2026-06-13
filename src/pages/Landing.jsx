@@ -94,7 +94,7 @@ export default function Landing() {
 
                 {/* Subtext: also shrinks when side-by-side to preserve video size */}
                 <p className="text-lg lg:text-sm xl:text-base 2xl:text-xl text-gray-400 leading-relaxed">
-                  Retaliate AI is a nightly reflection that holds you accountable to your commitments, helps you understand what went well and what didn't, and keeps you connected to why your goals matter.
+                  There&apos;s a war happening in your mind, the fight between your future self and the present. Your future self is fighting to keep up the habits that will let you achieve your dreams. Your present self is fighting for comfortability. It won&apos;t do the work required for your success. Give your future self the fire power it needs to give yourself all the consistency and discipline the best version of you has.
                 </p>
 
               </div>
