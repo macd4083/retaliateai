@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { X, CheckCircle, Circle, Target, Calendar, CheckSquare, Sparkles, ThumbsUp, TrendingUp } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 
 export default function SuggestionsModal({ feedback, suggestions, onClose, onAccept }) {
   const [selectedTodos, setSelectedTodos] = useState(new Set());

@@ -1,7 +1,7 @@
 import React from 'react';
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { User, MoreHorizontal, MessageSquare } from "lucide-react";
+import { MoreHorizontal, MessageSquare } from "lucide-react";
 import { format } from 'date-fns';
 import {
   DropdownMenu,
