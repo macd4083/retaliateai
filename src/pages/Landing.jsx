@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
-import { Sparkles, Heart, Target, TrendingUp, ArrowRight, CheckCircle, Brain, Shield, Download, Smartphone } from 'lucide-react';
+import { ArrowRight, CheckCircle, Download, Smartphone } from 'lucide-react';
 import { usePWAInstall } from '@/hooks/usePWAInstall';
 
 export default function Landing() {
@@ -40,9 +40,14 @@ export default function Landing() {
                   alt="Retaliate AI" 
                   className="w-12 h-12 object-contain"
                 />
-                <span className="text-2xl font-blackletter tracking-tight text-white">
-                  Retaliate AI
-                </span>
+                <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+                  <span className="text-2xl font-blackletter tracking-tight text-white">
+                    Retaliate AI
+                  </span>
+                  <span className="text-xs sm:text-sm font-serif italic tracking-[0.08em] text-gray-400">
+                    Your partner in building daily discipline.
+                  </span>
+                </div>
               </div>
               <div className="flex items-center gap-4">
                 <button
@@ -127,38 +132,6 @@ export default function Landing() {
               <p className="text-sm text-gray-500 tracking-wide">
                 7 days free • No credit card • Feedback earns you another week
               </p>
-            </div>
-          </div>
-
-          {/* ── 4. GUIDE SECTION ── */}
-          <div className="pb-32">
-            <div className="text-center mb-16">
-              <p className="text-red-500 text-sm font-bold uppercase tracking-widest mb-4">
-                Why This Works
-              </p>
-              <h2 className="text-4xl md:text-5xl font-bold text-white mb-6 leading-tight">
-                We've figured out what actually makes people follow through.
-              </h2>
-              <p className="text-xl text-gray-400 max-w-3xl mx-auto leading-relaxed">
-                Most apps track what you want. We track whether you did it, and why you didn't.
-                Retaliate AI was built around one insight from behavioral research and real interviews:
-                people change when they're consistently reconnected to why their goals matter and held
-                accountable to what they said yesterday.
-              </p>
-            </div>
-            <div className="grid md:grid-cols-3 gap-8">
-              <div className="bg-gradient-to-b from-red-950/30 to-transparent border border-red-900/40 rounded-xl p-8 text-center">
-                <div className="text-4xl font-bold text-red-500 mb-3">7 data points</div>
-                <p className="text-gray-400 text-sm">captured every session</p>
-              </div>
-              <div className="bg-gradient-to-b from-red-950/30 to-transparent border border-red-900/40 rounded-xl p-8 text-center">
-                <div className="text-2xl font-bold text-red-500 mb-3">Cross-session memory</div>
-                <p className="text-gray-400 text-sm">AI remembers your patterns, not just your last message</p>
-              </div>
-              <div className="bg-gradient-to-b from-red-950/30 to-transparent border border-red-900/40 rounded-xl p-8 text-center">
-                <div className="text-2xl font-bold text-red-500 mb-3">Commitment tracking</div>
-                <p className="text-gray-400 text-sm">Knows if you did what you said</p>
-              </div>
             </div>
           </div>
 
@@ -248,71 +221,6 @@ export default function Landing() {
             <PWALandingSection />
           </div>
 
-          {/* ── 7. FEATURES ── */}
-          <div className="pb-32">
-            <div className="text-center mb-16">
-              <h2 className="text-4xl md:text-5xl font-bold text-white mb-4 uppercase tracking-tight">
-                Built Around How People Actually Change
-              </h2>
-            </div>
-            <div className="grid md:grid-cols-3 gap-8">
-              <FeatureCard
-                icon={<Brain className="w-7 h-7" />}
-                title="It Remembers"
-                description="Every session is stored. Your wins, your misses, your excuses. The AI builds a picture of you over time. Not just what you did, but why you keep doing it."
-                tooltip={{
-                  title: 'Long-term memory',
-                  description: 'Vector-embedded session history lets the AI surface semantically similar moments from weeks ago, connecting patterns you\'d never notice in the moment.'
-                }}
-              />
-              <FeatureCard
-                icon={<Target className="w-7 h-7" />}
-                title="It Tracks Your Word"
-                description="You committed to something last night. It knows. Tonight it's going to ask you about it. That's the loop most apps don't close."
-                tooltip={{
-                  title: 'Commitment accountability',
-                  description: 'Commitment kept/missed rates, trajectory (improving, stable, declining), and a live gauge for the current week: behavioral data, not self-reported feelings.'
-                }}
-              />
-              <FeatureCard
-                icon={<Shield className="w-7 h-7" />}
-                title="It Won't Let You Off the Hook"
-                description="It hears excuses. It acknowledges them, and pivots to what's in your control. Warm but direct. No shame, no coddling."
-                tooltip={{
-                  title: 'Anti-excuse system',
-                  description: 'Intent classification detects excuse patterns in real-time. After three consecutive excuse signals, it escalates, pulling your future self vision into the conversation.'
-                }}
-              />
-              <FeatureCard
-                icon={<TrendingUp className="w-7 h-7" />}
-                title="It Sees Your Patterns"
-                description="The blockers that keep showing up. The wins that keep happening. The gap between who you say you are and what you actually do. It names it."
-                tooltip={{
-                  title: 'Behavioral pattern synthesis',
-                  description: 'Cross-session insight synthesis runs after every completed session, identifying recurring themes, emerging strengths, and persistent blockers from up to 30 sessions of data.'
-                }}
-              />
-              <FeatureCard
-                icon={<Sparkles className="w-7 h-7" />}
-                title="It Builds Your Why"
-                description="Goals without a reason behind them don't survive hard days. This AI works to deepen your understanding of why your goals actually matter to you, not the surface answer, the real one."
-                tooltip={{
-                  title: 'Motivation architecture',
-                  description: 'Why-building is tracked per goal over time. The system knows when your motivation signal is declining and prioritizes reconnecting you to your why before you quietly quit.'
-                }}
-              />
-              <FeatureCard
-                icon={<Heart className="w-7 h-7" />}
-                title="It Evolves With You"
-                description="After every session, your profile updates. Your strengths, your patterns, your identity. The AI that talks to you in month three knows things about you that month-one you couldn't have told it."
-                tooltip={{
-                  title: 'Adaptive profile evolution',
-                  description: 'Post-session GPT-4o pass updates your short-term state, long-term patterns, growth areas, values, and strengths, building a behavioral profile that makes every future session more accurate.'
-                }}
-              />
-            </div>
-          </div>
-
           {/* ── 8. SUCCESS VISION ── */}
           <div className="pb-32">
             <div className="text-center mb-16">
@@ -373,13 +281,6 @@ export default function Landing() {
                 A year from now you'll still know what you want. You just won't have done it.
                 That's not a motivation problem. It's a system problem.
               </p>
-              <button
-                onClick={handleGetStarted}
-                className="px-10 py-5 bg-red-600 text-white rounded-lg hover:bg-red-700 font-bold text-lg transition-all shadow-2xl shadow-red-900/50 uppercase tracking-wide inline-flex items-center gap-3 group"
-              >
-                Get the system. Start free.
-                <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-              </button>
             </div>
           </div>
 
