@@ -199,7 +199,7 @@ export default function Login() {
       <div className="max-w-md w-full bg-zinc-900 p-8 rounded-2xl border border-zinc-800">
         <div className="text-center mb-8">
           <div className="flex items-center justify-center gap-2 mb-4">
-            <img src="/inverselogo.png" alt="Retaliate AI" className="w-12 h-12" />
+            <img src="/logo.png" alt="Retaliate AI" className="w-12 h-12" />
             <h1 className="text-2xl font-bold text-white">Retaliate AI</h1>
           </div>
           <p className="text-zinc-400">
