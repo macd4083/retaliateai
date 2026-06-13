@@ -20,8 +20,8 @@ export default defineConfig({
         start_url: '/reflection',
         scope: '/',
         icons: [
-          { src: '/pwa-192x192.png', sizes: '192x192', type: 'image/png' },
-          { src: '/pwa-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
+          { src: '/android-chrome2-192x192.png', sizes: '192x192', type: 'image/png' },
+          { src: '/android-chrome2-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
         ],
       },
     }),

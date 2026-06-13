@@ -3,8 +3,8 @@ self.addEventListener('push', (event) => {
   const title = data.title || 'Retaliate AI';
   const options = {
     body: data.body || 'Time for your nightly reflection.',
-    icon: '/android-chrome-192x192.png',
-    badge: '/favicon-96x96.png',
+    icon: '/android-chrome2-192x192.png',
+    badge: '/favicon2-32x32.png',
     data: { url: data.url || '/reflection' },
     requireInteraction: false,
   };
