@@ -142,10 +142,10 @@ export default function Landing() {
                 Inside Every Session
               </p>
               <h2 className="text-4xl md:text-5xl font-bold text-white mb-6 leading-tight">
-                Four phases. Designed to do something specific to you.
+                Four phases of conversation directed by an ai coach.
               </h2>
               <p className="text-xl text-gray-400 max-w-3xl mx-auto leading-relaxed">
-                Not just record what happened. Build who you're becoming.
+                Taught to find what matters. Build and reinforce the why behind your desired identity shift.
               </p>
             </div>
 
@@ -216,16 +216,11 @@ export default function Landing() {
             </div>
           </div>
 
-          {/* ── 3b. PWA INSTALL ── */}
-          <div className="pb-20">
-            <PWALandingSection />
-          </div>
-
           {/* ── 8. SUCCESS VISION ── */}
-          <div className="pb-32">
+          <div className="pb-16">
             <div className="text-center mb-16">
               <h2 className="text-4xl md:text-5xl font-bold text-white mb-4 uppercase tracking-tight">
-                What It Looks Like When It's Working
+                Commit to watch your transformation
               </h2>
             </div>
             <div className="grid md:grid-cols-2 gap-8">
@@ -271,7 +266,7 @@ export default function Landing() {
           </div>
 
           {/* ── 9. FAILURE WARNING ── */}
-          <div className="pb-32">
+          <div className="pb-16">
             <div className="max-w-3xl mx-auto text-center">
               <h2 className="text-4xl md:text-5xl font-bold text-white mb-8 uppercase tracking-tight">
                 Or Nothing Changes.
@@ -285,13 +280,13 @@ export default function Landing() {
           </div>
 
           {/* ── 10. FINAL CTA ── */}
-          <div className="pb-32">
+          <div className="pb-16">
             <div className="bg-gradient-to-b from-red-950/40 to-transparent border-2 border-red-900 rounded-2xl p-16 backdrop-blur text-center">
               <h2 className="text-4xl md:text-5xl font-bold text-white mb-4 leading-tight">
-                One week. No card. No commitment.
+                One week. No card. Real Commitment.
               </h2>
               <p className="text-xl text-gray-400 mb-10 max-w-2xl mx-auto">
-                Just seven nights to find out if this is the thing that actually works for you.
+                Ultimately it's your responsibility to create your success and happiness in your life. Treat your future-self with the habit that will give you everything.
               </p>
               {/* Promo reminder card */}
               <div className="inline-block bg-red-950/60 border border-red-800 rounded-xl px-8 py-6 mb-10 text-left">
@@ -322,6 +317,11 @@ export default function Landing() {
                 Built for people who are serious about becoming who they say they'll be.
               </p>
             </div>
+          </div>
+
+          {/* ── 3b. PWA INSTALL ── */}
+          <div className="pb-20">
+            <PWALandingSection />
           </div>
 
           {/* ── 11. FOOTER ── */}
