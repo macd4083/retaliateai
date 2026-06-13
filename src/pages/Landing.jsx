@@ -85,16 +85,16 @@ export default function Landing() {
                     - 2xl (1536px): text-5xl, wide screens, near full size
                     No explicit <br /> tags. Let text wrap naturally at all column widths */}
                 <h1 className="text-5xl lg:text-3xl xl:text-4xl 2xl:text-5xl font-bold text-white mb-6 lg:mb-8 leading-[1.15] tracking-tight">
-                  Are you struggling to keep up with your ambitions?
+                  There’s a war in your mind.
                   <br /><br />
                   <span className="text-red-600">
-                    More pressure won't bridge the gap. A consistent system will.
+                    It’s time to pick a winner.
                   </span>
                 </h1>
 
                 {/* Subtext: also shrinks when side-by-side to preserve video size */}
                 <p className="text-lg lg:text-sm xl:text-base 2xl:text-xl text-gray-400 leading-relaxed">
-                  There&apos;s a war happening in your mind, the fight between your future self and the present. Your future self is fighting to keep up the habits that will let you achieve your dreams. Your present self is fighting for comfortability. It won&apos;t do the work required for your success. Give your future self the fire power it needs to give yourself all the consistency and discipline the best version of you has.
+                  Your future self is fighting for the habits that will build the life you want. Your present self is fighting for comfort. Build the consistency and discipline the best version of you has. Bring your ambitions to life.
                 </p>
 
               </div>
