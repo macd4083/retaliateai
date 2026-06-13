@@ -1,7 +1,6 @@
 import React from 'react';
 import { format } from 'date-fns';
-import { Badge } from "@/components/ui/badge";
-import { MessageSquare, Sparkles, ChevronRight } from "lucide-react";
+import { Sparkles, ChevronRight } from "lucide-react";
 
 export default function EntryCard({ entry, onClick }) {
   const preview = entry.content.length > 150 
