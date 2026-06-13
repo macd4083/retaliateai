@@ -3223,11 +3223,6 @@ export default async function handler(req, res) {
     // ── 8. Build compact context block ───────────────────────────────────
     const exercisesExplained = Array.from(historicalExplainedExercises);
     const effectiveSuggestedExercise = insightTriggeredExercise?.exerciseId || suggestedExercise;
-    const exerciseTriggerPath = insightTriggeredExercise
-      ? 'insight_triggered'
-      : (activeDirective && ['run_exercise', 'depth_probe'].includes(activeDirective.id))
-        ? 'directive_promoted'
-        : 'classifier';
     const isFirstTimeExercise = effectiveSuggestedExercise !== 'none' && !historicalExplainedExercises.has(effectiveSuggestedExercise);
 
     // ── 8b. Memory search for question/advice/memory_query/reflective intents ────────
@@ -3352,6 +3347,11 @@ export default async function handler(req, res) {
     const activeDirective = isInit
       ? null
       : dispatchNextDirective(combinedDirectiveQueue, currentStage, intentData?.emotional_state, messageCount, sessionExercisesRun);
+    const exerciseTriggerPath = insightTriggeredExercise
+      ? 'insight_triggered'
+      : (activeDirective && ['run_exercise', 'depth_probe'].includes(activeDirective.id))
+        ? 'directive_promoted'
+        : 'classifier';
     if (activeDirective) {
       queueThinkingEvent({
         event_type: 'directive_dispatch',
