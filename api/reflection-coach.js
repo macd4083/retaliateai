@@ -1509,7 +1509,10 @@ function buildDirectiveQueue({
   const mostlyKeptCheckin = sessionState?.checkin_outcome === 'kept'
     || (commitmentScore !== null && commitmentScore >= 50)
     || (sessionState?.checkin_outcome === 'partial' && commitmentScore === null);
-  const hasYesterdayCommitment = ((enrichedYesterdayFragments || yesterdayFragments || []).length > 0);
+  // Fix 3/4: treat text-only yesterday commitments as real commitments too,
+  // not just fragment-backed checklist rows.
+  const hasYesterdayCommitmentFragments = ((enrichedYesterdayFragments || yesterdayFragments || []).length > 0);
+  const hasYesterdayCommitment = hasYesterdayCommitmentFragments || !!yesterdayCommitment;
 
   // ── cold_start_opener ──────────────────────────────────────────────────
   // cold_start_opener: only fires for returning users with >7 day gap, never for first-ever sessions
@@ -1677,6 +1680,8 @@ Do NOT frame this as goal-specific unless the user is directly referencing a goa
   }
 
   // ── wins_invite_more ───────────────────────────────────────────────────
+  // Fix 4: this gate now correctly waits for wins callback steps whenever a
+  // text-based or fragment-based yesterday commitment exists.
   const priorWinsStepsDone = !hasYesterdayCommitment || (
     completedDirectives.includes('wins_goal_callback') &&
     completedDirectives.includes('wins_why_matters')
@@ -3343,9 +3348,13 @@ export default async function handler(req, res) {
     ];
 
     const currentStage = session_state.current_stage || 'commitment_checkin';
-    // isInit messages skip directive dispatch — init has its own fixed opener logic
+    // Fix 2: allow commitment_checkin to dispatch on INIT so the real check-in
+    // instruction can run on the opening turn.
+    const commitmentCheckinDirective = isInit
+      ? (combinedDirectiveQueue.find((directive) => directive.id === 'commitment_checkin') ?? null)
+      : null;
     const activeDirective = isInit
-      ? null
+      ? commitmentCheckinDirective
       : dispatchNextDirective(combinedDirectiveQueue, currentStage, intentData?.emotional_state, messageCount, sessionExercisesRun);
     const exerciseTriggerPath = insightTriggeredExercise
       ? 'insight_triggered'
@@ -3435,11 +3444,17 @@ export default async function handler(req, res) {
       const returningContext = preSessionState?.returning_user_context
         ? `If it feels natural, you may lightly reference this from last session: "${preSessionState.returning_user_context}".`
         : '';
+      // Fix 1: when yesterday commitment exists, force the opener to run the
+      // commitment check-in first instead of a generic greeting.
+      const safeYesterdayCommitment = sanitizeForPrompt(yesterdayCommitment, 280);
+      const commitmentCheckinOpener = (yesterdayCommitment && session_state.commitment_checkin_done !== true)
+        ? `\n\nIMPORTANT: Yesterday the user committed to: "${safeYesterdayCommitment}". Open by acknowledging this commitment directly and warmly asking how it went — do NOT give a generic greeting first. The commitment check-in comes before anything else. Set commitment_checkin_done: true in your response once you've acknowledged it.`
+        : '';
       messages.push({
         role: 'user',
         content: `Open the ${stage} stage of tonight's reflection. Start with a warm, direct greeting that fits this time of day: "${getTimeGreeting(client_tz_offset)}". Ask how they're doing right now in plain language. Keep it conversational and human.
 
-Do NOT mention stages, process, forms, or instructions.
+Do NOT mention stages, process, forms, or instructions.${commitmentCheckinOpener}
 Do NOT tell them to pick a mood.
 Do NOT say "what feels most present for you" or any variant of that phrasing.
 Do NOT use coaching-speak openers (like "what's coming up for you" or "where are you at energetically"). Ask in plain, direct language — warm but not performative.
