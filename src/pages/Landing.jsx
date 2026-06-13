@@ -85,16 +85,16 @@ export default function Landing() {
                     - 2xl (1536px): text-5xl, wide screens, near full size
                     No explicit <br /> tags. Let text wrap naturally at all column widths */}
                 <h1 className="text-5xl lg:text-3xl xl:text-4xl 2xl:text-5xl font-bold text-white mb-6 lg:mb-8 leading-[1.15] tracking-tight">
-                  Are you struggling to keep up with your ambitions?
+                  There’s a war in your mind.
                   <br /><br />
                   <span className="text-red-600">
-                    More pressure won't bridge the gap. A consistent system will.
+                    It’s time to pick a winner.
                   </span>
                 </h1>
 
                 {/* Subtext: also shrinks when side-by-side to preserve video size */}
                 <p className="text-lg lg:text-sm xl:text-base 2xl:text-xl text-gray-400 leading-relaxed">
-                  Retaliate AI is a nightly reflection that holds you accountable to your commitments, helps you understand what went well and what didn't, and keeps you connected to why your goals matter.
+                  Your future self is fighting for the habits that will build the life you want. Your present self is fighting for comfort. Build the consistency and discipline the best version of you has. Bring your ambitions to life.
                 </p>
 
               </div>
