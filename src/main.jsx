@@ -6,7 +6,10 @@ import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import App from './App.jsx';
 import { AuthProvider } from './lib/AuthContext';
 import { queryClient } from './lib/query-client';
+import { initAnalytics } from './lib/analytics';
 import './index.css';
+
+initAnalytics();
 
 // FIX: Removed React.StrictMode — it was causing useEffect to fire twice
 // in production, which sent __INIT__ to the API twice = duplicate opening messages

@@ -5,6 +5,7 @@ import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase/client';
 import { subscribeToPush, isMobile, isStandalone } from '../lib/pushNotifications';
 import { trackCompleteRegistration } from '../lib/metaEvents';
+import { trackEvent, identifyUser } from '../lib/analytics';
 
 const DEFAULT_LIFE_AREA_OPTIONS = [
   { emoji: '💼', label: 'Career & Business' },
@@ -160,6 +161,7 @@ export default function OnboardingV2({ onOnboardingComplete } = {}) {
     setSaving(true);
     try {
       await saveProfile({ full_name: fullName.trim(), display_name: fullName.trim(), onboarding_step: 2 });
+      trackEvent('onboarding_step_completed', { step: 1 });
       setStep(2);
     } catch (_e) {
       alert('Failed to save. Please try again.');
@@ -173,6 +175,7 @@ export default function OnboardingV2({ onOnboardingComplete } = {}) {
     setSaving(true);
     try {
       await saveProfile({ future_self: futureSelf.trim(), onboarding_step: 3 });
+      trackEvent('onboarding_step_completed', { step: 2 });
       setStep(3);
     } catch (_e) {
       alert('Failed to save. Please try again.');
@@ -200,6 +203,7 @@ export default function OnboardingV2({ onOnboardingComplete } = {}) {
         identity_statement: identityStatement,
         onboarding_step: 4,
       });
+      trackEvent('onboarding_step_completed', { step: 3 });
       setStep(4);
     } catch (_e) {
       alert('Failed to save. Please try again.');
@@ -214,6 +218,7 @@ export default function OnboardingV2({ onOnboardingComplete } = {}) {
     setSaving(true);
     try {
       await saveProfile({ blockers: allBlockers, onboarding_step: 5 });
+      trackEvent('onboarding_step_completed', { step: 4 });
       setStep(5);
     } catch (_e) {
       alert('Failed to save. Please try again.');
@@ -240,6 +245,7 @@ export default function OnboardingV2({ onOnboardingComplete } = {}) {
     setSaving(true);
     try {
       await saveProfile({ life_areas: selectedLifeAreas, onboarding_step: 6 });
+      trackEvent('onboarding_step_completed', { step: 5 });
       setAreaGoalIndex(0);
       setCurrentGoalTitle('');
       setCurrentGoalWhy('');
@@ -318,6 +324,7 @@ export default function OnboardingV2({ onOnboardingComplete } = {}) {
         timezone,
         onboarding_step: 8,
       });
+      trackEvent('onboarding_step_completed', { step: 6 });
       setStep(8);
     } catch (_e) {
       alert('Failed to save. Please try again.');
@@ -341,6 +348,8 @@ export default function OnboardingV2({ onOnboardingComplete } = {}) {
           trial_ends_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
         }).eq('id', user.id);
       }
+      identifyUser(user?.id, { email: user?.email });
+      trackEvent('onboarding_completed', { user_id: user?.id });
       trackCompleteRegistration({
         id: user?.id,
         email: user?.email,

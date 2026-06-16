@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase/client';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Mail, Lock, ArrowLeft, Eye, EyeOff } from 'lucide-react';
+import { trackEvent, identifyUser } from '../lib/analytics';
 
 export default function Login() {
   const [searchParams] = useSearchParams();
@@ -44,6 +45,8 @@ export default function Login() {
       setMessage(error.message);
       setMessageType('error');
     } else {
+      identifyUser(data.user.id, { email });
+      trackEvent('login_completed');
       setMessage('Login successful!');
       setMessageType('success');
       setTimeout(() => navigate('/reflection'), 1000);
@@ -55,6 +58,7 @@ export default function Login() {
     e.preventDefault();
     setLoading(true);
     setMessage('');
+    trackEvent('signup_started');
     
     const { data, error } = await supabase.auth.signUp({
       email,
@@ -74,6 +78,7 @@ export default function Login() {
           setMessageType('info');
         }, 100);
       } else {
+        trackEvent('signup_error', { error_code: error.status ?? 'unknown' });
         setMessage(error.message);
         setMessageType('error');
       }
@@ -82,6 +87,7 @@ export default function Login() {
       setSignupEmail(email);
       setSignupPassword(password);
       setShowOtpInput(true);
+      trackEvent('signup_completed');
       setMessage('Check your email! Click the verification link or enter the code.');
       setMessageType('success');
       setLoading(false);
@@ -372,6 +378,8 @@ function VerificationWaitingScreen({ signupEmail, signupPassword, onBack, naviga
       setOtpMessageType('error');
       setOtpLoading(false);
     } else {
+      identifyUser(data.user.id, { email: signupEmail });
+      trackEvent('email_verified');
       // Verification successful! Write to database to notify other devices
       try {
         await supabase.from('verification_events').insert({
