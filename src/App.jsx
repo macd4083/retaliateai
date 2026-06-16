@@ -21,6 +21,8 @@ import TrialExpiredModal from './components/TrialExpiredModal';
 
 import { useAuth } from './lib/AuthContext';
 import { supabase } from './lib/supabase/client';
+import { usePageTracking } from './lib/usePageTracking';
+import { stopAnalytics } from './lib/analytics';
 
 // ── Old imports (preserved, not deleted) ────────────────────────────────────
 // import Sidebar from './components/layout/Sidebar';
@@ -85,7 +87,10 @@ function AuthGuardV2({ children }) {
       .eq('id', user.id)
       .maybeSingle()
       .then(({ data }) => {
-        setOnboardingCompleted(data?.onboarding_completed ?? false);
+        const completed = data?.onboarding_completed ?? false;
+        setOnboardingCompleted(completed);
+        // Stop tracking for users who have already completed onboarding
+        if (completed) stopAnalytics();
         setProfileData(data || null);
         setProfileLoading(false);
       });
@@ -102,7 +107,10 @@ function AuthGuardV2({ children }) {
   if (!onboardingCompleted) {
     return (
       <OnboardingV2
-        onOnboardingComplete={() => setOnboardingCompleted(true)}
+        onOnboardingComplete={() => {
+          stopAnalytics();
+          setOnboardingCompleted(true);
+        }}
       />
     );
   }
@@ -151,6 +159,8 @@ function AuthGuardV2({ children }) {
 
 // ── App ──────────────────────────────────────────────────────────────────
 export default function App() {
+  usePageTracking();
+
   return (
     <Routes>
       {/* Public routes */}

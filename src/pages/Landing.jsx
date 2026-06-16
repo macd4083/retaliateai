@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import { ArrowRight, CheckCircle, Download, Smartphone } from 'lucide-react';
 import { usePWAInstall } from '@/hooks/usePWAInstall';
+import { trackEvent } from '@/lib/analytics';
 
 export default function Landing() {
   const navigate = useNavigate();
@@ -15,7 +16,8 @@ export default function Landing() {
     }
   }, [user, navigate]);
 
-  const handleGetStarted = () => {
+  const handleGetStarted = (location = 'hero') => {
+    trackEvent('landing_cta_clicked', { location });
     navigate('/login?signup=true');
   };
 
@@ -51,7 +53,7 @@ export default function Landing() {
               </div>
               <div className="flex items-center gap-4">
                 <button
-                  onClick={() => navigate('/login')}
+                  onClick={() => { trackEvent('landing_signin_clicked'); navigate('/login'); }}
                   className="px-6 py-2 text-red-500 hover:text-red-400 font-semibold transition-colors border border-red-900 hover:border-red-700 rounded"
                 >
                   Sign In
@@ -306,7 +308,7 @@ export default function Landing() {
               </div>
               <div>
                 <button
-                  onClick={handleGetStarted}
+                  onClick={() => handleGetStarted('bottom')}
                   className="px-12 py-6 bg-red-600 text-white rounded-lg hover:bg-red-700 font-bold text-xl transition-all shadow-2xl shadow-red-900/60 uppercase tracking-wide inline-flex items-center gap-3 group"
                 >
                   Start Your Free Week
