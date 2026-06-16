@@ -78,7 +78,7 @@ export default function Login() {
           setMessageType('info');
         }, 100);
       } else {
-        trackEvent('signup_error', { error: error.message });
+        trackEvent('signup_error', { error_code: error.status ?? 'unknown' });
         setMessage(error.message);
         setMessageType('error');
       }

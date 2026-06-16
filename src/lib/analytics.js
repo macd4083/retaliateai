@@ -12,7 +12,6 @@ export function initAnalytics() {
     capture_pageleave: true,
     session_recording: {
       maskAllInputs: true,
-      maskInputOptions: { password: true },
     },
     autocapture: true,
     loaded: (ph) => {
