@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase/client';
+import { isMissingProfileColumn } from '../lib/supabase/profileSchema';
 import { trackEvent, identifyUser } from '../lib/analytics';
 import {
   buildSignupPath,
@@ -102,17 +103,30 @@ export default function GuestEntry() {
 
       // ── 4. Mark user_profile as guest campaign user ──────────────────────
       // The trigger auto-created the profile row on sign-in; just update flags.
-      supabase
+      const updateTimestamp = new Date().toISOString();
+      const { error: updateError } = await supabase
         .from('user_profiles')
         .update({
           is_guest_campaign_user: true,
-          campaign_attribution: attribution,
-          updated_at: new Date().toISOString(),
+          updated_at: updateTimestamp,
         })
-        .eq('id', userId)
-        .then(({ error: updateError }) => {
-          if (updateError) console.error('[GuestEntry] profile update failed:', updateError);
-        });
+        .eq('id', userId);
+
+      // Older DB schemas may not have guest campaign fields yet.
+      // Fall back to a minimal update so guest navigation never blocks on profile shape.
+      if (updateError) {
+        if (isMissingProfileColumn(updateError, 'is_guest_campaign_user')) {
+          const { error: fallbackError } = await supabase
+            .from('user_profiles')
+            .update({ updated_at: updateTimestamp })
+            .eq('id', userId);
+          if (fallbackError) {
+            console.error('[GuestEntry] profile fallback update failed:', fallbackError);
+          }
+        } else {
+          console.error('[GuestEntry] profile update failed:', updateError);
+        }
+      }
 
       // ── 5. Route into the normal first-session flow ──────────────────────
       if (!cancelled) navigate('/reflection', { replace: true });

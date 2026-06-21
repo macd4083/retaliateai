@@ -4,6 +4,7 @@ import { Send, Moon, RefreshCw } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase/client';
+import { isMissingProfileColumn } from '../lib/supabase/profileSchema';
 import { reflectionHelpers } from '../lib/supabase/reflection';
 import { localDateStr } from '../lib/dateUtils';
 import { trackEvent } from '../lib/analytics';
@@ -312,17 +313,37 @@ export default function ReflectionV2() {
     setInitError(false);
     // Local flag — React state updates are async so we can't rely on isGuestCampaignUser
     // inside this function immediately after calling setIsGuestCampaignUser.
-    let isGuest = false;
+    // Anonymous users coming from /start/guest should stay on the guest path
+    // even when optional profile guest columns are not yet available.
+    let isGuest = user?.is_anonymous === true;
     try {
       // Profile load — non-critical, fail silently
       try {
-        const { data: profile } = await supabase
+        const { data: profile, error: profileError } = await supabase
           .from('user_profiles')
           .select('display_name, full_name, identity_statement, life_areas, is_guest_campaign_user')
           .eq('id', user.id)
           .maybeSingle();
-        setUserProfile(profile);
-        if (profile?.is_guest_campaign_user) {
+
+        let resolvedProfile = profile;
+        let resolvedProfileError = profileError;
+
+        if (profileError && isMissingProfileColumn(profileError, 'is_guest_campaign_user')) {
+          const { data: fallbackProfile, error: fallbackError } = await supabase
+            .from('user_profiles')
+            .select('display_name, full_name, identity_statement, life_areas')
+            .eq('id', user.id)
+            .maybeSingle();
+          resolvedProfile = fallbackProfile;
+          resolvedProfileError = fallbackError;
+        }
+
+        if (resolvedProfileError) {
+          throw resolvedProfileError;
+        }
+
+        setUserProfile(resolvedProfile);
+        if (resolvedProfile?.is_guest_campaign_user) {
           setIsGuestCampaignUser(true);
           isGuest = true;
         }
@@ -921,7 +942,7 @@ export default function ReflectionV2() {
         } catch (_e) {}
 
         // ── Guest campaign: redirect to conversion page after first session ──
-        if (isGuestCampaignUser) {
+        if (isGuestCampaignUser || user?.is_anonymous === true) {
           const attribution = readAttribution();
           trackEvent('guest_session_completed', { guest_id: user.id, session_id: sid, ...attribution });
 
@@ -934,7 +955,20 @@ export default function ReflectionV2() {
               updated_at: new Date().toISOString(),
             })
             .eq('id', user.id)
-            .catch(() => {});
+            .then(async ({ error }) => {
+              if (!error) return;
+              if (isMissingProfileColumn(error, 'requires_signup_for_next_session')) {
+                const { error: fallbackError } = await supabase
+                  .from('user_profiles')
+                  .update({
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq('id', user.id);
+                if (fallbackError) {
+                  console.error('[guest_session_completed] profile fallback update failed:', fallbackError);
+                }
+              }
+            });
 
           // Short delay so the summary card renders before we navigate away
           setTimeout(() => {
