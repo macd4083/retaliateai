@@ -39,6 +39,8 @@ import {
   saveAttribution,
 } from '../lib/guestSession';
 
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+
 async function waitForCondition(condition, timeout = 2000) {
   const start = Date.now();
 
@@ -76,7 +78,7 @@ describe('guest campaign onboarding', () => {
     vi.useRealTimers();
     vi.clearAllMocks();
 
-    delete window.fbq;
+    delete window['fbq'];
 
     posthogMock.__loaded = false;
     posthogMock.init = vi.fn();
@@ -203,7 +205,7 @@ describe('guest campaign onboarding', () => {
       throw new Error('ERR_BLOCKED_BY_CLIENT');
     });
 
-    window.fbq = vi.fn(() => {
+    window['fbq'] = vi.fn(() => {
       throw new Error('ERR_BLOCKED_BY_CLIENT');
     });
 
@@ -227,7 +229,7 @@ describe('guest campaign onboarding', () => {
     await waitForCondition(() => view.router.state.location.pathname === '/login');
     await waitForCondition(() => view.container.textContent.includes('Create your account'));
 
-    expect(window.fbq).toHaveBeenCalledWith('track', 'Lead');
+    expect(window['fbq']).toHaveBeenCalledWith('track', 'Lead');
     expect(view.container.textContent).toContain('Create your account');
   });
 });
