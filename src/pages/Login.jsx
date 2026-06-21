@@ -26,9 +26,11 @@ export default function Login() {
   }, [searchParams]);
 
   useEffect(() => {
-    if (searchParams.get('utm_source') === 'instagram' && window.fbq) {
-      window.fbq('track', 'Lead');
-    }
+    try {
+      if (searchParams.get('utm_source') === 'instagram' && typeof window.fbq === 'function') {
+        window.fbq('track', 'Lead');
+      }
+    } catch (_error) {}
   }, [searchParams]);
 
   const handleLogin = async (e) => {

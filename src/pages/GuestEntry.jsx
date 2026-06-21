@@ -2,7 +2,37 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase/client';
 import { trackEvent, identifyUser } from '../lib/analytics';
-import { extractAttribution, saveAttribution } from '../lib/guestSession';
+import {
+  buildSignupPath,
+  extractAttribution,
+  GUEST_FALLBACK_REDIRECT_DELAY_MS,
+  GUEST_MODE_UNAVAILABLE_MESSAGE,
+  saveAttribution,
+} from '../lib/guestSession';
+
+/**
+ * Detects the Supabase error shape returned when anonymous auth is disabled.
+ * Supabase currently surfaces this as a 422 plus an "Anonymous sign-ins are disabled"
+ * message, so the message match remains as a compatibility fallback.
+ *
+ * @param {unknown} authError
+ * @returns {boolean}
+ */
+function isAnonymousAuthDisabled(authError) {
+  const message = String(
+    authError?.message ||
+    authError?.error_description ||
+    authError?.details ||
+    authError ||
+    ''
+  ).toLowerCase();
+
+  return (
+    message.includes('anonymous sign-ins are disabled') ||
+    message.includes('anonymous sign ins are disabled') ||
+    (authError?.status === 422 && message.includes('anonymous'))
+  );
+}
 
 /**
  * GuestEntry  –  route: /start/guest
@@ -19,14 +49,18 @@ export default function GuestEntry() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [error, setError] = useState(null);
+  const [fallbackPath, setFallbackPath] = useState('');
+  const [fallbackMessage, setFallbackMessage] = useState('');
 
   useEffect(() => {
     let cancelled = false;
+    let redirectTimer;
 
     async function bootstrap() {
       // ── 1. Capture + persist attribution ────────────────────────────────
       const attribution = extractAttribution(searchParams);
       saveAttribution(attribution);
+      const nextSignupPath = buildSignupPath(attribution, { guest: 'unavailable' });
 
       // ── 2. Analytics: landing view ───────────────────────────────────────
       trackEvent('guest_campaign_landing_view', attribution);
@@ -35,16 +69,28 @@ export default function GuestEntry() {
       let userId;
       try {
         // If a valid session already exists (e.g. page refresh), use it
-        const { data: existing } = await supabase.auth.getSession();
+        const { data: existing, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError) throw sessionError;
         if (existing?.session?.user?.id) {
           userId = existing.session.user.id;
         } else {
           const { data, error: signInError } = await supabase.auth.signInAnonymously();
           if (signInError) throw signInError;
-          userId = data.user?.id;
+          userId = data?.user?.id;
         }
       } catch (err) {
         console.error('[GuestEntry] anonymous sign-in failed:', err);
+        if (isAnonymousAuthDisabled(err)) {
+          trackEvent('guest_campaign_guest_mode_unavailable', attribution);
+          if (!cancelled) {
+            setFallbackPath(nextSignupPath);
+            setFallbackMessage(GUEST_MODE_UNAVAILABLE_MESSAGE);
+            redirectTimer = window.setTimeout(() => {
+              navigate(nextSignupPath, { replace: true });
+            }, GUEST_FALLBACK_REDIRECT_DELAY_MS);
+          }
+          return;
+        }
         if (!cancelled) setError('Unable to start your session. Please try again.');
         return;
       }
@@ -73,10 +119,28 @@ export default function GuestEntry() {
     }
 
     bootstrap();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      if (redirectTimer) window.clearTimeout(redirectTimer);
+    };
   // searchParams is stable on mount — intentionally excluded from deps
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  if (fallbackMessage) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen bg-zinc-950 gap-4 px-6 text-center">
+        <p className="text-amber-300 text-sm max-w-sm">{fallbackMessage}</p>
+        <button
+          onClick={() => navigate(fallbackPath, { replace: true })}
+          className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 focus:ring-offset-zinc-950"
+        >
+          Continue with Free Trial
+        </button>
+        <p className="text-zinc-500 text-xs">Redirecting you now…</p>
+      </div>
+    );
+  }
 
   if (error) {
     return (
@@ -84,7 +148,7 @@ export default function GuestEntry() {
         <p className="text-red-400 text-sm">{error}</p>
         <button
           onClick={() => window.location.reload()}
-          className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors"
+          className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 focus:ring-offset-zinc-950"
         >
           Try Again
         </button>

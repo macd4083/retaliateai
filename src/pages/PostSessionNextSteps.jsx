@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ArrowRight, Smartphone } from 'lucide-react';
 import { trackEvent } from '../lib/analytics';
-import { readAttribution } from '../lib/guestSession';
+import { buildSignupPath, readAttribution } from '../lib/guestSession';
 import { usePWAInstall } from '../hooks/usePWAInstall';
 import ReflectionSummaryCard from '../components/v2/ReflectionSummaryCard';
 
@@ -38,7 +38,7 @@ export default function PostSessionNextSteps() {
 
   const handleStartTrial = () => {
     trackEvent('post_session_start_trial_clicked', attribution);
-    navigate('/login?signup=true');
+    navigate(buildSignupPath(attribution));
   };
 
   const handleDownloadApp = async () => {
