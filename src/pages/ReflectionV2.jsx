@@ -310,6 +310,9 @@ export default function ReflectionV2() {
   async function initSession() {
     setIsInitializing(true);
     setInitError(false);
+    // Local flag — React state updates are async so we can't rely on isGuestCampaignUser
+    // inside this function immediately after calling setIsGuestCampaignUser.
+    let isGuest = false;
     try {
       // Profile load — non-critical, fail silently
       try {
@@ -319,7 +322,10 @@ export default function ReflectionV2() {
           .eq('id', user.id)
           .maybeSingle();
         setUserProfile(profile);
-        if (profile?.is_guest_campaign_user) setIsGuestCampaignUser(true);
+        if (profile?.is_guest_campaign_user) {
+          setIsGuestCampaignUser(true);
+          isGuest = true;
+        }
       } catch (profileErr) {
         console.error('[initSession] profile load failed:', profileErr);
       }
@@ -335,8 +341,8 @@ export default function ReflectionV2() {
       setSessionId(session.id);
       setIsComplete(session.is_complete);
 
-      // Track guest session start (guest flag read from profile, set earlier in this function)
-      if (userProfile?.is_guest_campaign_user || isGuestCampaignUser) {
+      // Track guest session start
+      if (isGuest) {
         trackEvent('guest_session_started', {
           guest_id: user.id,
           session_id: session.id,

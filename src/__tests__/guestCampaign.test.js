@@ -90,7 +90,7 @@ describe('AuthGuardV2 guest logic', () => {
     if (
       profileData?.is_guest_campaign_user &&
       profileData?.requires_signup_for_next_session &&
-      user?.is_anonymous !== false
+      user?.is_anonymous === true
     ) {
       return 'show_signup_gate';
     }

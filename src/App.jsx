@@ -111,11 +111,11 @@ function AuthGuardV2({ children }) {
   if (!user) return <Navigate to="/login" replace />;
 
   // Guest campaign users who have already completed their first session: show signup gate.
-  // user.is_anonymous distinguishes anonymous (guest) users from signed-up users.
+  // user.is_anonymous === true distinguishes anonymous (guest) users from signed-up users.
   if (
     profileData?.is_guest_campaign_user &&
     profileData?.requires_signup_for_next_session &&
-    user?.is_anonymous !== false
+    user?.is_anonymous === true
   ) {
     return <GuestSignupGate attribution={readAttribution()} />;
   }

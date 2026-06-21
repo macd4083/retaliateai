@@ -28,7 +28,9 @@ export default function PostSessionNextSteps() {
   const streak = state?.streak || 0;
   const followThroughStats = state?.followThroughStats || null;
 
-  // Fire view event once on mount
+  // Fire view event once on mount.
+  // attribution is derived from readAttribution() which reads sessionStorage on render;
+  // it will not change between renders, so excluding it from deps is intentional.
   useEffect(() => {
     trackEvent('post_session_cta_viewed', attribution);
   // eslint-disable-next-line react-hooks/exhaustive-deps
