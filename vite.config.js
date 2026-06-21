@@ -39,4 +39,7 @@ export default defineConfig({
       external: ['web-push', 'resend'],
     },
   },
+  test: {
+    environment: 'jsdom',
+  },
 });

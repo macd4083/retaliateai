@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ArrowRight, Smartphone } from 'lucide-react';
 import { trackEvent } from '../lib/analytics';
+import { buildSignupPath } from '../lib/guestSession';
 import { usePWAInstall } from '../hooks/usePWAInstall';
 
 /**
@@ -26,7 +27,7 @@ export default function GuestSignupGate({ attribution = {} }) {
 
   const handleStartTrial = () => {
     trackEvent('post_session_start_trial_clicked', { ...attribution, context: 'second_session_gate' });
-    navigate('/login?signup=true');
+    navigate(buildSignupPath(attribution));
   };
 
   const handleDownloadApp = async () => {
