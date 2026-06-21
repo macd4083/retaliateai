@@ -56,12 +56,16 @@ async function fetchUserProfile(userId) {
 
   if (fallbackError) return { data: null, error: fallbackError };
 
+  if (fallbackData) {
+    console.warn('[AuthGuardV2] guest profile columns unavailable; using base profile fields');
+  }
+
   return {
     data: fallbackData
       ? {
           ...fallbackData,
-          is_guest_campaign_user: false,
-          requires_signup_for_next_session: false,
+          is_guest_campaign_user: undefined,
+          requires_signup_for_next_session: undefined,
         }
       : null,
     error: null,
@@ -161,7 +165,9 @@ function AuthGuardV2({ children }) {
 
   // Guest campaign users who have already completed their first session: show signup gate.
   // user.is_anonymous === true distinguishes anonymous (guest) users from signed-up users.
-  const isGuestUser = profileData?.is_guest_campaign_user || user?.is_anonymous === true;
+  const isGuestUser =
+    profileData?.is_guest_campaign_user === true ||
+    (user?.is_anonymous === true && profileData?.is_guest_campaign_user !== false);
 
   if (
     isGuestUser &&

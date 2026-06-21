@@ -316,7 +316,6 @@ export default function ReflectionV2() {
     // Anonymous users coming from /start/guest should stay on the guest path
     // even when optional profile guest columns are not yet available.
     let isGuest = user?.is_anonymous === true;
-    if (isGuest) setIsGuestCampaignUser(true);
     try {
       // Profile load — non-critical, fail silently
       try {
@@ -959,12 +958,15 @@ export default function ReflectionV2() {
             .then(async ({ error }) => {
               if (!error) return;
               if (isMissingProfileColumn(error, 'requires_signup_for_next_session')) {
-                await supabase
+                const { error: fallbackError } = await supabase
                   .from('user_profiles')
                   .update({
                     updated_at: new Date().toISOString(),
                   })
                   .eq('id', user.id);
+                if (fallbackError) {
+                  console.error('[guest_session_completed] profile fallback update failed:', fallbackError);
+                }
               }
             });
 
