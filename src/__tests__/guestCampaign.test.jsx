@@ -240,5 +240,7 @@ describe('guest campaign onboarding', () => {
 
     expect(testWindow.fbq).toHaveBeenCalledWith('track', 'Lead');
     expect(view.container.textContent).toContain('Create your account');
+    expect(view.container.querySelector('input[type="email"]')).not.toBeNull();
+    expect(view.container.textContent).toContain('Sign Up');
   });
 });

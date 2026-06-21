@@ -12,6 +12,8 @@ import {
 
 /**
  * Detects the Supabase error shape returned when anonymous auth is disabled.
+ * Supabase currently surfaces this as a 422 plus an "Anonymous sign-ins are disabled"
+ * message, so the message match remains as a compatibility fallback.
  *
  * @param {unknown} authError
  * @returns {boolean}
