@@ -167,7 +167,7 @@ function AuthGuardV2({ children }) {
   const isGuestUser = profileData?.is_guest_campaign_user || user?.is_anonymous === true;
 
   if (
-    profileData?.is_guest_campaign_user &&
+    isGuestUser &&
     profileData?.requires_signup_for_next_session &&
     user?.is_anonymous === true
   ) {
