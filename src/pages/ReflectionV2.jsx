@@ -6,7 +6,10 @@ import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase/client';
 import { reflectionHelpers } from '../lib/supabase/reflection';
 import { localDateStr } from '../lib/dateUtils';
+import { trackEvent } from '../lib/analytics';
+import { readAttribution } from '../lib/guestSession';
 import AppShellV2 from '../components/v2/AppShellV2';
+import ReflectionSummaryCard from '../components/v2/ReflectionSummaryCard';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -96,114 +99,10 @@ function TypingIndicator() {
   );
 }
 
+// SummaryCard is now the shared ReflectionSummaryCard component (imported above).
+// Keeping this thin alias so ChatMessage below does not require renaming.
 function SummaryCard({ data, streak, followThroughStats }) {
-  const navigate = useNavigate();
-
-  // Derive follow-through summary line (only shown if total >= 3)
-  let followThroughLine = null;
-  let followThroughEmoji = null;
-  if (followThroughStats && followThroughStats.total >= 3) {
-    const { kept, total, trajectory } = followThroughStats;
-    const rate = kept / total;
-    if (rate >= 0.7) {
-      followThroughLine = `You've kept ${kept} of your last ${total} commitments. That's your highest stretch yet.`;
-      followThroughEmoji = '✅';
-    } else if (trajectory === 'improving') {
-      followThroughLine = `${kept} of ${total} this week. You're trending up — keep it going.`;
-      followThroughEmoji = '📈';
-    } else if (rate >= 0.4) {
-      followThroughLine = `${kept} of ${total} this week. You're in a building phase — that's real.`;
-      followThroughEmoji = '📈';
-    } else {
-      followThroughLine = `${kept} of ${total} this week. Let's make the next one smaller and easier to nail.`;
-      followThroughEmoji = '🎯';
-    }
-  }
-
-  return (
-    <div className="bg-zinc-800 border border-zinc-600 rounded-2xl p-5 my-2 shadow-lg">
-      <div className="flex items-center gap-2 mb-4">
-        <span className="text-lg">🎯</span>
-        <span className="text-white font-semibold">Tonight's Takeaways</span>
-      </div>
-      <div className="border-t border-zinc-600 pt-4 space-y-3">
-        {data.win_text && (
-          <div className="flex items-start gap-2">
-            <span className="text-green-400 mt-0.5">✅</span>
-            <div>
-              <span className="text-zinc-400 text-xs">Win</span>
-              <p className="text-white text-sm">{data.win_text}</p>
-            </div>
-          </div>
-        )}
-        {data.miss_text && (
-          <div className="flex items-start gap-2">
-            <span className="text-yellow-400 mt-0.5">💡</span>
-            <div>
-              <span className="text-zinc-400 text-xs">Honest truth</span>
-              <p className="text-white text-sm">{data.miss_text}</p>
-            </div>
-          </div>
-        )}
-        {data.tomorrow_commitment && (
-          <>
-            {!data.commitment_minimum && !data.commitment_stretch && (
-              <div className="flex items-start gap-2">
-                <span className="text-blue-400 mt-0.5">📋</span>
-                <div>
-                  <span className="text-zinc-400 text-xs">Tomorrow</span>
-                  <p className="text-white text-sm">{data.tomorrow_commitment}</p>
-                </div>
-              </div>
-            )}
-          </>
-        )}
-        {data.commitment_minimum && (
-          <div className="flex items-start gap-2">
-            <span className="text-blue-400 mt-0.5">🎯</span>
-            <div>
-              <span className="text-zinc-400 text-xs">Minimum</span>
-              <p className="text-white text-sm">{data.commitment_minimum}</p>
-            </div>
-          </div>
-        )}
-        {data.commitment_stretch && (
-          <div className="flex items-start gap-2">
-            <span className="text-purple-400 mt-0.5">🚀</span>
-            <div>
-              <span className="text-zinc-400 text-xs">Stretch</span>
-              <p className="text-white text-sm">{data.commitment_stretch}</p>
-            </div>
-          </div>
-        )}
-        {streak > 0 && (
-          <div className="flex items-center gap-2">
-            <span className="text-red-400">🔥</span>
-            <p className="text-white text-sm font-medium">
-              {streak} night{streak !== 1 ? 's' : ''} in a row
-            </p>
-          </div>
-        )}
-        {followThroughStats && followThroughStats.total >= 3 && followThroughLine && (
-          <div className="flex items-center gap-2">
-            <span>{followThroughEmoji}</span>
-            <p className="text-white text-sm">{followThroughLine}</p>
-          </div>
-        )}
-      </div>
-      <p className="text-zinc-500 text-xs mt-4 text-center italic">
-        You're building the identity of someone who shows up.
-      </p>
-      <div className="flex sm:justify-end justify-center mt-3">
-        <button
-          onClick={() => navigate('/insights')}
-          className="text-sm text-zinc-400 hover:text-white border border-zinc-700 hover:border-zinc-500 rounded-lg px-3 py-1.5 transition-colors"
-        >
-          → View Insights
-        </button>
-      </div>
-    </div>
-  );
+  return <ReflectionSummaryCard data={data} streak={streak} followThroughStats={followThroughStats} />;
 }
 
 
@@ -272,6 +171,7 @@ function ChatMessage({ message, isFirstMessage, onChipSelect, chipsDisabled, str
 
 export default function ReflectionV2() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
 
@@ -328,6 +228,7 @@ export default function ReflectionV2() {
   const [followThroughStats, setFollowThroughStats] = useState(null);
   const [commitmentStatsCache, setCommitmentStatsCache] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isGuestCampaignUser, setIsGuestCampaignUser] = useState(false);
   const [pendingGoalSuggestion, setPendingGoalSuggestion] = useState(null);
   const [pendingWhyCapture, setPendingWhyCapture] = useState(null); // { goalId, title }
   const [activeGoals, setActiveGoals] = useState([]);
@@ -414,10 +315,11 @@ export default function ReflectionV2() {
       try {
         const { data: profile } = await supabase
           .from('user_profiles')
-          .select('display_name, full_name, identity_statement, life_areas')
+          .select('display_name, full_name, identity_statement, life_areas, is_guest_campaign_user')
           .eq('id', user.id)
           .maybeSingle();
         setUserProfile(profile);
+        if (profile?.is_guest_campaign_user) setIsGuestCampaignUser(true);
       } catch (profileErr) {
         console.error('[initSession] profile load failed:', profileErr);
       }
@@ -432,6 +334,15 @@ export default function ReflectionV2() {
       }
       setSessionId(session.id);
       setIsComplete(session.is_complete);
+
+      // Track guest session start (guest flag read from profile, set earlier in this function)
+      if (userProfile?.is_guest_campaign_user || isGuestCampaignUser) {
+        trackEvent('guest_session_started', {
+          guest_id: user.id,
+          session_id: session.id,
+          ...readAttribution(),
+        });
+      }
 
       // Fetch yesterday's commitment — non-critical, fail silently
       let fetchedYesterdayCommitment = null;
@@ -985,6 +896,7 @@ export default function ReflectionV2() {
         }).catch(() => {});
 
         // Fetch follow-through stats to show in the summary card
+        let resolvedFollowThroughStats = null;
         try {
           const statsRes = await fetch('/api/commitment-stats', {
             method: 'POST',
@@ -993,13 +905,40 @@ export default function ReflectionV2() {
           });
           if (statsRes.ok) {
             const statsData = await statsRes.json();
-            setFollowThroughStats({
+            resolvedFollowThroughStats = {
               kept: statsData.followThrough7?.kept ?? 0,
               total: statsData.followThrough7?.total ?? 0,
               trajectory: statsData.trajectory,
-            });
+            };
+            setFollowThroughStats(resolvedFollowThroughStats);
           }
         } catch (_e) {}
+
+        // ── Guest campaign: redirect to conversion page after first session ──
+        if (isGuestCampaignUser) {
+          const attribution = readAttribution();
+          trackEvent('guest_session_completed', { guest_id: user.id, session_id: sid, ...attribution });
+
+          // Mark profile flags so subsequent visits show the signup gate
+          supabase
+            .from('user_profiles')
+            .update({
+              completed_first_session: true,
+              requires_signup_for_next_session: true,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', user.id)
+            .catch(() => {});
+
+          // Short delay so the summary card renders before we navigate away
+          setTimeout(() => {
+            navigate('/post-session/next-steps', {
+              replace: true,
+              state: { summaryCardData: newSummaryData, streak, followThroughStats: resolvedFollowThroughStats },
+            });
+          }, 2500);
+          return;
+        }
 
         const alreadyHasPrompt = messagesRef.current.some((m) => m.id === 'post-session-prompt');
         if (!alreadyHasPrompt) {

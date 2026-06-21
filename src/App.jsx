@@ -18,11 +18,15 @@ import PrivacyPolicy from './pages/PrivacyPolicy';
 import TermsOfService from './pages/TermsOfService';
 import Landing from './pages/Landing';
 import TrialExpiredModal from './components/TrialExpiredModal';
+import GuestEntry from './pages/GuestEntry';
+import PostSessionNextSteps from './pages/PostSessionNextSteps';
+import GuestSignupGate from './components/GuestSignupGate';
 
 import { useAuth } from './lib/AuthContext';
 import { supabase } from './lib/supabase/client';
 import { usePageTracking } from './lib/usePageTracking';
 import { stopAnalytics } from './lib/analytics';
+import { readAttribution } from './lib/guestSession';
 
 // ── Old imports (preserved, not deleted) ────────────────────────────────────
 // import Sidebar from './components/layout/Sidebar';
@@ -55,6 +59,8 @@ function LoadingScreen() {
 
 // ── AuthGuardV2 ───────────────────────────────────────────────────────────
 // Checks auth + onboarding_completed. If not onboarded, shows OnboardingV2.
+// Guest campaign users (anonymous Supabase users from /start/guest) bypass
+// onboarding on first visit, and see a signup gate if they try a second session.
 function AuthGuardV2({ children }) {
   const { user, loading } = useAuth();
 
@@ -83,7 +89,7 @@ function AuthGuardV2({ children }) {
 
     supabase
       .from('user_profiles')
-      .select('onboarding_completed, trial_ends_at, subscription_status, feedback_submitted, trial_extended, role')
+      .select('onboarding_completed, trial_ends_at, subscription_status, feedback_submitted, trial_extended, role, is_guest_campaign_user, requires_signup_for_next_session')
       .eq('id', user.id)
       .maybeSingle()
       .then(({ data }) => {
@@ -104,7 +110,18 @@ function AuthGuardV2({ children }) {
 
   if (!user) return <Navigate to="/login" replace />;
 
-  if (!onboardingCompleted) {
+  // Guest campaign users who have already completed their first session: show signup gate.
+  // user.is_anonymous distinguishes anonymous (guest) users from signed-up users.
+  if (
+    profileData?.is_guest_campaign_user &&
+    profileData?.requires_signup_for_next_session &&
+    user?.is_anonymous !== false
+  ) {
+    return <GuestSignupGate attribution={readAttribution()} />;
+  }
+
+  // Guest campaign users bypass onboarding — go straight to the session.
+  if (!onboardingCompleted && !profileData?.is_guest_campaign_user) {
     return (
       <OnboardingV2
         onOnboardingComplete={() => {
@@ -170,6 +187,12 @@ export default function App() {
       <Route path="/privacy" element={<PrivacyPolicy />} />
       <Route path="/terms" element={<TermsOfService />} />
       <Route path="/" element={<Landing />} />
+
+      {/* Instagram guest-campaign entry — bootstraps anonymous session */}
+      <Route path="/start/guest" element={<GuestEntry />} />
+
+      {/* Post-session conversion page — public (guest arrives here after first session) */}
+      <Route path="/post-session/next-steps" element={<PostSessionNextSteps />} />
 
       {/* V2 protected routes */}
       <Route
