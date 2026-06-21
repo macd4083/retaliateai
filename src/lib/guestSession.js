@@ -12,6 +12,7 @@ const ATTRIBUTION_KEYS = ['src', 'utm_source', 'utm_medium', 'utm_campaign', 'ut
 export const GUEST_MODE_UNAVAILABLE_MESSAGE = 'Guest mode is unavailable right now. Continue with your free trial.';
 export const GUEST_FALLBACK_REDIRECT_DELAY_MS = 1200;
 
+/** Normalizes route/query input into a URLSearchParams instance. */
 function normalizeSearchParams(searchParams) {
   if (searchParams instanceof URLSearchParams) return searchParams;
   if (typeof searchParams === 'string') return new URLSearchParams(searchParams);
@@ -23,6 +24,7 @@ function normalizeSearchParams(searchParams) {
   return new URLSearchParams();
 }
 
+/** Returns a trimmed attribution value or undefined when it is not usable. */
 function cleanAttributionValue(value) {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();

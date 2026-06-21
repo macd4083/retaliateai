@@ -41,7 +41,11 @@ import {
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
-async function waitForCondition(condition, timeout = 2000) {
+/**
+ * @typedef {Window & { fbq?: (...args: any[]) => void }} TestWindow
+ */
+
+async function waitForCondition(condition, description = 'condition', timeout = 2000) {
   const start = Date.now();
 
   while (Date.now() - start < timeout) {
@@ -52,7 +56,7 @@ async function waitForCondition(condition, timeout = 2000) {
     });
   }
 
-  throw new Error('Timed out waiting for condition');
+  throw new Error(`Timed out after ${timeout}ms waiting for ${description}`);
 }
 
 async function renderRouter(initialEntry, routes) {
@@ -72,7 +76,8 @@ describe('guest campaign onboarding', () => {
   let view;
   let updateMock;
   let eqMock;
-  const testWindow = /** @type {any} */ (window);
+  /** @type {TestWindow} */
+  const testWindow = window;
 
   beforeEach(() => {
     sessionStorage.clear();
@@ -141,7 +146,7 @@ describe('guest campaign onboarding', () => {
       { path: '/reflection', element: <div>Reflection Ready</div> },
     ]);
 
-    await waitForCondition(() => view.router.state.location.pathname === '/reflection');
+    await waitForCondition(() => view.router.state.location.pathname === '/reflection', 'guest success redirect');
 
     expect(readAttribution()).toEqual({
       src: 'instagram',
@@ -178,14 +183,17 @@ describe('guest campaign onboarding', () => {
       { path: '/login', element: <div>Signup Route</div> },
     ]);
 
-    await waitForCondition(() => view.container.textContent.includes(GUEST_MODE_UNAVAILABLE_MESSAGE));
+    await waitForCondition(
+      () => view.container.textContent.includes(GUEST_MODE_UNAVAILABLE_MESSAGE),
+      'guest fallback message'
+    );
     expect(view.container.textContent).toContain('Continue with Free Trial');
 
     await act(async () => {
       vi.advanceTimersByTime(GUEST_FALLBACK_REDIRECT_DELAY_MS);
     });
 
-    await waitForCondition(() => view.router.state.location.pathname === '/login');
+    await waitForCondition(() => view.router.state.location.pathname === '/login', 'guest fallback redirect');
 
     const params = new URLSearchParams(view.router.state.location.search);
     expect(params.get('signup')).toBe('true');
@@ -227,8 +235,8 @@ describe('guest campaign onboarding', () => {
       vi.advanceTimersByTime(GUEST_FALLBACK_REDIRECT_DELAY_MS);
     });
 
-    await waitForCondition(() => view.router.state.location.pathname === '/login');
-    await waitForCondition(() => view.container.textContent.includes('Create your account'));
+    await waitForCondition(() => view.router.state.location.pathname === '/login', 'login route');
+    await waitForCondition(() => view.container.textContent.includes('Create your account'), 'login render');
 
     expect(testWindow.fbq).toHaveBeenCalledWith('track', 'Lead');
     expect(view.container.textContent).toContain('Create your account');

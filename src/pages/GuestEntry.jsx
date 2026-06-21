@@ -10,6 +10,12 @@ import {
   saveAttribution,
 } from '../lib/guestSession';
 
+/**
+ * Detects the Supabase error shape returned when anonymous auth is disabled.
+ *
+ * @param {unknown} authError
+ * @returns {boolean}
+ */
 function isAnonymousAuthDisabled(authError) {
   const message = String(
     authError?.message ||
