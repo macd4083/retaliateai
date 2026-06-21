@@ -4,6 +4,7 @@ import { Send, Moon, RefreshCw } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase/client';
+import { isMissingProfileColumn } from '../lib/supabase/profileSchema';
 import { reflectionHelpers } from '../lib/supabase/reflection';
 import { localDateStr } from '../lib/dateUtils';
 import { trackEvent } from '../lib/analytics';
@@ -21,12 +22,6 @@ function getTimeContext() {
   if (hour >= 23 || hour < 2) return { period: 'late_night', greeting: 'Still up?' };
   if (hour >= 2 && hour < 6) return { period: 'early_morning', greeting: "Can't sleep?" };
   return { period: 'late', greeting: 'Hey' };
-}
-
-function isMissingProfileColumn(error, columnName) {
-  if (!columnName) return false;
-  const message = String(error?.message || '');
-  return error?.code === 'PGRST204' && message.includes(`'${columnName}'`);
 }
 
 const BASE_STAGES = [
@@ -318,6 +313,8 @@ export default function ReflectionV2() {
     setInitError(false);
     // Local flag — React state updates are async so we can't rely on isGuestCampaignUser
     // inside this function immediately after calling setIsGuestCampaignUser.
+    // Anonymous users coming from /start/guest should stay on the guest path
+    // even when optional profile guest columns are not yet available.
     let isGuest = user?.is_anonymous === true;
     if (isGuest) setIsGuestCampaignUser(true);
     try {

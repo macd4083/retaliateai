@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase/client';
+import { isMissingProfileColumn } from '../lib/supabase/profileSchema';
 import { trackEvent, identifyUser } from '../lib/analytics';
 import {
   buildSignupPath,
@@ -32,12 +33,6 @@ function isAnonymousAuthDisabled(authError) {
     message.includes('anonymous sign ins are disabled') ||
     (authError?.status === 422 && message.includes('anonymous'))
   );
-}
-
-function isMissingColumnError(error, columnName) {
-  if (!columnName) return false;
-  const message = String(error?.message || '');
-  return error?.code === 'PGRST204' && message.includes(`'${columnName}'`);
 }
 
 /**
@@ -120,7 +115,7 @@ export default function GuestEntry() {
       // Older DB schemas may not have guest campaign fields yet.
       // Fall back to a minimal update so guest navigation never blocks on profile shape.
       if (updateError) {
-        if (isMissingColumnError(updateError, 'is_guest_campaign_user')) {
+        if (isMissingProfileColumn(updateError, 'is_guest_campaign_user')) {
           const { error: fallbackError } = await supabase
             .from('user_profiles')
             .update({ updated_at: updateTimestamp })

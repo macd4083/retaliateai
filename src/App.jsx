@@ -27,15 +27,11 @@ import { supabase } from './lib/supabase/client';
 import { usePageTracking } from './lib/usePageTracking';
 import { stopAnalytics } from './lib/analytics';
 import { readAttribution } from './lib/guestSession';
+import { isMissingProfileColumn } from './lib/supabase/profileSchema';
 
-const PROFILE_FIELDS_WITH_GUEST_FLAGS = 'onboarding_completed, trial_ends_at, subscription_status, feedback_submitted, trial_extended, role, is_guest_campaign_user, requires_signup_for_next_session';
-const PROFILE_FIELDS_BASE = 'onboarding_completed, trial_ends_at, subscription_status, feedback_submitted, trial_extended, role';
-
-function isMissingProfileColumn(error, columnName) {
-  if (!columnName) return false;
-  const message = String(error?.message || '');
-  return error?.code === 'PGRST204' && message.includes(`'${columnName}'`);
-}
+const PROFILE_BASE_FIELDS = ['onboarding_completed', 'trial_ends_at', 'subscription_status', 'feedback_submitted', 'trial_extended', 'role'];
+const PROFILE_FIELDS_BASE = PROFILE_BASE_FIELDS.join(', ');
+const PROFILE_FIELDS_WITH_GUEST_FLAGS = [...PROFILE_BASE_FIELDS, 'is_guest_campaign_user', 'requires_signup_for_next_session'].join(', ');
 
 async function fetchUserProfile(userId) {
   const { data, error } = await supabase
@@ -124,6 +120,7 @@ function AuthGuardV2({ children }) {
   React.useEffect(() => {
     // If auth is still resolving, don't do anything yet
     if (loading) return;
+    // Lives in effect scope so cleanup can cancel stale async profile requests.
     let cancelled = false;
 
     if (!user?.id) {
