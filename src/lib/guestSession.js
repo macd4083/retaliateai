@@ -26,7 +26,7 @@ function normalizeSearchParams(searchParams) {
 function cleanAttributionValue(value) {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
-  return trimmed || undefined;
+  return trimmed.length > 0 ? trimmed : undefined;
 }
 
 export function sanitizeAttribution(attribution) {

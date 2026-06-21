@@ -72,13 +72,14 @@ describe('guest campaign onboarding', () => {
   let view;
   let updateMock;
   let eqMock;
+  const testWindow = /** @type {any} */ (window);
 
   beforeEach(() => {
     sessionStorage.clear();
     vi.useRealTimers();
     vi.clearAllMocks();
 
-    delete window['fbq'];
+    testWindow.fbq = undefined;
 
     posthogMock.__loaded = false;
     posthogMock.init = vi.fn();
@@ -205,7 +206,7 @@ describe('guest campaign onboarding', () => {
       throw new Error('ERR_BLOCKED_BY_CLIENT');
     });
 
-    window['fbq'] = vi.fn(() => {
+    testWindow.fbq = vi.fn(() => {
       throw new Error('ERR_BLOCKED_BY_CLIENT');
     });
 
@@ -229,7 +230,7 @@ describe('guest campaign onboarding', () => {
     await waitForCondition(() => view.router.state.location.pathname === '/login');
     await waitForCondition(() => view.container.textContent.includes('Create your account'));
 
-    expect(window['fbq']).toHaveBeenCalledWith('track', 'Lead');
+    expect(testWindow.fbq).toHaveBeenCalledWith('track', 'Lead');
     expect(view.container.textContent).toContain('Create your account');
   });
 });

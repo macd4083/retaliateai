@@ -10,19 +10,19 @@ import {
   saveAttribution,
 } from '../lib/guestSession';
 
-function isAnonymousAuthDisabled(error) {
+function isAnonymousAuthDisabled(authError) {
   const message = String(
-    error?.message ||
-    error?.error_description ||
-    error?.details ||
-    error ||
+    authError?.message ||
+    authError?.error_description ||
+    authError?.details ||
+    authError ||
     ''
   ).toLowerCase();
 
   return (
     message.includes('anonymous sign-ins are disabled') ||
     message.includes('anonymous sign ins are disabled') ||
-    (error?.status === 422 && message.includes('anonymous'))
+    (authError?.status === 422 && message.includes('anonymous'))
   );
 }
 
