@@ -133,7 +133,7 @@ export default function GuestEntry() {
         <p className="text-amber-300 text-sm max-w-sm">{fallbackMessage}</p>
         <button
           onClick={() => navigate(fallbackPath, { replace: true })}
-          className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors"
+          className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 focus:ring-offset-zinc-950"
         >
           Continue with Free Trial
         </button>
@@ -148,7 +148,7 @@ export default function GuestEntry() {
         <p className="text-red-400 text-sm">{error}</p>
         <button
           onClick={() => window.location.reload()}
-          className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors"
+          className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 focus:ring-offset-zinc-950"
         >
           Try Again
         </button>
