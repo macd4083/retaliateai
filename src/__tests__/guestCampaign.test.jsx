@@ -3,21 +3,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot } from 'react-dom/client';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 
-const posthogMock = {
-  __loaded: false,
-  init: vi.fn(),
-  capture: vi.fn(),
-  identify: vi.fn(),
-  opt_out_capturing: vi.fn(),
-};
-
-const supabaseMock = {
-  auth: {
-    getSession: vi.fn(),
-    signInAnonymously: vi.fn(),
+const { posthogMock, supabaseMock } = vi.hoisted(() => ({
+  posthogMock: {
+    __loaded: false,
+    init: vi.fn(),
+    capture: vi.fn(),
+    identify: vi.fn(),
+    opt_out_capturing: vi.fn(),
   },
-  from: vi.fn(),
-};
+  supabaseMock: {
+    auth: {
+      getSession: vi.fn(),
+      signInAnonymously: vi.fn(),
+    },
+    from: vi.fn(),
+  },
+}));
 
 vi.mock('posthog-js', () => ({
   default: posthogMock,
