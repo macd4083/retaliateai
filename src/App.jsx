@@ -28,6 +28,50 @@ import { usePageTracking } from './lib/usePageTracking';
 import { stopAnalytics } from './lib/analytics';
 import { readAttribution } from './lib/guestSession';
 
+const PROFILE_FIELDS_WITH_GUEST_FLAGS = 'onboarding_completed, trial_ends_at, subscription_status, feedback_submitted, trial_extended, role, is_guest_campaign_user, requires_signup_for_next_session';
+const PROFILE_FIELDS_BASE = 'onboarding_completed, trial_ends_at, subscription_status, feedback_submitted, trial_extended, role';
+
+function isMissingProfileColumn(error, columnName) {
+  if (!columnName) return false;
+  const message = String(error?.message || '');
+  return error?.code === 'PGRST204' && message.includes(`'${columnName}'`);
+}
+
+async function fetchUserProfile(userId) {
+  const { data, error } = await supabase
+    .from('user_profiles')
+    .select(PROFILE_FIELDS_WITH_GUEST_FLAGS)
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (!error) return { data, error: null };
+
+  const missingGuestColumns =
+    isMissingProfileColumn(error, 'is_guest_campaign_user') ||
+    isMissingProfileColumn(error, 'requires_signup_for_next_session');
+
+  if (!missingGuestColumns) return { data: null, error };
+
+  const { data: fallbackData, error: fallbackError } = await supabase
+    .from('user_profiles')
+    .select(PROFILE_FIELDS_BASE)
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (fallbackError) return { data: null, error: fallbackError };
+
+  return {
+    data: fallbackData
+      ? {
+          ...fallbackData,
+          is_guest_campaign_user: false,
+          requires_signup_for_next_session: false,
+        }
+      : null,
+    error: null,
+  };
+}
+
 // ── Old imports (preserved, not deleted) ────────────────────────────────────
 // import Sidebar from './components/layout/Sidebar';
 // import JournalEditor from './components/journal/JournalEditor';
@@ -80,6 +124,7 @@ function AuthGuardV2({ children }) {
   React.useEffect(() => {
     // If auth is still resolving, don't do anything yet
     if (loading) return;
+    let cancelled = false;
 
     if (!user?.id) {
       setProfileLoading(false);
@@ -87,19 +132,26 @@ function AuthGuardV2({ children }) {
       return;
     }
 
-    supabase
-      .from('user_profiles')
-      .select('onboarding_completed, trial_ends_at, subscription_status, feedback_submitted, trial_extended, role, is_guest_campaign_user, requires_signup_for_next_session')
-      .eq('id', user.id)
-      .maybeSingle()
-      .then(({ data }) => {
-        const completed = data?.onboarding_completed ?? false;
-        setOnboardingCompleted(completed);
-        // Stop tracking for users who have already completed onboarding
-        if (completed) stopAnalytics();
-        setProfileData(data || null);
-        setProfileLoading(false);
-      });
+    async function loadProfile() {
+      const { data, error } = await fetchUserProfile(user.id);
+      if (cancelled) return;
+      if (error) {
+        console.error('[AuthGuardV2] profile load failed:', error);
+      }
+
+      const completed = data?.onboarding_completed ?? false;
+      setOnboardingCompleted(completed);
+      // Stop tracking for users who have already completed onboarding
+      if (completed) stopAnalytics();
+      setProfileData(data || null);
+      setProfileLoading(false);
+    }
+
+    loadProfile();
+
+    return () => {
+      cancelled = true;
+    };
   }, [user?.id, loading]); // FIX: also depend on loading so we wait for auth to settle
 
   // Show loading screen until BOTH auth AND profile check are done.
@@ -112,6 +164,8 @@ function AuthGuardV2({ children }) {
 
   // Guest campaign users who have already completed their first session: show signup gate.
   // user.is_anonymous === true distinguishes anonymous (guest) users from signed-up users.
+  const isGuestUser = profileData?.is_guest_campaign_user || user?.is_anonymous === true;
+
   if (
     profileData?.is_guest_campaign_user &&
     profileData?.requires_signup_for_next_session &&
@@ -121,7 +175,7 @@ function AuthGuardV2({ children }) {
   }
 
   // Guest campaign users bypass onboarding — go straight to the session.
-  if (!onboardingCompleted && !profileData?.is_guest_campaign_user) {
+  if (!onboardingCompleted && !isGuestUser) {
     return (
       <OnboardingV2
         onOnboardingComplete={() => {

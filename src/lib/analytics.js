@@ -27,6 +27,9 @@ export function initAnalytics() {
         maskAllInputs: true,
       },
       autocapture: true,
+      // Avoid loading optional external PostHog extensions (often blocked by ad blockers).
+      // Core analytics still work, and blocked extension scripts won't affect app flow.
+      disable_external_dependency_loading: true,
       loaded: (ph) => {
         try {
           if (import.meta.env.DEV && typeof ph?.debug === 'function') ph.debug();

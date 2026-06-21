@@ -158,14 +158,43 @@ describe('guest campaign onboarding', () => {
     expect(updateMock).toHaveBeenCalledWith(
       expect.objectContaining({
         is_guest_campaign_user: true,
-        campaign_attribution: expect.objectContaining({
-          src: 'instagram',
-          utm_source: 'instagram',
-          utm_campaign: 'trial',
-        }),
+        updated_at: expect.any(String),
       })
     );
     expect(eqMock).toHaveBeenCalledWith('id', 'guest-user-1');
+  });
+
+  it('falls back to minimal profile update when optional guest columns are missing', async () => {
+    eqMock
+      .mockResolvedValueOnce({
+        error: {
+          code: 'PGRST204',
+          message: "Could not find the 'is_guest_campaign_user' column of 'user_profiles' in the schema cache",
+        },
+      })
+      .mockResolvedValueOnce({ error: null });
+
+    view = await renderRouter('/start/guest?src=instagram', [
+      { path: '/start/guest', element: <GuestEntry /> },
+      { path: '/reflection', element: <div>Reflection Ready</div> },
+    ]);
+
+    await waitForCondition(() => view.router.state.location.pathname === '/reflection', 'guest redirect');
+
+    expect(updateMock).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        is_guest_campaign_user: true,
+      })
+    );
+    expect(updateMock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        updated_at: expect.any(String),
+      })
+    );
+    expect(updateMock).toHaveBeenCalledTimes(2);
+    expect(eqMock).toHaveBeenCalledTimes(2);
   });
 
   it('falls back to signup without crashing when anonymous auth is disabled', async () => {
