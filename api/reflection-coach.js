@@ -120,6 +120,8 @@ const supabase = createClient(
 const DEFAULT_CHECKLIST = { wins: false, commitment_checkin: false, honest: false, plan: false };
 const CHECKLIST_INIT_MESSAGE = "Here are your commitments from yesterday — check off what you actually did so I can get a sense of where we're starting tonight.";
 const CHECKLIST_SUBMITTED_SENTINEL = '__checklist_submitted__';
+// After ~16 session messages, tomorrow-stage planning usually loops without adding new commitment detail.
+const TOMORROW_STAGE_MAX_MESSAGES_BEFORE_CLOSE = 16;
 const MIN_DEEP_SESSION_MESSAGE_COUNT = 6;
 const MAX_DEPTH_INSIGHTS_RETAINED = 4;
 const MAX_COMMITMENT_WHYS = 1;   // max 1 active commitment_planning why per goal (always replace)
@@ -787,7 +789,9 @@ function deriveStageHint(sessionState, classifierChecklist, completedDirectives 
 
   // tomorrow → complete: gate purely on real checklist signals, no message counters
   const bridgeDone = sessionState.commitment_goal_bridge_done === true;
-  if (stage === 'tomorrow' && hasPlan && sessionState.commitment_minimum && bridgeDone) return 'complete';
+  // Safety valve: if tomorrow planning drags too long, allow session close.
+  const closeByExhaustion = messageCount >= TOMORROW_STAGE_MAX_MESSAGES_BEFORE_CLOSE;
+  if (stage === 'tomorrow' && hasPlan && sessionState.commitment_minimum && (bridgeDone || closeByExhaustion)) return 'complete';
   return null;
 }
 
@@ -2487,12 +2491,12 @@ Set directive_completed: "${probeId}" when done.`,
       && sessionState.wins_asked_for_more === true
       && winsUserTurnCount >= 3;
     const stageHintInstruction = (isWinsToHonest && userSignaledDone)
-      ? 'STAGE HINT: You MUST set stage_advance:true, new_stage:"honest" on this response. Do not wait — the user has signaled they are done with wins. Transition with a soft pivot phrase (e.g. "Okay — I want to shift for a second.") and ask the honest question. Never announce the stage name.'
+      ? 'STAGE HINT: The user has signaled they are done with wins. Transition with a soft pivot phrase (e.g. "Okay — I want to shift for a second.") and ask the honest question. Never announce the stage name.'
       : canSoftHintWinsToHonest
-        ? 'STAGE HINT: The user has shared enough wins and you have invited them to share more. It is now appropriate to gently transition to the honest stage. You MAY set stage_advance:true, new_stage:"honest" if the conversation naturally supports it — use a soft bridging phrase. Do not force it if the user is mid-thought, but do not wait indefinitely.'
+      ? 'STAGE HINT: The user has shared enough wins and you have invited them to share more. It is now appropriate to gently transition to the honest stage with a soft bridging phrase. Do not force it if the user is mid-thought, but do not wait indefinitely.'
       : isHonestToTomorrow
-        ? `STAGE HINT: Ready to move to "tomorrow". On THIS response, set stage_advance:true, new_stage:"tomorrow" and use only a soft bridging phrase that signals the shift without announcing stage names (e.g. "Alright, I've got a good picture of today. Let's talk about tomorrow."). For honest→tomorrow: Only transition if honest_depth has been confirmed for this session. Do NOT transition just because the user mentioned something they want to do differently — that belongs in honest. CRITICAL: Do NOT ask any planning question, commitment question, "small step", "next step", or future-action question on this same response turn. The transition response should be bridge-only. Then, on the NEXT turn after stage advancement, ask the minimum-first tomorrow commitment question grounded in their honest insight. Never announce the stage name.`
-        : `STAGE HINT: Ready to move to "${suggestedNextStage}". Transition naturally if conversation supports it — use a soft bridging phrase that signals the shift without announcing it. E.g. for wins→honest: "Okay — I want to shift for a second." For honest→tomorrow: "Alright, I've got a good picture of today. Let's talk about tomorrow." For tomorrow→complete: Do not announce a stage shift. Name the arc — what they committed to and the why behind it — in one sentence. Then set is_session_complete:true and deliver a warm specific closing message using their actual words. Never announce the stage name. Set stage_advance:true, new_stage:"${suggestedNextStage}".`;
+      ? `STAGE HINT: Ready to move toward tomorrow. Use only a soft bridging phrase that signals the shift without announcing stage names (e.g. "Alright, I've got a good picture of today. Let's talk about tomorrow."). For honest→tomorrow: only use this bridge if honest_depth has been confirmed for this session. Do NOT transition just because the user mentioned something they want to do differently — that belongs in honest. CRITICAL: Do NOT ask any planning question, commitment question, "small step", "next step", or future-action question on this same response turn. The transition response should be bridge-only. Then, on the NEXT turn, ask the minimum-first tomorrow commitment question grounded in their honest insight. Never announce the stage name.`
+      : `STAGE HINT: Ready to move toward "${suggestedNextStage}". Transition naturally if conversation supports it — use a soft bridging phrase that signals the shift without announcing it. E.g. for wins→honest: "Okay — I want to shift for a second." For honest→tomorrow: "Alright, I've got a good picture of today. Let's talk about tomorrow." For tomorrow→complete: Do not announce a stage shift. Name the arc — what they committed to and the why behind it — in one sentence, and deliver a warm specific closing message using their actual words. Never announce the stage name.`;
 
     allDirectives.push({
       id: 'stage_hint',
@@ -3508,6 +3512,8 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
 
     result.exercise_run = result.exercise_run || 'none';
     const stageAtTurnStart = session_state.current_stage || 'commitment_checkin';
+    // Preserve model-requested transition before server-authoritative routing overwrites result fields.
+    const modelRequestedStageAdvance = result.stage_advance === true ? result.new_stage : null;
     result.checklist_updates = result.checklist_updates || { ...DEFAULT_CHECKLIST };
     const VALID_STAGES = ['wins', 'commitment_checkin', 'honest', 'tomorrow', 'complete'];
     const VALID_TRANSITIONS = {
@@ -3810,12 +3816,11 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
       }
     }
     if (
-      result.stage_advance === true &&
-      result.new_stage &&
-      result.new_stage !== stageAtTurnStart &&
+      modelRequestedStageAdvance &&
+      modelRequestedStageAdvance !== stageAtTurnStart &&
       (result.directive_completed === null || result.directive_completed === undefined)
     ) {
-      console.warn(`[stage-guard] Stage advanced to ${result.new_stage} without directive_completed (turn ${messageCount})`);
+      console.warn(`[stage-guard] Model advanced to ${modelRequestedStageAdvance} without directive_completed (turn ${messageCount})`);
     }
 
     // Bug B guard: is_session_complete requires both minimum AND stretch to be captured
@@ -3861,6 +3866,50 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
     result.commitment_goal_bridge_done = firedDirectiveId === 'commitment_goal_why_depth'
       ? true
       : (session_state.commitment_goal_bridge_done === true);
+
+    const checkinCompletedInResult = result.commitment_checkin_done === true;
+    const checkinCompletedInState = session_state.commitment_checkin_done === true;
+    const checkinCompletedFromChecklistScore = precomputedScore !== null;
+    const routingState = {
+      ...session_state,
+      checklist: { ...(session_state.checklist || {}), ...(result.checklist_updates || {}) },
+      commitment_checkin_done: checkinCompletedInResult || checkinCompletedInState || checkinCompletedFromChecklistScore,
+      commitment_score: result.extracted_data?.commitment_score ?? session_state.commitment_score ?? precomputedScore,
+      wins_asked_for_more: session_state.wins_asked_for_more === true || result.wins_asked_for_more === true,
+      honest_depth: session_state.honest_depth === true || result.honest_depth === true,
+      tomorrow_commitment: result.extracted_data?.tomorrow_commitment || session_state.tomorrow_commitment || null,
+      commitment_minimum: result.extracted_data?.commitment_minimum || session_state.commitment_minimum || null,
+      commitment_stretch: result.extracted_data?.commitment_stretch || session_state.commitment_stretch || null,
+      stage_order_swapped: result.stage_order_swapped === true || session_state.stage_order_swapped === true,
+      commitment_goal_bridge_done: result.commitment_goal_bridge_done === true || session_state.commitment_goal_bridge_done === true,
+    };
+    const authoritativeStage = result.is_session_complete
+      ? 'complete'
+      : deriveStageHint(
+        routingState,
+        intentData?.checklist_content,
+        completedDirectives,
+        messageCount,
+        intentData,
+        displayMessage
+      );
+    if (authoritativeStage && authoritativeStage !== stageAtTurnStart) {
+      result.stage_advance = true;
+      result.new_stage = authoritativeStage;
+      if (authoritativeStage === 'honest') result.stage_order_swapped = true;
+    } else {
+      result.stage_advance = false;
+      result.new_stage = null;
+    }
+
+    if (
+      modelRequestedStageAdvance &&
+      modelRequestedStageAdvance !== result.new_stage &&
+      modelRequestedStageAdvance !== stageAtTurnStart
+    ) {
+      console.warn(`[stage-router] Overrode model transition ${stageAtTurnStart} → ${modelRequestedStageAdvance} with ${result.new_stage || stageAtTurnStart}`);
+    }
+
     const stageShiftReason = buildStageShiftReason({
       previousStage: stageAtTurnStart,
       newStage: result.new_stage,

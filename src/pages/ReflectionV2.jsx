@@ -881,7 +881,6 @@ export default function ReflectionV2() {
           dbUpdates.commitment_stretch = data.extracted_data.commitment_stretch;
         if (data.extracted_data?.commitment_score != null)
           dbUpdates.commitment_score = data.extracted_data.commitment_score;
-        if (data.stage_advance && data.new_stage) dbUpdates.current_stage = data.new_stage;
         if (data.commitment_checkin_done === true && !state.commitment_checkin_done) {
           dbUpdates.commitment_checkin_done = true;
         }
@@ -1200,10 +1199,6 @@ export default function ReflectionV2() {
     : isComplete
     ? 'Anything else on your mind...'
     : STAGE_PLACEHOLDERS[sessionState.current_stage] || 'Tell me more...';
-  const displayStage = (sessionState.current_stage === 'wins' || sessionState.current_stage === 'honest') && !sessionState.commitment_checkin_done
-    ? 'commitment_checkin'
-    : sessionState.current_stage;
-
   return (
     <AppShellV2
       title="Nightly Reflection"
@@ -1221,7 +1216,7 @@ export default function ReflectionV2() {
     >
       <div className="flex flex-col h-full">
         <div className="flex-shrink-0 border-b border-zinc-800 bg-zinc-950">
-          <ProgressBar currentStage={isComplete ? 'complete' : displayStage} stages={stages} />
+          <ProgressBar currentStage={isComplete ? 'complete' : sessionState.current_stage} stages={stages} />
         </div>
 
         <AnimatePresence mode="wait">
