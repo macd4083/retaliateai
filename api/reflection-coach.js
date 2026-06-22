@@ -120,6 +120,8 @@ const supabase = createClient(
 const DEFAULT_CHECKLIST = { wins: false, commitment_checkin: false, honest: false, plan: false };
 const CHECKLIST_INIT_MESSAGE = "Here are your commitments from yesterday — check off what you actually did so I can get a sense of where we're starting tonight.";
 const CHECKLIST_SUBMITTED_SENTINEL = '__checklist_submitted__';
+// After ~16 session messages, tomorrow-stage planning usually loops without adding new commitment detail.
+const TOMORROW_STAGE_MAX_MESSAGES_BEFORE_CLOSE = 16;
 const MIN_DEEP_SESSION_MESSAGE_COUNT = 6;
 const MAX_DEPTH_INSIGHTS_RETAINED = 4;
 const MAX_COMMITMENT_WHYS = 1;   // max 1 active commitment_planning why per goal (always replace)
@@ -787,7 +789,8 @@ function deriveStageHint(sessionState, classifierChecklist, completedDirectives 
 
   // tomorrow → complete: gate purely on real checklist signals, no message counters
   const bridgeDone = sessionState.commitment_goal_bridge_done === true;
-  const closeByExhaustion = messageCount >= 16;
+  // Safety valve: if tomorrow planning drags too long, allow session close.
+  const closeByExhaustion = messageCount >= TOMORROW_STAGE_MAX_MESSAGES_BEFORE_CLOSE;
   if (stage === 'tomorrow' && hasPlan && sessionState.commitment_minimum && (bridgeDone || closeByExhaustion)) return 'complete';
   return null;
 }
@@ -3509,6 +3512,7 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
 
     result.exercise_run = result.exercise_run || 'none';
     const stageAtTurnStart = session_state.current_stage || 'commitment_checkin';
+    // Preserve model-requested transition before server-authoritative routing overwrites result fields.
     const modelRequestedStageAdvance = result.stage_advance === true ? result.new_stage : null;
     result.checklist_updates = result.checklist_updates || { ...DEFAULT_CHECKLIST };
     const VALID_STAGES = ['wins', 'commitment_checkin', 'honest', 'tomorrow', 'complete'];
@@ -3813,12 +3817,10 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
     }
     if (
       modelRequestedStageAdvance &&
-      result.stage_advance === true &&
-      result.new_stage &&
-      result.new_stage !== stageAtTurnStart &&
+      modelRequestedStageAdvance !== stageAtTurnStart &&
       (result.directive_completed === null || result.directive_completed === undefined)
     ) {
-      console.warn(`[stage-guard] Model advanced to ${result.new_stage} without directive_completed (turn ${messageCount})`);
+      console.warn(`[stage-guard] Model advanced to ${modelRequestedStageAdvance} without directive_completed (turn ${messageCount})`);
     }
 
     // Bug B guard: is_session_complete requires both minimum AND stretch to be captured
@@ -3865,10 +3867,13 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
       ? true
       : (session_state.commitment_goal_bridge_done === true);
 
+    const checkinCompletedInResult = result.commitment_checkin_done === true;
+    const checkinCompletedInState = session_state.commitment_checkin_done === true;
+    const checkinCompletedFromChecklistScore = precomputedScore !== null;
     const routingState = {
       ...session_state,
       checklist: { ...(session_state.checklist || {}), ...(result.checklist_updates || {}) },
-      commitment_checkin_done: result.commitment_checkin_done === true || session_state.commitment_checkin_done === true || precomputedScore !== null,
+      commitment_checkin_done: checkinCompletedInResult || checkinCompletedInState || checkinCompletedFromChecklistScore,
       commitment_score: result.extracted_data?.commitment_score ?? session_state.commitment_score ?? precomputedScore,
       wins_asked_for_more: session_state.wins_asked_for_more === true || result.wins_asked_for_more === true,
       honest_depth: session_state.honest_depth === true || result.honest_depth === true,
@@ -3882,7 +3887,7 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
       ? 'complete'
       : deriveStageHint(
         routingState,
-        null,
+        intentData?.checklist_content,
         completedDirectives,
         messageCount,
         intentData,
@@ -3894,7 +3899,7 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
       if (authoritativeStage === 'honest') result.stage_order_swapped = true;
     } else {
       result.stage_advance = false;
-      if (!result.is_session_complete) result.new_stage = null;
+      result.new_stage = null;
     }
 
     if (
