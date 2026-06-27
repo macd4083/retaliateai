@@ -25,7 +25,12 @@ import { useAuth } from './lib/AuthContext';
 import { supabase } from './lib/supabase/client';
 import { usePageTracking } from './lib/usePageTracking';
 import { stopAnalytics } from './lib/analytics';
-import { buildSignupPath, evaluateGuestAccess, readAttribution } from './lib/guestSession';
+import {
+  buildSignupPath,
+  evaluateGuestAccess,
+  fetchGuestGuardrailsEnabled,
+  readAttribution,
+} from './lib/guestSession';
 import { isMissingProfileColumn } from './lib/supabase/profileSchema';
 
 const PROFILE_BASE_FIELDS = ['onboarding_completed', 'trial_ends_at', 'subscription_status', 'feedback_submitted', 'trial_extended', 'role'];
@@ -81,6 +86,10 @@ async function fetchUserProfile(userId) {
   };
 }
 
+export function isGuestCampaignUser(profileData, user) {
+  return profileData?.is_guest_campaign_user === true || user?.is_anonymous === true;
+}
+
 // ── Old imports (preserved, not deleted) ────────────────────────────────────
 // import Sidebar from './components/layout/Sidebar';
 // import JournalEditor from './components/journal/JournalEditor';
@@ -125,6 +134,7 @@ function AuthGuardV2({ children }) {
   const [profileData, setProfileData] = React.useState(null);
   const [profileLoading, setProfileLoading] = React.useState(true);
   const [feedbackDismissed, setFeedbackDismissed] = React.useState(false);
+  const [guardrailsEnabled, setGuardrailsEnabled] = React.useState(true);
 
   React.useEffect(() => {
     setFeedbackDismissed(false);
@@ -139,17 +149,22 @@ function AuthGuardV2({ children }) {
     if (!user?.id) {
       setProfileLoading(false);
       setOnboardingCompleted(false);
+      setGuardrailsEnabled(true);
       return;
     }
 
     async function loadProfile() {
-      const { data, error } = await fetchUserProfile(user.id);
+      const [{ data, error }, nextGuardrailsEnabled] = await Promise.all([
+        fetchUserProfile(user.id),
+        fetchGuestGuardrailsEnabled(supabase),
+      ]);
       if (cancelled) return;
       if (error) {
         console.error('[AuthGuardV2] profile load failed:', error);
       }
 
       const completed = data?.onboarding_completed ?? false;
+      setGuardrailsEnabled(nextGuardrailsEnabled);
       setOnboardingCompleted(completed);
       // Stop tracking for users who have already completed onboarding
       if (completed) stopAnalytics();
@@ -174,16 +189,13 @@ function AuthGuardV2({ children }) {
 
   // Guest campaign users who have already completed their first session: show signup gate.
   // user.is_anonymous === true distinguishes anonymous (guest) users from signed-up users.
-  const isGuestUser =
-    profileData?.is_guest_campaign_user === true ||
-    (user?.is_anonymous === true && profileData?.is_guest_campaign_user !== false);
+  const isGuestUser = isGuestCampaignUser(profileData, user);
+  const accessResult = evaluateGuestAccess(profileData, { guardrailsEnabled });
 
   if (
     isGuestUser &&
     user?.is_anonymous === true &&
-    (profileData?.requires_signup_for_next_session ||
-      evaluateGuestAccess(profileData) === 'cooldown' ||
-      evaluateGuestAccess(profileData) === 'require_signup')
+    (accessResult === 'cooldown' || accessResult === 'require_signup')
   ) {
     // Returning guest or guest in cooldown: redirect to the signup page, preserving any attribution.
     return <Navigate to={buildSignupPath(readAttribution())} replace />;

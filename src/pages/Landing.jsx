@@ -5,7 +5,12 @@ import { ArrowRight, CheckCircle, Download, Smartphone } from 'lucide-react';
 import { usePWAInstall } from '@/hooks/usePWAInstall';
 import { trackEvent } from '@/lib/analytics';
 import { supabase } from '@/lib/supabase/client';
-import { buildSignupPath, evaluateGuestAccess, readAttribution } from '@/lib/guestSession';
+import {
+  buildSignupPath,
+  evaluateGuestAccess,
+  fetchGuestGuardrailsEnabled,
+  readAttribution,
+} from '@/lib/guestSession';
 
 export default function Landing() {
   const navigate = useNavigate();
@@ -28,14 +33,19 @@ export default function Landing() {
     // Otherwise, show the landing page so they can navigate intentionally.
     let cancelled = false;
     setCheckingGuestProfile(true);
-    supabase
-      .from('user_profiles')
-      .select('requires_signup_for_next_session, guest_started_at, guest_cooldown_until')
-      .eq('id', user.id)
-      .maybeSingle()
-      .then(({ data, error }) => {
+    Promise.all([
+      supabase
+        .from('user_profiles')
+        .select('requires_signup_for_next_session, guest_started_at, guest_cooldown_until')
+        .eq('id', user.id)
+        .maybeSingle(),
+      fetchGuestGuardrailsEnabled(supabase),
+    ])
+      .then(([{ data, error }, guardrailsEnabled]) => {
         if (cancelled) return;
-        const accessResult = !error ? evaluateGuestAccess(data) : 'allow';
+        const accessResult = !error
+          ? evaluateGuestAccess(data, { guardrailsEnabled })
+          : 'allow';
         if (accessResult === 'require_signup' || accessResult === 'cooldown') {
           // Guest is blocked — send them to signup, preserving any attribution.
           navigate(buildSignupPath(readAttribution()), { replace: true });

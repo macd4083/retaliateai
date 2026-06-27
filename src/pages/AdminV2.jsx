@@ -5,6 +5,11 @@ import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase/client';
 import { localDateStr } from '../lib/dateUtils';
 import AppShellV2 from '../components/v2/AppShellV2';
+import { Switch } from '../components/ui/switch';
+import {
+  fetchGuestGuardrailsEnabled,
+  GUEST_GUARDRAILS_CONFIG_KEY,
+} from '../lib/guestSession';
 import {
   DEFAULT_LIVE_DEMO_SCRIPT,
   LIVE_DEMO_CHANNEL_NAME,
@@ -14,6 +19,8 @@ import {
 } from '../lib/liveDemo';
 
 const ADMIN_SECRET = import.meta.env.VITE_ADMIN_SECRET;
+const GUEST_GUARDRAILS_DESCRIPTION =
+  '2-day access window + 7-day cooldown policy for guest campaign users. Set false to bypass all guest timing gates.';
 
 const MAX_WHYS_TOTAL = 5;
 const MAX_SESSION_WHYS = 3;
@@ -399,6 +406,11 @@ export default function AdminV2() {
   const [goalLinkSaved, setGoalLinkSaved] = useState({});
   const [demoScript, setDemoScript] = useState('');
   const [demoScriptMsg, setDemoScriptMsg] = useState('');
+  const [guardrailsEnabled, setGuardrailsEnabled] = useState(true);
+  const [guardrailsDraft, setGuardrailsDraft] = useState(true);
+  const [guardrailsLoading, setGuardrailsLoading] = useState(false);
+  const [guardrailsSaving, setGuardrailsSaving] = useState(false);
+  const [guardrailsMsg, setGuardrailsMsg] = useState('');
   const [demoData, setDemoData] = useState({
     goals: [],
     commitmentScore: '',
@@ -444,6 +456,7 @@ export default function AdminV2() {
 
   useEffect(() => {
     if (isAdmin) {
+      loadGuestGuardrails();
       loadCommitmentRows();
       loadActiveGoals();
     }
@@ -516,6 +529,40 @@ export default function AdminV2() {
       setSessions(json.data || []);
     } catch (_e) {}
     setLoading(false);
+  }
+
+  async function loadGuestGuardrails() {
+    setGuardrailsLoading(true);
+    const enabled = await fetchGuestGuardrailsEnabled(supabase);
+    setGuardrailsEnabled(enabled);
+    setGuardrailsDraft(enabled);
+    setGuardrailsLoading(false);
+  }
+
+  async function saveGuestGuardrails() {
+    if (!user?.id) return;
+    setGuardrailsSaving(true);
+    setGuardrailsMsg('');
+    const { error } = await supabase
+      .from('app_config')
+      .upsert(
+        {
+          key: GUEST_GUARDRAILS_CONFIG_KEY,
+          value: guardrailsDraft,
+          description: GUEST_GUARDRAILS_DESCRIPTION,
+          updated_at: new Date().toISOString(),
+          updated_by: user.id,
+        },
+        { onConflict: 'key' }
+      );
+
+    if (error) {
+      setGuardrailsMsg('Failed to save guest guardrails.');
+    } else {
+      setGuardrailsEnabled(guardrailsDraft);
+      setGuardrailsMsg('Guest guardrails updated.');
+    }
+    setGuardrailsSaving(false);
   }
 
   async function loadTabData(tab) {
@@ -1060,6 +1107,56 @@ export default function AdminV2() {
             <RefreshCw className="w-4 h-4" />
             Refresh
           </button>
+        </div>
+
+        <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 sm:p-6 space-y-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-1">
+              <h3 className="text-white font-semibold text-base">Guest Guardrails</h3>
+              <p className="text-sm text-zinc-400 max-w-2xl">
+                Toggle the guest timing policy for `/start/guest`. When disabled, guest users bypass the
+                2-day access window, cooldown, and signup gate.
+              </p>
+            </div>
+            <Switch
+              checked={guardrailsDraft}
+              onCheckedChange={setGuardrailsDraft}
+              disabled={guardrailsLoading || guardrailsSaving}
+              aria-label="Toggle guest guardrails"
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <span
+              className={`px-3 py-1 rounded-full text-xs font-semibold border ${
+                guardrailsDraft
+                  ? 'bg-emerald-900/30 border-emerald-800 text-emerald-300'
+                  : 'bg-amber-900/30 border-amber-800 text-amber-300'
+              }`}
+            >
+              {guardrailsDraft ? 'Guardrails enabled' : 'Guardrails disabled'}
+            </span>
+            <button
+              onClick={saveGuestGuardrails}
+              disabled={guardrailsLoading || guardrailsSaving || guardrailsDraft === guardrailsEnabled}
+              className="px-3 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {guardrailsSaving ? 'Saving…' : 'Save'}
+            </button>
+            <button
+              onClick={loadGuestGuardrails}
+              disabled={guardrailsLoading || guardrailsSaving}
+              className="px-3 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-white text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {guardrailsLoading ? 'Refreshing…' : 'Refresh'}
+            </button>
+          </div>
+
+          {guardrailsMsg && (
+            <div className="px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-sm text-zinc-300">
+              {guardrailsMsg}
+            </div>
+          )}
         </div>
 
         <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 sm:p-6 space-y-4">
