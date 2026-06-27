@@ -111,8 +111,11 @@ export default function GuestEntry() {
           if (!cancelled) navigate(buildSignupPath(attribution), { replace: true });
           return;
         }
-      } catch (_e) {
-        // Column may not exist yet — safe to continue to the session.
+        if (gateError && !isMissingProfileColumn(gateError, 'requires_signup_for_next_session')) {
+          console.error('[GuestEntry] gate check failed:', gateError);
+        }
+      } catch (gateErr) {
+        console.error('[GuestEntry] gate check threw:', gateErr);
       }
 
       // Identify in analytics so subsequent events carry guest context

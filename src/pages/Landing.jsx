@@ -24,6 +24,7 @@ export default function Landing() {
 
     // Anonymous (guest) user: check whether they have already completed a first
     // session and therefore need to sign up before continuing.
+    let cancelled = false;
     setCheckingGuestProfile(true);
     supabase
       .from('user_profiles')
@@ -31,6 +32,7 @@ export default function Landing() {
       .eq('id', user.id)
       .maybeSingle()
       .then(({ data, error }) => {
+        if (cancelled) return;
         if (!error && data?.requires_signup_for_next_session === true) {
           // Returning guest — send them to signup, preserving any attribution.
           navigate(buildSignupPath(readAttribution()), { replace: true });
@@ -38,7 +40,17 @@ export default function Landing() {
           // First-visit guest or profile unavailable — let the reflection guard decide.
           navigate('/reflection', { replace: true });
         }
+      })
+      .catch(() => {
+        if (!cancelled) navigate('/reflection', { replace: true });
+      })
+      .finally(() => {
+        if (!cancelled) setCheckingGuestProfile(false);
       });
+
+    return () => {
+      cancelled = true;
+    };
   // navigate and supabase are stable references; user.id/is_anonymous drive re-runs.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, user?.is_anonymous]);

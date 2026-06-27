@@ -75,7 +75,7 @@ async function renderRouter(initialEntry, routes) {
 describe('guest campaign onboarding', () => {
   let view;
   let updateMock;
-  let eqMock;        // eq used in the update chain (profile write)
+  let updateEqMock;        // eq used in the update chain (profile write)
   let selectEqMock;  // eq used in the select chain (gate check)
   let maybeSingleMock;
   let selectMock;
@@ -102,8 +102,8 @@ describe('guest campaign onboarding', () => {
     selectMock = vi.fn().mockReturnValue({ eq: selectEqMock });
 
     // Profile-update chain: update({...}).eq(...)
-    eqMock = vi.fn().mockResolvedValue({ error: null });
-    updateMock = vi.fn().mockReturnValue({ eq: eqMock });
+    updateEqMock = vi.fn().mockResolvedValue({ error: null });
+    updateMock = vi.fn().mockReturnValue({ eq: updateEqMock });
 
     supabaseMock.auth.getSession.mockResolvedValue({
       data: { session: null },
@@ -172,11 +172,11 @@ describe('guest campaign onboarding', () => {
         updated_at: expect.any(String),
       })
     );
-    expect(eqMock).toHaveBeenCalledWith('id', 'guest-user-1');
+    expect(updateEqMock).toHaveBeenCalledWith('id', 'guest-user-1');
   });
 
   it('falls back to minimal profile update when optional guest columns are missing', async () => {
-    eqMock
+    updateEqMock
       .mockResolvedValueOnce({
         error: {
           code: 'PGRST204',
@@ -205,7 +205,7 @@ describe('guest campaign onboarding', () => {
       })
     );
     expect(updateMock).toHaveBeenCalledTimes(2);
-    expect(eqMock).toHaveBeenCalledTimes(2);
+    expect(updateEqMock).toHaveBeenCalledTimes(2);
   });
 
   it('falls back to signup without crashing when anonymous auth is disabled', async () => {
