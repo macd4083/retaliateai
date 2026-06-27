@@ -37,6 +37,7 @@ export function evaluateGuestAccess(profile, { guardrailsEnabled = true } = {}) 
   if (!profile) return 'allow';
 
   const now = new Date();
+  const requiresSignup = profile.requires_signup_for_next_session === true;
 
   if (profile.guest_started_at) {
     const startedAt = new Date(profile.guest_started_at);
@@ -46,16 +47,14 @@ export function evaluateGuestAccess(profile, { guardrailsEnabled = true } = {}) 
       : new Date(startedAt.getTime() + GUEST_COOLDOWN_WINDOW_MS);
 
     if (now <= allowedUntil) return 'allow';
-    if (profile.requires_signup_for_next_session === true) return 'require_signup';
+    if (requiresSignup) return 'require_signup';
     if (now < cooldownUntil) return 'cooldown';
     // Past the full cooldown — require signup (conversion optimisation)
     return 'require_signup';
   }
 
-  if (profile.requires_signup_for_next_session === true) return 'require_signup';
-
   // No timing data — new user, allow through
-  return 'allow';
+  return requiresSignup ? 'require_signup' : 'allow';
 }
 
 export async function fetchGuestGuardrailsEnabled(supabaseClient) {
