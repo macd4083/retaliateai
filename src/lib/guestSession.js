@@ -66,7 +66,7 @@ export async function fetchGuestGuardrailsEnabled(supabaseClient) {
       .maybeSingle();
 
     if (error) return true;
-    return data?.value === false ? false : true;
+    return data?.value !== false;
   } catch (_error) {
     return true;
   }
