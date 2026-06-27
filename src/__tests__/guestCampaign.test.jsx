@@ -32,7 +32,11 @@ import Login from '../pages/Login';
 import GuestEntry from '../pages/GuestEntry';
 import {
   buildSignupPath,
+  evaluateGuestAccess,
   extractAttribution,
+  GUEST_ALLOWED_WINDOW_MS,
+  GUEST_COOLDOWN_MESSAGE,
+  GUEST_COOLDOWN_WINDOW_MS,
   GUEST_FALLBACK_REDIRECT_DELAY_MS,
   GUEST_MODE_UNAVAILABLE_MESSAGE,
   readAttribution,
@@ -166,21 +170,27 @@ describe('guest campaign onboarding', () => {
     });
     expect(supabaseMock.auth.signInAnonymously).toHaveBeenCalledTimes(1);
     expect(supabaseMock.from).toHaveBeenCalledWith('user_profiles');
+    // First visit: profile update must include timing fields
     expect(updateMock).toHaveBeenCalledWith(
       expect.objectContaining({
         is_guest_campaign_user: true,
         updated_at: expect.any(String),
+        guest_started_at: expect.any(String),
+        guest_cooldown_until: expect.any(String),
+        guest_usage_count: 1,
       })
     );
     expect(updateEqMock).toHaveBeenCalledWith('id', 'guest-user-1');
   });
 
   it('falls back to minimal profile update when optional guest columns are missing', async () => {
+    // First call (full update with timing fields) → PGRST204 (timing columns not yet deployed)
+    // Second call (fallback: just is_guest_campaign_user + updated_at) → succeeds
     updateEqMock
       .mockResolvedValueOnce({
         error: {
           code: 'PGRST204',
-          message: "Could not find the 'is_guest_campaign_user' column of 'user_profiles' in the schema cache",
+          message: "Could not find the 'guest_started_at' column of 'user_profiles' in the schema cache",
         },
       })
       .mockResolvedValueOnce({ error: null });
@@ -192,18 +202,25 @@ describe('guest campaign onboarding', () => {
 
     await waitForCondition(() => view.router.state.location.pathname === '/reflection', 'guest redirect');
 
+    // First call: full update including timing fields
     expect(updateMock).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
         is_guest_campaign_user: true,
+        guest_started_at: expect.any(String),
+        guest_cooldown_until: expect.any(String),
+        guest_usage_count: 1,
       })
     );
+    // Second call (fallback): just guest flag + updated_at, no timing fields
     expect(updateMock).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
+        is_guest_campaign_user: true,
         updated_at: expect.any(String),
       })
     );
+    expect(updateMock.mock.calls[1][0]).not.toHaveProperty('guest_started_at');
     expect(updateMock).toHaveBeenCalledTimes(2);
     expect(updateEqMock).toHaveBeenCalledTimes(2);
   });
@@ -325,5 +342,152 @@ describe('guest campaign onboarding', () => {
 
     await waitForCondition(() => view.router.state.location.pathname === '/reflection', 'fallback redirect');
     expect(updateMock).toHaveBeenCalled();
+  });
+
+  // ── Guest timing policy tests ──────────────────────────────────────────────
+
+  describe('evaluateGuestAccess (unit)', () => {
+    it('returns allow for null profile', () => {
+      expect(evaluateGuestAccess(null)).toBe('allow');
+    });
+
+    it('returns allow for brand-new guest with no timing fields', () => {
+      expect(evaluateGuestAccess({ requires_signup_for_next_session: false })).toBe('allow');
+    });
+
+    it('returns require_signup when requires_signup_for_next_session is true', () => {
+      expect(evaluateGuestAccess({ requires_signup_for_next_session: true })).toBe('require_signup');
+    });
+
+    it('returns allow when within the 2-day window', () => {
+      const guestStartedAt = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(); // 1 day ago
+      const guestCooldownUntil = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString();
+      expect(evaluateGuestAccess({ guest_started_at: guestStartedAt, guest_cooldown_until: guestCooldownUntil })).toBe('allow');
+    });
+
+    it('returns cooldown on day 3 (past 2-day window, before 7-day cooldown)', () => {
+      const guestStartedAt = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(); // 3 days ago
+      const guestCooldownUntil = new Date(Date.now() + 4 * 24 * 60 * 60 * 1000).toISOString(); // 4 days from now
+      expect(evaluateGuestAccess({ guest_started_at: guestStartedAt, guest_cooldown_until: guestCooldownUntil })).toBe('cooldown');
+    });
+
+    it('returns require_signup when past 7-day cooldown', () => {
+      const guestStartedAt = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString(); // 8 days ago
+      const guestCooldownUntil = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(); // expired yesterday
+      expect(evaluateGuestAccess({ guest_started_at: guestStartedAt, guest_cooldown_until: guestCooldownUntil })).toBe('require_signup');
+    });
+  });
+
+  it('blocks guest in cooldown window and shows message before redirecting to signup', async () => {
+    vi.useFakeTimers();
+    posthogMock.__loaded = true; // enable analytics so we can assert the tracking event
+    // Simulate a guest who started 4 days ago (past 2-day window, still in 7-day cooldown)
+    const fourDaysAgo = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString();
+    const threeDaysFromNow = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
+    supabaseMock.auth.getSession.mockResolvedValue({
+      data: { session: { user: { id: 'cooldown-guest-1' } } },
+      error: null,
+    });
+    maybeSingleMock.mockResolvedValue({
+      data: {
+        requires_signup_for_next_session: false,
+        guest_started_at: fourDaysAgo,
+        guest_cooldown_until: threeDaysFromNow,
+        guest_usage_count: 2,
+      },
+      error: null,
+    });
+
+    view = await renderRouter('/start/guest?src=instagram&utm_source=instagram', [
+      { path: '/start/guest', element: <GuestEntry /> },
+      { path: '/login', element: <div>Signup Page</div> },
+      { path: '/reflection', element: <div>Reflection</div> },
+    ]);
+
+    // Should show the cooldown message first
+    await waitForCondition(
+      () => view.container.textContent.includes(GUEST_COOLDOWN_MESSAGE),
+      'cooldown message'
+    );
+    expect(view.container.textContent).toContain('Continue with Free Trial');
+
+    // After the redirect timer fires, should land on /login
+    await act(async () => {
+      vi.advanceTimersByTime(GUEST_FALLBACK_REDIRECT_DELAY_MS);
+    });
+    await waitForCondition(() => view.router.state.location.pathname === '/login', 'cooldown redirect');
+
+    const params = new URLSearchParams(view.router.state.location.search);
+    expect(params.get('signup')).toBe('true');
+    // The cooldown analytics event should have fired
+    expect(posthogMock.capture).toHaveBeenCalledWith('guest_cooldown_blocked', expect.objectContaining({ guest_id: 'cooldown-guest-1' }));
+    // Profile update should NOT have been called (gate fired first)
+    expect(updateMock).not.toHaveBeenCalled();
+  });
+
+  it('allows guest within the 2-day window and increments usage count', async () => {
+    // Simulate a guest who started 1 day ago (still within the 2-day window)
+    const oneDayAgo = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
+    const sixDaysFromNow = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString();
+    supabaseMock.auth.getSession.mockResolvedValue({
+      data: { session: { user: { id: 'returning-guest-window' } } },
+      error: null,
+    });
+    maybeSingleMock.mockResolvedValue({
+      data: {
+        requires_signup_for_next_session: false,
+        guest_started_at: oneDayAgo,
+        guest_cooldown_until: sixDaysFromNow,
+        guest_usage_count: 1,
+      },
+      error: null,
+    });
+
+    view = await renderRouter('/start/guest?src=instagram', [
+      { path: '/start/guest', element: <GuestEntry /> },
+      { path: '/reflection', element: <div>Reflection Ready</div> },
+    ]);
+
+    await waitForCondition(() => view.router.state.location.pathname === '/reflection', 'window guest redirect');
+
+    // Profile update should increment usage count, NOT reset timing fields
+    expect(updateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        is_guest_campaign_user: true,
+        guest_usage_count: 2,
+        updated_at: expect.any(String),
+      })
+    );
+    // Should NOT set guest_started_at again (not a first visit)
+    expect(updateMock.mock.calls[0][0]).not.toHaveProperty('guest_started_at');
+  });
+
+  it('sets timing fields on first visit (no guest_started_at in profile)', async () => {
+    // Profile exists but has no timing fields — simulates a fresh anonymous user
+    maybeSingleMock.mockResolvedValue({
+      data: {
+        requires_signup_for_next_session: false,
+        guest_started_at: null,
+        guest_cooldown_until: null,
+        guest_usage_count: 0,
+      },
+      error: null,
+    });
+
+    view = await renderRouter('/start/guest?src=instagram', [
+      { path: '/start/guest', element: <GuestEntry /> },
+      { path: '/reflection', element: <div>Reflection Ready</div> },
+    ]);
+
+    await waitForCondition(() => view.router.state.location.pathname === '/reflection', 'first visit redirect');
+
+    expect(updateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        is_guest_campaign_user: true,
+        guest_started_at: expect.any(String),
+        guest_cooldown_until: expect.any(String),
+        guest_usage_count: 1,
+      })
+    );
   });
 });

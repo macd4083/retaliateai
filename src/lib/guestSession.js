@@ -12,6 +12,49 @@ const ATTRIBUTION_KEYS = ['src', 'utm_source', 'utm_medium', 'utm_campaign', 'ut
 export const GUEST_MODE_UNAVAILABLE_MESSAGE = 'Guest mode is unavailable right now. Continue with your free trial.';
 export const GUEST_FALLBACK_REDIRECT_DELAY_MS = 1200;
 
+/** Guest access timing constants */
+export const GUEST_ALLOWED_WINDOW_MS = 2 * 24 * 60 * 60 * 1000; // 2 days from first start
+export const GUEST_COOLDOWN_WINDOW_MS = 7 * 24 * 60 * 60 * 1000; // 7 days from first start
+
+export const GUEST_COOLDOWN_MESSAGE =
+  'Your guest access is temporarily paused. Sign up for free to continue your daily reflection habit.';
+
+/**
+ * Evaluates whether a guest profile can access the guest session based on timing policy.
+ *
+ * Policy:
+ *   - Day 0–2 from first start: access allowed
+ *   - Day 3–7 from first start: access blocked (cooldown)
+ *   - After day 7 or requires_signup_for_next_session flag: require signup
+ *
+ * @param {object|null} profile – row from user_profiles (may have null timing fields)
+ * @returns {'allow'|'cooldown'|'require_signup'}
+ */
+export function evaluateGuestAccess(profile) {
+  if (!profile) return 'allow';
+
+  // Explicit permanent gate set after a completed session
+  if (profile.requires_signup_for_next_session === true) return 'require_signup';
+
+  const now = new Date();
+
+  if (profile.guest_started_at) {
+    const startedAt = new Date(profile.guest_started_at);
+    const allowedUntil = new Date(startedAt.getTime() + GUEST_ALLOWED_WINDOW_MS);
+    const cooldownUntil = profile.guest_cooldown_until
+      ? new Date(profile.guest_cooldown_until)
+      : new Date(startedAt.getTime() + GUEST_COOLDOWN_WINDOW_MS);
+
+    if (now <= allowedUntil) return 'allow';
+    if (now < cooldownUntil) return 'cooldown';
+    // Past the full cooldown — require signup (conversion optimisation)
+    return 'require_signup';
+  }
+
+  // No timing data — new user, allow through
+  return 'allow';
+}
+
 /** Normalizes route/query input into a URLSearchParams instance. */
 function normalizeSearchParams(searchParams) {
   if (searchParams instanceof URLSearchParams) return searchParams;

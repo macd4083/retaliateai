@@ -5,7 +5,7 @@ import { ArrowRight, CheckCircle, Download, Smartphone } from 'lucide-react';
 import { usePWAInstall } from '@/hooks/usePWAInstall';
 import { trackEvent } from '@/lib/analytics';
 import { supabase } from '@/lib/supabase/client';
-import { buildSignupPath, readAttribution } from '@/lib/guestSession';
+import { buildSignupPath, evaluateGuestAccess, readAttribution } from '@/lib/guestSession';
 
 export default function Landing() {
   const navigate = useNavigate();
@@ -22,27 +22,30 @@ export default function Landing() {
       return;
     }
 
-    // Anonymous (guest) user: check whether they have already completed a first
-    // session and therefore need to sign up before continuing.
+    // Anonymous (guest) user: check timing/signup policy before deciding what to show.
+    // Per policy: do NOT auto-resume guest reflection from `/`.
+    // If the guest is in cooldown or has completed their session, redirect to signup.
+    // Otherwise, show the landing page so they can navigate intentionally.
     let cancelled = false;
     setCheckingGuestProfile(true);
     supabase
       .from('user_profiles')
-      .select('requires_signup_for_next_session')
+      .select('requires_signup_for_next_session, guest_started_at, guest_cooldown_until')
       .eq('id', user.id)
       .maybeSingle()
       .then(({ data, error }) => {
         if (cancelled) return;
-        if (!error && data?.requires_signup_for_next_session === true) {
-          // Returning guest — send them to signup, preserving any attribution.
+        const accessResult = !error ? evaluateGuestAccess(data) : 'allow';
+        if (accessResult === 'require_signup' || accessResult === 'cooldown') {
+          // Guest is blocked — send them to signup, preserving any attribution.
           navigate(buildSignupPath(readAttribution()), { replace: true });
-        } else {
-          // First-visit guest or profile unavailable — let the reflection guard decide.
-          navigate('/reflection', { replace: true });
         }
+        // Otherwise (first-visit or within 2-day window): show the landing page.
+        // Guest must intentionally navigate to /start/guest to enter a session.
       })
-      .catch(() => {
-        if (!cancelled) navigate('/reflection', { replace: true });
+      .catch((err) => {
+        if (!cancelled) console.warn('[Landing] guest profile check failed:', err);
+        // On error, show landing page rather than auto-routing anywhere.
       })
       .finally(() => {
         if (!cancelled) setCheckingGuestProfile(false);
