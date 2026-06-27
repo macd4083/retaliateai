@@ -75,7 +75,7 @@ async function renderRouter(initialEntry, routes) {
 describe('guest campaign onboarding', () => {
   let view;
   let updateMock;
-  let updateEqMock;        // eq used in the update chain (profile write)
+  let updateEqMock;  // eq used in the update chain (profile write)
   let selectEqMock;  // eq used in the select chain (gate check)
   let maybeSingleMock;
   let selectMock;
