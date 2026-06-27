@@ -3896,7 +3896,6 @@ Mood chips to return: [{"label":"Proud 🔥","value":"proud"},{"label":"Grateful
     if (authoritativeStage && authoritativeStage !== stageAtTurnStart) {
       result.stage_advance = true;
       result.new_stage = authoritativeStage;
-      if (authoritativeStage === 'honest') result.stage_order_swapped = true;
     } else {
       result.stage_advance = false;
       result.new_stage = null;
