@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { MoreHorizontal } from 'lucide-react';
+import { MoreHorizontal, BarChart2 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase/client';
 import { reflectionHelpers } from '../lib/supabase/reflection';
@@ -34,6 +35,7 @@ function getMondayOf(dateStr) {
 
 export default function InsightsV2() {
   const { user } = useAuth();
+  const navigate = useNavigate();
 
   const [allCommitments, setAllCommitments]       = useState([]);
   const [selectedWeekIndex, setSelectedWeekIndex] = useState(null);
@@ -304,6 +306,38 @@ export default function InsightsV2() {
         setCommitmentStats(data);
       }
     } catch (_e) {}
+  }
+
+  if (user?.is_anonymous === true) {
+    return (
+      <AppShellV2 title="Insights">
+        <div className="h-full overflow-y-auto flex flex-col items-center justify-center gap-6 px-6 text-center">
+          <div className="w-16 h-16 rounded-full bg-zinc-800 flex items-center justify-center">
+            <BarChart2 className="w-8 h-8 text-zinc-500" />
+          </div>
+          <div>
+            <h2 className="text-white font-semibold text-lg mb-2">Unlock Your Insights</h2>
+            <p className="text-zinc-400 text-sm max-w-xs leading-relaxed">
+              Sign up or log in to track your streaks, commitments, and personal growth over time.
+            </p>
+          </div>
+          <div className="flex flex-col gap-3 w-full max-w-xs">
+            <button
+              onClick={() => navigate('/login?signup=true')}
+              className="w-full py-3 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-full transition-colors"
+            >
+              Sign Up
+            </button>
+            <button
+              onClick={() => navigate('/login')}
+              className="w-full py-3 text-red-400 hover:text-red-300 font-medium transition-colors"
+            >
+              Log In
+            </button>
+          </div>
+        </div>
+      </AppShellV2>
+    );
   }
 
   if (loading) {
