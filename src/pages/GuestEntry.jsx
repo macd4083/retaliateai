@@ -98,10 +98,30 @@ export default function GuestEntry() {
 
       if (!userId || cancelled) return;
 
+      // ── 4. Gate: if this is a returning guest who must sign up, redirect now ─
+      // Avoids unnecessary profile writes and prevents re-entry into reflection.
+      try {
+        const { data: gateData, error: gateError } = await supabase
+          .from('user_profiles')
+          .select('requires_signup_for_next_session')
+          .eq('id', userId)
+          .maybeSingle();
+        if (!gateError && gateData?.requires_signup_for_next_session === true) {
+          trackEvent('guest_return_signup_gated', { guest_id: userId, ...attribution });
+          if (!cancelled) navigate(buildSignupPath(attribution), { replace: true });
+          return;
+        }
+        if (gateError && !isMissingProfileColumn(gateError, 'requires_signup_for_next_session')) {
+          console.error('[GuestEntry] gate check failed:', gateError);
+        }
+      } catch (gateErr) {
+        console.error('[GuestEntry] gate check threw:', gateErr);
+      }
+
       // Identify in analytics so subsequent events carry guest context
       identifyUser(userId, { is_guest_campaign_user: true, ...attribution });
 
-      // ── 4. Mark user_profile as guest campaign user ──────────────────────
+      // ── 5. Mark user_profile as guest campaign user ──────────────────────
       // The trigger auto-created the profile row on sign-in; just update flags.
       const updateTimestamp = new Date().toISOString();
       const { error: updateError } = await supabase
@@ -128,7 +148,7 @@ export default function GuestEntry() {
         }
       }
 
-      // ── 5. Route into the normal first-session flow ──────────────────────
+      // ── 6. Route into the normal first-session flow ──────────────────────
       if (!cancelled) navigate('/reflection', { replace: true });
     }
 

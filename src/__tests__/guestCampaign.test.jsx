@@ -75,7 +75,10 @@ async function renderRouter(initialEntry, routes) {
 describe('guest campaign onboarding', () => {
   let view;
   let updateMock;
-  let eqMock;
+  let updateEqMock;  // eq used in the update chain (profile write)
+  let selectEqMock;  // eq used in the select chain (gate check)
+  let maybeSingleMock;
+  let selectMock;
   /** @type {TestWindow} */
   const testWindow = window;
 
@@ -92,8 +95,15 @@ describe('guest campaign onboarding', () => {
     posthogMock.identify = vi.fn();
     posthogMock.opt_out_capturing = vi.fn();
 
-    eqMock = vi.fn().mockResolvedValue({ error: null });
-    updateMock = vi.fn(() => ({ eq: eqMock }));
+    // Gate-check chain: select('requires_signup_for_next_session').eq(...).maybeSingle()
+    // Default: not a returning guest (flag is false → proceed to reflection).
+    maybeSingleMock = vi.fn().mockResolvedValue({ data: { requires_signup_for_next_session: false }, error: null });
+    selectEqMock = vi.fn().mockReturnValue({ maybeSingle: maybeSingleMock });
+    selectMock = vi.fn().mockReturnValue({ eq: selectEqMock });
+
+    // Profile-update chain: update({...}).eq(...)
+    updateEqMock = vi.fn().mockResolvedValue({ error: null });
+    updateMock = vi.fn().mockReturnValue({ eq: updateEqMock });
 
     supabaseMock.auth.getSession.mockResolvedValue({
       data: { session: null },
@@ -104,6 +114,7 @@ describe('guest campaign onboarding', () => {
       error: null,
     });
     supabaseMock.from.mockReturnValue({
+      select: selectMock,
       update: updateMock,
     });
   });
@@ -161,11 +172,11 @@ describe('guest campaign onboarding', () => {
         updated_at: expect.any(String),
       })
     );
-    expect(eqMock).toHaveBeenCalledWith('id', 'guest-user-1');
+    expect(updateEqMock).toHaveBeenCalledWith('id', 'guest-user-1');
   });
 
   it('falls back to minimal profile update when optional guest columns are missing', async () => {
-    eqMock
+    updateEqMock
       .mockResolvedValueOnce({
         error: {
           code: 'PGRST204',
@@ -194,7 +205,7 @@ describe('guest campaign onboarding', () => {
       })
     );
     expect(updateMock).toHaveBeenCalledTimes(2);
-    expect(eqMock).toHaveBeenCalledTimes(2);
+    expect(updateEqMock).toHaveBeenCalledTimes(2);
   });
 
   it('falls back to signup without crashing when anonymous auth is disabled', async () => {
@@ -271,5 +282,48 @@ describe('guest campaign onboarding', () => {
     expect(view.container.textContent).toContain('Create your account');
     expect(view.container.querySelector('input[type="email"]')).not.toBeNull();
     expect(view.container.textContent).toContain('Sign Up');
+  });
+
+  it('redirects returning guest to signup when requires_signup_for_next_session is true', async () => {
+    // Simulate a returning guest whose first session is already complete.
+    supabaseMock.auth.getSession.mockResolvedValue({
+      data: { session: { user: { id: 'returning-guest-1' } } },
+      error: null,
+    });
+    maybeSingleMock.mockResolvedValue({
+      data: { requires_signup_for_next_session: true },
+      error: null,
+    });
+
+    view = await renderRouter('/start/guest?src=instagram&utm_source=instagram', [
+      { path: '/start/guest', element: <GuestEntry /> },
+      { path: '/login', element: <div>Signup Page</div> },
+      { path: '/reflection', element: <div>Reflection</div> },
+    ]);
+
+    await waitForCondition(() => view.router.state.location.pathname === '/login', 'returning guest signup redirect');
+
+    const params = new URLSearchParams(view.router.state.location.search);
+    expect(params.get('signup')).toBe('true');
+    expect(params.get('src')).toBe('instagram');
+    // Should NOT have started a new profile update (gate fired before the write)
+    expect(updateMock).not.toHaveBeenCalled();
+  });
+
+  it('continues to reflection when gate check returns missing column error', async () => {
+    // If the column is not yet in the DB, the gate check fails gracefully and lets the
+    // user proceed rather than crashing or showing a misleading signup prompt.
+    maybeSingleMock.mockResolvedValue({
+      data: null,
+      error: { code: 'PGRST204', message: "Could not find the 'requires_signup_for_next_session' column" },
+    });
+
+    view = await renderRouter('/start/guest?src=instagram', [
+      { path: '/start/guest', element: <GuestEntry /> },
+      { path: '/reflection', element: <div>Reflection Ready</div> },
+    ]);
+
+    await waitForCondition(() => view.router.state.location.pathname === '/reflection', 'fallback redirect');
+    expect(updateMock).toHaveBeenCalled();
   });
 });

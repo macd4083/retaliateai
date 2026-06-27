@@ -20,13 +20,12 @@ import Landing from './pages/Landing';
 import TrialExpiredModal from './components/TrialExpiredModal';
 import GuestEntry from './pages/GuestEntry';
 import PostSessionNextSteps from './pages/PostSessionNextSteps';
-import GuestSignupGate from './components/GuestSignupGate';
 
 import { useAuth } from './lib/AuthContext';
 import { supabase } from './lib/supabase/client';
 import { usePageTracking } from './lib/usePageTracking';
 import { stopAnalytics } from './lib/analytics';
-import { readAttribution } from './lib/guestSession';
+import { buildSignupPath, readAttribution } from './lib/guestSession';
 import { isMissingProfileColumn } from './lib/supabase/profileSchema';
 
 const PROFILE_BASE_FIELDS = ['onboarding_completed', 'trial_ends_at', 'subscription_status', 'feedback_submitted', 'trial_extended', 'role'];
@@ -174,7 +173,8 @@ function AuthGuardV2({ children }) {
     profileData?.requires_signup_for_next_session &&
     user?.is_anonymous === true
   ) {
-    return <GuestSignupGate attribution={readAttribution()} />;
+    // Returning guest: redirect to the signup page, preserving any attribution.
+    return <Navigate to={buildSignupPath(readAttribution())} replace />;
   }
 
   // Guest campaign users bypass onboarding — go straight to the session.
