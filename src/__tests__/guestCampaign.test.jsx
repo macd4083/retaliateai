@@ -380,6 +380,7 @@ describe('guest campaign onboarding', () => {
 
   it('blocks guest in cooldown window and shows message before redirecting to signup', async () => {
     vi.useFakeTimers();
+    posthogMock.__loaded = true; // enable analytics so we can assert the tracking event
     // Simulate a guest who started 4 days ago (past 2-day window, still in 7-day cooldown)
     const fourDaysAgo = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString();
     const threeDaysFromNow = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
@@ -418,6 +419,8 @@ describe('guest campaign onboarding', () => {
 
     const params = new URLSearchParams(view.router.state.location.search);
     expect(params.get('signup')).toBe('true');
+    // The cooldown analytics event should have fired
+    expect(posthogMock.capture).toHaveBeenCalledWith('guest_cooldown_blocked', expect.objectContaining({ guest_id: 'cooldown-guest-1' }));
     // Profile update should NOT have been called (gate fired first)
     expect(updateMock).not.toHaveBeenCalled();
   });

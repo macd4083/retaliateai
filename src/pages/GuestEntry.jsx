@@ -155,9 +155,9 @@ export default function GuestEntry() {
 
       if (isFirstVisit) {
         // Set timing markers on the very first guest entry
-        const sevenDaysFromNow = new Date(Date.now() + GUEST_COOLDOWN_WINDOW_MS).toISOString();
+        const cooldownEndTime = new Date(Date.now() + GUEST_COOLDOWN_WINDOW_MS).toISOString();
         profileFields.guest_started_at = updateTimestamp;
-        profileFields.guest_cooldown_until = sevenDaysFromNow;
+        profileFields.guest_cooldown_until = cooldownEndTime;
         profileFields.guest_usage_count = 1;
       } else {
         // Increment usage count for return visits within the 2-day window

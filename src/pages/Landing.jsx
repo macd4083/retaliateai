@@ -43,7 +43,8 @@ export default function Landing() {
         // Otherwise (first-visit or within 2-day window): show the landing page.
         // Guest must intentionally navigate to /start/guest to enter a session.
       })
-      .catch(() => {
+      .catch((err) => {
+        if (!cancelled) console.warn('[Landing] guest profile check failed:', err);
         // On error, show landing page rather than auto-routing anywhere.
       })
       .finally(() => {
