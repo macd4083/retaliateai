@@ -25,12 +25,18 @@ import { useAuth } from './lib/AuthContext';
 import { supabase } from './lib/supabase/client';
 import { usePageTracking } from './lib/usePageTracking';
 import { stopAnalytics } from './lib/analytics';
-import { buildSignupPath, readAttribution } from './lib/guestSession';
+import { buildSignupPath, evaluateGuestAccess, readAttribution } from './lib/guestSession';
 import { isMissingProfileColumn } from './lib/supabase/profileSchema';
 
 const PROFILE_BASE_FIELDS = ['onboarding_completed', 'trial_ends_at', 'subscription_status', 'feedback_submitted', 'trial_extended', 'role'];
 const PROFILE_FIELDS_BASE = PROFILE_BASE_FIELDS.join(', ');
-const PROFILE_FIELDS_WITH_GUEST_FLAGS = [...PROFILE_BASE_FIELDS, 'is_guest_campaign_user', 'requires_signup_for_next_session'].join(', ');
+const PROFILE_FIELDS_WITH_GUEST_FLAGS = [
+  ...PROFILE_BASE_FIELDS,
+  'is_guest_campaign_user',
+  'requires_signup_for_next_session',
+  'guest_started_at',
+  'guest_cooldown_until',
+].join(', ');
 
 async function fetchUserProfile(userId) {
   const { data, error } = await supabase
@@ -43,7 +49,9 @@ async function fetchUserProfile(userId) {
 
   const missingGuestColumns =
     isMissingProfileColumn(error, 'is_guest_campaign_user') ||
-    isMissingProfileColumn(error, 'requires_signup_for_next_session');
+    isMissingProfileColumn(error, 'requires_signup_for_next_session') ||
+    isMissingProfileColumn(error, 'guest_started_at') ||
+    isMissingProfileColumn(error, 'guest_cooldown_until');
 
   if (!missingGuestColumns) return { data: null, error };
 
@@ -65,6 +73,8 @@ async function fetchUserProfile(userId) {
           ...fallbackData,
           is_guest_campaign_user: undefined,
           requires_signup_for_next_session: undefined,
+          guest_started_at: undefined,
+          guest_cooldown_until: undefined,
         }
       : null,
     error: null,
@@ -170,10 +180,12 @@ function AuthGuardV2({ children }) {
 
   if (
     isGuestUser &&
-    profileData?.requires_signup_for_next_session &&
-    user?.is_anonymous === true
+    user?.is_anonymous === true &&
+    (profileData?.requires_signup_for_next_session ||
+      evaluateGuestAccess(profileData) === 'cooldown' ||
+      evaluateGuestAccess(profileData) === 'require_signup')
   ) {
-    // Returning guest: redirect to the signup page, preserving any attribution.
+    // Returning guest or guest in cooldown: redirect to the signup page, preserving any attribution.
     return <Navigate to={buildSignupPath(readAttribution())} replace />;
   }
 
