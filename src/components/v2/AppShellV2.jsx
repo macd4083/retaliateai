@@ -12,6 +12,11 @@ const NAV_LINKS = [
   { label: 'Settings', path: '/settings', icon: Settings },
 ];
 
+const GUEST_NAV_LINKS = [
+  { label: 'Reflection', path: '/reflection', icon: Moon },
+  { label: 'Insights', path: '/insights', icon: BarChart2 },
+];
+
 const LIVE_DEMO_USER_NAV_LINKS = [
   { label: 'Reflection', path: '/admin/live-demo', icon: Moon },
   { label: 'Insights', path: '/admin/live-demo/insights', icon: BarChart2 },
@@ -28,6 +33,7 @@ export default function AppShellV2({ title, children, adminAction = null, shellM
   const { user, signOut } = useAuth();
   const isLiveDemo = location.pathname.startsWith('/admin/live-demo');
   const isLiveDemoUserShell = shellMode === 'live-demo-user';
+  const isGuest = user?.is_anonymous === true;
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminTimeOverride, setAdminTimeOverride] = useState(null);
@@ -42,7 +48,15 @@ export default function AppShellV2({ title, children, adminAction = null, shellM
 
   const drawerDisplayName = isLiveDemoUserShell ? LIVE_DEMO_USER_PROFILE.displayName : displayName;
   const drawerEmail = isLiveDemoUserShell ? LIVE_DEMO_USER_PROFILE.email : user?.email;
-  const drawerNavLinks = isLiveDemoUserShell ? LIVE_DEMO_USER_NAV_LINKS : NAV_LINKS;
+
+  let drawerNavLinks;
+  if (isLiveDemoUserShell) {
+    drawerNavLinks = LIVE_DEMO_USER_NAV_LINKS;
+  } else if (isGuest) {
+    drawerNavLinks = GUEST_NAV_LINKS;
+  } else {
+    drawerNavLinks = NAV_LINKS;
+  }
 
   useEffect(() => {
     if (!user?.id) return;
@@ -130,13 +144,32 @@ export default function AppShellV2({ title, children, adminAction = null, shellM
             </div>
           )}
           {!isLiveDemo && !isLiveDemoUserShell && (
-            <button
-              onClick={() => navigate('/settings')}
-              className="w-9 h-9 flex items-center justify-center rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
-              aria-label="Settings"
-            >
-              <Settings className="w-4 h-4" />
-            </button>
+            isGuest ? (
+              <>
+                <button
+                  onClick={() => navigate('/login')}
+                  className="px-3 py-1.5 text-sm font-medium text-red-400 hover:text-red-300 transition-colors"
+                  aria-label="Log In"
+                >
+                  Log In
+                </button>
+                <button
+                  onClick={() => navigate('/login?signup=true')}
+                  className="px-3 py-1.5 text-sm font-semibold text-white bg-red-600 hover:bg-red-700 rounded-full transition-colors"
+                  aria-label="Sign Up"
+                >
+                  Sign Up
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={() => navigate('/settings')}
+                className="w-9 h-9 flex items-center justify-center rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+                aria-label="Settings"
+              >
+                <Settings className="w-4 h-4" />
+              </button>
+            )
           )}
         </div>
       </div>
@@ -308,14 +341,23 @@ export default function AppShellV2({ title, children, adminAction = null, shellM
           </div>
         )}
 
-        {/* Sign out */}
+        {/* Sign out / Home */}
         <div className="px-3 py-4 border-t border-zinc-800">
-          <button
-            onClick={handleSignOut}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-red-400 hover:text-white hover:bg-red-900/40 transition-colors"
-          >
-            Sign Out
-          </button>
+          {isGuest ? (
+            <button
+              onClick={() => { navigate('/'); setDrawerOpen(false); }}
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+            >
+              Go to Home
+            </button>
+          ) : (
+            <button
+              onClick={handleSignOut}
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-red-400 hover:text-white hover:bg-red-900/40 transition-colors"
+            >
+              Sign Out
+            </button>
+          )}
         </div>
       </div>
     </div>
