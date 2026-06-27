@@ -48,7 +48,15 @@ export default function AppShellV2({ title, children, adminAction = null, shellM
 
   const drawerDisplayName = isLiveDemoUserShell ? LIVE_DEMO_USER_PROFILE.displayName : displayName;
   const drawerEmail = isLiveDemoUserShell ? LIVE_DEMO_USER_PROFILE.email : user?.email;
-  const drawerNavLinks = isLiveDemoUserShell ? LIVE_DEMO_USER_NAV_LINKS : isGuest ? GUEST_NAV_LINKS : NAV_LINKS;
+
+  let drawerNavLinks;
+  if (isLiveDemoUserShell) {
+    drawerNavLinks = LIVE_DEMO_USER_NAV_LINKS;
+  } else if (isGuest) {
+    drawerNavLinks = GUEST_NAV_LINKS;
+  } else {
+    drawerNavLinks = NAV_LINKS;
+  }
 
   useEffect(() => {
     if (!user?.id) return;
