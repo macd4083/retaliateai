@@ -87,6 +87,7 @@ export default function GuestEntry() {
             const { error: signOutError } = await supabase.auth.signOut();
             if (signOutError) {
               console.error('[GuestEntry] sign-out before guest bootstrap failed:', signOutError);
+              throw signOutError;
             }
           }
           const { data, error: signInError } = await supabase.auth.signInAnonymously();
