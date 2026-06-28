@@ -14,6 +14,7 @@ import {
   GUEST_COOLDOWN_WINDOW_MS,
   saveAttribution,
 } from '../lib/guestSession';
+import GuestSignupGate from '../components/GuestSignupGate';
 
 /**
  * Detects the Supabase error shape returned when anonymous auth is disabled.
@@ -56,6 +57,8 @@ export default function GuestEntry() {
   const [error, setError] = useState(null);
   const [fallbackPath, setFallbackPath] = useState('');
   const [fallbackMessage, setFallbackMessage] = useState('');
+  const [showSignupGate, setShowSignupGate] = useState(false);
+  const [gateAttribution, setGateAttribution] = useState({});
 
   useEffect(() => {
     let cancelled = false;
@@ -133,15 +136,8 @@ export default function GuestEntry() {
               accessResult === 'cooldown' ? 'guest_cooldown_blocked' : 'guest_return_signup_gated';
             trackEvent(eventName, { guest_id: userId, ...attribution });
             if (!cancelled) {
-              if (accessResult === 'cooldown') {
-                setFallbackPath(buildSignupPath(attribution));
-                setFallbackMessage(GUEST_COOLDOWN_MESSAGE);
-                redirectTimer = window.setTimeout(() => {
-                  navigate(buildSignupPath(attribution), { replace: true });
-                }, GUEST_FALLBACK_REDIRECT_DELAY_MS);
-              } else {
-                navigate(buildSignupPath(attribution), { replace: true });
-              }
+              setGateAttribution(attribution);
+              setShowSignupGate(true);
             }
             return;
           }
@@ -222,6 +218,10 @@ export default function GuestEntry() {
   // searchParams is stable on mount — intentionally excluded from deps
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  if (showSignupGate) {
+    return <GuestSignupGate attribution={gateAttribution} />;
+  }
 
   if (fallbackMessage) {
     return (

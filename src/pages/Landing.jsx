@@ -271,6 +271,17 @@ export default function Landing() {
             </div>
           </div>
 
+          {/* ── Try guest session CTA ── */}
+          <div className="pb-16 flex flex-col items-center text-center">
+            <button
+              onClick={() => { trackEvent('landing_guest_session_clicked'); navigate('/start/guest'); }}
+              className="px-10 py-4 bg-red-600 text-white rounded-lg hover:bg-red-700 font-bold text-base transition-all shadow-xl shadow-red-900/40 uppercase tracking-wide"
+            >
+              Try guest session
+            </button>
+            <p className="text-sm text-gray-500 mt-3 tracking-wide">No sign up required</p>
+          </div>
+
           {/* ── 8. SUCCESS VISION ── */}
           <div className="pb-16">
             <div className="text-center mb-16">
