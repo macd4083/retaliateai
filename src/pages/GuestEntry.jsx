@@ -76,9 +76,20 @@ export default function GuestEntry() {
         // If a valid session already exists (e.g. page refresh), use it
         const { data: existing, error: sessionError } = await supabase.auth.getSession();
         if (sessionError) throw sessionError;
-        if (existing?.session?.user?.id) {
-          userId = existing.session.user.id;
+        const existingUser = existing?.session?.user;
+        if (existingUser?.id && existingUser?.is_anonymous === true) {
+          userId = existingUser.id;
         } else {
+          // /start/guest must always bootstrap an anonymous guest flow.
+          // Clear any existing non-anonymous session first so stale auth state
+          // cannot force onboarding redirects on /reflection.
+          if (existingUser?.id) {
+            const { error: signOutError } = await supabase.auth.signOut();
+            if (signOutError) {
+              console.error('[GuestEntry] sign-out before guest bootstrap failed:', signOutError);
+              throw signOutError;
+            }
+          }
           const { data, error: signInError } = await supabase.auth.signInAnonymously();
           if (signInError) throw signInError;
           userId = data?.user?.id;

@@ -14,6 +14,7 @@ const { posthogMock, supabaseMock } = vi.hoisted(() => ({
   supabaseMock: {
     auth: {
       getSession: vi.fn(),
+      signOut: vi.fn(),
       signInAnonymously: vi.fn(),
     },
     from: vi.fn(),
@@ -118,6 +119,7 @@ describe('guest campaign onboarding', () => {
       data: { user: { id: 'guest-user-1' } },
       error: null,
     });
+    supabaseMock.auth.signOut.mockResolvedValue({ error: null });
     supabaseMock.from.mockReturnValue({
       select: selectMock,
       update: updateMock,
@@ -305,7 +307,7 @@ describe('guest campaign onboarding', () => {
   it('redirects returning guest to signup when requires_signup_for_next_session is true', async () => {
     // Simulate a returning guest whose first session is already complete.
     supabaseMock.auth.getSession.mockResolvedValue({
-      data: { session: { user: { id: 'returning-guest-1' } } },
+      data: { session: { user: { id: 'returning-guest-1', is_anonymous: true } } },
       error: null,
     });
     maybeSingleMock.mockResolvedValue({
@@ -436,7 +438,7 @@ describe('guest campaign onboarding', () => {
     const fourDaysAgo = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString();
     const threeDaysFromNow = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
     supabaseMock.auth.getSession.mockResolvedValue({
-      data: { session: { user: { id: 'cooldown-guest-1' } } },
+      data: { session: { user: { id: 'cooldown-guest-1', is_anonymous: true } } },
       error: null,
     });
     maybeSingleMock.mockResolvedValue({
@@ -481,7 +483,7 @@ describe('guest campaign onboarding', () => {
     const oneDayAgo = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
     const sixDaysFromNow = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString();
     supabaseMock.auth.getSession.mockResolvedValue({
-      data: { session: { user: { id: 'returning-guest-window' } } },
+      data: { session: { user: { id: 'returning-guest-window', is_anonymous: true } } },
       error: null,
     });
     maybeSingleMock.mockResolvedValue({
@@ -517,7 +519,7 @@ describe('guest campaign onboarding', () => {
     const oneDayAgo = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
     const sixDaysFromNow = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString();
     supabaseMock.auth.getSession.mockResolvedValue({
-      data: { session: { user: { id: 'window-override-guest' } } },
+      data: { session: { user: { id: 'window-override-guest', is_anonymous: true } } },
       error: null,
     });
     maybeSingleMock.mockResolvedValue({
@@ -549,7 +551,7 @@ describe('guest campaign onboarding', () => {
     const fourDaysAgo = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString();
     const threeDaysFromNow = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
     supabaseMock.auth.getSession.mockResolvedValue({
-      data: { session: { user: { id: 'guardrails-disabled-guest' } } },
+      data: { session: { user: { id: 'guardrails-disabled-guest', is_anonymous: true } } },
       error: null,
     });
     maybeSingleMock
@@ -606,5 +608,27 @@ describe('guest campaign onboarding', () => {
         guest_usage_count: 1,
       })
     );
+  });
+
+  it('replaces stale authenticated sessions with anonymous guest sessions', async () => {
+    supabaseMock.auth.getSession.mockResolvedValue({
+      data: { session: { user: { id: 'signed-user-1', is_anonymous: false } } },
+      error: null,
+    });
+    supabaseMock.auth.signInAnonymously.mockResolvedValue({
+      data: { user: { id: 'fresh-guest-1' } },
+      error: null,
+    });
+
+    view = await renderRouter('/start/guest?src=instagram', [
+      { path: '/start/guest', element: <GuestEntry /> },
+      { path: '/reflection', element: <div>Reflection Ready</div> },
+    ]);
+
+    await waitForCondition(() => view.router.state.location.pathname === '/reflection', 'stale session guest redirect');
+
+    expect(supabaseMock.auth.signOut).toHaveBeenCalledTimes(1);
+    expect(supabaseMock.auth.signInAnonymously).toHaveBeenCalledTimes(1);
+    expect(updateEqMock).toHaveBeenCalledWith('id', 'fresh-guest-1');
   });
 });
