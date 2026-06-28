@@ -8,6 +8,7 @@
 
 const GUEST_ATTRIBUTION_KEY = 'retaliate_guest_attribution';
 const ATTRIBUTION_KEYS = ['src', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term'];
+export const GUEST_GUARDRAILS_CONFIG_KEY = 'guest_guardrails_enabled';
 
 export const GUEST_MODE_UNAVAILABLE_MESSAGE = 'Guest mode is unavailable right now. Continue with your free trial.';
 export const GUEST_FALLBACK_REDIRECT_DELAY_MS = 1200;
@@ -28,15 +29,15 @@ export const GUEST_COOLDOWN_MESSAGE =
  *   - After day 7 or requires_signup_for_next_session flag: require signup
  *
  * @param {object|null} profile – row from user_profiles (may have null timing fields)
+ * @param {{ guardrailsEnabled?: boolean }} [options]
  * @returns {'allow'|'cooldown'|'require_signup'}
  */
-export function evaluateGuestAccess(profile) {
+export function evaluateGuestAccess(profile, { guardrailsEnabled = true } = {}) {
+  if (!guardrailsEnabled) return 'allow';
   if (!profile) return 'allow';
 
-  // Explicit permanent gate set after a completed session
-  if (profile.requires_signup_for_next_session === true) return 'require_signup';
-
   const now = new Date();
+  const requiresSignup = profile.requires_signup_for_next_session === true;
 
   if (profile.guest_started_at) {
     const startedAt = new Date(profile.guest_started_at);
@@ -46,13 +47,29 @@ export function evaluateGuestAccess(profile) {
       : new Date(startedAt.getTime() + GUEST_COOLDOWN_WINDOW_MS);
 
     if (now <= allowedUntil) return 'allow';
+    if (requiresSignup) return 'require_signup';
     if (now < cooldownUntil) return 'cooldown';
     // Past the full cooldown — require signup (conversion optimisation)
     return 'require_signup';
   }
 
   // No timing data — new user, allow through
-  return 'allow';
+  return requiresSignup ? 'require_signup' : 'allow';
+}
+
+export async function fetchGuestGuardrailsEnabled(supabaseClient) {
+  try {
+    const { data, error } = await supabaseClient
+      .from('app_config')
+      .select('value')
+      .eq('key', GUEST_GUARDRAILS_CONFIG_KEY)
+      .maybeSingle();
+
+    if (error) return true;
+    return data?.value !== false;
+  } catch (_error) {
+    return true;
+  }
 }
 
 /** Normalizes route/query input into a URLSearchParams instance. */

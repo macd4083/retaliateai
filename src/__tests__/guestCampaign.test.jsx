@@ -34,6 +34,7 @@ import {
   buildSignupPath,
   evaluateGuestAccess,
   extractAttribution,
+  fetchGuestGuardrailsEnabled,
   GUEST_ALLOWED_WINDOW_MS,
   GUEST_COOLDOWN_MESSAGE,
   GUEST_COOLDOWN_WINDOW_MS,
@@ -359,10 +360,31 @@ describe('guest campaign onboarding', () => {
       expect(evaluateGuestAccess({ requires_signup_for_next_session: true })).toBe('require_signup');
     });
 
+    it('returns allow when guardrails are disabled', () => {
+      expect(
+        evaluateGuestAccess(
+          { requires_signup_for_next_session: true },
+          { guardrailsEnabled: false }
+        )
+      ).toBe('allow');
+    });
+
     it('returns allow when within the 2-day window', () => {
       const guestStartedAt = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(); // 1 day ago
       const guestCooldownUntil = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString();
       expect(evaluateGuestAccess({ guest_started_at: guestStartedAt, guest_cooldown_until: guestCooldownUntil })).toBe('allow');
+    });
+
+    it('returns allow within the 2-day window even when requires_signup_for_next_session is true', () => {
+      const guestStartedAt = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
+      const guestCooldownUntil = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString();
+      expect(
+        evaluateGuestAccess({
+          requires_signup_for_next_session: true,
+          guest_started_at: guestStartedAt,
+          guest_cooldown_until: guestCooldownUntil,
+        })
+      ).toBe('allow');
     });
 
     it('returns cooldown on day 3 (past 2-day window, before 7-day cooldown)', () => {
@@ -375,6 +397,35 @@ describe('guest campaign onboarding', () => {
       const guestStartedAt = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString(); // 8 days ago
       const guestCooldownUntil = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(); // expired yesterday
       expect(evaluateGuestAccess({ guest_started_at: guestStartedAt, guest_cooldown_until: guestCooldownUntil })).toBe('require_signup');
+    });
+
+    it('returns require_signup outside the 2-day window when requires_signup_for_next_session is true', () => {
+      const guestStartedAt = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+      const guestCooldownUntil = new Date(Date.now() + 4 * 24 * 60 * 60 * 1000).toISOString();
+      expect(
+        evaluateGuestAccess({
+          requires_signup_for_next_session: true,
+          guest_started_at: guestStartedAt,
+          guest_cooldown_until: guestCooldownUntil,
+        })
+      ).toBe('require_signup');
+    });
+  });
+
+  describe('fetchGuestGuardrailsEnabled', () => {
+    it('returns true when the config row is missing', async () => {
+      maybeSingleMock.mockResolvedValueOnce({ data: null, error: null });
+      await expect(fetchGuestGuardrailsEnabled(supabaseMock)).resolves.toBe(true);
+    });
+
+    it('returns false when the config row disables guardrails', async () => {
+      maybeSingleMock.mockResolvedValueOnce({ data: { value: false }, error: null });
+      await expect(fetchGuestGuardrailsEnabled(supabaseMock)).resolves.toBe(false);
+    });
+
+    it('returns true when the config query errors', async () => {
+      maybeSingleMock.mockResolvedValueOnce({ data: null, error: { message: 'boom' } });
+      await expect(fetchGuestGuardrailsEnabled(supabaseMock)).resolves.toBe(true);
     });
   });
 
@@ -460,6 +511,72 @@ describe('guest campaign onboarding', () => {
     );
     // Should NOT set guest_started_at again (not a first visit)
     expect(updateMock.mock.calls[0][0]).not.toHaveProperty('guest_started_at');
+  });
+
+  it('allows a returning guest within the 2-day window even when requires_signup_for_next_session is true', async () => {
+    const oneDayAgo = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
+    const sixDaysFromNow = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString();
+    supabaseMock.auth.getSession.mockResolvedValue({
+      data: { session: { user: { id: 'window-override-guest' } } },
+      error: null,
+    });
+    maybeSingleMock.mockResolvedValue({
+      data: {
+        requires_signup_for_next_session: true,
+        guest_started_at: oneDayAgo,
+        guest_cooldown_until: sixDaysFromNow,
+        guest_usage_count: 1,
+      },
+      error: null,
+    });
+
+    view = await renderRouter('/start/guest?src=instagram', [
+      { path: '/start/guest', element: <GuestEntry /> },
+      { path: '/reflection', element: <div>Reflection Ready</div> },
+      { path: '/login', element: <div>Signup Page</div> },
+    ]);
+
+    await waitForCondition(() => view.router.state.location.pathname === '/reflection', 'window override redirect');
+    expect(updateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        is_guest_campaign_user: true,
+        guest_usage_count: 2,
+      })
+    );
+  });
+
+  it('bypasses guest timing gates when guardrails are disabled globally', async () => {
+    const fourDaysAgo = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString();
+    const threeDaysFromNow = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
+    supabaseMock.auth.getSession.mockResolvedValue({
+      data: { session: { user: { id: 'guardrails-disabled-guest' } } },
+      error: null,
+    });
+    maybeSingleMock
+      .mockResolvedValueOnce({ data: { value: false }, error: null })
+      .mockResolvedValueOnce({
+        data: {
+          requires_signup_for_next_session: true,
+          guest_started_at: fourDaysAgo,
+          guest_cooldown_until: threeDaysFromNow,
+          guest_usage_count: 2,
+        },
+        error: null,
+      });
+
+    view = await renderRouter('/start/guest?src=instagram', [
+      { path: '/start/guest', element: <GuestEntry /> },
+      { path: '/reflection', element: <div>Reflection Ready</div> },
+      { path: '/login', element: <div>Signup Page</div> },
+    ]);
+
+    await waitForCondition(() => view.router.state.location.pathname === '/reflection', 'guardrails disabled redirect');
+    expect(updateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        is_guest_campaign_user: true,
+        guest_usage_count: 3,
+      })
+    );
   });
 
   it('sets timing fields on first visit (no guest_started_at in profile)', async () => {

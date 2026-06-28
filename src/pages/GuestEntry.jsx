@@ -7,6 +7,7 @@ import {
   buildSignupPath,
   evaluateGuestAccess,
   extractAttribution,
+  fetchGuestGuardrailsEnabled,
   GUEST_COOLDOWN_MESSAGE,
   GUEST_FALLBACK_REDIRECT_DELAY_MS,
   GUEST_MODE_UNAVAILABLE_MESSAGE,
@@ -101,6 +102,8 @@ export default function GuestEntry() {
 
       if (!userId || cancelled) return;
 
+      const guardrailsEnabled = await fetchGuestGuardrailsEnabled(supabase);
+
       // ── 4. Gate: timing policy + signup gate ──────────────────────────────
       // Reads timing fields to enforce the 2-day access / 7-day cooldown policy.
       let guestProfile = null;
@@ -113,7 +116,7 @@ export default function GuestEntry() {
 
         if (!gateError) {
           guestProfile = gateData;
-          const accessResult = evaluateGuestAccess(gateData);
+          const accessResult = evaluateGuestAccess(gateData, { guardrailsEnabled });
           if (accessResult === 'require_signup' || accessResult === 'cooldown') {
             const eventName =
               accessResult === 'cooldown' ? 'guest_cooldown_blocked' : 'guest_return_signup_gated';
