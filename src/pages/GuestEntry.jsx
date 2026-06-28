@@ -8,8 +8,6 @@ import {
   evaluateGuestAccess,
   extractAttribution,
   fetchGuestGuardrailsEnabled,
-  GUEST_COOLDOWN_MESSAGE,
-  GUEST_FALLBACK_REDIRECT_DELAY_MS,
   GUEST_MODE_UNAVAILABLE_MESSAGE,
   GUEST_COOLDOWN_WINDOW_MS,
   saveAttribution,
@@ -55,14 +53,11 @@ export default function GuestEntry() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [error, setError] = useState(null);
-  const [fallbackPath, setFallbackPath] = useState('');
-  const [fallbackMessage, setFallbackMessage] = useState('');
   const [showSignupGate, setShowSignupGate] = useState(false);
   const [gateAttribution, setGateAttribution] = useState({});
 
   useEffect(() => {
     let cancelled = false;
-    let redirectTimer;
 
     async function bootstrap() {
       // ── 1. Capture + persist attribution ────────────────────────────────
@@ -213,7 +208,6 @@ export default function GuestEntry() {
     bootstrap();
     return () => {
       cancelled = true;
-      if (redirectTimer) window.clearTimeout(redirectTimer);
     };
   // searchParams is stable on mount — intentionally excluded from deps
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -221,21 +215,6 @@ export default function GuestEntry() {
 
   if (showSignupGate) {
     return <GuestSignupGate attribution={gateAttribution} />;
-  }
-
-  if (fallbackMessage) {
-    return (
-      <div className="flex flex-col items-center justify-center h-screen bg-zinc-950 gap-4 px-6 text-center">
-        <p className="text-amber-300 text-sm max-w-sm">{fallbackMessage}</p>
-        <button
-          onClick={() => navigate(fallbackPath, { replace: true })}
-          className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 focus:ring-offset-zinc-950"
-        >
-          Continue with Free Trial
-        </button>
-        <p className="text-zinc-500 text-xs">Redirecting you now…</p>
-      </div>
-    );
   }
 
   if (error) {
