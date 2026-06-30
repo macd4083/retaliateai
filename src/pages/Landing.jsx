@@ -73,9 +73,9 @@ export default function Landing() {
     navigate('/login?signup=true');
   };
 
-  // Don't render anything while auth is resolving, a user is logged in, or we
-  // are waiting for the guest profile check to complete.
-  if (loading || user || checkingGuestProfile) return null;
+  // Don't render anything while auth is resolving, while we're checking guest
+  // profile state, or while a signed-in non-anonymous user is being redirected.
+  if (loading || checkingGuestProfile || (user && !user.is_anonymous)) return null;
 
   return (
     <div className="min-h-screen bg-black">

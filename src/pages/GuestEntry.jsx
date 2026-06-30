@@ -8,6 +8,7 @@ import {
   evaluateGuestAccess,
   extractAttribution,
   fetchGuestGuardrailsEnabled,
+  GUEST_FALLBACK_REDIRECT_DELAY_MS,
   GUEST_MODE_UNAVAILABLE_MESSAGE,
   GUEST_COOLDOWN_WINDOW_MS,
   saveAttribution,
@@ -53,11 +54,13 @@ export default function GuestEntry() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [error, setError] = useState(null);
+  const [fallbackPath, setFallbackPath] = useState(null);
   const [showSignupGate, setShowSignupGate] = useState(false);
   const [gateAttribution, setGateAttribution] = useState({});
 
   useEffect(() => {
     let cancelled = false;
+    let redirectTimer;
 
     async function bootstrap() {
       // ── 1. Capture + persist attribution ────────────────────────────────
@@ -98,7 +101,7 @@ export default function GuestEntry() {
           trackEvent('guest_campaign_guest_mode_unavailable', attribution);
           if (!cancelled) {
             setFallbackPath(nextSignupPath);
-            setFallbackMessage(GUEST_MODE_UNAVAILABLE_MESSAGE);
+            setError(GUEST_MODE_UNAVAILABLE_MESSAGE);
             redirectTimer = window.setTimeout(() => {
               navigate(nextSignupPath, { replace: true });
             }, GUEST_FALLBACK_REDIRECT_DELAY_MS);
@@ -208,6 +211,9 @@ export default function GuestEntry() {
     bootstrap();
     return () => {
       cancelled = true;
+      if (redirectTimer) {
+        window.clearTimeout(redirectTimer);
+      }
     };
   // searchParams is stable on mount — intentionally excluded from deps
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -222,10 +228,16 @@ export default function GuestEntry() {
       <div className="flex flex-col items-center justify-center h-screen bg-zinc-950 gap-4 px-6 text-center">
         <p className="text-red-400 text-sm">{error}</p>
         <button
-          onClick={() => window.location.reload()}
+          onClick={() => {
+            if (fallbackPath) {
+              navigate(fallbackPath, { replace: true });
+              return;
+            }
+            window.location.reload();
+          }}
           className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 focus:ring-offset-zinc-950"
         >
-          Try Again
+          {fallbackPath ? 'Continue with Free Trial' : 'Try Again'}
         </button>
       </div>
     );
