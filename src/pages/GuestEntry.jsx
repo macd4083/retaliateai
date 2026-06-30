@@ -8,6 +8,7 @@ import {
   evaluateGuestAccess,
   extractAttribution,
   fetchGuestGuardrailsEnabled,
+  GUEST_FALLBACK_REDIRECT_DELAY_MS,
   GUEST_MODE_UNAVAILABLE_MESSAGE,
   GUEST_COOLDOWN_WINDOW_MS,
   saveAttribution,
@@ -58,6 +59,7 @@ export default function GuestEntry() {
 
   useEffect(() => {
     let cancelled = false;
+    let redirectTimer;
 
     async function bootstrap() {
       // ── 1. Capture + persist attribution ────────────────────────────────
@@ -97,8 +99,7 @@ export default function GuestEntry() {
         if (isAnonymousAuthDisabled(err)) {
           trackEvent('guest_campaign_guest_mode_unavailable', attribution);
           if (!cancelled) {
-            setFallbackPath(nextSignupPath);
-            setFallbackMessage(GUEST_MODE_UNAVAILABLE_MESSAGE);
+            setError(GUEST_MODE_UNAVAILABLE_MESSAGE);
             redirectTimer = window.setTimeout(() => {
               navigate(nextSignupPath, { replace: true });
             }, GUEST_FALLBACK_REDIRECT_DELAY_MS);
@@ -208,6 +209,9 @@ export default function GuestEntry() {
     bootstrap();
     return () => {
       cancelled = true;
+      if (redirectTimer) {
+        window.clearTimeout(redirectTimer);
+      }
     };
   // searchParams is stable on mount — intentionally excluded from deps
   // eslint-disable-next-line react-hooks/exhaustive-deps
