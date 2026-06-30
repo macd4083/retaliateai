@@ -1,23 +1,20 @@
 import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowRight, Smartphone } from 'lucide-react';
 import { trackEvent } from '../lib/analytics';
 import { buildSignupPath } from '../lib/guestSession';
-import { usePWAInstall } from '../hooks/usePWAInstall';
 
 /**
  * GuestSignupGate
  *
- * Shown when a guest campaign user (requires_signup_for_next_session=true) tries
- * to start a second session without creating an account.
+ * Shown when a guest user's access window has expired and they need to
+ * create an account before continuing.
  *
  * Props:
  *   attribution – UTM/src object read from guestSession for event attribution
  */
 export default function GuestSignupGate({ attribution = {} }) {
   const navigate = useNavigate();
-  const { isInstallable, isIos, promptInstall } = usePWAInstall();
 
   // Fire once on mount
   useEffect(() => {
@@ -25,18 +22,14 @@ export default function GuestSignupGate({ attribution = {} }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleStartTrial = () => {
-    trackEvent('post_session_start_trial_clicked', { ...attribution, context: 'second_session_gate' });
+  const handleSignUp = () => {
+    trackEvent('guest_gate_signup_clicked', { ...attribution, context: 'guest_gate' });
     navigate(buildSignupPath(attribution));
   };
 
-  const handleDownloadApp = async () => {
-    trackEvent('post_session_download_app_clicked', { ...attribution, context: 'second_session_gate' });
-    if (isInstallable && !isIos) {
-      await promptInstall();
-    } else {
-      navigate('/');
-    }
+  const handleLogIn = () => {
+    trackEvent('guest_gate_login_clicked', { ...attribution, context: 'guest_gate' });
+    navigate('/login');
   };
 
   return (
@@ -48,27 +41,25 @@ export default function GuestSignupGate({ attribution = {} }) {
         className="w-full max-w-sm text-center"
       >
         <p className="text-4xl mb-4">🔒</p>
-        <h2 className="text-xl font-bold mb-2">Ready for your next session?</h2>
+        <h2 className="text-xl font-bold mb-4">You need to create an account before continuing.</h2>
         <p className="text-zinc-400 text-sm leading-relaxed mb-8">
-          You've completed your free first session. Create a free account to keep
+          Your guest access window has ended. Create a free account to keep
           your momentum going and unlock daily reflection.
         </p>
 
-        <div className="space-y-3">
+        <div className="flex flex-col items-center gap-4">
           <button
-            onClick={handleStartTrial}
-            className="w-full flex items-center justify-center gap-2 bg-red-600 hover:bg-red-500 text-white font-semibold py-4 rounded-2xl transition-colors"
+            onClick={handleSignUp}
+            className="px-8 py-2.5 text-sm font-semibold text-white bg-red-600 hover:bg-red-700 rounded-full transition-colors"
           >
-            Start Free Trial
-            <ArrowRight className="w-5 h-5" />
+            Sign Up
           </button>
 
           <button
-            onClick={handleDownloadApp}
-            className="w-full flex items-center justify-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white font-medium py-4 rounded-2xl border border-zinc-700 hover:border-zinc-600 transition-colors"
+            onClick={handleLogIn}
+            className="text-sm font-medium text-red-400 hover:text-red-300 transition-colors"
           >
-            <Smartphone className="w-5 h-5 text-zinc-400" />
-            Download the App
+            Log in
           </button>
         </div>
       </motion.div>
