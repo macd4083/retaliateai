@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { shouldShowTrialExpiredModal } from '../App';
+import { shouldShowTrialExpiredModal } from '../lib/trialModal';
 
 describe('shouldShowTrialExpiredModal', () => {
   it('does not show the trial-expired modal for guest users', () => {
