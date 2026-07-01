@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 
-import { isGuestCampaignUser } from '../App';
 import { isAnonymousGuestUser } from '../lib/guestSession';
 import { shouldShowTrialExpiredModal } from '../lib/trialModal';
 
@@ -32,14 +31,11 @@ describe('shouldShowTrialExpiredModal', () => {
       ).toBe(true);
     });
 
-    it('treats anonymous users as guest campaign users even without guest profile flags', () => {
+    it('detects anonymous users from identities fallback', () => {
       expect(
-        isGuestCampaignUser(
-          { is_guest_campaign_user: false },
-          {
-            app_metadata: { provider: 'anonymous' },
-          }
-        )
+        isAnonymousGuestUser({
+          identities: [{ provider: 'anonymous' }],
+        })
       ).toBe(true);
     });
   });
