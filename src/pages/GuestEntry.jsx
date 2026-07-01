@@ -11,6 +11,7 @@ import {
   GUEST_FALLBACK_REDIRECT_DELAY_MS,
   GUEST_MODE_UNAVAILABLE_MESSAGE,
   GUEST_COOLDOWN_WINDOW_MS,
+  isAnonymousGuestUser,
   saveAttribution,
 } from '../lib/guestSession';
 import GuestSignupGate from '../components/GuestSignupGate';
@@ -78,7 +79,7 @@ export default function GuestEntry() {
         const { data: existing, error: sessionError } = await supabase.auth.getSession();
         if (sessionError) throw sessionError;
         const existingUser = existing?.session?.user;
-        if (existingUser?.id && existingUser?.is_anonymous === true) {
+        if (existingUser?.id && isAnonymousGuestUser(existingUser)) {
           userId = existingUser.id;
         } else {
           // /start/guest must always bootstrap an anonymous guest flow.

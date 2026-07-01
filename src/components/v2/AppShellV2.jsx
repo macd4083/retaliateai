@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { Settings, Moon, BarChart2, X, Database, Download, Share, MessageSquare, ScrollText } from 'lucide-react';
 import { useAuth } from '../../lib/AuthContext';
 import { supabase } from '../../lib/supabase/client';
+import { isAnonymousGuestUser } from '../../lib/guestSession';
 import { usePWAInstall } from '../../hooks/usePWAInstall';
 import PWAInstallBanner from '../pwa/PWAInstallBanner';
 
@@ -33,7 +34,7 @@ export default function AppShellV2({ title, children, adminAction = null, shellM
   const { user, signOut } = useAuth();
   const isLiveDemo = location.pathname.startsWith('/admin/live-demo');
   const isLiveDemoUserShell = shellMode === 'live-demo-user';
-  const isGuest = user?.is_anonymous === true;
+  const isGuest = isAnonymousGuestUser(user);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminTimeOverride, setAdminTimeOverride] = useState(null);

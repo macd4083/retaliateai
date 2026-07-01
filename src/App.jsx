@@ -29,6 +29,7 @@ import {
   buildSignupPath,
   evaluateGuestAccess,
   fetchGuestGuardrailsEnabled,
+  isAnonymousGuestUser,
   readAttribution,
 } from './lib/guestSession';
 import { shouldShowTrialExpiredModal } from './lib/trialModal';
@@ -88,7 +89,7 @@ async function fetchUserProfile(userId) {
 }
 
 export function isGuestCampaignUser(profileData, user) {
-  return profileData?.is_guest_campaign_user === true || user?.is_anonymous === true;
+  return profileData?.is_guest_campaign_user === true || isAnonymousGuestUser(user);
 }
 
 // ── Old imports (preserved, not deleted) ────────────────────────────────────
@@ -193,11 +194,7 @@ function AuthGuardV2({ children }) {
   const isGuestUser = isGuestCampaignUser(profileData, user);
   const accessResult = evaluateGuestAccess(profileData, { guardrailsEnabled });
 
-  if (
-    isGuestUser &&
-    user?.is_anonymous === true &&
-    (accessResult === 'cooldown' || accessResult === 'require_signup')
-  ) {
+  if (isGuestUser && isAnonymousGuestUser(user) && (accessResult === 'cooldown' || accessResult === 'require_signup')) {
     // Returning guest or guest in cooldown: redirect to the signup page, preserving any attribution.
     return <Navigate to={buildSignupPath(readAttribution())} replace />;
   }
@@ -218,6 +215,12 @@ function AuthGuardV2({ children }) {
     feedbackDismissed,
     isGuestUser,
   });
+  const extendedTrialExpired = Boolean(
+    profileData?.trial_ends_at &&
+      new Date(profileData.trial_ends_at) < new Date() &&
+      profileData?.feedback_submitted &&
+      profileData?.trial_extended
+  );
 
   return (
     <>

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { isAnonymousGuestUser } from '../lib/guestSession';
 import { shouldShowTrialExpiredModal } from '../lib/trialModal';
 
 describe('shouldShowTrialExpiredModal', () => {
@@ -19,6 +20,36 @@ describe('shouldShowTrialExpiredModal', () => {
         }
       )
     ).toBe(false);
+  });
+
+  describe('guest detection helpers', () => {
+    it('detects anonymous users from explicit is_anonymous flag', () => {
+      expect(isAnonymousGuestUser({ is_anonymous: true })).toBe(true);
+    });
+
+    it('detects anonymous users from app_metadata provider', () => {
+      expect(
+        isAnonymousGuestUser({
+          app_metadata: { provider: 'anonymous' },
+        })
+      ).toBe(true);
+    });
+
+    it('detects anonymous users from identities fallback', () => {
+      expect(
+        isAnonymousGuestUser({
+          identities: [{ provider: 'anonymous' }],
+        })
+      ).toBe(true);
+    });
+
+    it('returns false for invalid or non-anonymous shapes', () => {
+      expect(isAnonymousGuestUser(null)).toBe(false);
+      expect(isAnonymousGuestUser(undefined)).toBe(false);
+      expect(isAnonymousGuestUser('anonymous')).toBe(false);
+      expect(isAnonymousGuestUser({ identities: [] })).toBe(false);
+      expect(isAnonymousGuestUser({ app_metadata: { provider: 'email' } })).toBe(false);
+    });
   });
 
   it('still shows the trial-expired modal for non-guest expired trials', () => {

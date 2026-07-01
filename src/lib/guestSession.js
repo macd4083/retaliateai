@@ -21,6 +21,23 @@ export const GUEST_COOLDOWN_MESSAGE =
   'Your guest access is temporarily paused. Sign up for free to continue your daily reflection habit.';
 
 /**
+ * Supabase anonymous users can be represented in multiple ways depending on SDK/runtime.
+ * Treat all supported shapes as guest users.
+ *
+ * @param {object|null|undefined} user
+ * @returns {boolean}
+ */
+export function isAnonymousGuestUser(user) {
+  if (!user || typeof user !== 'object') return false;
+  if (user.is_anonymous === true) return true;
+  if (user.app_metadata?.provider === 'anonymous') return true;
+  if (Array.isArray(user.identities)) {
+    return user.identities.some((identity) => identity?.provider === 'anonymous');
+  }
+  return false;
+}
+
+/**
  * Evaluates whether a guest profile can access the guest session based on timing policy.
  *
  * Policy:
