@@ -31,6 +31,7 @@ import {
   fetchGuestGuardrailsEnabled,
   readAttribution,
 } from './lib/guestSession';
+import { shouldShowTrialExpiredModal } from './lib/trialModal';
 import { isMissingProfileColumn } from './lib/supabase/profileSchema';
 
 const PROFILE_BASE_FIELDS = ['onboarding_completed', 'trial_ends_at', 'subscription_status', 'feedback_submitted', 'trial_extended', 'role'];
@@ -213,26 +214,10 @@ function AuthGuardV2({ children }) {
     );
   }
 
-  const now = new Date();
-  const trialExpired = profileData?.trial_ends_at
-    ? new Date(profileData.trial_ends_at) < now
-    : false;
-  const isActive =
-    profileData?.subscription_status === 'active' ||
-    profileData?.subscription_status === 'canceling';
-  const isTrialing =
-    profileData?.subscription_status === 'trialing' && !trialExpired;
-  const extendedTrialExpired = Boolean(
-    trialExpired && profileData?.feedback_submitted && profileData?.trial_extended
-  );
-  const showFeedbackModal = Boolean(
-    !feedbackDismissed &&
-      trialExpired &&
-      !isActive &&
-      (!profileData?.feedback_submitted || extendedTrialExpired) &&
-      !isTrialing &&
-      profileData?.role !== 'admin'
-  );
+  const showFeedbackModal = shouldShowTrialExpiredModal(profileData, {
+    feedbackDismissed,
+    isGuestUser,
+  });
 
   return (
     <>
