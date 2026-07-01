@@ -41,6 +41,13 @@ const STAGE_PLACEHOLDERS = {
 
 const DEFAULT_CHECKLIST = { wins: false, commitment_checkin: false, honest: false, plan: false };
 const CHECKLIST_INIT_MESSAGE = "Here are your commitments from yesterday — check off what you actually did so I can get a sense of where we're starting tonight.";
+const TRIAL_EXPIRED_ERROR = 'trial_expired';
+
+function shouldShowGuestSignupGateForError(response, user, errorPayload) {
+  return response.status === 403 &&
+    isAnonymousGuestUser(user) &&
+    errorPayload?.error === TRIAL_EXPIRED_ERROR;
+}
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -686,13 +693,17 @@ export default function ReflectionV2() {
       if (!response) throw new Error('API error');
       if (!response.ok) {
         let errorPayload = null;
-        try {
-          errorPayload = await response.json();
-        } catch (_e) {}
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          try {
+            errorPayload = await response.json();
+          } catch (jsonParseError) {
+            // Non-JSON error responses are handled by generic fallback below.
+            void jsonParseError;
+          }
+        }
 
-        const isGuestSignupRequired = response.status === 403 &&
-          isAnonymousGuestUser(user) &&
-          errorPayload?.error === 'trial_expired';
+        const isGuestSignupRequired = shouldShowGuestSignupGateForError(response, user, errorPayload);
 
         if (isGuestSignupRequired) {
           trackEvent('guest_session_blocked_signup_required', {
