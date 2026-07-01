@@ -9,6 +9,7 @@ import {
   buildSignupPath,
   evaluateGuestAccess,
   fetchGuestGuardrailsEnabled,
+  isAnonymousGuestUser,
   readAttribution,
 } from '@/lib/guestSession';
 
@@ -22,7 +23,7 @@ export default function Landing() {
     if (!user) return;
 
     // Non-anonymous signed-in users go straight to the app.
-    if (!user.is_anonymous) {
+    if (!isAnonymousGuestUser(user)) {
       navigate('/reflection', { replace: true });
       return;
     }
@@ -66,7 +67,7 @@ export default function Landing() {
     };
   // navigate and supabase are stable references; user.id/is_anonymous drive re-runs.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id, user?.is_anonymous]);
+  }, [user?.id, user?.is_anonymous, user?.app_metadata?.provider]);
 
   const handleGetStarted = (location = 'hero') => {
     trackEvent('landing_cta_clicked', { location });
@@ -75,7 +76,7 @@ export default function Landing() {
 
   // Don't render anything while auth is resolving, while we're checking guest
   // profile state, or while a signed-in non-anonymous user is being redirected.
-  if (loading || checkingGuestProfile || (user && !user.is_anonymous)) return null;
+  if (loading || checkingGuestProfile || (user && !isAnonymousGuestUser(user))) return null;
 
   return (
     <div className="min-h-screen bg-black">

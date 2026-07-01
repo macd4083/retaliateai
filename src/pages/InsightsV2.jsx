@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { MoreHorizontal, BarChart2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
+import { isAnonymousGuestUser } from '../lib/guestSession';
 import { supabase } from '../lib/supabase/client';
 import { reflectionHelpers } from '../lib/supabase/reflection';
 import { localDateStr } from '../lib/dateUtils';
@@ -308,7 +309,7 @@ export default function InsightsV2() {
     } catch (_e) {}
   }
 
-  if (user?.is_anonymous === true) {
+  if (isAnonymousGuestUser(user)) {
     return (
       <AppShellV2 title="Insights">
         <div className="h-full overflow-y-auto flex flex-col items-center justify-center gap-6 px-6 text-center">

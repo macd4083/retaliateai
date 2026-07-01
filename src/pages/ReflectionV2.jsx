@@ -8,7 +8,7 @@ import { isMissingProfileColumn } from '../lib/supabase/profileSchema';
 import { reflectionHelpers } from '../lib/supabase/reflection';
 import { localDateStr } from '../lib/dateUtils';
 import { trackEvent } from '../lib/analytics';
-import { readAttribution } from '../lib/guestSession';
+import { isAnonymousGuestUser, readAttribution } from '../lib/guestSession';
 import AppShellV2 from '../components/v2/AppShellV2';
 import ReflectionSummaryCard from '../components/v2/ReflectionSummaryCard';
 
@@ -315,7 +315,7 @@ export default function ReflectionV2() {
     // inside this function immediately after calling setIsGuestCampaignUser.
     // Anonymous users coming from /start/guest should stay on the guest path
     // even when optional profile guest columns are not yet available.
-    let isGuest = user?.is_anonymous === true;
+    let isGuest = isAnonymousGuestUser(user);
     try {
       // Profile load — non-critical, fail silently
       try {
@@ -941,7 +941,7 @@ export default function ReflectionV2() {
         } catch (_e) {}
 
         // ── Guest campaign: redirect to conversion page after first session ──
-        if (isGuestCampaignUser || user?.is_anonymous === true) {
+        if (isGuestCampaignUser || isAnonymousGuestUser(user)) {
           const attribution = readAttribution();
           trackEvent('guest_session_completed', { guest_id: user.id, session_id: sid, ...attribution });
 
@@ -1201,7 +1201,7 @@ export default function ReflectionV2() {
     : STAGE_PLACEHOLDERS[sessionState.current_stage] || 'Tell me more...';
   return (
     <AppShellV2
-      title="Nightly Reflection"
+      title={(isGuestCampaignUser || isAnonymousGuestUser(user)) ? 'Guest Session' : 'Nightly Reflection'}
       adminAction={
         isAdmin ? (
           <button
