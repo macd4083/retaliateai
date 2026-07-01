@@ -233,7 +233,7 @@ export default function ReflectionV2() {
   const [isGuestCampaignUser, setIsGuestCampaignUser] = useState(false);
   const [pendingGoalSuggestion, setPendingGoalSuggestion] = useState(null);
   const [pendingWhyCapture, setPendingWhyCapture] = useState(null); // { goalId, title }
-  const [showGuestSignupGate, setShowGuestSignupGate] = useState(false); // { goalId, title }
+  const [showGuestSignupGate, setShowGuestSignupGate] = useState(false);
   const [activeGoals, setActiveGoals] = useState([]);
   const [checkedFragments, setCheckedFragments] = useState({});
   const [chatFocused, setChatFocused] = useState(false);
