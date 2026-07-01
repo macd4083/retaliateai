@@ -9,6 +9,7 @@ import { reflectionHelpers } from '../lib/supabase/reflection';
 import { localDateStr } from '../lib/dateUtils';
 import { trackEvent } from '../lib/analytics';
 import { isAnonymousGuestUser, readAttribution } from '../lib/guestSession';
+import GuestSignupGate from '../components/GuestSignupGate';
 import AppShellV2 from '../components/v2/AppShellV2';
 import ReflectionSummaryCard from '../components/v2/ReflectionSummaryCard';
 
@@ -232,6 +233,7 @@ export default function ReflectionV2() {
   const [isGuestCampaignUser, setIsGuestCampaignUser] = useState(false);
   const [pendingGoalSuggestion, setPendingGoalSuggestion] = useState(null);
   const [pendingWhyCapture, setPendingWhyCapture] = useState(null); // { goalId, title }
+  const [showGuestSignupGate, setShowGuestSignupGate] = useState(false); // { goalId, title }
   const [activeGoals, setActiveGoals] = useState([]);
   const [checkedFragments, setCheckedFragments] = useState({});
   const [chatFocused, setChatFocused] = useState(false);
@@ -681,7 +683,31 @@ export default function ReflectionV2() {
         clearTimeout(timeoutId);
       }
 
-      if (!response || !response.ok) throw new Error('API error');
+      if (!response) throw new Error('API error');
+      if (!response.ok) {
+        let errorPayload = null;
+        try {
+          errorPayload = await response.json();
+        } catch (_e) {}
+
+        const isGuestSignupRequired = response.status === 403 &&
+          isAnonymousGuestUser(user) &&
+          errorPayload?.error === 'trial_expired';
+
+        if (isGuestSignupRequired) {
+          trackEvent('guest_session_blocked_signup_required', {
+            guest_id: user.id,
+            session_id: sid,
+            ...readAttribution(),
+          });
+          setShowGuestSignupGate(true);
+          messagesRef.current = messagesRef.current.filter((m) => !m.isTyping);
+          setMessages(messagesRef.current);
+          return;
+        }
+
+        throw new Error(errorPayload?.message || 'API error');
+      }
 
       const data = await response.json();
       const stageAtTurnStart = state.current_stage || 'commitment_checkin';
@@ -1199,6 +1225,11 @@ export default function ReflectionV2() {
     : isComplete
     ? 'Anything else on your mind...'
     : STAGE_PLACEHOLDERS[sessionState.current_stage] || 'Tell me more...';
+
+  if (showGuestSignupGate) {
+    return <GuestSignupGate attribution={readAttribution()} />;
+  }
+
   return (
     <AppShellV2
       title={(isGuestCampaignUser || isAnonymousGuestUser(user)) ? 'Guest Session' : 'Nightly Reflection'}
