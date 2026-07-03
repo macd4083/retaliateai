@@ -9,6 +9,7 @@ import { reflectionHelpers } from '../lib/supabase/reflection';
 import { localDateStr } from '../lib/dateUtils';
 import { trackEvent } from '../lib/analytics';
 import { isAnonymousGuestUser, readAttribution } from '../lib/guestSession';
+import GuestSignupGate from '../components/GuestSignupGate';
 import AppShellV2 from '../components/v2/AppShellV2';
 import ReflectionSummaryCard from '../components/v2/ReflectionSummaryCard';
 
@@ -40,6 +41,13 @@ const STAGE_PLACEHOLDERS = {
 
 const DEFAULT_CHECKLIST = { wins: false, commitment_checkin: false, honest: false, plan: false };
 const CHECKLIST_INIT_MESSAGE = "Here are your commitments from yesterday — check off what you actually did so I can get a sense of where we're starting tonight.";
+const TRIAL_EXPIRED_ERROR = 'trial_expired';
+
+function shouldShowGuestSignupGateForError(response, user, errorPayload) {
+  return response.status === 403 &&
+    isAnonymousGuestUser(user) &&
+    errorPayload?.error === TRIAL_EXPIRED_ERROR;
+}
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -232,6 +240,7 @@ export default function ReflectionV2() {
   const [isGuestCampaignUser, setIsGuestCampaignUser] = useState(false);
   const [pendingGoalSuggestion, setPendingGoalSuggestion] = useState(null);
   const [pendingWhyCapture, setPendingWhyCapture] = useState(null); // { goalId, title }
+  const [showGuestSignupGate, setShowGuestSignupGate] = useState(false);
   const [activeGoals, setActiveGoals] = useState([]);
   const [checkedFragments, setCheckedFragments] = useState({});
   const [chatFocused, setChatFocused] = useState(false);
@@ -681,7 +690,35 @@ export default function ReflectionV2() {
         clearTimeout(timeoutId);
       }
 
-      if (!response || !response.ok) throw new Error('API error');
+      if (!response) throw new Error('API error');
+      if (!response.ok) {
+        let errorPayload = null;
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          try {
+            errorPayload = await response.json();
+          } catch (jsonParseError) {
+            // Non-JSON error responses are handled by generic fallback below.
+            void jsonParseError;
+          }
+        }
+
+        const isGuestSignupRequired = shouldShowGuestSignupGateForError(response, user, errorPayload);
+
+        if (isGuestSignupRequired) {
+          trackEvent('guest_session_blocked_signup_required', {
+            guest_id: user.id,
+            session_id: sid,
+            ...readAttribution(),
+          });
+          setShowGuestSignupGate(true);
+          messagesRef.current = messagesRef.current.filter((m) => !m.isTyping);
+          setMessages(messagesRef.current);
+          return;
+        }
+
+        throw new Error(errorPayload?.message || 'API error');
+      }
 
       const data = await response.json();
       const stageAtTurnStart = state.current_stage || 'commitment_checkin';
@@ -1199,6 +1236,11 @@ export default function ReflectionV2() {
     : isComplete
     ? 'Anything else on your mind...'
     : STAGE_PLACEHOLDERS[sessionState.current_stage] || 'Tell me more...';
+
+  if (showGuestSignupGate) {
+    return <GuestSignupGate attribution={readAttribution()} />;
+  }
+
   return (
     <AppShellV2
       title={(isGuestCampaignUser || isAnonymousGuestUser(user)) ? 'Guest Session' : 'Nightly Reflection'}
