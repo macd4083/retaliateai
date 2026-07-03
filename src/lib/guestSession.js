@@ -9,7 +9,6 @@
 const GUEST_ATTRIBUTION_KEY = 'retaliate_guest_attribution';
 const ATTRIBUTION_KEYS = ['src', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term'];
 export const GUEST_GUARDRAILS_CONFIG_KEY = 'guest_guardrails_enabled';
-
 export const GUEST_MODE_UNAVAILABLE_MESSAGE = 'Guest mode is unavailable right now. Continue with your free trial.';
 export const GUEST_FALLBACK_REDIRECT_DELAY_MS = 1200;
 
@@ -35,15 +34,24 @@ export function isAnonymousGuestUser(user) {
  * For this phase, gating is driven only by requires_signup_for_next_session.
  *
  * @param {object|null} profile – row from user_profiles
- * @param {{ guardrailsEnabled?: boolean }} [options]
  * @returns {'allow'|'require_signup'}
  */
-export function evaluateGuestAccess(profile, { guardrailsEnabled = true } = {}) {
-  if (!guardrailsEnabled) return 'allow';
+export function evaluateGuestAccess(profile) {
   if (!profile) return 'allow';
   return profile.requires_signup_for_next_session === true ? 'require_signup' : 'allow';
 }
 
+/**
+ * Determines whether the guest signup prompt should appear right after commitment capture.
+ *
+ * @param {{
+ *   isGuestUser: boolean,
+ *   previousCommitment: string|null|undefined,
+ *   nextCommitment: string|null|undefined,
+ *   hasPromptBeenShown: boolean
+ * }} params
+ * @returns {boolean}
+ */
 export function shouldPromptGuestSignupAfterCommitment({
   isGuestUser,
   previousCommitment,

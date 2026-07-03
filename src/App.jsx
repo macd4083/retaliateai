@@ -75,11 +75,12 @@ async function fetchUserProfile(userId) {
   return {
     data: safeFallbackData
       ? Object.assign(
+        {},
+        safeFallbackData,
         {
           is_guest_campaign_user: undefined,
           requires_signup_for_next_session: undefined,
-        },
-        safeFallbackData
+        }
       )
       : null,
     error: null,

@@ -367,15 +367,6 @@ describe('guest campaign onboarding', () => {
       expect(evaluateGuestAccess({ requires_signup_for_next_session: true })).toBe('require_signup');
     });
 
-    it('returns allow when guardrails are disabled', () => {
-      expect(
-        evaluateGuestAccess(
-          { requires_signup_for_next_session: true },
-          { guardrailsEnabled: false }
-        )
-      ).toBe('allow');
-    });
-
     it('ignores legacy timing fields and only uses requires_signup_for_next_session', () => {
       expect(
         evaluateGuestAccess({

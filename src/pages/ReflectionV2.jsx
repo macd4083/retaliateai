@@ -189,7 +189,7 @@ export default function ReflectionV2() {
   // Guard ref — initSession only ever runs once per mount
   const initCalledRef = useRef(false);
   const initSentRef = useRef(false);
-  const guestCommitmentPromptShownRef = useRef(false);
+  const hasShownCommitmentSignupModalRef = useRef(false);
 
   // messagesRef always holds the latest messages array so sendMessage
   // never closes over a stale snapshot.
@@ -562,7 +562,7 @@ export default function ReflectionV2() {
 
     if (!error) return;
     if (!isMissingProfileColumn(error, 'requires_signup_for_next_session')) {
-      console.error('[guest_signup_gate] profile update failed:', error);
+      console.error('[markGuestRequiresSignup] profile update failed:', error);
       return;
     }
 
@@ -574,7 +574,7 @@ export default function ReflectionV2() {
       .eq('id', userId);
 
     if (fallbackError) {
-      console.error('[guest_signup_gate] profile fallback update failed:', fallbackError);
+      console.error('[markGuestRequiresSignup] profile fallback update failed:', fallbackError);
     }
   }
 
@@ -967,24 +967,21 @@ export default function ReflectionV2() {
           dbUpdates.commitment_goal_bridge_done = true;
         }
         if (Object.keys(dbUpdates).length > 0) {
-          const shouldAwaitCommitmentWrite = shouldPromptGuestSignupAfterCommitment({
+          const shouldShowSignupModalAfterCommitment = shouldPromptGuestSignupAfterCommitment({
             isGuestUser: isGuestCampaignUser || isAnonymousGuestUser(user),
             previousCommitment: state.tomorrow_commitment,
             nextCommitment: dbUpdates.tomorrow_commitment,
-            hasPromptBeenShown: guestCommitmentPromptShownRef.current,
+            hasPromptBeenShown: hasShownCommitmentSignupModalRef.current,
           });
-          if (shouldAwaitCommitmentWrite) {
+          if (!shouldShowSignupModalAfterCommitment) {
+            reflectionHelpers.updateSession(sid, dbUpdates).catch(() => {});
+          } else {
             try {
               await reflectionHelpers.updateSession(sid, dbUpdates);
             } catch (sessionUpdateErr) {
               console.error('[guest_signup_gate] commitment save failed:', sessionUpdateErr);
             }
-          } else {
-            reflectionHelpers.updateSession(sid, dbUpdates).catch(() => {});
-          }
-
-          if (shouldAwaitCommitmentWrite) {
-            guestCommitmentPromptShownRef.current = true;
+            hasShownCommitmentSignupModalRef.current = true;
             await markGuestRequiresSignup(user.id);
             setShowGuestSignupGate(true);
           }
