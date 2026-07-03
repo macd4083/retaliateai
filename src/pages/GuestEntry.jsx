@@ -5,14 +5,12 @@ import { isMissingProfileColumn } from '../lib/supabase/profileSchema';
 import { trackEvent, identifyUser } from '../lib/analytics';
 import {
   buildSignupPath,
-  evaluateGuestAccess,
   extractAttribution,
   GUEST_FALLBACK_REDIRECT_DELAY_MS,
   GUEST_MODE_UNAVAILABLE_MESSAGE,
   isAnonymousGuestUser,
   saveAttribution,
 } from '../lib/guestSession';
-import GuestSignupGate from '../components/GuestSignupGate';
 
 /**
  * Detects the Supabase error shape returned when anonymous auth is disabled.
@@ -54,8 +52,6 @@ export default function GuestEntry() {
   const [searchParams] = useSearchParams();
   const [error, setError] = useState(null);
   const [fallbackPath, setFallbackPath] = useState(null);
-  const [showSignupGate, setShowSignupGate] = useState(false);
-  const [gateAttribution, setGateAttribution] = useState({});
 
   useEffect(() => {
     let cancelled = false;
@@ -113,49 +109,37 @@ export default function GuestEntry() {
 
       if (!userId || cancelled) return;
 
-      // ── 4. Gate: first-session completion flag only ───────────────────────
-      let guestProfile = null;
-      try {
-        const { data: gateData, error: gateError } = await supabase
-          .from('user_profiles')
-          .select('requires_signup_for_next_session, guest_usage_count')
-          .eq('id', userId)
-          .maybeSingle();
-
-        if (!gateError) {
-          guestProfile = gateData;
-          const accessResult = evaluateGuestAccess(gateData);
-          if (accessResult === 'require_signup') {
-            trackEvent('guest_return_signup_gated', { guest_id: userId, ...attribution });
-            if (!cancelled) {
-              setGateAttribution(attribution);
-              setShowSignupGate(true);
-            }
-            return;
-          }
-        } else if (gateError?.code !== 'PGRST204') {
-          // Only log genuinely unexpected errors; PGRST204 means a column is missing
-          // (schema not yet deployed) and we fall through to allow the guest session.
-          console.error('[GuestEntry] gate check failed:', gateError);
-        }
-      } catch (gateErr) {
-        console.error('[GuestEntry] gate check threw:', gateErr);
-      }
-
       // Identify in analytics so subsequent events carry guest context
       identifyUser(userId, { is_guest_campaign_user: true, ...attribution });
 
-      // ── 5. Mark user_profile as guest campaign user ──────────────────────
+      // ── 4. Mark user_profile as guest campaign user ──────────────────────
       // The trigger auto-created the profile row on sign-in; just update flags.
       const updateTimestamp = new Date().toISOString();
-      const isFirstVisit = typeof guestProfile?.guest_usage_count !== 'number';
+
+      // Fetch current usage count so we can increment it accurately.
+      let guestUsageCount = null;
+      try {
+        const { data: countData, error: countError } = await supabase
+          .from('user_profiles')
+          .select('guest_usage_count')
+          .eq('id', userId)
+          .maybeSingle();
+        if (!countError) {
+          guestUsageCount = countData?.guest_usage_count ?? null;
+        }
+      } catch (_countErr) {
+        // Non-critical — fall back to treating this as a first visit.
+        console.error('[GuestEntry] usage count fetch failed:', _countErr);
+      }
+
+      const isFirstVisit = typeof guestUsageCount !== 'number';
 
       const profileFields = {
         is_guest_campaign_user: true,
         updated_at: updateTimestamp,
       };
 
-      profileFields.guest_usage_count = isFirstVisit ? 1 : (guestProfile?.guest_usage_count || 0) + 1;
+      profileFields.guest_usage_count = isFirstVisit ? 1 : (guestUsageCount || 0) + 1;
 
       const { error: updateError } = await supabase
         .from('user_profiles')
@@ -189,7 +173,7 @@ export default function GuestEntry() {
         }
       }
 
-      // ── 6. Route into the normal first-session flow ──────────────────────
+      // ── 5. Route into the normal first-session flow ──────────────────────
       if (!cancelled) navigate('/reflection', { replace: true });
     }
 
@@ -203,20 +187,6 @@ export default function GuestEntry() {
   // searchParams is stable on mount — intentionally excluded from deps
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  if (showSignupGate) {
-    return (
-      <GuestSignupGate
-        attribution={gateAttribution}
-        mode="fullscreen"
-        context="guest_entry_gate"
-        title="Create your account to continue"
-        body="Your guest reflection is complete. Create your account to save your progress and keep your momentum tomorrow."
-        ctaLabel="Create account"
-        secondaryLabel="Log in"
-      />
-    );
-  }
 
   if (error) {
     return (
