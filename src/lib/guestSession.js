@@ -13,13 +13,6 @@ export const GUEST_GUARDRAILS_CONFIG_KEY = 'guest_guardrails_enabled';
 export const GUEST_MODE_UNAVAILABLE_MESSAGE = 'Guest mode is unavailable right now. Continue with your free trial.';
 export const GUEST_FALLBACK_REDIRECT_DELAY_MS = 1200;
 
-/** Guest access timing constants */
-export const GUEST_ALLOWED_WINDOW_MS = 2 * 24 * 60 * 60 * 1000; // 2 days from first start
-export const GUEST_COOLDOWN_WINDOW_MS = 7 * 24 * 60 * 60 * 1000; // 7 days from first start
-
-export const GUEST_COOLDOWN_MESSAGE =
-  'Your guest access is temporarily paused. Sign up for free to continue your daily reflection habit.';
-
 /**
  * Supabase anonymous users can be represented in multiple ways depending on SDK/runtime.
  * Treat all supported shapes as guest users.
@@ -38,40 +31,29 @@ export function isAnonymousGuestUser(user) {
 }
 
 /**
- * Evaluates whether a guest profile can access the guest session based on timing policy.
+ * Evaluates whether a guest profile can access the guest session.
+ * For this phase, gating is driven only by requires_signup_for_next_session.
  *
- * Policy:
- *   - Day 0–2 from first start: access allowed
- *   - Day 3–7 from first start: access blocked (cooldown)
- *   - After day 7 or requires_signup_for_next_session flag: require signup
- *
- * @param {object|null} profile – row from user_profiles (may have null timing fields)
+ * @param {object|null} profile – row from user_profiles
  * @param {{ guardrailsEnabled?: boolean }} [options]
- * @returns {'allow'|'cooldown'|'require_signup'}
+ * @returns {'allow'|'require_signup'}
  */
 export function evaluateGuestAccess(profile, { guardrailsEnabled = true } = {}) {
   if (!guardrailsEnabled) return 'allow';
   if (!profile) return 'allow';
+  return profile.requires_signup_for_next_session === true ? 'require_signup' : 'allow';
+}
 
-  const now = new Date();
-  const requiresSignup = profile.requires_signup_for_next_session === true;
-
-  if (profile.guest_started_at) {
-    const startedAt = new Date(profile.guest_started_at);
-    const allowedUntil = new Date(startedAt.getTime() + GUEST_ALLOWED_WINDOW_MS);
-    const cooldownUntil = profile.guest_cooldown_until
-      ? new Date(profile.guest_cooldown_until)
-      : new Date(startedAt.getTime() + GUEST_COOLDOWN_WINDOW_MS);
-
-    if (now <= allowedUntil) return 'allow';
-    if (requiresSignup) return 'require_signup';
-    if (now < cooldownUntil) return 'cooldown';
-    // Past the full cooldown — require signup (conversion optimisation)
-    return 'require_signup';
-  }
-
-  // No timing data — new user, allow through
-  return requiresSignup ? 'require_signup' : 'allow';
+export function shouldPromptGuestSignupAfterCommitment({
+  isGuestUser,
+  previousCommitment,
+  nextCommitment,
+  hasPromptBeenShown,
+}) {
+  if (!isGuestUser) return false;
+  if (hasPromptBeenShown) return false;
+  if (typeof nextCommitment !== 'string' || nextCommitment.trim().length === 0) return false;
+  return typeof previousCommitment !== 'string' || previousCommitment.trim().length === 0;
 }
 
 export async function fetchGuestGuardrailsEnabled(supabaseClient) {
