@@ -2844,7 +2844,7 @@ export default async function handler(req, res) {
   try {
     const { data: profile, error: profileError } = await supabase
       .from('user_profiles')
-      .select('subscription_status, trial_ends_at, trial_extended, feedback_submitted, role')
+      .select('subscription_status, trial_ends_at, trial_extended, feedback_submitted, role, is_guest_campaign_user')
       .eq('id', authenticatedUserId)
       .maybeSingle();
 
@@ -2852,6 +2852,7 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: profileError.message || 'Failed to check subscription' });
     }
 
+    const isGuestCampaignUser = profile?.is_guest_campaign_user === true;
     const trialExpired = profile?.trial_ends_at
       ? new Date(profile.trial_ends_at) < new Date()
       : false;
@@ -2860,7 +2861,9 @@ export default async function handler(req, res) {
       profile?.subscription_status === 'canceling';
     const isAdminUser = profile?.role === 'admin';
 
-    if (trialExpired && !isActive && !isAdminUser) {
+    // Guest/anonymous users are not subject to trial expiry enforcement.
+    // Their conversion is handled in-session via the commitment capture modal.
+    if (trialExpired && !isActive && !isAdminUser && !isGuestCampaignUser) {
       return res.status(403).json({ error: 'trial_expired', message: 'Your trial has ended.' });
     }
   } catch (subscriptionCheckError) {

@@ -296,14 +296,16 @@ describe('guest campaign onboarding', () => {
     expect(view.container.textContent).toContain('Sign Up');
   });
 
-  it('shows signup gate for returning guest when requires_signup_for_next_session is true', async () => {
-    // Simulate a returning guest whose first session is already complete.
+  it('proceeds to reflection for returning guest with requires_signup_for_next_session true (no early gate)', async () => {
+    // Product intent: guests are ALWAYS allowed to start a new session.
+    // The signup modal fires only after the commitment-for-tomorrow step inside ReflectionV2,
+    // not at entry. Returning guests with a completed first session must not see a gate here.
     supabaseMock.auth.getSession.mockResolvedValue({
       data: { session: { user: { id: 'returning-guest-1', is_anonymous: true } } },
       error: null,
     });
     maybeSingleMock.mockResolvedValue({
-      data: { requires_signup_for_next_session: true },
+      data: { requires_signup_for_next_session: true, guest_usage_count: 1 },
       error: null,
     });
 
@@ -314,33 +316,25 @@ describe('guest campaign onboarding', () => {
     ]);
 
     await waitForCondition(
-      () => view.container.textContent.includes('Create your account to continue'),
-      'returning guest signup gate'
+      () => view.router.state.location.pathname === '/reflection',
+      'returning guest proceeds to reflection'
     );
 
-    const cta = Array.from(view.container.querySelectorAll('button')).find(
-      (button) => button.textContent === 'Create account'
+    // Profile update should happen (usage count increments, no early return)
+    expect(updateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        is_guest_campaign_user: true,
+        guest_usage_count: 2,
+      })
     );
-    expect(cta).toBeTruthy();
-    await act(async () => {
-      cta.click();
-    });
-
-    await waitForCondition(() => view.router.state.location.pathname === '/login', 'returning guest signup redirect');
-
-    const params = new URLSearchParams(view.router.state.location.search);
-    expect(params.get('signup')).toBe('true');
-    expect(params.get('src')).toBe('instagram');
-    // Should NOT have started a new profile update (gate fired before the write)
-    expect(updateMock).not.toHaveBeenCalled();
   });
 
-  it('continues to reflection when gate check returns missing column error', async () => {
-    // If the column is not yet in the DB, the gate check fails gracefully and lets the
-    // user proceed rather than crashing or showing a misleading signup prompt.
+  it('continues to reflection when usage-count fetch returns missing column error', async () => {
+    // PGRST204 on the usage-count select is handled gracefully (treated as first visit)
+    // and the user proceeds to reflection without crashing or showing a misleading prompt.
     maybeSingleMock.mockResolvedValue({
       data: null,
-      error: { code: 'PGRST204', message: "Could not find the 'requires_signup_for_next_session' column" },
+      error: { code: 'PGRST204', message: "Could not find the 'guest_usage_count' column" },
     });
 
     view = await renderRouter('/start/guest?src=instagram', [
@@ -428,7 +422,9 @@ describe('guest campaign onboarding', () => {
     );
   });
 
-  it('requires signup for returning guests when requires_signup_for_next_session is true', async () => {
+  it('proceeds to reflection regardless of requires_signup_for_next_session (signup prompt fires in-session)', async () => {
+    // Entry no longer gates on requires_signup_for_next_session. The signup prompt
+    // fires inside ReflectionV2 only after the commitment-for-tomorrow step.
     supabaseMock.auth.getSession.mockResolvedValue({
       data: { session: { user: { id: 'window-override-guest', is_anonymous: true } } },
       error: null,
@@ -450,18 +446,15 @@ describe('guest campaign onboarding', () => {
     ]);
 
     await waitForCondition(
-      () => view.container.textContent.includes('Create your account to continue'),
-      'signup required gate'
+      () => view.router.state.location.pathname === '/reflection',
+      'guest with prior completed session proceeds to reflection'
     );
-    const cta = Array.from(view.container.querySelectorAll('button')).find(
-      (button) => button.textContent === 'Create account'
+    expect(updateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        is_guest_campaign_user: true,
+        guest_usage_count: 2,
+      })
     );
-    expect(cta).toBeTruthy();
-    await act(async () => {
-      cta.click();
-    });
-    await waitForCondition(() => view.router.state.location.pathname === '/login', 'signup required redirect');
-    expect(updateMock).not.toHaveBeenCalled();
   });
 
   it('sets usage count on first visit when profile has no usage history', async () => {
