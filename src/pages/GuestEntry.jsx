@@ -7,10 +7,8 @@ import {
   buildSignupPath,
   evaluateGuestAccess,
   extractAttribution,
-  fetchGuestGuardrailsEnabled,
   GUEST_FALLBACK_REDIRECT_DELAY_MS,
   GUEST_MODE_UNAVAILABLE_MESSAGE,
-  GUEST_COOLDOWN_WINDOW_MS,
   isAnonymousGuestUser,
   saveAttribution,
 } from '../lib/guestSession';
@@ -115,25 +113,20 @@ export default function GuestEntry() {
 
       if (!userId || cancelled) return;
 
-      const guardrailsEnabled = await fetchGuestGuardrailsEnabled(supabase);
-
-      // ── 4. Gate: timing policy + signup gate ──────────────────────────────
-      // Reads timing fields to enforce the 2-day access / 7-day cooldown policy.
+      // ── 4. Gate: first-session completion flag only ───────────────────────
       let guestProfile = null;
       try {
         const { data: gateData, error: gateError } = await supabase
           .from('user_profiles')
-          .select('requires_signup_for_next_session, guest_started_at, guest_cooldown_until, guest_usage_count')
+          .select('requires_signup_for_next_session, guest_usage_count')
           .eq('id', userId)
           .maybeSingle();
 
         if (!gateError) {
           guestProfile = gateData;
-          const accessResult = evaluateGuestAccess(gateData, { guardrailsEnabled });
-          if (accessResult === 'require_signup' || accessResult === 'cooldown') {
-            const eventName =
-              accessResult === 'cooldown' ? 'guest_cooldown_blocked' : 'guest_return_signup_gated';
-            trackEvent(eventName, { guest_id: userId, ...attribution });
+          const accessResult = evaluateGuestAccess(gateData);
+          if (accessResult === 'require_signup') {
+            trackEvent('guest_return_signup_gated', { guest_id: userId, ...attribution });
             if (!cancelled) {
               setGateAttribution(attribution);
               setShowSignupGate(true);
@@ -155,23 +148,14 @@ export default function GuestEntry() {
       // ── 5. Mark user_profile as guest campaign user ──────────────────────
       // The trigger auto-created the profile row on sign-in; just update flags.
       const updateTimestamp = new Date().toISOString();
-      const isFirstVisit = !guestProfile?.guest_started_at;
+      const isFirstVisit = typeof guestProfile?.guest_usage_count !== 'number';
 
       const profileFields = {
         is_guest_campaign_user: true,
         updated_at: updateTimestamp,
       };
 
-      if (isFirstVisit) {
-        // Set timing markers on the very first guest entry
-        const cooldownEndTime = new Date(Date.now() + GUEST_COOLDOWN_WINDOW_MS).toISOString();
-        profileFields.guest_started_at = updateTimestamp;
-        profileFields.guest_cooldown_until = cooldownEndTime;
-        profileFields.guest_usage_count = 1;
-      } else {
-        // Increment usage count for return visits within the 2-day window
-        profileFields.guest_usage_count = (guestProfile?.guest_usage_count || 0) + 1;
-      }
+      profileFields.guest_usage_count = isFirstVisit ? 1 : (guestProfile?.guest_usage_count || 0) + 1;
 
       const { error: updateError } = await supabase
         .from('user_profiles')
@@ -182,7 +166,7 @@ export default function GuestEntry() {
       // Fall back to a minimal update so guest navigation never blocks on profile shape.
       if (updateError) {
         if (updateError?.code === 'PGRST204') {
-          // Try without timing fields (schema may not have them yet)
+          // Try without optional guest fields (schema may not have them yet)
           const { error: guestFlagError } = await supabase
             .from('user_profiles')
             .update({ is_guest_campaign_user: true, updated_at: updateTimestamp })
@@ -221,7 +205,17 @@ export default function GuestEntry() {
   }, []);
 
   if (showSignupGate) {
-    return <GuestSignupGate attribution={gateAttribution} />;
+    return (
+      <GuestSignupGate
+        attribution={gateAttribution}
+        mode="fullscreen"
+        context="guest_entry_gate"
+        title="Create your account to continue"
+        body="Your guest reflection is complete. Create your account to save your progress and keep your momentum tomorrow."
+        ctaLabel="Create account"
+        secondaryLabel="Log in"
+      />
+    );
   }
 
   if (error) {

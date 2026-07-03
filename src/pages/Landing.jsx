@@ -8,7 +8,6 @@ import { supabase } from '@/lib/supabase/client';
 import {
   buildSignupPath,
   evaluateGuestAccess,
-  fetchGuestGuardrailsEnabled,
   isAnonymousGuestUser,
   readAttribution,
 } from '@/lib/guestSession';
@@ -29,30 +28,23 @@ export default function Landing() {
       return;
     }
 
-    // Anonymous (guest) user: check timing/signup policy before deciding what to show.
-    // Per policy: do NOT auto-resume guest reflection from `/`.
-    // If the guest is in cooldown or has completed their session, redirect to signup.
+    // Anonymous (guest) user: only check whether first session already requires signup.
     // Otherwise, show the landing page so they can navigate intentionally.
     let cancelled = false;
     setCheckingGuestProfile(true);
-    Promise.all([
-      supabase
-        .from('user_profiles')
-        .select('requires_signup_for_next_session, guest_started_at, guest_cooldown_until')
-        .eq('id', user.id)
-        .maybeSingle(),
-      fetchGuestGuardrailsEnabled(supabase),
-    ])
-      .then(([{ data, error }, guardrailsEnabled]) => {
+    supabase
+      .from('user_profiles')
+      .select('requires_signup_for_next_session')
+      .eq('id', user.id)
+      .maybeSingle()
+      .then(({ data, error }) => {
         if (cancelled) return;
-        const accessResult = !error
-          ? evaluateGuestAccess(data, { guardrailsEnabled })
-          : 'allow';
-        if (accessResult === 'require_signup' || accessResult === 'cooldown') {
+        const accessResult = !error ? evaluateGuestAccess(data) : 'allow';
+        if (accessResult === 'require_signup') {
           // Guest is blocked — send them to signup, preserving any attribution.
           navigate(buildSignupPath(readAttribution()), { replace: true });
         }
-        // Otherwise (first-visit or within 2-day window): show the landing page.
+        // Otherwise (first-visit): show the landing page.
         // Guest must intentionally navigate to /start/guest to enter a session.
       })
       .catch((err) => {

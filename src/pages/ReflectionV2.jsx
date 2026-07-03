@@ -1,14 +1,17 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Send, Moon, RefreshCw } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase/client';
 import { isMissingProfileColumn } from '../lib/supabase/profileSchema';
 import { reflectionHelpers } from '../lib/supabase/reflection';
 import { localDateStr } from '../lib/dateUtils';
 import { trackEvent } from '../lib/analytics';
-import { isAnonymousGuestUser, readAttribution } from '../lib/guestSession';
+import {
+  isAnonymousGuestUser,
+  readAttribution,
+  shouldPromptGuestSignupAfterCommitment,
+} from '../lib/guestSession';
 import GuestSignupGate from '../components/GuestSignupGate';
 import AppShellV2 from '../components/v2/AppShellV2';
 import ReflectionSummaryCard from '../components/v2/ReflectionSummaryCard';
@@ -180,13 +183,13 @@ function ChatMessage({ message, isFirstMessage, onChipSelect, chipsDisabled, str
 
 export default function ReflectionV2() {
   const { user } = useAuth();
-  const navigate = useNavigate();
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
 
   // Guard ref — initSession only ever runs once per mount
   const initCalledRef = useRef(false);
   const initSentRef = useRef(false);
+  const hasShownCommitmentSignupModalRef = useRef(false);
 
   // messagesRef always holds the latest messages array so sendMessage
   // never closes over a stale snapshot.
@@ -544,6 +547,35 @@ export default function ReflectionV2() {
       'Content-Type': 'application/json',
       ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
     };
+  }
+
+  async function markGuestRequiresSignup(userId) {
+    const nowIso = new Date().toISOString();
+    const { error } = await supabase
+      .from('user_profiles')
+      .update({
+        completed_first_session: true,
+        requires_signup_for_next_session: true,
+        updated_at: nowIso,
+      })
+      .eq('id', userId);
+
+    if (!error) return;
+    if (!isMissingProfileColumn(error, 'requires_signup_for_next_session')) {
+      console.error('[markGuestRequiresSignup] profile update failed:', error);
+      return;
+    }
+
+    const { error: fallbackError } = await supabase
+      .from('user_profiles')
+      .update({
+        updated_at: nowIso,
+      })
+      .eq('id', userId);
+
+    if (fallbackError) {
+      console.error('[markGuestRequiresSignup] profile fallback update failed:', fallbackError);
+    }
   }
 
   // ── Send message ──────────────────────────────────────────────────────────
@@ -934,8 +966,26 @@ export default function ReflectionV2() {
         if (data.commitment_goal_bridge_done === true && !state.commitment_goal_bridge_done) {
           dbUpdates.commitment_goal_bridge_done = true;
         }
-        if (Object.keys(dbUpdates).length > 0)
-          reflectionHelpers.updateSession(sid, dbUpdates).catch(() => {});
+        if (Object.keys(dbUpdates).length > 0) {
+          const shouldShowSignupModalAfterCommitment = shouldPromptGuestSignupAfterCommitment({
+            isGuestUser: isGuestCampaignUser || isAnonymousGuestUser(user),
+            previousCommitment: state.tomorrow_commitment,
+            nextCommitment: dbUpdates.tomorrow_commitment,
+            hasPromptBeenShown: hasShownCommitmentSignupModalRef.current,
+          });
+          if (!shouldShowSignupModalAfterCommitment) {
+            reflectionHelpers.updateSession(sid, dbUpdates).catch(() => {});
+          } else {
+            try {
+              await reflectionHelpers.updateSession(sid, dbUpdates);
+            } catch (sessionUpdateErr) {
+              console.error('[guest_signup_gate] commitment save failed:', sessionUpdateErr);
+            }
+            hasShownCommitmentSignupModalRef.current = true;
+            await markGuestRequiresSignup(user.id);
+            setShowGuestSignupGate(true);
+          }
+        }
       }
 
       // Handle new goal suggestion from coach
@@ -976,45 +1026,6 @@ export default function ReflectionV2() {
             setFollowThroughStats(resolvedFollowThroughStats);
           }
         } catch (_e) {}
-
-        // ── Guest campaign: redirect to conversion page after first session ──
-        if (isGuestCampaignUser || isAnonymousGuestUser(user)) {
-          const attribution = readAttribution();
-          trackEvent('guest_session_completed', { guest_id: user.id, session_id: sid, ...attribution });
-
-          // Mark profile flags so subsequent visits show the signup gate
-          supabase
-            .from('user_profiles')
-            .update({
-              completed_first_session: true,
-              requires_signup_for_next_session: true,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', user.id)
-            .then(async ({ error }) => {
-              if (!error) return;
-              if (isMissingProfileColumn(error, 'requires_signup_for_next_session')) {
-                const { error: fallbackError } = await supabase
-                  .from('user_profiles')
-                  .update({
-                    updated_at: new Date().toISOString(),
-                  })
-                  .eq('id', user.id);
-                if (fallbackError) {
-                  console.error('[guest_session_completed] profile fallback update failed:', fallbackError);
-                }
-              }
-            });
-
-          // Short delay so the summary card renders before we navigate away
-          setTimeout(() => {
-            navigate('/post-session/next-steps', {
-              replace: true,
-              state: { summaryCardData: newSummaryData, streak, followThroughStats: resolvedFollowThroughStats },
-            });
-          }, 2500);
-          return;
-        }
 
         const alreadyHasPrompt = messagesRef.current.some((m) => m.id === 'post-session-prompt');
         if (!alreadyHasPrompt) {
@@ -1237,10 +1248,6 @@ export default function ReflectionV2() {
     ? 'Anything else on your mind...'
     : STAGE_PLACEHOLDERS[sessionState.current_stage] || 'Tell me more...';
 
-  if (showGuestSignupGate) {
-    return <GuestSignupGate attribution={readAttribution()} />;
-  }
-
   return (
     <AppShellV2
       title={(isGuestCampaignUser || isAnonymousGuestUser(user)) ? 'Guest Session' : 'Nightly Reflection'}
@@ -1462,6 +1469,14 @@ export default function ReflectionV2() {
             </div>
           </div>
         </div>
+        {showGuestSignupGate && (
+          <GuestSignupGate
+            attribution={readAttribution()}
+            mode="modal"
+            context="commitment_capture"
+            onSecondaryAction={() => setShowGuestSignupGate(false)}
+          />
+        )}
       </div>
     </AppShellV2>
   );

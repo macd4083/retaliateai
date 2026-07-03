@@ -28,12 +28,13 @@ import { stopAnalytics } from './lib/analytics';
 import {
   buildSignupPath,
   evaluateGuestAccess,
-  fetchGuestGuardrailsEnabled,
   isAnonymousGuestUser,
   readAttribution,
 } from './lib/guestSession';
 import { shouldShowTrialExpiredModal } from './lib/trialModal';
 import { isMissingProfileColumn } from './lib/supabase/profileSchema';
+
+const OnboardingScreen = /** @type {any} */ (OnboardingV2);
 
 const PROFILE_BASE_FIELDS = ['onboarding_completed', 'trial_ends_at', 'subscription_status', 'feedback_submitted', 'trial_extended', 'role'];
 const PROFILE_FIELDS_BASE = PROFILE_BASE_FIELDS.join(', ');
@@ -41,8 +42,6 @@ const PROFILE_FIELDS_WITH_GUEST_FLAGS = [
   ...PROFILE_BASE_FIELDS,
   'is_guest_campaign_user',
   'requires_signup_for_next_session',
-  'guest_started_at',
-  'guest_cooldown_until',
 ].join(', ');
 
 async function fetchUserProfile(userId) {
@@ -56,9 +55,7 @@ async function fetchUserProfile(userId) {
 
   const missingGuestColumns =
     isMissingProfileColumn(error, 'is_guest_campaign_user') ||
-    isMissingProfileColumn(error, 'requires_signup_for_next_session') ||
-    isMissingProfileColumn(error, 'guest_started_at') ||
-    isMissingProfileColumn(error, 'guest_cooldown_until');
+    isMissingProfileColumn(error, 'requires_signup_for_next_session');
 
   if (!missingGuestColumns) return { data: null, error };
 
@@ -73,16 +70,18 @@ async function fetchUserProfile(userId) {
   if (fallbackData) {
     console.warn('[AuthGuardV2] guest profile columns unavailable; using base profile fields');
   }
+  const safeFallbackData = (fallbackData && typeof fallbackData === 'object') ? fallbackData : null;
 
   return {
-    data: fallbackData
-      ? {
-          ...fallbackData,
+    data: safeFallbackData
+      ? Object.assign(
+        {},
+        safeFallbackData,
+        {
           is_guest_campaign_user: undefined,
           requires_signup_for_next_session: undefined,
-          guest_started_at: undefined,
-          guest_cooldown_until: undefined,
         }
+      )
       : null,
     error: null,
   };
@@ -126,7 +125,7 @@ function LoadingScreen() {
 // Guest campaign users (anonymous Supabase users from /start/guest) bypass
 // onboarding on first visit, and see a signup gate if they try a second session.
 function AuthGuardV2({ children }) {
-  const { user, loading } = useAuth();
+  const { user, loading } = /** @type {{ user: any, loading: boolean }} */ (useAuth());
 
   // FIX: Start as null (unknown), not false.
   // null = "haven't checked yet" → show loading screen
@@ -136,7 +135,6 @@ function AuthGuardV2({ children }) {
   const [profileData, setProfileData] = React.useState(null);
   const [profileLoading, setProfileLoading] = React.useState(true);
   const [feedbackDismissed, setFeedbackDismissed] = React.useState(false);
-  const [guardrailsEnabled, setGuardrailsEnabled] = React.useState(true);
 
   React.useEffect(() => {
     setFeedbackDismissed(false);
@@ -151,22 +149,17 @@ function AuthGuardV2({ children }) {
     if (!user?.id) {
       setProfileLoading(false);
       setOnboardingCompleted(false);
-      setGuardrailsEnabled(true);
       return;
     }
 
     async function loadProfile() {
-      const [{ data, error }, nextGuardrailsEnabled] = await Promise.all([
-        fetchUserProfile(user.id),
-        fetchGuestGuardrailsEnabled(supabase),
-      ]);
+      const { data, error } = await fetchUserProfile(user.id);
       if (cancelled) return;
       if (error) {
         console.error('[AuthGuardV2] profile load failed:', error);
       }
 
       const completed = data?.onboarding_completed ?? false;
-      setGuardrailsEnabled(nextGuardrailsEnabled);
       setOnboardingCompleted(completed);
       // Stop tracking for users who have already completed onboarding
       if (completed) stopAnalytics();
@@ -189,20 +182,20 @@ function AuthGuardV2({ children }) {
 
   if (!user) return <Navigate to="/login" replace />;
 
-  // Guest campaign users who have already completed their first session: show signup gate.
+  // Guest campaign users who have already completed their first session: redirect to signup.
   // user.is_anonymous === true distinguishes anonymous (guest) users from signed-up users.
   const isGuestUser = isGuestCampaignUser(profileData, user);
-  const accessResult = evaluateGuestAccess(profileData, { guardrailsEnabled });
+  const accessResult = evaluateGuestAccess(profileData);
 
-  if (isGuestUser && isAnonymousGuestUser(user) && (accessResult === 'cooldown' || accessResult === 'require_signup')) {
-    // Returning guest or guest in cooldown: redirect to the signup page, preserving any attribution.
+  if (isGuestUser && isAnonymousGuestUser(user) && accessResult === 'require_signup') {
+    // Returning guest: redirect to the signup page, preserving any attribution.
     return <Navigate to={buildSignupPath(readAttribution())} replace />;
   }
 
   // Guest campaign users bypass onboarding — go straight to the session.
   if (!onboardingCompleted && !isGuestUser) {
     return (
-      <OnboardingV2
+      <OnboardingScreen
         onOnboardingComplete={() => {
           stopAnalytics();
           setOnboardingCompleted(true);
