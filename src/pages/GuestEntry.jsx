@@ -129,6 +129,7 @@ export default function GuestEntry() {
         }
       } catch (_countErr) {
         // Non-critical — fall back to treating this as a first visit.
+        console.error('[GuestEntry] usage count fetch failed:', _countErr);
       }
 
       const isFirstVisit = typeof guestUsageCount !== 'number';

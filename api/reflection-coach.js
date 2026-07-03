@@ -2852,7 +2852,7 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: profileError.message || 'Failed to check subscription' });
     }
 
-    const isGuestCampaignUser = profile?.is_guest_campaign_user === true;
+    const isGuestCampaignUser = !!profile?.is_guest_campaign_user;
     const trialExpired = profile?.trial_ends_at
       ? new Date(profile.trial_ends_at) < new Date()
       : false;
