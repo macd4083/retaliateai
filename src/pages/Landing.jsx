@@ -243,7 +243,7 @@ export default function Landing() {
                   "What didn't go as planned? What got in the way?"
                 </p>
                 <p className="text-gray-400 leading-relaxed">
-                  Most people skip this and wonder why nothing changes. The AI hears excuses, acknowledges them, and pivots to what's actually in your control. Warm but direct. No shame, no coddling.
+                  Most people skip this and wonder why nothing changes. The AI hears excuses, acknowledges them, and pivots to what's actually in your control. No shame, no coddling.
                 </p>
               </div>
 
