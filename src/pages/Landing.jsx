@@ -20,7 +20,8 @@ export default function Landing() {
       navigate('/reflection', { replace: true });
     }
     // Anonymous (guest) users stay on the landing page to choose their path intentionally.
-  }, [user?.id, isAnonymousUser]); // eslint-disable-line react-hooks/exhaustive-deps
+    // navigate is a stable reference from react-router-dom; user.id/is_anonymous drive re-runs.
+  }, [user?.id, isAnonymousUser, navigate]);
 
   const handleGetStarted = (location = 'hero') => {
     trackEvent('landing_cta_clicked', { location });
