@@ -30,18 +30,6 @@ export function isAnonymousGuestUser(user) {
 }
 
 /**
- * Evaluates whether a guest profile can access the guest session.
- * For this phase, gating is driven only by requires_signup_for_next_session.
- *
- * @param {object|null} profile – row from user_profiles
- * @returns {'allow'|'require_signup'}
- */
-export function evaluateGuestAccess(profile) {
-  if (!profile) return 'allow';
-  return profile.requires_signup_for_next_session === true ? 'require_signup' : 'allow';
-}
-
-/**
  * Determines whether the guest signup prompt should appear right after commitment capture.
  *
  * @param {{

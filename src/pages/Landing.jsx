@@ -4,20 +4,13 @@ import { useAuth } from '@/lib/AuthContext';
 import { ArrowRight, CheckCircle, Download, Smartphone } from 'lucide-react';
 import { usePWAInstall } from '@/hooks/usePWAInstall';
 import { trackEvent } from '@/lib/analytics';
-import { supabase } from '@/lib/supabase/client';
-import {
-  buildSignupPath,
-  evaluateGuestAccess,
-  isAnonymousGuestUser,
-  readAttribution,
-} from '@/lib/guestSession';
+import { isAnonymousGuestUser } from '@/lib/guestSession';
 
 export default function Landing() {
   const navigate = useNavigate();
   const { user, loading } = useAuth();
+
   const isAnonymousUser = isAnonymousGuestUser(user);
-  // true while we are fetching the anonymous user's profile to decide where to send them
-  const [checkingGuestProfile, setCheckingGuestProfile] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -25,51 +18,17 @@ export default function Landing() {
     // Non-anonymous signed-in users go straight to the app.
     if (!isAnonymousUser) {
       navigate('/reflection', { replace: true });
-      return;
     }
-
-    // Anonymous (guest) user: only check whether first session already requires signup.
-    // Otherwise, show the landing page so they can navigate intentionally.
-    let cancelled = false;
-    setCheckingGuestProfile(true);
-    supabase
-      .from('user_profiles')
-      .select('requires_signup_for_next_session')
-      .eq('id', user.id)
-      .maybeSingle()
-      .then(({ data, error }) => {
-        if (cancelled) return;
-        const accessResult = !error ? evaluateGuestAccess(data) : 'allow';
-        if (accessResult === 'require_signup') {
-          // Guest is blocked — send them to signup, preserving any attribution.
-          navigate(buildSignupPath(readAttribution()), { replace: true });
-        }
-        // Otherwise (first-visit): show the landing page.
-        // Guest must intentionally navigate to /start/guest to enter a session.
-      })
-      .catch((err) => {
-        if (!cancelled) console.warn('[Landing] guest profile check failed:', err);
-        // On error, show landing page rather than auto-routing anywhere.
-      })
-      .finally(() => {
-        if (!cancelled) setCheckingGuestProfile(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  // navigate and supabase are stable references; user.id/is_anonymous drive re-runs.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id, isAnonymousUser]);
+    // Anonymous (guest) users stay on the landing page to choose their path intentionally.
+  }, [user?.id, isAnonymousUser]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleGetStarted = (location = 'hero') => {
     trackEvent('landing_cta_clicked', { location });
     navigate('/login?signup=true');
   };
 
-  // Don't render anything while auth is resolving, while we're checking guest
-  // profile state, or while a signed-in non-anonymous user is being redirected.
-  if (loading || checkingGuestProfile || (user && !isAnonymousUser)) return null;
+  // Don't render anything while auth is resolving or while a signed-in non-anonymous user is being redirected.
+  if (loading || (user && !isAnonymousUser)) return null;
 
   return (
     <div className="min-h-screen bg-black">

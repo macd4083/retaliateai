@@ -33,7 +33,6 @@ import Login from '../pages/Login';
 import GuestEntry from '../pages/GuestEntry';
 import {
   buildSignupPath,
-  evaluateGuestAccess,
   extractAttribution,
   fetchGuestGuardrailsEnabled,
   GUEST_FALLBACK_REDIRECT_DELAY_MS,
@@ -344,32 +343,6 @@ describe('guest campaign onboarding', () => {
 
     await waitForCondition(() => view.router.state.location.pathname === '/reflection', 'fallback redirect');
     expect(updateMock).toHaveBeenCalled();
-  });
-
-  // ── Guest access policy tests ──────────────────────────────────────────────
-
-  describe('evaluateGuestAccess (unit)', () => {
-    it('returns allow for null profile', () => {
-      expect(evaluateGuestAccess(null)).toBe('allow');
-    });
-
-    it('returns allow for brand-new guest with no signup requirement', () => {
-      expect(evaluateGuestAccess({ requires_signup_for_next_session: false })).toBe('allow');
-    });
-
-    it('returns require_signup when requires_signup_for_next_session is true', () => {
-      expect(evaluateGuestAccess({ requires_signup_for_next_session: true })).toBe('require_signup');
-    });
-
-    it('ignores legacy timing fields and only uses requires_signup_for_next_session', () => {
-      expect(
-        evaluateGuestAccess({
-          requires_signup_for_next_session: true,
-          guest_started_at: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString(),
-          guest_cooldown_until: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
-        })
-      ).toBe('require_signup');
-    });
   });
 
   describe('fetchGuestGuardrailsEnabled', () => {

@@ -26,10 +26,7 @@ import { supabase } from './lib/supabase/client';
 import { usePageTracking } from './lib/usePageTracking';
 import { stopAnalytics } from './lib/analytics';
 import {
-  buildSignupPath,
-  evaluateGuestAccess,
   isAnonymousGuestUser,
-  readAttribution,
 } from './lib/guestSession';
 import { shouldShowTrialExpiredModal } from './lib/trialModal';
 import { isMissingProfileColumn } from './lib/supabase/profileSchema';
@@ -41,7 +38,6 @@ const PROFILE_FIELDS_BASE = PROFILE_BASE_FIELDS.join(', ');
 const PROFILE_FIELDS_WITH_GUEST_FLAGS = [
   ...PROFILE_BASE_FIELDS,
   'is_guest_campaign_user',
-  'requires_signup_for_next_session',
 ].join(', ');
 
 async function fetchUserProfile(userId) {
@@ -54,8 +50,7 @@ async function fetchUserProfile(userId) {
   if (!error) return { data, error: null };
 
   const missingGuestColumns =
-    isMissingProfileColumn(error, 'is_guest_campaign_user') ||
-    isMissingProfileColumn(error, 'requires_signup_for_next_session');
+    isMissingProfileColumn(error, 'is_guest_campaign_user');
 
   if (!missingGuestColumns) return { data: null, error };
 
@@ -79,7 +74,6 @@ async function fetchUserProfile(userId) {
         safeFallbackData,
         {
           is_guest_campaign_user: undefined,
-          requires_signup_for_next_session: undefined,
         }
       )
       : null,
@@ -182,17 +176,8 @@ function AuthGuardV2({ children }) {
 
   if (!user) return <Navigate to="/login" replace />;
 
-  // Guest campaign users who have already completed their first session: redirect to signup.
-  // user.is_anonymous === true distinguishes anonymous (guest) users from signed-up users.
-  const isGuestUser = isGuestCampaignUser(profileData, user);
-  const accessResult = evaluateGuestAccess(profileData);
-
-  if (isGuestUser && isAnonymousGuestUser(user) && accessResult === 'require_signup') {
-    // Returning guest: redirect to the signup page, preserving any attribution.
-    return <Navigate to={buildSignupPath(readAttribution())} replace />;
-  }
-
   // Guest campaign users bypass onboarding — go straight to the session.
+  const isGuestUser = isGuestCampaignUser(profileData, user);
   if (!onboardingCompleted && !isGuestUser) {
     return (
       <OnboardingScreen

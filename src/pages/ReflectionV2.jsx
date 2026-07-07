@@ -542,35 +542,6 @@ export default function ReflectionV2() {
     };
   }
 
-  async function markGuestRequiresSignup(userId) {
-    const nowIso = new Date().toISOString();
-    const { error } = await supabase
-      .from('user_profiles')
-      .update({
-        completed_first_session: true,
-        requires_signup_for_next_session: true,
-        updated_at: nowIso,
-      })
-      .eq('id', userId);
-
-    if (!error) return;
-    if (!isMissingProfileColumn(error, 'requires_signup_for_next_session')) {
-      console.error('[markGuestRequiresSignup] profile update failed:', error);
-      return;
-    }
-
-    const { error: fallbackError } = await supabase
-      .from('user_profiles')
-      .update({
-        updated_at: nowIso,
-      })
-      .eq('id', userId);
-
-    if (fallbackError) {
-      console.error('[markGuestRequiresSignup] profile fallback update failed:', fallbackError);
-    }
-  }
-
   // ── Send message ──────────────────────────────────────────────────────────
 
   async function sendMessage(userText, overrideSessionId, overrideState, extraContext = {}) {
@@ -961,7 +932,6 @@ export default function ReflectionV2() {
               console.error('[guest_signup_gate] commitment save failed:', sessionUpdateErr);
             }
             hasShownCommitmentSignupModalRef.current = true;
-            await markGuestRequiresSignup(user.id);
             setShowGuestSignupGate(true);
           }
         }
