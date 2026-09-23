@@ -115,6 +115,20 @@ function LoadingScreen() {
   );
 }
 
+function CatchAllRedirect() {
+  const { user, loading } = /** @type {{ user: any, loading: boolean }} */ (useAuth());
+
+  if (loading) {
+    return <LoadingScreen />;
+  }
+
+  if (!user) {
+    return <Navigate to="/" replace />;
+  }
+
+  return <Navigate to={isAnonymousGuestUser(user) ? '/reflection' : '/today'} replace />;
+}
+
 // ── AuthGuardV2 ───────────────────────────────────────────────────────────
 // Checks auth + onboarding_completed. If not onboarded, shows OnboardingV2.
 // Guest campaign users (anonymous Supabase users from /start/guest) bypass
@@ -317,7 +331,7 @@ export default function App() {
         }
       />
       {/* Catch-all */}
-      <Route path="*" element={<Navigate to="/today" replace />} />
+      <Route path="*" element={<CatchAllRedirect />} />
     </Routes>
   );
 }

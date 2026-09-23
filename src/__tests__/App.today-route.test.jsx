@@ -3,7 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot } from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';
 
-const { fromMock } = vi.hoisted(() => ({
+const { authState, fromMock } = vi.hoisted(() => ({
+  authState: {
+    user: { id: 'user-1' },
+    loading: false,
+  },
   fromMock: vi.fn(),
 }));
 
@@ -84,10 +88,7 @@ vi.mock('../pages/PostSessionNextSteps', () => ({
 }));
 
 vi.mock('../lib/AuthContext', () => ({
-  useAuth: () => ({
-    user: { id: 'user-1' },
-    loading: false,
-  }),
+  useAuth: () => authState,
 }));
 
 vi.mock('../lib/supabase/client', () => ({
@@ -105,7 +106,7 @@ vi.mock('../lib/analytics', () => ({
 }));
 
 vi.mock('../lib/guestSession', () => ({
-  isAnonymousGuestUser: () => false,
+  isAnonymousGuestUser: (user) => user?.is_anonymous === true,
 }));
 
 vi.mock('../lib/trialModal', () => ({
@@ -160,6 +161,8 @@ describe('App today routing', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    authState.user = { id: 'user-1' };
+    authState.loading = false;
     fromMock.mockImplementation((table) => {
       if (table !== 'user_profiles') {
         throw new Error(`Unexpected table: ${table}`);
@@ -215,5 +218,18 @@ describe('App today routing', () => {
     );
 
     expect(view.container.textContent).toContain('Today Page');
+  });
+
+  it('redirects unknown routes to the landing page for unauthenticated users', async () => {
+    authState.user = null;
+
+    await renderApp('/does-not-exist');
+
+    await waitForCondition(
+      () => view.container.textContent.includes('Landing Page'),
+      'public catch-all redirect'
+    );
+
+    expect(view.container.textContent).toContain('Landing Page');
   });
 });
