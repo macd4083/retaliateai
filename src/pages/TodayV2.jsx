@@ -91,6 +91,7 @@ export default function TodayV2() {
   );
   const hasPlan = Boolean(plan.title);
   const isSavingOutcome = outcomeSaveState === 'saving';
+  const canContinueToPlan = Boolean(status) && !isSavingOutcome;
 
   const loadToday = useCallback(async () => {
     if (!user?.id) return;
@@ -376,17 +377,32 @@ export default function TodayV2() {
             </div>
 
             <p className="mb-4 text-sm leading-relaxed text-zinc-300">
-              When the day is over, return to reflection to review what happened and decide
-              tomorrow’s next highest-ROI action.
+              After you save today’s outcome, continue into the structured review-and-plan
+              worksheet. The classic reflection chat still stays available.
             </p>
 
             <button
               type="button"
-              onClick={() => navigate('/reflection')}
-              className="inline-flex items-center gap-2 rounded-full bg-red-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-red-500 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-2 focus:ring-offset-zinc-900"
+              onClick={() => navigate('/plan')}
+              disabled={!canContinueToPlan}
+              className="inline-flex items-center gap-2 rounded-full bg-red-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-red-500 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-2 focus:ring-offset-zinc-900 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Open reflection
+              Continue to review &amp; plan
               <ArrowRight className="h-4 w-4" />
+            </button>
+
+            <div className="mt-3 text-xs leading-relaxed text-zinc-500">
+              {canContinueToPlan
+                ? 'Review Today comes first there, then Plan Tomorrow, then final confirmation.'
+                : 'Save Done, Partial, or Missed first so the worksheet starts from real evidence.'}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => navigate('/reflection')}
+              className="mt-4 text-sm font-medium text-zinc-400 transition-colors hover:text-white focus:outline-none focus:text-white"
+            >
+              Prefer the chat? Open /reflection instead.
             </button>
           </section>
         </div>

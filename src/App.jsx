@@ -4,6 +4,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 // ── V2 pages (new) ─────────────────────────────────────────────────────────
 import ReflectionV2 from './pages/ReflectionV2';
 import TodayV2 from './pages/TodayV2';
+import PlanV2 from './pages/PlanV2';
 import InsightsV2 from './pages/InsightsV2';
 import SettingsV2 from './pages/SettingsV2';
 import OnboardingV2 from './pages/OnboardingV2';
@@ -270,6 +271,14 @@ export default function App() {
         element={
           <AuthGuardV2>
             <ReflectionV2 />
+          </AuthGuardV2>
+        }
+      />
+      <Route
+        path="/plan"
+        element={
+          <AuthGuardV2>
+            <PlanV2 />
           </AuthGuardV2>
         }
       />
