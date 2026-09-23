@@ -357,7 +357,7 @@ export default function OnboardingV2({ onOnboardingComplete } = {}) {
       });
       // Signal parent (AuthGuardV2) that onboarding is done — avoids stale cache issue
       if (onOnboardingComplete) onOnboardingComplete();
-      else navigate('/reflection');
+      else navigate('/today');
       // Subscribe to push notifications silently after navigation
       if (user?.id) {
         subscribeToPush(user.id, supabase).catch(() => {});

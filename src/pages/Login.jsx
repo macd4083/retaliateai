@@ -51,7 +51,7 @@ export default function Login() {
       trackEvent('login_completed');
       setMessage('Login successful!');
       setMessageType('success');
-      setTimeout(() => navigate('/reflection'), 1000);
+      setTimeout(() => navigate('/today'), 1000);
     }
     setLoading(false);
   };
@@ -350,7 +350,7 @@ function VerificationWaitingScreen({ signupEmail, signupPassword, onBack, naviga
           if (signInData?.session) {
             clearInterval(checkInterval);
             clearInterval(dotsInterval);
-            navigate('/reflection');
+            navigate('/today');
           }
         }
       } catch (err) {
@@ -394,7 +394,7 @@ function VerificationWaitingScreen({ signupEmail, signupPassword, onBack, naviga
       
       setOtpMessage('Email verified! Redirecting...');
       setOtpMessageType('success');
-      setTimeout(() => navigate('/reflection'), 1500);
+      setTimeout(() => navigate('/today'), 1500);
     }
   };
 
