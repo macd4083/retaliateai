@@ -71,7 +71,14 @@ describe('PlanV2', () => {
       date: '2026-09-23',
       checkin_outcome: 'partial',
       tomorrow_commitment: null,
-      tomorrow_plan_details: null,
+      tomorrow_plan_details: {
+        review_today: {
+          highest_roi_action: 'Ship the revised offer',
+          repeated_trajectory: 'If repeated, this builds direct customer feedback loops.',
+          lesson: 'Prepare call notes before lunch.',
+          completion_status: 'partial',
+        },
+      },
       commitment_why: null,
     });
     getYesterdayCommitmentMock.mockResolvedValue('Ship the revised offer');
@@ -114,46 +121,27 @@ describe('PlanV2', () => {
     field.dispatchEvent(new window.Event('input', { bubbles: true }));
   }
 
-  function clickButton(label) {
-    const button = Array.from(view.container.querySelectorAll('button')).find(
-      (candidate) => candidate.textContent.trim() === label
-    );
-
-    button.click();
-  }
-
-  it('publishes the structured worksheet into the existing commitment fields', async () => {
+  it('uses Today review evidence as planning context and publishes tomorrow commitment fields', async () => {
     await renderPage();
 
     await waitForCondition(
-      () => view.container.textContent.includes('Ship the revised offer'),
-      'worksheet load'
+      () => view.container.textContent.includes('Evidence carried from Today'),
+      'plan load'
     );
 
-    expect(view.container.textContent).toContain('Part 1 · Review Today');
-    expect(view.container.textContent).toContain('Part 2 · Plan Tomorrow');
-    expect(view.container.textContent).toContain('Part 3 · Final confirmation');
+    expect(view.container.textContent).toContain('Ship the revised offer');
+    expect(view.container.textContent).toContain('Prepare call notes before lunch.');
 
     await act(async () => {
-      changeField('plan-result-value', 'Sent the revision and got clear objections back.');
-      changeField('plan-benefit-from-action', 'I now know the exact objection blocking the sale.');
-      changeField('plan-cost-of-inaction', 'I would still be guessing and delaying outreach.');
-      changeField('plan-repeated-trajectory', 'More avoidance would keep revenue flat.');
-      changeField('plan-becoming', 'Someone who faces the signal instead of hiding from it.');
-      changeField('plan-lesson', 'I need the draft ready before my afternoon energy drops.');
-      changeField('plan-desired-direction', 'A seller who learns from direct contact with reality.');
+      changeField('plan-desired-direction', 'A seller who iterates from real objections.');
       changeField('plan-value-to-strengthen', 'Directness and consistency.');
-      changeField('plan-primary-action', 'Call the three warm leads before noon.');
-      changeField('plan-completion-definition', 'Three calls placed and notes logged in the CRM.');
-      changeField('plan-additional-actions', 'Send follow-up emails to any lead I miss by phone.');
-      changeField('plan-start-plan', 'At 9:00 AM from the office with the lead sheet open.');
-      changeField('plan-obstacle', 'I may drift into admin work first.');
-      changeField('plan-tonight-preparation', 'Lay out the lead sheet and draft the first call opener.');
-    });
-
-    await act(async () => {
-      clickButton('Partly');
-      clickButton('Mixed');
+      changeField('plan-primary-action', 'Call three warm leads before noon.');
+      changeField('plan-completion-definition', 'Three calls completed with notes in CRM.');
+      changeField('plan-additional-actions', 'Email follow-ups to any lead I miss by phone.');
+      changeField('plan-start-plan', '9:00 AM at my desk with the call list open.');
+      changeField('plan-obstacle', 'I may hide in admin tasks.');
+      changeField('plan-fallback-action', 'Make one call within 10 minutes no matter what.');
+      changeField('plan-tonight-preparation', 'Print call list and script opening line tonight.');
       const checkbox = view.container.querySelector('#plan-confirm-checkbox');
       checkbox.click();
     });
@@ -167,8 +155,6 @@ describe('PlanV2', () => {
       'publish button enabled'
     );
 
-    expect(publishButton.disabled).toBe(false);
-
     await act(async () => {
       publishButton.click();
     });
@@ -181,31 +167,44 @@ describe('PlanV2', () => {
     expect(updateSessionMock).toHaveBeenCalledWith(
       'session-1',
       expect.objectContaining({
-        tomorrow_commitment: 'Call the three warm leads before noon.',
-        commitment_minimum: 'Three calls placed and notes logged in the CRM.',
-        commitment_stretch: 'Send follow-up emails to any lead I miss by phone.',
-        commitment_why: 'A seller who learns from direct contact with reality. | Directness and consistency.',
+        tomorrow_commitment: 'Call three warm leads before noon.',
+        commitment_minimum: 'Three calls completed with notes in CRM.',
+        commitment_stretch: 'Email follow-ups to any lead I miss by phone.',
+        commitment_why: 'A seller who iterates from real objections. | Directness and consistency.',
         commitment_checkin_done: true,
         checkin_outcome: 'partial',
         tomorrow_plan_details: expect.objectContaining({
           workflow: 'structured_plan_v1',
-          what: 'Call the three warm leads before noon.',
-          when_where: 'At 9:00 AM from the office with the lead sheet open.',
+          what: 'Call three warm leads before noon.',
           review_today: expect.objectContaining({
             highest_roi_action: 'Ship the revised offer',
-            completion_status: 'partial',
+            lesson: 'Prepare call notes before lunch.',
           }),
           plan_tomorrow: expect.objectContaining({
-            desired_direction: 'A seller who learns from direct contact with reality.',
-            value_to_strengthen: 'Directness and consistency.',
-            obstacle: 'I may drift into admin work first.',
+            obstacle: 'I may hide in admin tasks.',
+            minimum_action_if_blocked: 'Make one call within 10 minutes no matter what.',
           }),
         }),
       })
     );
+  });
 
-    expect(view.container.textContent).toContain(
-      'Tomorrow’s action is published. It will carry into Today on the next day.'
+  it('shows a fallback prompt when review evidence is missing', async () => {
+    getYesterdayCommitmentMock.mockResolvedValueOnce('');
+    getTodaySessionMock.mockResolvedValueOnce({
+      id: 'session-1',
+      date: '2026-09-23',
+      checkin_outcome: null,
+      tomorrow_commitment: null,
+      tomorrow_plan_details: null,
+      commitment_why: null,
+    });
+
+    await renderPage();
+
+    await waitForCondition(
+      () => view.container.textContent.includes('Complete Today’s Review first'),
+      'missing review prompt'
     );
   });
 });

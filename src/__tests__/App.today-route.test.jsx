@@ -224,6 +224,17 @@ describe('App today routing', () => {
     expect(view.container.textContent).toContain('Plan Page');
   });
 
+  it('keeps /reflection available as a separate protected route', async () => {
+    await renderApp('/reflection');
+
+    await waitForCondition(
+      () => view.container.textContent.includes('Reflection Page'),
+      '/reflection route render'
+    );
+
+    expect(view.container.textContent).toContain('Reflection Page');
+  });
+
   it('redirects unknown routes to /today for authenticated users', async () => {
     await renderApp('/does-not-exist');
 

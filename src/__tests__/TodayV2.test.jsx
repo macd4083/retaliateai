@@ -87,9 +87,10 @@ describe('TodayV2', () => {
       id: 'session-1',
       date: '2026-09-23',
       checkin_outcome: null,
+      tomorrow_plan_details: null,
     });
     updateSessionMock.mockResolvedValue({
-      checkin_outcome: 'missed',
+      id: 'session-1',
     });
     maybeSingleMock.mockResolvedValue({
       data: null,
@@ -126,188 +127,98 @@ describe('TodayV2', () => {
     return view;
   }
 
-  it('renders the empty-plan state when yesterday has no commitment', async () => {
+  function changeField(id, value) {
+    const field = view.container.querySelector(`#${id}`);
+    const prototype = field.tagName === 'TEXTAREA'
+      ? window.HTMLTextAreaElement.prototype
+      : window.HTMLInputElement.prototype;
+    const descriptor = Object.getOwnPropertyDescriptor(prototype, 'value');
+    descriptor.set.call(field, value);
+    field.dispatchEvent(new window.Event('input', { bubbles: true }));
+  }
+
+  function clickButton(label) {
+    const button = Array.from(view.container.querySelectorAll('button')).find(
+      (candidate) => candidate.textContent.trim() === label
+    );
+    button.click();
+  }
+
+  async function fillRequiredReviewFields() {
+    await act(async () => {
+      changeField('today-highest-roi-action', 'Close the pricing proposal loop');
+      clickButton('Partly');
+      changeField('today-result-value', 'I sent one revised proposal and identified the blocker.');
+      changeField('today-benefit-from-action', 'I now know the exact objection to resolve tomorrow.');
+      changeField('today-cost-of-inaction', 'Delay would keep revenue timing uncertain.');
+      changeField('today-repeated-trajectory', 'Repeating this pace would steadily improve sales confidence.');
+      changeField('today-becoming', 'Someone who follows through despite discomfort.');
+      clickButton('Unsure');
+      changeField('today-lesson', 'Prepare proposal notes before my late-day energy dip.');
+    });
+  }
+
+  it('lets users without a previous plan complete review and continue to /plan', async () => {
     await renderPage();
 
     await waitForCondition(
-      () => view.container.textContent.includes('No plan from yesterday yet'),
-      'empty state'
+      () => view.container.textContent.includes('There was no previous-night commitment saved.'),
+      'no prior plan helper text'
     );
 
-    expect(view.container.textContent).toContain(
-      'There isn’t a saved tomorrow commitment to carry into today.'
-    );
-    expect(view.container.textContent).toContain(
-      'Outcome controls unlock after you set a plan in reflection.'
-    );
-  });
+    await fillRequiredReviewFields();
 
-  it('loads the saved outcome, persists updates, and restores the local note fallback', async () => {
-    window.localStorage.setItem(
-      'retaliateai:today-note:user-1:2026-09-23',
-      'Closed the draft and sent it.'
+    const submitButton = Array.from(view.container.querySelectorAll('button')).find(
+      (candidate) => candidate.textContent.includes('Submit Today’s Review')
     );
 
-    getTodaySessionMock.mockResolvedValue({
-      id: 'session-1',
-      date: '2026-09-23',
-      checkin_outcome: 'partial',
-    });
-    maybeSingleMock.mockResolvedValue({
-      data: {
-        tomorrow_commitment: 'Ship the outreach draft',
-        commitment_minimum: 'Write one clean version',
-        commitment_stretch: 'Send it to five prospects',
-      },
-      error: null,
-    });
-
-    await renderPage();
-
-    await waitForCondition(
-      () => view.container.textContent.includes('Ship the outreach draft'),
-      'loaded commitment'
-    );
-
-    expect(view.container.textContent).toContain('Outcome saved.');
-    expect(view.container.textContent).toContain('Write one clean version');
-    expect(view.container.textContent).toContain('Send it to five prospects');
-
-    const textarea = view.container.querySelector('textarea');
-    expect(textarea.value).toBe('Closed the draft and sent it.');
-
-    const missedButton = Array.from(view.container.querySelectorAll('button')).find(
-      (button) => button.textContent.trim() === 'Missed'
-    );
+    await waitForCondition(() => submitButton.disabled === false, 'submit enabled');
 
     await act(async () => {
-      missedButton.click();
+      submitButton.click();
     });
 
     await waitForCondition(
       () => updateSessionMock.mock.calls.length === 1,
-      'outcome save call'
+      'review save call'
     );
 
-    expect(updateSessionMock).toHaveBeenCalledWith('session-1', {
-      commitment_checkin_done: true,
+    expect(updateSessionMock).toHaveBeenCalledWith(
+      'session-1',
+      expect.objectContaining({
+        checkin_outcome: 'partial',
+        commitment_checkin_done: true,
+        tomorrow_plan_details: expect.objectContaining({
+          workflow: 'structured_plan_v1',
+          review_today: expect.objectContaining({
+            highest_roi_action: 'Close the pricing proposal loop',
+            completion_status: 'partial',
+            lesson: 'Prepare proposal notes before my late-day energy dip.',
+          }),
+        }),
+      })
+    );
+
+    expect(navigateMock).toHaveBeenCalledWith('/plan');
+    expect(navigateMock).not.toHaveBeenCalledWith('/reflection');
+  });
+
+  it('prefills highest-ROI action and outcome when previous data exists', async () => {
+    getTodaySessionMock.mockResolvedValue({
+      id: 'session-1',
+      date: '2026-09-23',
       checkin_outcome: 'missed',
-    });
-    expect(view.container.textContent).toContain('Outcome saved.');
-  });
-
-  it('rolls back the selected outcome when saving fails', async () => {
-    getTodaySessionMock.mockResolvedValue({
-      id: 'session-1',
-      date: '2026-09-23',
-      checkin_outcome: 'partial',
-    });
-    maybeSingleMock.mockResolvedValue({
-      data: {
-        tomorrow_commitment: 'Ship the outreach draft',
-        commitment_minimum: null,
-        commitment_stretch: null,
+      tomorrow_plan_details: {
+        review_today: {
+          lesson: 'Existing lesson',
+        },
       },
-      error: null,
-    });
-    updateSessionMock.mockRejectedValueOnce(new Error('save failed'));
-
-    await renderPage();
-
-    await waitForCondition(
-      () => view.container.textContent.includes('Ship the outreach draft'),
-      'loaded commitment'
-    );
-
-    const partialButton = Array.from(view.container.querySelectorAll('button')).find(
-      (button) => button.textContent.trim() === 'Partial'
-    );
-    const missedButton = Array.from(view.container.querySelectorAll('button')).find(
-      (button) => button.textContent.trim() === 'Missed'
-    );
-
-    await act(async () => {
-      missedButton.click();
-    });
-
-    await waitForCondition(
-      () => view.container.textContent.includes('Could not save your check-in. Please try again.'),
-      'save failure message'
-    );
-
-    expect(partialButton.getAttribute('aria-pressed')).toBe('true');
-    expect(missedButton.getAttribute('aria-pressed')).toBe('false');
-  });
-
-  it('shows a load error and retries successfully', async () => {
-    getTodaySessionMock
-      .mockRejectedValueOnce(new Error('boom'))
-      .mockResolvedValueOnce({
-        id: 'session-2',
-        date: '2026-09-23',
-        checkin_outcome: null,
-      });
-    maybeSingleMock.mockResolvedValue({
-      data: {
-        tomorrow_commitment: 'Finish the proposal',
-        commitment_minimum: null,
-        commitment_stretch: null,
-      },
-      error: null,
-    });
-
-    await renderPage();
-
-    await waitForCondition(
-      () => view.container.textContent.includes('Couldn’t load Today'),
-      'load error state'
-    );
-
-    const retryButton = Array.from(view.container.querySelectorAll('button')).find(
-      (button) => button.textContent.trim() === 'Try again'
-    );
-
-    await act(async () => {
-      retryButton.click();
-    });
-
-    await waitForCondition(
-      () => view.container.textContent.includes('Finish the proposal'),
-      'successful retry'
-    );
-
-    expect(getTodaySessionMock).toHaveBeenCalledTimes(2);
-  });
-
-  it('shows the load error state when the yesterday-plan query fails', async () => {
-    maybeSingleMock.mockResolvedValue({
-      data: null,
-      error: new Error('query failed'),
-    });
-
-    await renderPage();
-
-    await waitForCondition(
-      () => view.container.textContent.includes('Couldn’t load Today'),
-      'query failure state'
-    );
-
-    expect(view.container.textContent).toContain(
-      'Could not load today’s focus right now. Please try again.'
-    );
-  });
-
-  it('opens the structured worksheet after an outcome is already saved', async () => {
-    getTodaySessionMock.mockResolvedValue({
-      id: 'session-1',
-      date: '2026-09-23',
-      checkin_outcome: 'partial',
     });
     maybeSingleMock.mockResolvedValue({
       data: {
         tomorrow_commitment: 'Ship the outreach draft',
         commitment_minimum: 'Write one clean version',
-        commitment_stretch: null,
+        commitment_stretch: 'Send to five leads',
       },
       error: null,
     });
@@ -315,18 +226,65 @@ describe('TodayV2', () => {
     await renderPage();
 
     await waitForCondition(
-      () => view.container.textContent.includes('Continue to review & plan'),
-      'night worksheet CTA'
+      () => view.container.textContent.includes('Ship the outreach draft'),
+      'prefilled yesterday plan'
     );
 
-    const continueButton = Array.from(view.container.querySelectorAll('button')).find(
-      (button) => button.textContent.includes('Continue to review & plan')
+    const actionField = view.container.querySelector('#today-highest-roi-action');
+    expect(actionField.value).toBe('Ship the outreach draft');
+
+    const noButton = Array.from(view.container.querySelectorAll('button')).find(
+      (candidate) => candidate.textContent.trim() === 'No'
+    );
+    expect(noButton.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('shows non-shaming conditional prompts based on completion status', async () => {
+    await renderPage();
+
+    await waitForCondition(
+      () => view.container.textContent.includes('What tangible result or value did it create?'),
+      'initial prompt'
     );
 
     await act(async () => {
-      continueButton.click();
+      clickButton('No');
     });
 
-    expect(navigateMock).toHaveBeenCalledWith('/plan');
+    await waitForCondition(
+      () => view.container.textContent.includes('What was delayed or lost, what interfered, or what did you learn?'),
+      'missed prompt'
+    );
+
+    await act(async () => {
+      clickButton('Partly');
+    });
+
+    await waitForCondition(
+      () => view.container.textContent.includes('What progress did it create, and what remains?'),
+      'partial prompt'
+    );
+  });
+
+  it('blocks transition and shows an error when review save fails', async () => {
+    updateSessionMock.mockRejectedValueOnce(new Error('save failed'));
+
+    await renderPage();
+    await fillRequiredReviewFields();
+
+    const submitButton = Array.from(view.container.querySelectorAll('button')).find(
+      (candidate) => candidate.textContent.includes('Submit Today’s Review')
+    );
+
+    await act(async () => {
+      submitButton.click();
+    });
+
+    await waitForCondition(
+      () => view.container.textContent.includes('Could not save today’s review. Please try again.'),
+      'save failure text'
+    );
+
+    expect(navigateMock).not.toHaveBeenCalledWith('/plan');
   });
 });

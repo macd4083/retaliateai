@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
   ArrowRight,
-  CheckCircle2,
   Loader2,
   Moon,
   Target,
@@ -13,23 +12,6 @@ import AppShellV2 from '../components/v2/AppShellV2';
 import { useAuth } from '../lib/AuthContext';
 import { localDateStr } from '../lib/dateUtils';
 import { reflectionHelpers } from '../lib/supabase/reflection';
-
-const COMPLETION_OPTIONS = [
-  { key: 'kept', label: 'Yes' },
-  { key: 'partial', label: 'Partly' },
-  { key: 'missed', label: 'No' },
-];
-
-const YES_NO_OPTIONS = [
-  { key: 'yes', label: 'Yes' },
-  { key: 'no', label: 'No' },
-];
-
-const IDENTITY_OPTIONS = [
-  { key: 'yes', label: 'Yes' },
-  { key: 'mixed', label: 'Mixed' },
-  { key: 'no', label: 'No' },
-];
 
 function formatSessionDate(dateStr) {
   const date = new Date(`${dateStr}T12:00:00`);
@@ -63,6 +45,7 @@ function createEmptyForm(highestRoiAction = '') {
     additionalActions: '',
     startPlan: '',
     obstacle: '',
+    fallbackAction: '',
     tonightPreparation: '',
   };
 }
@@ -166,6 +149,7 @@ function buildFormFromSession(session, yesterdayCommitment, draft) {
     additionalActions: session?.commitment_stretch || plan.additional_actions || '',
     startPlan: plan.start_plan || storedDetails.when_where || '',
     obstacle: plan.obstacle || '',
+    fallbackAction: plan.minimum_action_if_blocked || '',
     tonightPreparation: plan.tonight_preparation || '',
   };
 
@@ -218,36 +202,11 @@ function buildPublishedPayload(form) {
       additional_actions: form.additionalActions || null,
       start_plan: form.startPlan || null,
       obstacle: form.obstacle || null,
+      minimum_action_if_blocked: form.fallbackAction || null,
       tonight_preparation: form.tonightPreparation || null,
     },
     published_at: new Date().toISOString(),
   };
-}
-
-function ChoiceGroup({ name, value, options, onChange }) {
-  return (
-    <div className="mt-3 grid grid-cols-3 gap-2">
-      {options.map((option) => {
-        const selected = value === option.key;
-        return (
-          <button
-            key={option.key}
-            type="button"
-            onClick={() => onChange(name, option.key)}
-            aria-pressed={selected}
-            className={[
-              'rounded-2xl border px-3 py-3 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-2 focus:ring-offset-zinc-900',
-              selected
-                ? 'border-red-500 bg-red-500/10 text-white'
-                : 'border-zinc-700 bg-zinc-950 text-zinc-300 hover:border-zinc-600 hover:text-white',
-            ].join(' ')}
-          >
-            {option.label}
-          </button>
-        );
-      })}
-    </div>
-  );
 }
 
 function QuestionBlock({ label, children, hint = null }) {
@@ -270,7 +229,6 @@ export default function PlanV2() {
   const [loadError, setLoadError] = useState('');
   const [sessionId, setSessionId] = useState(null);
   const [sessionDate, setSessionDate] = useState(localDateStr());
-  const [yesterdayCommitment, setYesterdayCommitment] = useState('');
   const [existingCommitment, setExistingCommitment] = useState('');
   const [form, setForm] = useState(() => createEmptyForm());
   const [draftState, setDraftState] = useState('idle');
@@ -289,20 +247,13 @@ export default function PlanV2() {
 
   const missingRequiredFields = useMemo(() => {
     const requiredValues = [
-      form.completionStatus,
-      form.resultValue,
-      form.benefitFromAction,
-      form.costOfInaction,
-      form.repeatedTrajectory,
-      form.becoming,
-      form.desiredIdentityFit,
-      form.lesson,
       form.desiredDirection,
       form.valueToStrengthen,
       form.primaryAction,
       form.completionDefinition,
       form.startPlan,
       form.obstacle,
+      form.fallbackAction,
       form.tonightPreparation,
     ];
 
@@ -310,6 +261,11 @@ export default function PlanV2() {
   }, [form]);
 
   const canPublish = missingRequiredFields === 0 && confirmChecked && publishState !== 'saving';
+  const hasReviewEvidence = Boolean(
+    trimValue(form.highestRoiAction) ||
+      trimValue(form.repeatedTrajectory) ||
+      trimValue(form.lesson)
+  );
 
   const setField = useCallback((field, value) => {
     setFormTouched(true);
@@ -343,7 +299,6 @@ export default function PlanV2() {
 
       setSessionId(session.id);
       setSessionDate(date);
-      setYesterdayCommitment(priorCommitment);
       setExistingCommitment(session.tomorrow_commitment || '');
       setForm(restoredForm);
       setPublishedAt(storedPublishedAt);
@@ -406,10 +361,6 @@ export default function PlanV2() {
           : payload.published_at;
 
       setExistingCommitment(updatedSession?.tomorrow_commitment || sanitizedForm.primaryAction);
-      setForm((currentForm) => ({
-        ...currentForm,
-        highestRoiAction: currentForm.highestRoiAction || yesterdayCommitment,
-      }));
       setPublishedAt(nextPublishedAt);
       setPublishState('success');
       setConfirmChecked(false);
@@ -495,7 +446,7 @@ export default function PlanV2() {
                   key={step}
                   className={[
                     'rounded-2xl border px-3 py-2 text-center',
-                    index === 0
+                    index === 1
                       ? 'border-red-500/40 bg-red-500/10 text-red-200'
                       : 'border-zinc-800 bg-zinc-950 text-zinc-500',
                   ].join(' ')}
@@ -507,172 +458,42 @@ export default function PlanV2() {
           </section>
 
           <section className="rounded-3xl border border-zinc-800 bg-zinc-900 p-5">
-            <div className="flex items-center gap-2 text-zinc-200">
-              <CheckCircle2 className="h-4 w-4 text-red-400" />
-              <h3 className="text-sm font-medium uppercase tracking-[0.2em] text-zinc-400">
-                Part 1 · Review Today
-              </h3>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">Review context</p>
+                <h3 className="mt-1 text-base font-semibold text-white">
+                  Evidence carried from Today
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => navigate('/today')}
+                className="rounded-full border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-200 transition-colors hover:border-zinc-500 hover:text-white focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2 focus:ring-offset-zinc-900"
+              >
+                Back to Review Today
+              </button>
             </div>
-            <p className="mt-3 text-sm leading-relaxed text-zinc-300">
-              A miss is information, not a moral verdict. Keep the answers concrete.
-            </p>
 
-            <div className="mt-5 space-y-6">
-              <div className="space-y-4 rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4">
-                <h4 className="text-sm font-semibold text-white">1. Follow-Through</h4>
-
-                <QuestionBlock
-                  label="What was today’s highest-ROI action?"
-                  hint={!yesterdayCommitment ? 'If there was no saved carry-over plan, name the action you meant to execute.' : null}
-                >
-                  <textarea
-                    id="plan-highest-roi-action"
-                    value={form.highestRoiAction}
-                    onChange={(event) => setField('highestRoiAction', event.target.value)}
-                    rows={2}
-                    className="mt-3 w-full rounded-2xl border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-white placeholder:text-zinc-500 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-400"
-                  />
-                </QuestionBlock>
-
-                <QuestionBlock label="Did I complete it?">
-                  <ChoiceGroup
-                    name="completionStatus"
-                    value={form.completionStatus}
-                    options={COMPLETION_OPTIONS}
-                    onChange={setField}
-                  />
-                </QuestionBlock>
-
-                <QuestionBlock label="What tangible result or value did it create?">
-                  <textarea
-                    id="plan-result-value"
-                    value={form.resultValue}
-                    onChange={(event) => setField('resultValue', event.target.value)}
-                    rows={3}
-                    className="mt-3 w-full rounded-2xl border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-white placeholder:text-zinc-500 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-400"
-                  />
-                </QuestionBlock>
-              </div>
-
-              <div className="space-y-4 rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4">
-                <h4 className="text-sm font-semibold text-white">2. Habits</h4>
-
-                <QuestionBlock label="Sleep: ___ hours">
-                  <input
-                    id="plan-sleep-hours"
-                    type="number"
-                    inputMode="decimal"
-                    min="0"
-                    value={form.sleepHours}
-                    onChange={(event) => setField('sleepHours', event.target.value)}
-                    className="mt-3 w-full rounded-2xl border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-white placeholder:text-zinc-500 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-400"
-                  />
-                </QuestionBlock>
-
-                <QuestionBlock label="Exercise/movement">
-                  <ChoiceGroup
-                    name="movement"
-                    value={form.movement}
-                    options={YES_NO_OPTIONS}
-                    onChange={setField}
-                  />
-                </QuestionBlock>
-
-                <QuestionBlock label="Focused work: ___ minutes">
-                  <input
-                    id="plan-focused-work"
-                    type="number"
-                    inputMode="numeric"
-                    min="0"
-                    value={form.focusedWorkMinutes}
-                    onChange={(event) => setField('focusedWorkMinutes', event.target.value)}
-                    className="mt-3 w-full rounded-2xl border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-white placeholder:text-zinc-500 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-400"
-                  />
-                </QuestionBlock>
-
-                <QuestionBlock label="Personal habit">
-                  <input
-                    id="plan-personal-habit-name"
-                    value={form.personalHabitName}
-                    onChange={(event) => setField('personalHabitName', event.target.value)}
-                    className="mt-3 w-full rounded-2xl border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-white placeholder:text-zinc-500 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-400"
-                  />
-                  <ChoiceGroup
-                    name="personalHabitDone"
-                    value={form.personalHabitDone}
-                    options={YES_NO_OPTIONS}
-                    onChange={setField}
-                  />
-                </QuestionBlock>
-              </div>
-
-              <div className="space-y-4 rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4">
-                <h4 className="text-sm font-semibold text-white">3. Consequences and Benefits</h4>
-
-                <QuestionBlock label="What benefit came from the actions I took?">
-                  <textarea
-                    id="plan-benefit-from-action"
-                    value={form.benefitFromAction}
-                    onChange={(event) => setField('benefitFromAction', event.target.value)}
-                    rows={3}
-                    className="mt-3 w-full rounded-2xl border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-white placeholder:text-zinc-500 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-400"
-                  />
-                </QuestionBlock>
-
-                <QuestionBlock label="What did I lose or delay through inaction?">
-                  <textarea
-                    id="plan-cost-of-inaction"
-                    value={form.costOfInaction}
-                    onChange={(event) => setField('costOfInaction', event.target.value)}
-                    rows={3}
-                    className="mt-3 w-full rounded-2xl border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-white placeholder:text-zinc-500 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-400"
-                  />
-                </QuestionBlock>
-
-                <QuestionBlock label="If I repeated today’s choices, where would they take me?">
-                  <textarea
-                    id="plan-repeated-trajectory"
-                    value={form.repeatedTrajectory}
-                    onChange={(event) => setField('repeatedTrajectory', event.target.value)}
-                    rows={3}
-                    className="mt-3 w-full rounded-2xl border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-white placeholder:text-zinc-500 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-400"
-                  />
-                </QuestionBlock>
-              </div>
-
-              <div className="space-y-4 rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4">
-                <h4 className="text-sm font-semibold text-white">4. Trajectory and Identity</h4>
-
-                <QuestionBlock label="Based on today’s evidence, who am I becoming?">
-                  <textarea
-                    id="plan-becoming"
-                    value={form.becoming}
-                    onChange={(event) => setField('becoming', event.target.value)}
-                    rows={3}
-                    className="mt-3 w-full rounded-2xl border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-white placeholder:text-zinc-500 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-400"
-                  />
-                </QuestionBlock>
-
-                <QuestionBlock label="Is that who I want to become?">
-                  <ChoiceGroup
-                    name="desiredIdentityFit"
-                    value={form.desiredIdentityFit}
-                    options={IDENTITY_OPTIONS}
-                    onChange={setField}
-                  />
-                </QuestionBlock>
-
-                <QuestionBlock label="What did today teach me about myself, my environment, or my methods?">
-                  <textarea
-                    id="plan-lesson"
-                    value={form.lesson}
-                    onChange={(event) => setField('lesson', event.target.value)}
-                    rows={3}
-                    className="mt-3 w-full rounded-2xl border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-white placeholder:text-zinc-500 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-400"
-                  />
-                </QuestionBlock>
-              </div>
-            </div>
+            {hasReviewEvidence ? (
+              <dl className="mt-4 space-y-3 rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4 text-sm text-zinc-300">
+                <div>
+                  <dt className="text-zinc-500">Highest-ROI action reviewed</dt>
+                  <dd>{trimValue(form.highestRoiAction) || 'Not provided'}</dd>
+                </div>
+                <div>
+                  <dt className="text-zinc-500">Repeated-choice trajectory</dt>
+                  <dd>{trimValue(form.repeatedTrajectory) || 'Not provided'}</dd>
+                </div>
+                <div>
+                  <dt className="text-zinc-500">Lesson from today</dt>
+                  <dd>{trimValue(form.lesson) || 'Not provided'}</dd>
+                </div>
+              </dl>
+            ) : (
+              <p className="mt-4 rounded-2xl border border-zinc-700 bg-zinc-950/70 p-4 text-sm text-zinc-300">
+                Complete Today’s Review first so planning starts from your own evidence.
+              </p>
+            )}
           </section>
 
           <section className="rounded-3xl border border-zinc-800 bg-zinc-900 p-5">
@@ -765,6 +586,16 @@ export default function PlanV2() {
                   />
                 </QuestionBlock>
 
+                <QuestionBlock label="If that obstacle appears, what minimum action will I still take?">
+                  <textarea
+                    id="plan-fallback-action"
+                    value={form.fallbackAction}
+                    onChange={(event) => setField('fallbackAction', event.target.value)}
+                    rows={3}
+                    className="mt-3 w-full rounded-2xl border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-white placeholder:text-zinc-500 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-400"
+                  />
+                </QuestionBlock>
+
                 <QuestionBlock label="What will I change or prepare tonight to make follow-through easier?">
                   <textarea
                     id="plan-tonight-preparation"
@@ -805,6 +636,10 @@ export default function PlanV2() {
                 <div>
                   <dt className="text-zinc-500">Direction</dt>
                   <dd>{trimValue(form.desiredDirection) || 'Not filled yet.'}</dd>
+                </div>
+                <div>
+                  <dt className="text-zinc-500">Minimum backup action</dt>
+                  <dd>{trimValue(form.fallbackAction) || 'Not filled yet.'}</dd>
                 </div>
               </dl>
             </div>
