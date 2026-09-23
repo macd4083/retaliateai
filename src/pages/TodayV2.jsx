@@ -30,6 +30,13 @@ function formatSessionDate(dateStr) {
   });
 }
 
+function offsetDateStr(dateStr, offsetDays) {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+  date.setDate(date.getDate() + offsetDays);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
 function getNoteStorageKey(userId, dateStr) {
   if (!userId || !dateStr) return null;
   return `retaliateai:today-note:${userId}:${dateStr}`;
@@ -104,7 +111,7 @@ export default function TodayV2() {
         .from('reflection_sessions')
         .select('tomorrow_commitment, commitment_minimum, commitment_stretch')
         .eq('user_id', user.id)
-        .eq('date', localDateStr(-1))
+        .eq('date', offsetDateStr(resolvedDate, -1))
         .maybeSingle();
 
       if (error) throw error;
@@ -122,7 +129,13 @@ export default function TodayV2() {
     } catch (error) {
       console.error('[TodayV2] load failed:', error);
       setLoadError('Could not load today’s focus right now. Please try again.');
+      setSessionId(null);
+      setStatus(null);
       setPlan({ title: '', minimum: '', stretch: '' });
+      setNotes('');
+      setNoteStorageState('idle');
+      setOutcomeSaveState('idle');
+      setOutcomeError('');
     } finally {
       setLoading(false);
     }

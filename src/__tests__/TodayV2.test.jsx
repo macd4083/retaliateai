@@ -195,4 +195,44 @@ describe('TodayV2', () => {
     });
     expect(view.container.textContent).toContain('Outcome saved.');
   });
+
+  it('shows a load error and retries successfully', async () => {
+    getTodaySessionMock
+      .mockRejectedValueOnce(new Error('boom'))
+      .mockResolvedValueOnce({
+        id: 'session-2',
+        date: '2026-09-23',
+        checkin_outcome: null,
+      });
+    maybeSingleMock.mockResolvedValue({
+      data: {
+        tomorrow_commitment: 'Finish the proposal',
+        commitment_minimum: null,
+        commitment_stretch: null,
+      },
+      error: null,
+    });
+
+    await renderPage();
+
+    await waitForCondition(
+      () => view.container.textContent.includes('Couldn’t load Today'),
+      'load error state'
+    );
+
+    const retryButton = Array.from(view.container.querySelectorAll('button')).find(
+      (button) => button.textContent.trim() === 'Try again'
+    );
+
+    await act(async () => {
+      retryButton.click();
+    });
+
+    await waitForCondition(
+      () => view.container.textContent.includes('Finish the proposal'),
+      'successful retry'
+    );
+
+    expect(getTodaySessionMock).toHaveBeenCalledTimes(2);
+  });
 });
