@@ -203,6 +203,27 @@ describe('TodayV2', () => {
     expect(navigateMock).not.toHaveBeenCalledWith('/reflection');
   });
 
+  it('names the missing required answers instead of silently blocking submit', async () => {
+    await renderPage();
+
+    const submitButton = Array.from(view.container.querySelectorAll('button')).find(
+      (candidate) => candidate.textContent.includes('Submit Today’s Review')
+    );
+
+    await act(async () => {
+      submitButton.click();
+    });
+
+    await waitForCondition(
+      () => view.container.textContent.includes('Please answer: today’s highest-ROI action'),
+      'named validation guidance'
+    );
+
+    expect(view.container.textContent).toContain('whether you completed it');
+    expect(view.container.textContent).toContain('what today taught you');
+    expect(updateSessionMock).not.toHaveBeenCalled();
+  });
+
   it('prefills highest-ROI action and outcome when previous data exists', async () => {
     getTodaySessionMock.mockResolvedValue({
       id: 'session-1',
@@ -285,6 +306,8 @@ describe('TodayV2', () => {
       'save failure text'
     );
 
+    expect(view.container.querySelector('#today-highest-roi-action').value).toBe('Close the pricing proposal loop');
+    expect(view.container.querySelector('#today-lesson').value).toBe('Prepare proposal notes before my late-day energy dip.');
     expect(navigateMock).not.toHaveBeenCalledWith('/plan');
   });
 });
