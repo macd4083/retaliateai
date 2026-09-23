@@ -296,4 +296,37 @@ describe('TodayV2', () => {
       'Could not load today’s focus right now. Please try again.'
     );
   });
+
+  it('opens the structured worksheet after an outcome is already saved', async () => {
+    getTodaySessionMock.mockResolvedValue({
+      id: 'session-1',
+      date: '2026-09-23',
+      checkin_outcome: 'partial',
+    });
+    maybeSingleMock.mockResolvedValue({
+      data: {
+        tomorrow_commitment: 'Ship the outreach draft',
+        commitment_minimum: 'Write one clean version',
+        commitment_stretch: null,
+      },
+      error: null,
+    });
+
+    await renderPage();
+
+    await waitForCondition(
+      () => view.container.textContent.includes('Continue to review & plan'),
+      'night worksheet CTA'
+    );
+
+    const continueButton = Array.from(view.container.querySelectorAll('button')).find(
+      (button) => button.textContent.includes('Continue to review & plan')
+    );
+
+    await act(async () => {
+      continueButton.click();
+    });
+
+    expect(navigateMock).toHaveBeenCalledWith('/plan');
+  });
 });

@@ -15,6 +15,10 @@ vi.mock('../pages/TodayV2', () => ({
   default: () => <div>Today Page</div>,
 }));
 
+vi.mock('../pages/PlanV2', () => ({
+  default: () => <div>Plan Page</div>,
+}));
+
 vi.mock('../pages/ReflectionV2', () => ({
   default: () => <div>Reflection Page</div>,
 }));
@@ -207,6 +211,17 @@ describe('App today routing', () => {
     );
 
     expect(view.container.textContent).toContain('Today Page');
+  });
+
+  it('renders the protected /plan route for authenticated users', async () => {
+    await renderApp('/plan');
+
+    await waitForCondition(
+      () => view.container.textContent.includes('Plan Page'),
+      '/plan route render'
+    );
+
+    expect(view.container.textContent).toContain('Plan Page');
   });
 
   it('redirects unknown routes to /today for authenticated users', async () => {
