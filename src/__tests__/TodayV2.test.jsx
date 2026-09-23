@@ -196,6 +196,49 @@ describe('TodayV2', () => {
     expect(view.container.textContent).toContain('Outcome saved.');
   });
 
+  it('rolls back the selected outcome when saving fails', async () => {
+    getTodaySessionMock.mockResolvedValue({
+      id: 'session-1',
+      date: '2026-09-23',
+      checkin_outcome: 'partial',
+    });
+    maybeSingleMock.mockResolvedValue({
+      data: {
+        tomorrow_commitment: 'Ship the outreach draft',
+        commitment_minimum: null,
+        commitment_stretch: null,
+      },
+      error: null,
+    });
+    updateSessionMock.mockRejectedValueOnce(new Error('save failed'));
+
+    await renderPage();
+
+    await waitForCondition(
+      () => view.container.textContent.includes('Ship the outreach draft'),
+      'loaded commitment'
+    );
+
+    const partialButton = Array.from(view.container.querySelectorAll('button')).find(
+      (button) => button.textContent.trim() === 'Partial'
+    );
+    const missedButton = Array.from(view.container.querySelectorAll('button')).find(
+      (button) => button.textContent.trim() === 'Missed'
+    );
+
+    await act(async () => {
+      missedButton.click();
+    });
+
+    await waitForCondition(
+      () => view.container.textContent.includes('Could not save your check-in. Please try again.'),
+      'save failure message'
+    );
+
+    expect(partialButton.getAttribute('aria-pressed')).toBe('true');
+    expect(missedButton.getAttribute('aria-pressed')).toBe('false');
+  });
+
   it('shows a load error and retries successfully', async () => {
     getTodaySessionMock
       .mockRejectedValueOnce(new Error('boom'))
@@ -234,5 +277,23 @@ describe('TodayV2', () => {
     );
 
     expect(getTodaySessionMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows the load error state when the yesterday-plan query fails', async () => {
+    maybeSingleMock.mockResolvedValue({
+      data: null,
+      error: new Error('query failed'),
+    });
+
+    await renderPage();
+
+    await waitForCondition(
+      () => view.container.textContent.includes('Couldn’t load Today'),
+      'query failure state'
+    );
+
+    expect(view.container.textContent).toContain(
+      'Could not load today’s focus right now. Please try again.'
+    );
   });
 });

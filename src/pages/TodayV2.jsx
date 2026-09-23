@@ -79,6 +79,7 @@ export default function TodayV2() {
   const [status, setStatus] = useState(null);
   const [notes, setNotes] = useState('');
   const [noteReady, setNoteReady] = useState(false);
+  const [noteTouched, setNoteTouched] = useState(false);
   const [noteStorageState, setNoteStorageState] = useState('idle');
   const [outcomeSaveState, setOutcomeSaveState] = useState('idle');
   const [outcomeError, setOutcomeError] = useState('');
@@ -97,6 +98,7 @@ export default function TodayV2() {
     setLoading(true);
     setLoadError('');
     setNoteReady(false);
+    setNoteTouched(false);
 
     try {
       const todaySession = await reflectionHelpers.getTodaySession(user.id);
@@ -146,11 +148,11 @@ export default function TodayV2() {
   }, [loadToday]);
 
   useEffect(() => {
-    if (!noteReady || !noteStorageKey) return;
+    if (!noteReady || !noteStorageKey || !noteTouched) return;
 
     const didSave = writeLocalNote(noteStorageKey, notes.trim());
     setNoteStorageState(didSave ? 'saved' : 'error');
-  }, [noteReady, noteStorageKey, notes]);
+  }, [noteReady, noteStorageKey, noteTouched, notes]);
 
   const handleOutcome = async (outcome) => {
     if (!sessionId || !hasPlan || isSavingOutcome) return;
@@ -348,7 +350,10 @@ export default function TodayV2() {
               <textarea
                 id="today-note"
                 value={notes}
-                onChange={(event) => setNotes(event.target.value)}
+                onChange={(event) => {
+                  setNoteTouched(true);
+                  setNotes(event.target.value);
+                }}
                 rows={4}
                 placeholder="What tangible result did this create? What benefit did acting produce? What got in the way?"
                 className="w-full rounded-2xl border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-white placeholder:text-zinc-500 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-400"
