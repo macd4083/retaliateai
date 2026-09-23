@@ -31,6 +31,18 @@ const IDENTITY_OPTIONS = [
   { key: 'no', label: 'No' },
 ];
 
+const REQUIRED_FIELD_DETAILS = [
+  { key: 'highestRoiAction', label: 'today’s highest-ROI action' },
+  { key: 'completionStatus', label: 'whether you completed it' },
+  { key: 'resultValue', label: 'the result, value, or honest account of what happened' },
+  { key: 'benefitFromAction', label: 'the benefit from action' },
+  { key: 'costOfInaction', label: 'the loss or delay from inaction' },
+  { key: 'repeatedTrajectory', label: 'where repeated choices would take you' },
+  { key: 'becoming', label: 'who today’s evidence suggests you are becoming' },
+  { key: 'desiredIdentityFit', label: 'whether that direction is who you want to become' },
+  { key: 'lesson', label: 'what today taught you' },
+];
+
 function formatSessionDate(dateStr) {
   const date = new Date(`${dateStr}T12:00:00`);
   return date.toLocaleDateString('en-US', {
@@ -186,11 +198,28 @@ function buildReviewPayload(form) {
   };
 }
 
-function ChoiceGroup({ name, value, options, onChange, columns = 3 }) {
+function getMissingRequiredFields(form) {
+  return REQUIRED_FIELD_DETAILS.filter(({ key }) => !trimValue(form[key]));
+}
+
+function formatMissingFieldList(fields) {
+  return fields.map(({ label }) => label).join(', ');
+}
+
+function getTextFieldClass(isInvalid) {
+  return [
+    'mt-3 w-full rounded-2xl border bg-zinc-950 px-3 py-2.5 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2',
+    isInvalid
+      ? 'border-red-500 focus:border-red-500 focus:ring-red-400'
+      : 'border-zinc-700 focus:border-red-500 focus:ring-red-400',
+  ].join(' ');
+}
+
+function ChoiceGroup({ name, value, options, onChange, columns = 3, invalid = false }) {
   const colClass = columns === 2 ? 'grid-cols-2' : 'grid-cols-3';
 
   return (
-    <div className={`mt-3 grid ${colClass} gap-2`}>
+    <div className={`mt-3 grid ${colClass} gap-2 rounded-2xl ${invalid ? 'ring-1 ring-red-500/60 ring-offset-2 ring-offset-zinc-900' : ''}`}>
       {options.map((option) => {
         const selected = value === option.key;
         return (
@@ -214,14 +243,22 @@ function ChoiceGroup({ name, value, options, onChange, columns = 3 }) {
   );
 }
 
-function QuestionBlock({ label, children, hint = null }) {
+function QuestionBlock({ label, children, hint = null, error = null, required = false }) {
   return (
     <div>
-      <label className="block text-sm font-medium text-white">
-        {label}
-      </label>
+      <div className="flex items-center gap-2">
+        <label className="block text-sm font-medium text-white">
+          {label}
+        </label>
+        {required && (
+          <span className="rounded-full border border-zinc-700 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-zinc-400">
+            Required
+          </span>
+        )}
+      </div>
       {hint && <p className="mt-1 text-xs leading-relaxed text-zinc-500">{hint}</p>}
       {children}
+      {error && <p className="mt-2 text-xs text-red-300">{error}</p>}
     </div>
   );
 }
@@ -241,6 +278,7 @@ export default function TodayV2() {
   const [draftState, setDraftState] = useState('idle');
   const [submitState, setSubmitState] = useState('idle');
   const [submitError, setSubmitError] = useState('');
+  const [showValidation, setShowValidation] = useState(false);
 
   const todayLabel = useMemo(() => formatSessionDate(sessionDate), [sessionDate]);
   const draftStorageKey = useMemo(
@@ -248,21 +286,16 @@ export default function TodayV2() {
     [sessionDate, user?.id]
   );
 
-  const missingRequiredFields = useMemo(() => {
-    const requiredValues = [
-      form.highestRoiAction,
-      form.completionStatus,
-      form.resultValue,
-      form.benefitFromAction,
-      form.costOfInaction,
-      form.repeatedTrajectory,
-      form.becoming,
-      form.desiredIdentityFit,
-      form.lesson,
-    ];
-
-    return requiredValues.filter((value) => !trimValue(value)).length;
-  }, [form]);
+  const missingRequiredFields = useMemo(() => getMissingRequiredFields(form), [form]);
+  const missingRequiredCount = missingRequiredFields.length;
+  const missingRequiredSummary = useMemo(
+    () => formatMissingFieldList(missingRequiredFields),
+    [missingRequiredFields]
+  );
+  const fieldErrors = useMemo(
+    () => new Set(showValidation ? missingRequiredFields.map(({ key }) => key) : []),
+    [missingRequiredFields, showValidation]
+  );
 
   const conditionalPrompt = useMemo(() => {
     if (form.completionStatus === 'partial') {
@@ -278,6 +311,7 @@ export default function TodayV2() {
 
   const setField = useCallback((field, value) => {
     setFormTouched(true);
+    setSubmitError('');
     setForm((currentForm) => ({
       ...currentForm,
       [field]: value,
@@ -319,6 +353,7 @@ export default function TodayV2() {
       setForm(buildFormFromSession(session, prefillAction, storedDraft));
       setDraftState(storedDraft ? 'saved' : 'idle');
       setSubmitState('idle');
+      setShowValidation(false);
       setFormReady(true);
     } catch (error) {
       console.error('[TodayV2] load failed:', error);
@@ -328,6 +363,7 @@ export default function TodayV2() {
       setForm(createEmptyForm());
       setDraftState('idle');
       setSubmitState('idle');
+      setShowValidation(false);
     } finally {
       setLoading(false);
     }
@@ -345,13 +381,22 @@ export default function TodayV2() {
   }, [draftStorageKey, form, formReady, formTouched, submitState]);
 
   async function handleSubmitReview() {
-    if (!sessionId || missingRequiredFields > 0 || submitState === 'saving') return;
+    if (!sessionId || submitState === 'saving') return;
 
     const sanitized = sanitizeForm(form);
+    const currentMissingFields = getMissingRequiredFields(sanitized);
+
+    if (currentMissingFields.length > 0) {
+      setShowValidation(true);
+      setSubmitError(`Please answer: ${formatMissingFieldList(currentMissingFields)}.`);
+      return;
+    }
+
     const reviewPayload = buildReviewPayload(sanitized);
 
     setSubmitState('saving');
     setSubmitError('');
+    setShowValidation(false);
 
     try {
       const session = await reflectionHelpers.getTodaySession(user.id);
@@ -497,32 +542,45 @@ export default function TodayV2() {
                 <QuestionBlock
                   label="What was today’s highest-ROI action?"
                   hint={!yesterdayPlan.title ? 'Retrospective is valid—capture the action you attempted or should evaluate.' : null}
+                  error={fieldErrors.has('highestRoiAction') ? 'Please name the highest-ROI action you are reviewing.' : null}
+                  required
                 >
                   <textarea
                     id="today-highest-roi-action"
                     value={form.highestRoiAction}
                     onChange={(event) => setField('highestRoiAction', event.target.value)}
                     rows={2}
-                    className="mt-3 w-full rounded-2xl border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-white placeholder:text-zinc-500 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-400"
+                    aria-invalid={fieldErrors.has('highestRoiAction')}
+                    className={getTextFieldClass(fieldErrors.has('highestRoiAction'))}
                   />
                 </QuestionBlock>
 
-                <QuestionBlock label="Did I complete it?">
+                <QuestionBlock
+                  label="Did I complete it?"
+                  error={fieldErrors.has('completionStatus') ? 'Please choose Yes, Partly, or No.' : null}
+                  required
+                >
                   <ChoiceGroup
                     name="completionStatus"
                     value={form.completionStatus}
                     options={COMPLETION_OPTIONS}
                     onChange={setField}
+                    invalid={fieldErrors.has('completionStatus')}
                   />
                 </QuestionBlock>
 
-                <QuestionBlock label={conditionalPrompt}>
+                <QuestionBlock
+                  label={conditionalPrompt}
+                  error={fieldErrors.has('resultValue') ? 'Please describe the result, progress, or honest lesson from what happened.' : null}
+                  required
+                >
                   <textarea
                     id="today-result-value"
                     value={form.resultValue}
                     onChange={(event) => setField('resultValue', event.target.value)}
                     rows={3}
-                    className="mt-3 w-full rounded-2xl border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-white placeholder:text-zinc-500 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-400"
+                    aria-invalid={fieldErrors.has('resultValue')}
+                    className={getTextFieldClass(fieldErrors.has('resultValue'))}
                   />
                 </QuestionBlock>
               </div>
@@ -538,7 +596,7 @@ export default function TodayV2() {
                     min="0"
                     value={form.sleepHours}
                     onChange={(event) => setField('sleepHours', event.target.value)}
-                    className="mt-3 w-full rounded-2xl border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-white placeholder:text-zinc-500 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-400"
+                    className={getTextFieldClass(false)}
                   />
                 </QuestionBlock>
 
@@ -560,7 +618,7 @@ export default function TodayV2() {
                     min="0"
                     value={form.focusedWorkMinutes}
                     onChange={(event) => setField('focusedWorkMinutes', event.target.value)}
-                    className="mt-3 w-full rounded-2xl border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-white placeholder:text-zinc-500 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-400"
+                    className={getTextFieldClass(false)}
                   />
                 </QuestionBlock>
 
@@ -569,7 +627,7 @@ export default function TodayV2() {
                     id="today-personal-habit-name"
                     value={form.personalHabitName}
                     onChange={(event) => setField('personalHabitName', event.target.value)}
-                    className="mt-3 w-full rounded-2xl border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-white placeholder:text-zinc-500 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-400"
+                    className={getTextFieldClass(false)}
                   />
                   <ChoiceGroup
                     name="personalHabitDone"
@@ -584,33 +642,48 @@ export default function TodayV2() {
               <div className="space-y-4 rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4">
                 <h4 className="text-sm font-semibold text-white">3. Consequences and Benefits</h4>
 
-                <QuestionBlock label="What benefit came from the actions I took?">
+                <QuestionBlock
+                  label="What benefit came from the actions I took?"
+                  error={fieldErrors.has('benefitFromAction') ? 'Please name the benefit that came from your actions.' : null}
+                  required
+                >
                   <textarea
                     id="today-benefit-from-action"
                     value={form.benefitFromAction}
                     onChange={(event) => setField('benefitFromAction', event.target.value)}
                     rows={3}
-                    className="mt-3 w-full rounded-2xl border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-white placeholder:text-zinc-500 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-400"
+                    aria-invalid={fieldErrors.has('benefitFromAction')}
+                    className={getTextFieldClass(fieldErrors.has('benefitFromAction'))}
                   />
                 </QuestionBlock>
 
-                <QuestionBlock label="What did I lose or delay through inaction?">
+                <QuestionBlock
+                  label="What did I lose or delay through inaction?"
+                  error={fieldErrors.has('costOfInaction') ? 'Please name the loss or delay from inaction.' : null}
+                  required
+                >
                   <textarea
                     id="today-cost-of-inaction"
                     value={form.costOfInaction}
                     onChange={(event) => setField('costOfInaction', event.target.value)}
                     rows={3}
-                    className="mt-3 w-full rounded-2xl border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-white placeholder:text-zinc-500 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-400"
+                    aria-invalid={fieldErrors.has('costOfInaction')}
+                    className={getTextFieldClass(fieldErrors.has('costOfInaction'))}
                   />
                 </QuestionBlock>
 
-                <QuestionBlock label="If I repeated today’s choices, where would they take me?">
+                <QuestionBlock
+                  label="If I repeated today’s choices, where would they take me?"
+                  error={fieldErrors.has('repeatedTrajectory') ? 'Please describe where repeating today’s choices would lead.' : null}
+                  required
+                >
                   <textarea
                     id="today-repeated-trajectory"
                     value={form.repeatedTrajectory}
                     onChange={(event) => setField('repeatedTrajectory', event.target.value)}
                     rows={3}
-                    className="mt-3 w-full rounded-2xl border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-white placeholder:text-zinc-500 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-400"
+                    aria-invalid={fieldErrors.has('repeatedTrajectory')}
+                    className={getTextFieldClass(fieldErrors.has('repeatedTrajectory'))}
                   />
                 </QuestionBlock>
               </div>
@@ -621,32 +694,45 @@ export default function TodayV2() {
                 <QuestionBlock
                   label="Based on today’s evidence, who am I becoming?"
                   hint="One day is evidence, not a permanent identity verdict."
+                  error={fieldErrors.has('becoming') ? 'Please describe who today’s evidence suggests you are becoming.' : null}
+                  required
                 >
                   <textarea
                     id="today-becoming"
                     value={form.becoming}
                     onChange={(event) => setField('becoming', event.target.value)}
                     rows={3}
-                    className="mt-3 w-full rounded-2xl border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-white placeholder:text-zinc-500 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-400"
+                    aria-invalid={fieldErrors.has('becoming')}
+                    className={getTextFieldClass(fieldErrors.has('becoming'))}
                   />
                 </QuestionBlock>
 
-                <QuestionBlock label="Is that who I want to become?">
+                <QuestionBlock
+                  label="Is that who I want to become?"
+                  error={fieldErrors.has('desiredIdentityFit') ? 'Please choose whether that direction matches who you want to become.' : null}
+                  required
+                >
                   <ChoiceGroup
                     name="desiredIdentityFit"
                     value={form.desiredIdentityFit}
                     options={IDENTITY_OPTIONS}
                     onChange={setField}
+                    invalid={fieldErrors.has('desiredIdentityFit')}
                   />
                 </QuestionBlock>
 
-                <QuestionBlock label="What did today teach me about myself, my environment, or my methods?">
+                <QuestionBlock
+                  label="What did today teach me about myself, my environment, or my methods?"
+                  error={fieldErrors.has('lesson') ? 'Please capture what today taught you.' : null}
+                  required
+                >
                   <textarea
                     id="today-lesson"
                     value={form.lesson}
                     onChange={(event) => setField('lesson', event.target.value)}
                     rows={3}
-                    className="mt-3 w-full rounded-2xl border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-white placeholder:text-zinc-500 focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-400"
+                    aria-invalid={fieldErrors.has('lesson')}
+                    className={getTextFieldClass(fieldErrors.has('lesson'))}
                   />
                 </QuestionBlock>
               </div>
@@ -655,8 +741,10 @@ export default function TodayV2() {
 
           <section className="rounded-3xl border border-zinc-800 bg-zinc-900 p-5">
             <div className="text-xs leading-relaxed text-zinc-500">
-              {missingRequiredFields > 0
-                ? `${missingRequiredFields} required answer${missingRequiredFields === 1 ? '' : 's'} still missing before continuing.`
+              {showValidation && missingRequiredCount > 0
+                ? `Please answer: ${missingRequiredSummary}.`
+                : missingRequiredCount > 0
+                ? `${missingRequiredCount} required answer${missingRequiredCount === 1 ? '' : 's'} still need evidence before continuing.`
                 : 'Review evidence is complete and ready to carry into Plan Tomorrow.'}
             </div>
 
@@ -669,7 +757,7 @@ export default function TodayV2() {
               <button
                 type="button"
                 onClick={handleSubmitReview}
-                disabled={missingRequiredFields > 0 || submitState === 'saving'}
+                disabled={!sessionId || submitState === 'saving'}
                 className="inline-flex items-center justify-center gap-2 rounded-full bg-red-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-red-500 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-2 focus:ring-offset-zinc-900 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Submit Today’s Review &amp; Continue to Plan Tomorrow
