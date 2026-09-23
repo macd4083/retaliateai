@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Settings, Moon, BarChart2, X, Database, Download, Share, MessageSquare, ScrollText } from 'lucide-react';
+import { Settings, Moon, BarChart2, Clock3, X, Database, Download, Share, MessageSquare, ScrollText } from 'lucide-react';
 import { useAuth } from '../../lib/AuthContext';
 import { supabase } from '../../lib/supabase/client';
 import { isAnonymousGuestUser } from '../../lib/guestSession';
@@ -8,6 +8,7 @@ import { usePWAInstall } from '../../hooks/usePWAInstall';
 import PWAInstallBanner from '../pwa/PWAInstallBanner';
 
 const NAV_LINKS = [
+  { label: 'Today', path: '/today', icon: Clock3 },
   { label: 'Reflection', path: '/reflection', icon: Moon },
   { label: 'Insights', path: '/insights', icon: BarChart2 },
   { label: 'Settings', path: '/settings', icon: Settings },

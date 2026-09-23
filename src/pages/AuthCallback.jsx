@@ -25,7 +25,7 @@ export default function AuthCallback() {
             subscription.unsubscribe();
             setStatus('success');
             // AuthGuardV2 will handle the onboarding redirect automatically
-            navigate('/reflection', { replace: true });
+            navigate('/today', { replace: true });
           }
         }));
 
@@ -34,7 +34,7 @@ export default function AuthCallback() {
         if (data.session) {
           subscription.unsubscribe();
           setStatus('success');
-          navigate('/reflection', { replace: true });
+          navigate('/today', { replace: true });
         }
       } catch (err) {
         console.error('Callback error:', err);

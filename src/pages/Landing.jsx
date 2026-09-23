@@ -17,7 +17,7 @@ export default function Landing() {
 
     // Non-anonymous signed-in users go straight to the app.
     if (!isAnonymousUser) {
-      navigate('/reflection', { replace: true });
+      navigate('/today', { replace: true });
     }
     // Anonymous (guest) users stay on the landing page to choose their path intentionally.
     // navigate is a stable reference from react-router-dom; user.id/is_anonymous drive re-runs.

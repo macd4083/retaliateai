@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 
 // ── V2 pages (new) ─────────────────────────────────────────────────────────
 import ReflectionV2 from './pages/ReflectionV2';
+import TodayV2 from './pages/TodayV2';
 import InsightsV2 from './pages/InsightsV2';
 import SettingsV2 from './pages/SettingsV2';
 import OnboardingV2 from './pages/OnboardingV2';
@@ -112,6 +113,20 @@ function LoadingScreen() {
       <p className="text-zinc-500 text-sm tracking-wide">Loading...</p>
     </div>
   );
+}
+
+function CatchAllRedirect() {
+  const { user, loading } = /** @type {{ user: any, loading: boolean }} */ (useAuth());
+
+  if (loading) {
+    return <LoadingScreen />;
+  }
+
+  if (!user) {
+    return <Navigate to="/" replace />;
+  }
+
+  return <Navigate to={isAnonymousGuestUser(user) ? '/reflection' : '/today'} replace />;
 }
 
 // ── AuthGuardV2 ───────────────────────────────────────────────────────────
@@ -243,6 +258,14 @@ export default function App() {
 
       {/* V2 protected routes */}
       <Route
+        path="/today"
+        element={
+          <AuthGuardV2>
+            <TodayV2 />
+          </AuthGuardV2>
+        }
+      />
+      <Route
         path="/reflection"
         element={
           <AuthGuardV2>
@@ -308,7 +331,7 @@ export default function App() {
         }
       />
       {/* Catch-all */}
-      <Route path="*" element={<Navigate to="/reflection" replace />} />
+      <Route path="*" element={<CatchAllRedirect />} />
     </Routes>
   );
 }
