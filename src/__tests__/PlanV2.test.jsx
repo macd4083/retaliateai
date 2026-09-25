@@ -47,7 +47,7 @@ vi.mock('../lib/supabase/dailyWorkflow', () => ({
   },
   offsetDateStr: (dateStr, offsetDays) => {
     const [y, m, d] = dateStr.split('-').map(Number);
-    const date = new Date(y, m - 1, d);
+    const date = new Date(y, m - 1, d, 12);
     date.setDate(date.getDate() + offsetDays);
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
   },
@@ -164,11 +164,58 @@ describe('PlanV2', () => {
       findButton('Add optional action').click();
     });
 
-    const stillVisible = findButton('Add optional action');
-    expect(stillVisible).toBeUndefined();
+    const maybeThirdAdd = findButton('Add optional action');
+    if (maybeThirdAdd) {
+      await act(async () => {
+        maybeThirdAdd.click();
+      });
+    }
+
+    expect(findButton('Add optional action')).toBeUndefined();
+    expect(view.container.querySelector('#plan-action-text-3')).toBeNull();
 
     expect(view.container.textContent).toContain('Additional action 1');
     expect(view.container.textContent).toContain('Additional action 2');
+  });
+
+  it('prefers published plan rows over stale session draft actions when restoring', async () => {
+    getTodaySessionMock.mockResolvedValueOnce({
+      id: 'session-1',
+      date: '2026-09-25',
+      tomorrow_plan_details: {
+        plan_tomorrow_draft: {
+          desired_direction: 'Stale draft direction',
+          actions: [
+            {
+              action_text: 'Old draft action',
+              completion_measure: 'Old measure',
+              minimum_version: 'Old minimum',
+            },
+          ],
+        },
+      },
+    });
+    loadTomorrowPlanActionsMock.mockResolvedValueOnce([
+      {
+        id: 'plan-published-1',
+        action_text: 'Published action text',
+        completion_measure: 'Published measure',
+        minimum_version: 'Published minimum',
+        stretch_version: null,
+        is_primary: true,
+      },
+    ]);
+
+    await renderPage();
+
+    await waitForCondition(
+      () => view.container.querySelector('#plan-action-text-0'),
+      'plan action field'
+    );
+
+    expect(view.container.querySelector('#plan-action-text-0').value).toBe('Published action text');
+    expect(view.container.querySelector('#plan-action-measure-0').value).toBe('Published measure');
+    expect(view.container.querySelector('#plan-action-minimum-0').value).toBe('Published minimum');
   });
 
   it('saves drafts separately and publishes separate rows with backward-compatible fields on confirm', async () => {
@@ -200,6 +247,17 @@ describe('PlanV2', () => {
     });
 
     await waitForCondition(() => updateSessionMock.mock.calls.length >= 1, 'draft session save call');
+    expect(updateSessionMock.mock.calls[0][1]).toEqual(expect.objectContaining({
+      tomorrow_plan_details: expect.objectContaining({
+        plan_tomorrow_draft: expect.objectContaining({
+          desired_direction: 'I am becoming consistent with direct sales outreach.',
+          actions: expect.arrayContaining([
+            expect.objectContaining({ action_text: 'Call three warm leads before noon.' }),
+            expect.objectContaining({ action_text: 'Send two proposal follow-ups' }),
+          ]),
+        }),
+      }),
+    }));
     expect(publishTomorrowPlanMock).not.toHaveBeenCalled();
 
     await act(async () => {

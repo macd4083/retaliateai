@@ -255,7 +255,8 @@ function HabitModal({ open, onClose, onSave, initialValue, saveError, saving }) 
 }
 
 export default function TodayV2() {
-  const { user } = useAuth();
+  const auth = /** @type {{ user?: { id?: string } }} */ (useAuth());
+  const user = auth?.user;
   const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
@@ -472,7 +473,8 @@ export default function TodayV2() {
         rows: habitRows,
       });
 
-      const primaryOutcome = reviewsPayload[0]?.outcome || null;
+      const primaryReviewedAction = reviewsPayload.find((row) => row.is_primary) || reviewsPayload[0];
+      const primaryOutcome = primaryReviewedAction?.outcome || null;
       const mappedCheckinOutcome = primaryOutcome === 'done' ? 'kept' : primaryOutcome;
 
       const session = await reflectionHelpers.getTodaySession(user.id);
@@ -480,7 +482,7 @@ export default function TodayV2() {
         ? session.tomorrow_plan_details
         : {};
 
-      await reflectionHelpers.updateSession(sessionId, {
+      const updates = {
         checkin_outcome: mappedCheckinOutcome,
         commitment_checkin_done: Boolean(mappedCheckinOutcome),
         tomorrow_plan_details: {
@@ -491,7 +493,9 @@ export default function TodayV2() {
             reviewed_at: new Date().toISOString(),
           },
         },
-      });
+      };
+
+      await reflectionHelpers.updateSession(sessionId, updates);
 
       setSubmitState('success');
       clearDraft(draftStorageKey);
@@ -741,7 +745,7 @@ export default function TodayV2() {
                           onClick={() => handleArchiveHabit(habit)}
                           className="w-full rounded-lg px-3 py-2 text-left text-sm text-red-300 hover:bg-zinc-800"
                         >
-                          Delete
+                          Archive
                         </button>
                       </div>
                     )}

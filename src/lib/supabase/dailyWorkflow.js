@@ -1,37 +1,6 @@
 import { supabase } from './client';
 import { localDateStr } from '../dateUtils';
 
-const DEFAULT_HABITS = [
-  {
-    name: 'Sleep',
-    input_type: 'number',
-    unit: 'hours',
-    scheduled_days: [1, 2, 3, 4, 5, 6, 0],
-    display_order: 0,
-  },
-  {
-    name: 'Exercise / movement',
-    input_type: 'boolean',
-    unit: null,
-    scheduled_days: [1, 2, 3, 4, 5, 6, 0],
-    display_order: 1,
-  },
-  {
-    name: 'Focused work',
-    input_type: 'duration',
-    unit: 'minutes',
-    scheduled_days: [1, 2, 3, 4, 5, 6, 0],
-    display_order: 2,
-  },
-  {
-    name: 'Personal habit',
-    input_type: 'boolean',
-    unit: null,
-    scheduled_days: [1, 2, 3, 4, 5, 6, 0],
-    display_order: 3,
-  },
-];
-
 export function weekdayIndexForDate(dateStr) {
   const [year, month, day] = dateStr.split('-').map(Number);
   return new Date(year, month - 1, day, 12).getDay();
@@ -45,19 +14,8 @@ export function offsetDateStr(dateStr, offsetDays) {
 }
 
 async function ensureDefaultHabits(userId) {
-  const { data, error } = await supabase
-    .from('user_habits')
-    .select('id')
-    .eq('user_id', userId)
-    .eq('is_archived', false)
-    .limit(1);
-
+  const { error } = await supabase.rpc('seed_default_habits_for_user', { p_user_id: userId });
   if (error) throw error;
-  if (data && data.length > 0) return;
-
-  const rows = DEFAULT_HABITS.map((habit) => ({ ...habit, user_id: userId }));
-  const { error: insertError } = await supabase.from('user_habits').insert(rows);
-  if (insertError) throw insertError;
 }
 
 export const dailyWorkflow = {
@@ -119,19 +77,7 @@ export const dailyWorkflow = {
   },
 
   async saveActionReviews({ userId, sessionId, reviewDate, rows }) {
-    const { error: deleteError } = await supabase
-      .from('daily_action_reviews')
-      .delete()
-      .eq('user_id', userId)
-      .eq('review_date', reviewDate);
-    if (deleteError) throw deleteError;
-
-    if (!rows.length) return;
-
     const payload = rows.map((row, index) => ({
-      user_id: userId,
-      session_id: sessionId,
-      review_date: reviewDate,
       plan_action_id: row.plan_action_id || null,
       action_text: row.action_text,
       completion_measure: row.completion_measure || null,
@@ -140,8 +86,13 @@ export const dailyWorkflow = {
       display_order: index,
     }));
 
-    const { error: insertError } = await supabase.from('daily_action_reviews').insert(payload);
-    if (insertError) throw insertError;
+    const { error } = await supabase.rpc('replace_daily_action_reviews', {
+      p_user_id: userId,
+      p_session_id: sessionId,
+      p_review_date: reviewDate,
+      p_rows: payload,
+    });
+    if (error) throw error;
   },
 
   async saveHabitCheckins({ userId, reviewDate, rows }) {
@@ -215,32 +166,21 @@ export const dailyWorkflow = {
   },
 
   async publishTomorrowPlan({ userId, sessionId, planDate, actions }) {
-    const { error: deleteError } = await supabase
-      .from('daily_plan_actions')
-      .delete()
-      .eq('user_id', userId)
-      .eq('plan_date', planDate);
-    if (deleteError) throw deleteError;
-
     const payload = actions.map((row, index) => ({
-      user_id: userId,
-      session_id: sessionId,
-      plan_date: planDate,
       action_text: row.action_text,
       completion_measure: row.completion_measure || null,
       minimum_version: row.minimum_version || null,
       stretch_version: row.stretch_version || null,
       is_primary: Boolean(row.is_primary),
       display_order: index,
-      is_published: true,
     }));
 
-    if (!payload.length) return [];
-    const { data, error } = await supabase
-      .from('daily_plan_actions')
-      .insert(payload)
-      .select('id, action_text, completion_measure, minimum_version, stretch_version, is_primary, display_order, is_published')
-      .order('display_order', { ascending: true });
+    const { data, error } = await supabase.rpc('replace_daily_plan_actions', {
+      p_user_id: userId,
+      p_session_id: sessionId,
+      p_plan_date: planDate,
+      p_rows: payload,
+    });
     if (error) throw error;
     return data || [];
   },

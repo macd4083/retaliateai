@@ -78,6 +78,7 @@ describe('TodayV2', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.localStorage.clear();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     getTodaySessionMock.mockResolvedValue({
       id: 'session-1',
@@ -128,6 +129,7 @@ describe('TodayV2', () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     if (view) {
       await act(async () => {
         view.root.unmount();
@@ -287,5 +289,27 @@ describe('TodayV2', () => {
         scheduled_days: expect.arrayContaining([2, 3, 4, 5]),
       })
     );
+  });
+
+  it('archives a habit from the overflow menu', async () => {
+    await renderPage();
+
+    await waitForCondition(
+      () => view.container.textContent.includes('Sleep'),
+      'habit row render'
+    );
+
+    await act(async () => {
+      const menuButtons = view.container.querySelectorAll('button[aria-haspopup=\"menu\"]');
+      menuButtons[0].click();
+    });
+
+    await act(async () => {
+      const archiveButton = Array.from(view.container.querySelectorAll('button')).find((button) => button.textContent.trim() === 'Archive');
+      archiveButton.click();
+    });
+
+    await waitForCondition(() => archiveHabitMock.mock.calls.length === 1, 'archive call');
+    expect(archiveHabitMock).toHaveBeenCalledWith('user-1', 'habit-1');
   });
 });

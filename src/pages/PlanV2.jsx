@@ -116,7 +116,8 @@ function looksVague(actionText) {
 }
 
 export default function PlanV2() {
-  const { user } = useAuth();
+  const auth = /** @type {{ user?: { id?: string } }} */ (useAuth());
+  const user = auth?.user;
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -142,7 +143,8 @@ export default function PlanV2() {
   const primaryAction = sanitizedActions[0] || createActionRow({ is_primary: true });
   const additionalActions = sanitizedActions.slice(1).filter((row) => row.action_text || row.completion_measure || row.minimum_version || row.stretch_version);
 
-  const canAddAdditional = actions.length <= MAX_ADDITIONAL_ACTIONS;
+  const additionalActionCount = Math.max(0, actions.length - 1);
+  const canAddAdditional = additionalActionCount < MAX_ADDITIONAL_ACTIONS;
   const hasFieldErrors = !desiredDirection.trim() || actionErrors.some(Boolean) || !sanitizedActions[0]?.action_text;
   const canPublish = !hasFieldErrors && confirmChecked && publishState !== 'saving';
 
@@ -163,10 +165,10 @@ export default function PlanV2() {
 
       const nextActions = localDraft?.actions?.length
         ? localDraft.actions.map((row, index) => createActionRow({ ...row, is_primary: index === 0 }))
-        : fromSession.actions.length
-        ? fromSession.actions.map((row, index) => createActionRow({ ...row, is_primary: index === 0 }))
         : existingActions.length
         ? existingActions.map((row, index) => createActionRow({ ...row, is_primary: index === 0 }))
+        : fromSession.actions.length
+        ? fromSession.actions.map((row, index) => createActionRow({ ...row, is_primary: index === 0 }))
         : [createActionRow({ is_primary: true })];
 
       const details = session?.tomorrow_plan_details && typeof session.tomorrow_plan_details === 'object'
@@ -301,7 +303,7 @@ export default function PlanV2() {
         commitment_minimum: publishRows[0].minimum_version || publishRows[0].completion_measure,
         commitment_stretch: publishRows[0].stretch_version || null,
         commitment_why: cleanDesiredDirection || null,
-        commitment_made_at: new Date().toISOString(),
+        commitment_made_at: session?.commitment_made_at || new Date().toISOString(),
         tomorrow_plan_details: {
           ...existingDetails,
           workflow: 'review_today_plan_tomorrow_v2',
