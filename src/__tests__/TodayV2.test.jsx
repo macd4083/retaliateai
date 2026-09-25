@@ -6,14 +6,20 @@ const {
   navigateMock,
   getTodaySessionMock,
   updateSessionMock,
-  fromMock,
-  maybeSingleMock,
+  loadReviewDataMock,
+  saveActionReviewsMock,
+  saveHabitCheckinsMock,
+  saveHabitMock,
+  archiveHabitMock,
 } = vi.hoisted(() => ({
   navigateMock: vi.fn(),
   getTodaySessionMock: vi.fn(),
   updateSessionMock: vi.fn(),
-  fromMock: vi.fn(),
-  maybeSingleMock: vi.fn(),
+  loadReviewDataMock: vi.fn(),
+  saveActionReviewsMock: vi.fn(),
+  saveHabitCheckinsMock: vi.fn(),
+  saveHabitMock: vi.fn(),
+  archiveHabitMock: vi.fn(),
 }));
 
 vi.mock('react-router-dom', () => ({
@@ -30,9 +36,7 @@ vi.mock('../components/v2/AppShellV2', () => ({
 }));
 
 vi.mock('../lib/AuthContext', () => ({
-  useAuth: () => ({
-    user: { id: 'user-1' },
-  }),
+  useAuth: () => ({ user: { id: 'user-1' } }),
 }));
 
 vi.mock('../lib/supabase/reflection', () => ({
@@ -42,9 +46,13 @@ vi.mock('../lib/supabase/reflection', () => ({
   },
 }));
 
-vi.mock('../lib/supabase/client', () => ({
-  supabase: {
-    from: fromMock,
+vi.mock('../lib/supabase/dailyWorkflow', () => ({
+  dailyWorkflow: {
+    loadReviewData: loadReviewDataMock,
+    saveActionReviews: saveActionReviewsMock,
+    saveHabitCheckins: saveHabitCheckinsMock,
+    saveHabit: saveHabitMock,
+    archiveHabit: archiveHabitMock,
   },
 }));
 
@@ -54,7 +62,6 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 async function waitForCondition(condition, description = 'condition', timeout = 2000) {
   const start = Date.now();
-
   while (Date.now() - start < timeout) {
     if (condition()) return;
     await act(async () => {
@@ -62,18 +69,7 @@ async function waitForCondition(condition, description = 'condition', timeout = 
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
   }
-
   throw new Error(`Timed out after ${timeout}ms waiting for ${description}`);
-}
-
-function createReflectionSessionsQuery() {
-  const query = {
-    select: vi.fn(() => query),
-    eq: vi.fn(() => query),
-    maybeSingle: maybeSingleMock,
-  };
-
-  return query;
 }
 
 describe('TodayV2', () => {
@@ -85,23 +81,50 @@ describe('TodayV2', () => {
 
     getTodaySessionMock.mockResolvedValue({
       id: 'session-1',
-      date: '2026-09-23',
-      checkin_outcome: null,
+      date: '2026-09-25',
       tomorrow_plan_details: null,
     });
-    updateSessionMock.mockResolvedValue({
-      id: 'session-1',
+
+    loadReviewDataMock.mockResolvedValue({
+      planActions: [
+        {
+          id: 'plan-1',
+          action_text: 'Call three customers',
+          completion_measure: '3 calls with notes',
+          is_primary: true,
+        },
+        {
+          id: 'plan-2',
+          action_text: 'Send follow-up emails',
+          completion_measure: '2 follow-ups',
+          is_primary: false,
+        },
+      ],
+      actionReviews: [],
+      habits: [
+        {
+          id: 'habit-1',
+          name: 'Sleep',
+          input_type: 'number',
+          unit: 'hours',
+          scheduled_days: [1, 2, 3, 4, 5, 6, 0],
+        },
+      ],
+      checkins: [],
+      yesterdayCommitment: 'Call three customers',
     });
-    maybeSingleMock.mockResolvedValue({
-      data: null,
-      error: null,
+
+    saveActionReviewsMock.mockResolvedValue(undefined);
+    saveHabitCheckinsMock.mockResolvedValue(undefined);
+    saveHabitMock.mockResolvedValue({
+      id: 'habit-2',
+      name: 'Meditate',
+      input_type: 'boolean',
+      unit: null,
+      scheduled_days: [1, 2, 3, 4, 5],
+      display_order: 1,
     });
-    fromMock.mockImplementation((table) => {
-      if (table !== 'reflection_sessions') {
-        throw new Error(`Unexpected table: ${table}`);
-      }
-      return createReflectionSessionsQuery();
-    });
+    updateSessionMock.mockResolvedValue({ id: 'session-1' });
   });
 
   afterEach(async () => {
@@ -124,190 +147,145 @@ describe('TodayV2', () => {
     });
 
     view = { container, root };
-    return view;
   }
 
-  function changeField(id, value) {
+  function findButton(text) {
+    return Array.from(view.container.querySelectorAll('button')).find((candidate) =>
+      candidate.textContent.includes(text)
+    );
+  }
+
+  function setInputValue(id, value) {
     const field = view.container.querySelector(`#${id}`);
     const prototype = field.tagName === 'TEXTAREA'
       ? window.HTMLTextAreaElement.prototype
       : window.HTMLInputElement.prototype;
-    const descriptor = Object.getOwnPropertyDescriptor(prototype, 'value');
-    descriptor.set.call(field, value);
+    Object.getOwnPropertyDescriptor(prototype, 'value').set.call(field, value);
     field.dispatchEvent(new window.Event('input', { bubbles: true }));
   }
 
-  function clickButton(label) {
-    const button = Array.from(view.container.querySelectorAll('button')).find(
-      (candidate) => candidate.textContent.trim() === label
-    );
-    button.click();
-  }
-
-  async function fillRequiredReviewFields() {
-    await act(async () => {
-      changeField('today-highest-roi-action', 'Close the pricing proposal loop');
-      clickButton('Partly');
-      changeField('today-result-value', 'I sent one revised proposal and identified the blocker.');
-      changeField('today-benefit-from-action', 'I now know the exact objection to resolve tomorrow.');
-      changeField('today-cost-of-inaction', 'Delay would keep revenue timing uncertain.');
-      changeField('today-repeated-trajectory', 'Repeating this pace would steadily improve sales confidence.');
-      changeField('today-becoming', 'Someone who follows through despite discomfort.');
-      clickButton('Unsure');
-      changeField('today-lesson', 'Prepare proposal notes before my late-day energy dip.');
-    });
-  }
-
-  it('lets users without a previous plan complete review and continue to /plan', async () => {
+  it('renders previous planned actions as separate primary and secondary rows', async () => {
     await renderPage();
 
     await waitForCondition(
-      () => view.container.textContent.includes('There was no previous-night commitment saved.'),
-      'no prior plan helper text'
+      () => view.container.textContent.includes('Call three customers'),
+      'planned actions render'
     );
 
-    await fillRequiredReviewFields();
+    expect(view.container.textContent).toContain('Primary action');
+    expect(view.container.textContent).toContain('Secondary action');
+    expect(view.container.querySelector('#today-action-text-0').value).toBe('Call three customers');
+    expect(view.container.querySelector('#today-action-text-1').value).toBe('Send follow-up emails');
+  });
 
-    const submitButton = Array.from(view.container.querySelectorAll('button')).find(
-      (candidate) => candidate.textContent.includes('Submit Today’s Review')
-    );
-
-    await waitForCondition(() => submitButton.disabled === false, 'submit enabled');
-
-    await act(async () => {
-      submitButton.click();
+  it('lets no-previous-plan users submit retrospective evidence and continue to /plan', async () => {
+    loadReviewDataMock.mockResolvedValueOnce({
+      planActions: [],
+      actionReviews: [],
+      habits: [],
+      checkins: [],
+      yesterdayCommitment: null,
     });
 
+    await renderPage();
+
     await waitForCondition(
-      () => updateSessionMock.mock.calls.length === 1,
-      'review save call'
+      () => view.container.textContent.includes('What were today’s highest-ROI actions?'),
+      'retrospective helper text'
     );
+    await waitForCondition(() => view.container.querySelector('#today-action-text-0'), 'first retrospective action field');
 
-    expect(updateSessionMock).toHaveBeenCalledWith(
-      'session-1',
-      expect.objectContaining({
-        checkin_outcome: 'partial',
-        commitment_checkin_done: true,
-        tomorrow_plan_details: expect.objectContaining({
-          workflow: 'structured_plan_v1',
-          review_today: expect.objectContaining({
-            highest_roi_action: 'Close the pricing proposal loop',
-            completion_status: 'partial',
-            lesson: 'Prepare proposal notes before my late-day energy dip.',
-          }),
-        }),
-      })
-    );
+    await act(async () => {
+      setInputValue('today-action-text-0', 'Drafted the launch brief');
+      findButton('Done').click();
+    });
 
+    await act(async () => {
+      findButton('Save review and plan tomorrow').click();
+    });
+
+    await waitForCondition(() => saveActionReviewsMock.mock.calls.length === 1, 'save action reviews call');
+
+    expect(saveActionReviewsMock).toHaveBeenCalledWith(expect.objectContaining({
+      reviewDate: '2026-09-25',
+      rows: expect.arrayContaining([
+        expect.objectContaining({ action_text: 'Drafted the launch brief', outcome: 'done' }),
+      ]),
+    }));
     expect(navigateMock).toHaveBeenCalledWith('/plan');
     expect(navigateMock).not.toHaveBeenCalledWith('/reflection');
   });
 
-  it('names the missing required answers instead of silently blocking submit', async () => {
-    await renderPage();
-
-    const submitButton = Array.from(view.container.querySelectorAll('button')).find(
-      (candidate) => candidate.textContent.includes('Submit Today’s Review')
-    );
-
-    await act(async () => {
-      submitButton.click();
+  it('preserves entered values and blocks navigation when save fails', async () => {
+    loadReviewDataMock.mockResolvedValueOnce({
+      planActions: [],
+      actionReviews: [],
+      habits: [],
+      checkins: [],
+      yesterdayCommitment: null,
     });
-
-    await waitForCondition(
-      () => view.container.textContent.includes('Please answer: today’s highest-ROI action'),
-      'named validation guidance'
-    );
-
-    expect(view.container.textContent).toContain('whether you completed it');
-    expect(view.container.textContent).toContain('what today taught you');
-    expect(updateSessionMock).not.toHaveBeenCalled();
-  });
-
-  it('prefills highest-ROI action and outcome when previous data exists', async () => {
-    getTodaySessionMock.mockResolvedValue({
-      id: 'session-1',
-      date: '2026-09-23',
-      checkin_outcome: 'missed',
-      tomorrow_plan_details: {
-        review_today: {
-          lesson: 'Existing lesson',
-        },
-      },
-    });
-    maybeSingleMock.mockResolvedValue({
-      data: {
-        tomorrow_commitment: 'Ship the outreach draft',
-        commitment_minimum: 'Write one clean version',
-        commitment_stretch: 'Send to five leads',
-      },
-      error: null,
-    });
+    saveActionReviewsMock.mockRejectedValueOnce(new Error('boom'));
 
     await renderPage();
 
     await waitForCondition(
-      () => view.container.textContent.includes('Ship the outreach draft'),
-      'prefilled yesterday plan'
-    );
-
-    const actionField = view.container.querySelector('#today-highest-roi-action');
-    expect(actionField.value).toBe('Ship the outreach draft');
-
-    const noButton = Array.from(view.container.querySelectorAll('button')).find(
-      (candidate) => candidate.textContent.trim() === 'No'
-    );
-    expect(noButton.getAttribute('aria-pressed')).toBe('true');
-  });
-
-  it('shows non-shaming conditional prompts based on completion status', async () => {
-    await renderPage();
-
-    await waitForCondition(
-      () => view.container.textContent.includes('What tangible result or value did it create?'),
-      'initial prompt'
+      () => view.container.querySelector('#today-action-text-0'),
+      'first action input'
     );
 
     await act(async () => {
-      clickButton('No');
+      setInputValue('today-action-text-0', 'Call three customers');
+      findButton('Done').click();
     });
-
-    await waitForCondition(
-      () => view.container.textContent.includes('What was delayed or lost, what interfered, or what did you learn?'),
-      'missed prompt'
-    );
 
     await act(async () => {
-      clickButton('Partly');
+      findButton('Save review and plan tomorrow').click();
     });
 
     await waitForCondition(
-      () => view.container.textContent.includes('What progress did it create, and what remains?'),
-      'partial prompt'
-    );
-  });
-
-  it('blocks transition and shows an error when review save fails', async () => {
-    updateSessionMock.mockRejectedValueOnce(new Error('save failed'));
-
-    await renderPage();
-    await fillRequiredReviewFields();
-
-    const submitButton = Array.from(view.container.querySelectorAll('button')).find(
-      (candidate) => candidate.textContent.includes('Submit Today’s Review')
+      () => view.container.textContent.includes('Could not save today’s review.'),
+      'save error'
     );
 
-    await act(async () => {
-      submitButton.click();
-    });
-
-    await waitForCondition(
-      () => view.container.textContent.includes('Could not save today’s review. Please try again.'),
-      'save failure text'
-    );
-
-    expect(view.container.querySelector('#today-highest-roi-action').value).toBe('Close the pricing proposal loop');
-    expect(view.container.querySelector('#today-lesson').value).toBe('Prepare proposal notes before my late-day energy dip.');
+    expect(view.container.querySelector('#today-action-text-0').value).toBe('Call three customers');
     expect(navigateMock).not.toHaveBeenCalledWith('/plan');
+  });
+
+  it('opens habit modal from add button and saves selected weekdays', async () => {
+    await renderPage();
+
+    await waitForCondition(
+      () => findButton('Add habit'),
+      'add habit button'
+    );
+
+    await act(async () => {
+      findButton('Add habit').click();
+    });
+
+    await waitForCondition(
+      () => view.container.querySelector('[role="dialog"]'),
+      'habit modal'
+    );
+
+    await act(async () => {
+      setInputValue('habit-name', 'Meditate');
+      const monday = Array.from(view.container.querySelectorAll('button')).find((button) => button.textContent.trim() === 'M');
+      monday.click();
+      const saturday = Array.from(view.container.querySelectorAll('button')).find((button) => button.textContent.trim() === 'Sa');
+      saturday.click();
+      const saveButton = Array.from(view.container.querySelectorAll('button')).find((button) => button.textContent.trim() === 'Save');
+      saveButton.click();
+    });
+
+    await waitForCondition(() => saveHabitMock.mock.calls.length === 1, 'habit save call');
+
+    expect(saveHabitMock).toHaveBeenCalledWith(
+      'user-1',
+      expect.objectContaining({
+        name: 'Meditate',
+        scheduled_days: expect.arrayContaining([2, 3, 4, 5]),
+      })
+    );
   });
 });
