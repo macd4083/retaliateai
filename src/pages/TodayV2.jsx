@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 
 import AppShellV2 from '../components/v2/AppShellV2';
 import { useAuth } from '../lib/AuthContext';
+import { buildCommitmentFragmentsFromLegacyFields, formatCommitmentFragmentText } from '../lib/commitmentFragments';
 import { localDateStr } from '../lib/dateUtils';
 import { dailyWorkflow } from '../lib/supabase/dailyWorkflow';
 import { reflectionHelpers } from '../lib/supabase/reflection';
@@ -78,12 +79,43 @@ function clearDraft(storageKey) {
 function createActionRow(base = {}) {
   return {
     id: base.id || `local-${Math.random().toString(36).slice(2)}`,
-    plan_action_id: base.plan_action_id || null,
+    plan_action_id: base.plan_action_id || base.id || null,
     action_text: base.action_text || '',
     completion_measure: base.completion_measure || '',
     is_primary: Boolean(base.is_primary),
     outcome: base.outcome || '',
   };
+}
+
+function mergePlanAndReviewRows(planRows, reviewRows) {
+  if (!planRows.length) return reviewRows;
+  if (!reviewRows.length) return planRows;
+
+  const reviewByPlanId = new Map(
+    reviewRows
+      .filter((row) => row.plan_action_id)
+      .map((row) => [row.plan_action_id, row])
+  );
+  const unmatchedReviews = [...reviewRows];
+
+  const merged = planRows.map((planRow) => {
+    const byPlanId = planRow.plan_action_id ? reviewByPlanId.get(planRow.plan_action_id) : null;
+    const match = byPlanId || null;
+    if (!match) return planRow;
+
+    const removeIndex = unmatchedReviews.findIndex((item) => item.id === match.id);
+    if (removeIndex >= 0) unmatchedReviews.splice(removeIndex, 1);
+
+    return {
+      ...planRow,
+      action_text: match.action_text || planRow.action_text,
+      completion_measure: match.completion_measure || planRow.completion_measure,
+      outcome: match.outcome || planRow.outcome,
+      is_primary: planRow.is_primary || match.is_primary,
+    };
+  });
+
+  return [...merged, ...unmatchedReviews];
 }
 
 function createHabitValues(habits, checkins) {
@@ -300,16 +332,26 @@ export default function TodayV2() {
 
       const fromPlanRows = (context.planActions || []).map((row) => createActionRow(row));
       const fromReviewRows = (context.actionReviews || []).map((row) => createActionRow(row));
+      const fromLegacyRows = buildCommitmentFragmentsFromLegacyFields({
+        tomorrowCommitment: context.yesterdayCommitment,
+        commitmentMinimum: context.yesterdayCommitmentMinimum,
+        commitmentStretch: context.yesterdayCommitmentStretch,
+      }).map((fragment, index) => createActionRow({
+        action_text: formatCommitmentFragmentText(fragment),
+        is_primary: index === 0,
+      }));
+      const planWithReviews = mergePlanAndReviewRows(fromPlanRows, fromReviewRows);
+      const seededRows = planWithReviews.length
+        ? planWithReviews
+        : fromLegacyRows.length
+        ? fromLegacyRows
+        : [];
 
       let nextActions;
       if (draft?.actions?.length) {
         nextActions = draft.actions.map((row) => createActionRow(row));
-      } else if (fromReviewRows.length) {
-        nextActions = fromReviewRows;
-      } else if (fromPlanRows.length) {
-        nextActions = fromPlanRows;
       } else {
-        nextActions = [createActionRow({ is_primary: true })];
+        nextActions = seededRows;
       }
 
       const nextHabitValues = draft?.habitValues
@@ -318,7 +360,7 @@ export default function TodayV2() {
 
       setSessionId(session.id);
       setSessionDate(date);
-      setHasPreviousPlan(fromPlanRows.length > 0);
+      setHasPreviousPlan(seededRows.length > 0);
       setActions(nextActions);
       setHabits(context.habits || []);
       setHabitValues(nextHabitValues);
@@ -415,7 +457,7 @@ export default function TodayV2() {
     if (!user?.id) return;
     setMenuHabitId(null);
 
-    const confirmed = window.confirm(`Archive "${habit.name}"? Existing check-ins stay in your history.`);
+    const confirmed = window.confirm(`Delete "${habit.name}"? Existing check-ins stay in your history.`);
     if (!confirmed) return;
 
     try {
@@ -423,7 +465,7 @@ export default function TodayV2() {
       await loadData();
     } catch (error) {
       console.error('[TodayV2] archive habit failed:', error);
-      setSubmitError('Could not archive habit. Please try again.');
+      setSubmitError('Could not delete habit. Please try again.');
     }
   };
 
@@ -606,9 +648,11 @@ export default function TodayV2() {
               {actions.map((row, index) => (
                 <div key={row.id} className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4">
                   <div className="flex items-start justify-between gap-3">
-                    <div className="text-xs uppercase tracking-[0.18em] text-zinc-500">
-                      {index === 0 || row.is_primary ? 'Primary action' : 'Secondary action'}
-                    </div>
+                    {(hasPreviousPlan || row.action_text.trim() || row.completion_measure.trim() || row.outcome) ? (
+                      <div className="text-xs uppercase tracking-[0.18em] text-zinc-500">
+                        {index === 0 || row.is_primary ? 'Primary action' : 'Secondary action'}
+                      </div>
+                    ) : <div />}
                     {row.completion_measure && <span className="text-xs text-zinc-400">Measure: {row.completion_measure}</span>}
                   </div>
 
@@ -668,10 +712,10 @@ export default function TodayV2() {
               <button
                 type="button"
                 onClick={openAddHabitModal}
-                className="inline-flex items-center gap-1 rounded-full bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-500 focus:outline-none focus:ring-2 focus:ring-red-400"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-red-600 text-white hover:bg-red-500 focus:outline-none focus:ring-2 focus:ring-red-400"
                 aria-label="Add habit"
               >
-                <Plus className="h-3.5 w-3.5" /> Add habit
+                <Plus className="h-4 w-4" />
               </button>
             </div>
 
@@ -745,7 +789,7 @@ export default function TodayV2() {
                           onClick={() => handleArchiveHabit(habit)}
                           className="w-full rounded-lg px-3 py-2 text-left text-sm text-red-300 hover:bg-zinc-800"
                         >
-                          Archive
+                          Delete
                         </button>
                       </div>
                     )}
@@ -774,13 +818,6 @@ export default function TodayV2() {
               >
                 Save review and plan tomorrow
                 <ArrowRight className="h-4 w-4" />
-              </button>
-              <button
-                type="button"
-                onClick={() => navigate('/reflection')}
-                className="rounded-full border border-zinc-700 px-4 py-2.5 text-sm font-medium text-zinc-200 hover:border-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-400"
-              >
-                Optional: open legacy reflection chat
               </button>
             </div>
 

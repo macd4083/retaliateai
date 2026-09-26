@@ -62,7 +62,7 @@ export const dailyWorkflow = {
 
     const { data: yesterdaySession } = await supabase
       .from('reflection_sessions')
-      .select('tomorrow_commitment')
+      .select('tomorrow_commitment, commitment_minimum, commitment_stretch')
       .eq('user_id', userId)
       .eq('date', yesterday)
       .maybeSingle();
@@ -73,6 +73,8 @@ export const dailyWorkflow = {
       habits: habits || [],
       checkins: checkins || [],
       yesterdayCommitment: yesterdaySession?.tomorrow_commitment || null,
+      yesterdayCommitmentMinimum: yesterdaySession?.commitment_minimum || null,
+      yesterdayCommitmentStretch: yesterdaySession?.commitment_stretch || null,
     };
   },
 

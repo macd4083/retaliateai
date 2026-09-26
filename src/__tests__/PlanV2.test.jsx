@@ -218,6 +218,30 @@ describe('PlanV2', () => {
     expect(view.container.querySelector('#plan-action-minimum-0').value).toBe('Published minimum');
   });
 
+  it('restores legacy minimum/stretch commitment fields using split commitment rows', async () => {
+    getTodaySessionMock.mockResolvedValueOnce({
+      id: 'session-1',
+      date: '2026-09-25',
+      tomorrow_commitment: 'Minimum: Call three leads. Stretch: Send two follow-ups.',
+      commitment_minimum: null,
+      commitment_stretch: null,
+      commitment_why: 'I am becoming more consistent.',
+      tomorrow_plan_details: null,
+    });
+    loadTomorrowPlanActionsMock.mockResolvedValueOnce([]);
+
+    await renderPage();
+
+    await waitForCondition(
+      () => view.container.querySelector('#plan-action-text-0'),
+      'legacy split action field'
+    );
+
+    expect(view.container.querySelector('#plan-action-text-0').value).toBe('Minimum: Call three leads');
+    expect(view.container.querySelector('#plan-action-text-1').value).toBe('Stretch: Send two follow-ups');
+    expect(view.container.querySelector('#plan-desired-direction').value).toBe('I am becoming more consistent.');
+  });
+
   it('saves drafts separately and publishes separate rows with backward-compatible fields on confirm', async () => {
     await renderPage();
 

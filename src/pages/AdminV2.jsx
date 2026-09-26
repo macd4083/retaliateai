@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Database, Trash2, ChevronDown, ChevronRight, RefreshCw, Pencil, Monitor } from 'lucide-react';
 import { useAuth } from '../lib/AuthContext';
+import { buildCommitmentFragmentsFromLegacyFields } from '../lib/commitmentFragments';
 import { supabase } from '../lib/supabase/client';
 import { localDateStr } from '../lib/dateUtils';
 import AppShellV2 from '../components/v2/AppShellV2';
@@ -44,52 +45,16 @@ async function adminFetch(body) {
   });
 }
 
-function parseTasksFromText(text) {
-  if (!text || !text.trim()) return [];
-  // Split on:
-  //   - ". " followed by uppercase (sentence boundary)
-  //   - "; "
-  //   - ", and " / ", or "
-  //   - " and " / " or " as clause separators (but not inside short phrases)
-  const parts = text
-    .split(/\.\s+(?=[A-Z])|;\s*|,\s*(?:and|or)\s+|\s+(?:and|or)\s+/i)
-    .map((s) => s.replace(/\.\s*$/, '').trim())
-    .filter(Boolean);
-  return parts.length > 0 ? parts : [text.trim()];
-}
-
 function buildCommitmentFragments({ tomorrowCommitment, commitmentMinimum, commitmentStretch }) {
-  const minimum = String(commitmentMinimum || '').trim();
-  const stretch = String(commitmentStretch || '').trim();
-  const commitment = String(tomorrowCommitment || '').trim();
-
-  // Parse each field independently into individual task fragments
-  const minimumTasks = parseTasksFromText(minimum);
-  const stretchTasks = parseTasksFromText(stretch);
-
-  const allTasks = [...minimumTasks, ...stretchTasks];
-
-  if (allTasks.length === 0 && commitment) {
-    const fallbackTasks = parseTasksFromText(commitment);
-    return fallbackTasks.map((task, i) => ({
-      commitment_text: task,
-      fragment_index: i,
-      commitment_type: null,
-    }));
-  }
-
-  return [
-    ...minimumTasks.map((task, i) => ({
-      commitment_text: task,
-      fragment_index: i,
-      commitment_type: 'minimum',
-    })),
-    ...stretchTasks.map((task, i) => ({
-      commitment_text: task,
-      fragment_index: minimumTasks.length + i,
-      commitment_type: 'stretch',
-    })),
-  ];
+  return buildCommitmentFragmentsFromLegacyFields({
+    tomorrowCommitment,
+    commitmentMinimum,
+    commitmentStretch,
+  }).map((fragment, index) => ({
+    commitment_text: fragment.text,
+    fragment_index: index,
+    commitment_type: fragment.type,
+  }));
 }
 
 const DATA_TABS = [
