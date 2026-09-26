@@ -157,6 +157,10 @@ describe('TodayV2', () => {
     );
   }
 
+  function findButtonByLabel(label) {
+    return view.container.querySelector(`button[aria-label="${label}"]`);
+  }
+
   function setInputValue(id, value) {
     const field = view.container.querySelector(`#${id}`);
     const prototype = field.tagName === 'TEXTAREA'
@@ -195,6 +199,13 @@ describe('TodayV2', () => {
       () => view.container.textContent.includes('What were today’s highest-ROI actions?'),
       'retrospective helper text'
     );
+    expect(view.container.querySelector('#today-action-text-0')).toBeNull();
+    expect(view.container.textContent).not.toContain('Primary action');
+
+    await act(async () => {
+      findButton('Add action').click();
+    });
+
     await waitForCondition(() => view.container.querySelector('#today-action-text-0'), 'first retrospective action field');
 
     await act(async () => {
@@ -230,6 +241,10 @@ describe('TodayV2', () => {
 
     await renderPage();
 
+    await act(async () => {
+      findButton('Add action').click();
+    });
+
     await waitForCondition(
       () => view.container.querySelector('#today-action-text-0'),
       'first action input'
@@ -257,12 +272,12 @@ describe('TodayV2', () => {
     await renderPage();
 
     await waitForCondition(
-      () => findButton('Add habit'),
+      () => findButtonByLabel('Add habit'),
       'add habit button'
     );
 
     await act(async () => {
-      findButton('Add habit').click();
+      findButtonByLabel('Add habit').click();
     });
 
     await waitForCondition(
@@ -305,11 +320,35 @@ describe('TodayV2', () => {
     });
 
     await act(async () => {
-      const archiveButton = Array.from(view.container.querySelectorAll('button')).find((button) => button.textContent.trim() === 'Archive');
+      const archiveButton = Array.from(view.container.querySelectorAll('button')).find((button) => button.textContent.trim() === 'Delete');
       archiveButton.click();
     });
 
     await waitForCondition(() => archiveHabitMock.mock.calls.length === 1, 'archive call');
     expect(archiveHabitMock).toHaveBeenCalledWith('user-1', 'habit-1');
+  });
+
+  it('loads legacy yesterday commitment fragments as follow-through rows when no published plan exists', async () => {
+    loadReviewDataMock.mockResolvedValueOnce({
+      planActions: [],
+      actionReviews: [],
+      habits: [],
+      checkins: [],
+      yesterdayCommitment: 'Minimum: Call three customers. Stretch: Send follow-up emails.',
+      yesterdayCommitmentMinimum: null,
+      yesterdayCommitmentStretch: null,
+    });
+
+    await renderPage();
+
+    await waitForCondition(
+      () => view.container.querySelector('#today-action-text-0'),
+      'legacy action rows'
+    );
+
+    expect(view.container.querySelector('#today-action-text-0').value).toBe('Minimum: Call three customers');
+    expect(view.container.querySelector('#today-action-text-1').value).toBe('Stretch: Send follow-up emails');
+    expect(view.container.textContent).toContain('Primary action');
+    expect(view.container.textContent).toContain('Secondary action');
   });
 });

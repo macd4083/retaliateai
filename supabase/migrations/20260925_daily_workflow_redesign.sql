@@ -37,11 +37,22 @@ CREATE INDEX IF NOT EXISTS idx_daily_plan_actions_user_plan_date
 
 ALTER TABLE daily_plan_actions ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY IF NOT EXISTS "Users can manage their own daily plan actions"
-  ON daily_plan_actions
-  FOR ALL
-  USING (auth.uid() = user_id)
-  WITH CHECK (auth.uid() = user_id);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'daily_plan_actions'
+      AND policyname = 'Users can manage their own daily plan actions'
+  ) THEN
+    CREATE POLICY "Users can manage their own daily plan actions"
+      ON daily_plan_actions
+      FOR ALL
+      USING (auth.uid() = user_id)
+      WITH CHECK (auth.uid() = user_id);
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS daily_action_reviews (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -63,11 +74,22 @@ CREATE INDEX IF NOT EXISTS idx_daily_action_reviews_user_review_date
 
 ALTER TABLE daily_action_reviews ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY IF NOT EXISTS "Users can manage their own daily action reviews"
-  ON daily_action_reviews
-  FOR ALL
-  USING (auth.uid() = user_id)
-  WITH CHECK (auth.uid() = user_id);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'daily_action_reviews'
+      AND policyname = 'Users can manage their own daily action reviews'
+  ) THEN
+    CREATE POLICY "Users can manage their own daily action reviews"
+      ON daily_action_reviews
+      FOR ALL
+      USING (auth.uid() = user_id)
+      WITH CHECK (auth.uid() = user_id);
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS user_habits (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -94,11 +116,22 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_user_habits_user_active_name_unique
 
 ALTER TABLE user_habits ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY IF NOT EXISTS "Users can manage their own habits"
-  ON user_habits
-  FOR ALL
-  USING (auth.uid() = user_id)
-  WITH CHECK (auth.uid() = user_id);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'user_habits'
+      AND policyname = 'Users can manage their own habits'
+  ) THEN
+    CREATE POLICY "Users can manage their own habits"
+      ON user_habits
+      FOR ALL
+      USING (auth.uid() = user_id)
+      WITH CHECK (auth.uid() = user_id);
+  END IF;
+END $$;
 
 CREATE OR REPLACE FUNCTION seed_default_habits_for_user(p_user_id uuid)
 RETURNS void
@@ -174,11 +207,22 @@ CREATE INDEX IF NOT EXISTS idx_habit_checkins_user_date
 
 ALTER TABLE habit_checkins ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY IF NOT EXISTS "Users can manage their own habit checkins"
-  ON habit_checkins
-  FOR ALL
-  USING (auth.uid() = user_id)
-  WITH CHECK (auth.uid() = user_id);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'habit_checkins'
+      AND policyname = 'Users can manage their own habit checkins'
+  ) THEN
+    CREATE POLICY "Users can manage their own habit checkins"
+      ON habit_checkins
+      FOR ALL
+      USING (auth.uid() = user_id)
+      WITH CHECK (auth.uid() = user_id);
+  END IF;
+END $$;
 
 CREATE OR REPLACE FUNCTION replace_daily_action_reviews(
   p_user_id uuid,

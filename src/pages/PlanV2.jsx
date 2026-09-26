@@ -3,6 +3,7 @@ import { AlertCircle, ArrowRight, Loader2, Moon, Plus, Target } from 'lucide-rea
 
 import AppShellV2 from '../components/v2/AppShellV2';
 import { useAuth } from '../lib/AuthContext';
+import { buildCommitmentFragmentsFromLegacyFields, formatCommitmentFragmentText } from '../lib/commitmentFragments';
 import { localDateStr } from '../lib/dateUtils';
 import { dailyWorkflow, offsetDateStr } from '../lib/supabase/dailyWorkflow';
 import { reflectionHelpers } from '../lib/supabase/reflection';
@@ -75,14 +76,23 @@ function buildDraftFromSession(session, tomorrowDate, localDraft) {
   const publishedPlan = details.plan_tomorrow && typeof details.plan_tomorrow === 'object'
     ? details.plan_tomorrow
     : {};
+  const legacyActions = buildCommitmentFragmentsFromLegacyFields({
+    tomorrowCommitment: session?.tomorrow_commitment,
+    commitmentMinimum: session?.commitment_minimum,
+    commitmentStretch: session?.commitment_stretch,
+  }).map((fragment, index) => createActionRow({
+    action_text: formatCommitmentFragmentText(fragment),
+    is_primary: index === 0,
+  }));
 
   return {
     desiredDirection:
       localDraft?.desiredDirection
       || persistedDraft.desired_direction
       || publishedPlan.desired_direction
+      || session?.commitment_why
       || '',
-    actions: (localDraft?.actions || persistedDraft.actions || publishedPlan.actions || []).map((row) => createActionRow(row)),
+    actions: (localDraft?.actions || persistedDraft.actions || publishedPlan.actions || legacyActions || []).map((row) => createActionRow(row)),
     planDate: tomorrowDate,
   };
 }
