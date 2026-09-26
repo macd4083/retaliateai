@@ -98,10 +98,9 @@ function mergePlanAndReviewRows(planRows, reviewRows) {
   );
   const unmatchedReviews = [...reviewRows];
 
-  const merged = planRows.map((planRow, index) => {
+  const merged = planRows.map((planRow) => {
     const byPlanId = planRow.plan_action_id ? reviewByPlanId.get(planRow.plan_action_id) : null;
-    const byIndex = unmatchedReviews[index] || null;
-    const match = byPlanId || byIndex;
+    const match = byPlanId || null;
     if (!match) return planRow;
 
     const removeIndex = unmatchedReviews.findIndex((item) => item.id === match.id);

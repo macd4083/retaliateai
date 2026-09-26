@@ -84,6 +84,12 @@ function buildDraftFromSession(session, tomorrowDate, localDraft) {
     action_text: formatCommitmentFragmentText(fragment),
     is_primary: index === 0,
   }));
+  const restoredActions = [
+    localDraft?.actions,
+    persistedDraft.actions,
+    publishedPlan.actions,
+    legacyActions,
+  ].find((rows) => Array.isArray(rows) && rows.length > 0) || [];
 
   return {
     desiredDirection:
@@ -92,7 +98,7 @@ function buildDraftFromSession(session, tomorrowDate, localDraft) {
       || publishedPlan.desired_direction
       || session?.commitment_why
       || '',
-    actions: (localDraft?.actions || persistedDraft.actions || publishedPlan.actions || legacyActions || []).map((row) => createActionRow(row)),
+    actions: restoredActions.map((row) => createActionRow(row)),
     planDate: tomorrowDate,
   };
 }

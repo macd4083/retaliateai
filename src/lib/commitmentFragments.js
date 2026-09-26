@@ -1,11 +1,30 @@
 export function splitCommitmentText(text) {
   if (!text || !String(text).trim()) return [];
   const normalized = String(text).trim();
-  const parts = normalized
-    .split(/\.\s+(?=[A-Z])|;\s*|,\s*(?:and|or)\s+|\s+(?:and|or)\s+/i)
+  const seedParts = normalized
+    .split(/\.\s+(?=[A-Z])|;\s*|,\s*(?:and|or)\s+/i)
     .map((value) => value.replace(/\.\s*$/, '').trim())
     .filter(Boolean);
+  const parts = seedParts.flatMap((value) => splitConjunctionTaskClauses(value));
   return parts.length > 0 ? parts : [normalized];
+}
+
+const TASK_START_REGEX = /^(send|write|call|ship|build|review|test|draft|publish|exercise|train|prepare|finish|email|create|record|deliver|update|refactor|fix)\b/i;
+
+function splitConjunctionTaskClauses(input) {
+  const segment = String(input || '').trim();
+  if (!segment) return [];
+
+  const matches = segment.match(/\s+(?:and|or)\s+/gi);
+  if (!matches) return [segment];
+
+  const tokens = segment.split(/\s+(?:and|or)\s+/i).map((value) => value.trim()).filter(Boolean);
+  if (tokens.length !== 2) return [segment];
+
+  const [left, right] = tokens;
+  if (!TASK_START_REGEX.test(right)) return [segment];
+  if (left.split(/\s+/).length < 2) return [segment];
+  return [left, right];
 }
 
 function extractTypedTextFromCombinedCommitment(tomorrowCommitment) {
