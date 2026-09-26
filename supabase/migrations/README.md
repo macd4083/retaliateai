@@ -33,3 +33,4 @@ Run files in filename order (alphabetical / chronological).
 24. `20260509_stripe_columns.sql` — Adds Stripe customer/subscription columns and trial fields to user_profiles
 25. `20260609_fix_trial_start.sql` — Ensures trial default behavior on signup and backfills missing trial_ends_at for trialing users
 26. `20260609_user_feedback.sql` — Creates user_feedback table and adds feedback/trial email tracking columns to user_profiles
+27. `20260925_daily_workflow_redesign.sql` — Adds daily_plan_actions, daily_action_reviews, user_habits, habit_checkins, and `reflection_sessions.checkin_outcome` compatibility for the Review Today → Plan Tomorrow workflow

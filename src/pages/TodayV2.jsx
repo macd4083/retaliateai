@@ -1,47 +1,36 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  AlertCircle,
-  ArrowRight,
-  CheckCircle2,
-  Loader2,
-  Target,
-} from 'lucide-react';
+import { AlertCircle, ArrowRight, CheckCircle2, Loader2, MoreHorizontal, Plus, Target, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 import AppShellV2 from '../components/v2/AppShellV2';
 import { useAuth } from '../lib/AuthContext';
 import { localDateStr } from '../lib/dateUtils';
-import { supabase } from '../lib/supabase/client';
+import { dailyWorkflow } from '../lib/supabase/dailyWorkflow';
 import { reflectionHelpers } from '../lib/supabase/reflection';
 
-const COMPLETION_OPTIONS = [
-  { key: 'kept', label: 'Yes' },
-  { key: 'partial', label: 'Partly' },
-  { key: 'missed', label: 'No' },
+const OUTCOME_OPTIONS = [
+  { key: 'done', label: 'Done' },
+  { key: 'partial', label: 'Partial' },
+  { key: 'missed', label: 'Missed' },
 ];
 
-const YES_NO_OPTIONS = [
-  { key: 'yes', label: 'Yes' },
-  { key: 'no', label: 'No' },
+const WEEKDAY_OPTIONS = [
+  { value: 1, label: 'M' },
+  { value: 2, label: 'T' },
+  { value: 3, label: 'W' },
+  { value: 4, label: 'Th' },
+  { value: 5, label: 'F' },
+  { value: 6, label: 'Sa' },
+  { value: 0, label: 'Su' },
 ];
 
-const IDENTITY_OPTIONS = [
-  { key: 'yes', label: 'Yes' },
-  { key: 'mixed', label: 'Unsure' },
-  { key: 'no', label: 'No' },
+const HABIT_INPUT_OPTIONS = [
+  { value: 'boolean', label: 'Yes / No' },
+  { value: 'number', label: 'Number' },
+  { value: 'duration', label: 'Duration' },
 ];
 
-const REQUIRED_FIELD_DETAILS = [
-  { key: 'highestRoiAction', label: 'today’s highest-ROI action' },
-  { key: 'completionStatus', label: 'whether you completed it' },
-  { key: 'resultValue', label: 'the result, value, or honest account of what happened' },
-  { key: 'benefitFromAction', label: 'the benefit from action' },
-  { key: 'costOfInaction', label: 'the loss or delay from inaction' },
-  { key: 'repeatedTrajectory', label: 'where repeated choices would take you' },
-  { key: 'becoming', label: 'who today’s evidence suggests you are becoming' },
-  { key: 'desiredIdentityFit', label: 'whether that direction is who you want to become' },
-  { key: 'lesson', label: 'what today taught you' },
-];
+const MAX_RETROSPECTIVE_ACTIONS = 3;
 
 function formatSessionDate(dateStr) {
   const date = new Date(`${dateStr}T12:00:00`);
@@ -52,21 +41,13 @@ function formatSessionDate(dateStr) {
   });
 }
 
-function offsetDateStr(dateStr, offsetDays) {
-  const [year, month, day] = dateStr.split('-').map(Number);
-  const date = new Date(year, month - 1, day);
-  date.setDate(date.getDate() + offsetDays);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
-
 function getDraftStorageKey(userId, dateStr) {
   if (!userId || !dateStr) return null;
-  return `retaliateai:today-review-draft:${userId}:${dateStr}`;
+  return `retaliateai:today-review-v3-draft:${userId}:${dateStr}`;
 }
 
 function readDraft(storageKey) {
   if (!storageKey || typeof window === 'undefined') return null;
-
   try {
     const raw = window.localStorage.getItem(storageKey);
     return raw ? JSON.parse(raw) : null;
@@ -77,7 +58,6 @@ function readDraft(storageKey) {
 
 function writeDraft(storageKey, value) {
   if (!storageKey || typeof window === 'undefined') return false;
-
   try {
     window.localStorage.setItem(storageKey, JSON.stringify(value));
     return true;
@@ -88,7 +68,6 @@ function writeDraft(storageKey, value) {
 
 function clearDraft(storageKey) {
   if (!storageKey || typeof window === 'undefined') return;
-
   try {
     window.localStorage.removeItem(storageKey);
   } catch (_error) {
@@ -96,325 +75,428 @@ function clearDraft(storageKey) {
   }
 }
 
-function trimValue(value) {
-  return typeof value === 'string' ? value.trim() : value;
-}
-
-function createEmptyForm(highestRoiAction = '') {
+function createActionRow(base = {}) {
   return {
-    highestRoiAction,
-    completionStatus: '',
-    resultValue: '',
-    sleepHours: '',
-    movement: '',
-    focusedWorkMinutes: '',
-    personalHabitName: '',
-    personalHabitDone: '',
-    benefitFromAction: '',
-    costOfInaction: '',
-    repeatedTrajectory: '',
-    becoming: '',
-    desiredIdentityFit: '',
-    lesson: '',
+    id: base.id || `local-${Math.random().toString(36).slice(2)}`,
+    plan_action_id: base.plan_action_id || null,
+    action_text: base.action_text || '',
+    completion_measure: base.completion_measure || '',
+    is_primary: Boolean(base.is_primary),
+    outcome: base.outcome || '',
   };
 }
 
-function mergeDefined(base, candidate) {
-  return Object.keys(base).reduce((accumulator, key) => {
-    const nextValue = candidate?.[key];
-
-    if (nextValue === undefined || nextValue === null || nextValue === '') {
-      accumulator[key] = base[key];
-      return accumulator;
-    }
-
-    accumulator[key] = String(nextValue);
-    return accumulator;
-  }, { ...base });
-}
-
-function buildFormFromSession(session, yesterdayCommitment, draft) {
-  const storedDetails =
-    session?.tomorrow_plan_details && typeof session.tomorrow_plan_details === 'object'
-      ? session.tomorrow_plan_details
-      : {};
-  const review = storedDetails.review_today && typeof storedDetails.review_today === 'object'
-    ? storedDetails.review_today
-    : {};
-
-  const base = createEmptyForm(yesterdayCommitment || session?.yesterday_commitment || '');
-  const persisted = {
-    highestRoiAction: review.highest_roi_action || yesterdayCommitment || session?.yesterday_commitment || '',
-    completionStatus: session?.checkin_outcome || review.completion_status || '',
-    resultValue: review.result_value || '',
-    sleepHours: review.sleep_hours ?? '',
-    movement: review.movement || '',
-    focusedWorkMinutes: review.focused_work_minutes ?? '',
-    personalHabitName: review.personal_habit_name || '',
-    personalHabitDone: review.personal_habit_done || '',
-    benefitFromAction: review.benefit_from_action || '',
-    costOfInaction: review.cost_of_inaction || '',
-    repeatedTrajectory: review.repeated_trajectory || '',
-    becoming: review.becoming || '',
-    desiredIdentityFit: review.desired_identity_fit || '',
-    lesson: review.lesson || '',
-  };
-
-  const withPersisted = mergeDefined(base, persisted);
-  return mergeDefined(withPersisted, draft);
-}
-
-function sanitizeForm(form) {
-  return Object.keys(form).reduce((accumulator, key) => {
-    const value = form[key];
-
-    if (typeof value === 'string') {
-      accumulator[key] = value.trim();
-      return accumulator;
-    }
-
-    accumulator[key] = value;
-    return accumulator;
+function createHabitValues(habits, checkins) {
+  const byHabit = new Map((checkins || []).map((item) => [item.habit_id, item]));
+  return habits.reduce((acc, habit) => {
+    const existing = byHabit.get(habit.id);
+    acc[habit.id] = {
+      value_boolean: existing?.value_boolean ?? null,
+      value_number: existing?.value_number ?? '',
+    };
+    return acc;
   }, {});
 }
 
-function buildReviewPayload(form) {
-  return {
-    highest_roi_action: form.highestRoiAction || null,
-    completion_status: form.completionStatus || null,
-    result_value: form.resultValue || null,
-    sleep_hours: form.sleepHours || null,
-    movement: form.movement || null,
-    focused_work_minutes: form.focusedWorkMinutes || null,
-    personal_habit_name: form.personalHabitName || null,
-    personal_habit_done: form.personalHabitDone || null,
-    benefit_from_action: form.benefitFromAction || null,
-    cost_of_inaction: form.costOfInaction || null,
-    repeated_trajectory: form.repeatedTrajectory || null,
-    becoming: form.becoming || null,
-    desired_identity_fit: form.desiredIdentityFit || null,
-    lesson: form.lesson || null,
-    submitted_at: new Date().toISOString(),
-  };
+function normalizeActionsForValidation(rows) {
+  return rows
+    .map((row) => ({ ...row, action_text: row.action_text.trim(), completion_measure: row.completion_measure.trim() }))
+    .filter((row) => row.action_text.length > 0 || row.outcome.length > 0);
 }
 
-function getMissingRequiredFields(form) {
-  return REQUIRED_FIELD_DETAILS.filter(({ key }) => !trimValue(form[key]));
+function actionRowError(row) {
+  const textMissing = !row.action_text.trim();
+  const statusMissing = !row.outcome;
+  if (!textMissing && !statusMissing) return '';
+  if (textMissing && statusMissing) return 'Action and outcome are required.';
+  if (textMissing) return 'Action text is required.';
+  return 'Select Done, Partial, or Missed.';
 }
 
-function formatMissingFieldList(fields) {
-  return fields.map(({ label }) => label).join(', ');
-}
+function HabitModal({ open, onClose, onSave, initialValue, saveError, saving }) {
+  const [form, setForm] = useState(() => initialValue);
 
-function getTextFieldClass(isInvalid) {
-  return [
-    'mt-3 w-full rounded-2xl border bg-zinc-950 px-3 py-2.5 text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2',
-    isInvalid
-      ? 'border-red-500 focus:border-red-500 focus:ring-red-400'
-      : 'border-zinc-700 focus:border-red-500 focus:ring-red-400',
-  ].join(' ');
-}
+  useEffect(() => {
+    setForm(initialValue);
+  }, [initialValue]);
 
-function ChoiceGroup({ name, value, options, onChange, columns = 3, invalid = false }) {
-  const colClass = columns === 2 ? 'grid-cols-2' : 'grid-cols-3';
+  useEffect(() => {
+    if (!open) return;
+    const handler = (event) => {
+      if (event.key === 'Escape' && !saving) onClose();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [open, onClose, saving]);
+
+  if (!open) return null;
+
+  const selectedDays = new Set(form.scheduled_days);
+  const nameError = !form.name.trim();
+  const dayError = form.scheduled_days.length === 0;
 
   return (
-    <div className={`mt-3 grid ${colClass} gap-2 rounded-2xl ${invalid ? 'ring-1 ring-red-500/60 ring-offset-2 ring-offset-zinc-900' : ''}`}>
-      {options.map((option) => {
-        const selected = value === option.key;
-        return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 px-4" role="presentation">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="habit-modal-title"
+        className="w-full max-w-md rounded-3xl border border-zinc-700 bg-zinc-900 p-5 shadow-xl"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 id="habit-modal-title" className="text-lg font-semibold text-white">
+              {form.id ? 'Edit habit' : 'Add habit'}
+            </h3>
+            <p className="mt-1 text-sm text-zinc-400">Choose a name, input type, and schedule.</p>
+          </div>
           <button
-            key={option.key}
             type="button"
-            onClick={() => onChange(name, option.key)}
-            aria-pressed={selected}
-            className={[
-              'rounded-2xl border px-3 py-3 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-2 focus:ring-offset-zinc-900',
-              selected
-                ? 'border-red-500 bg-red-500/10 text-white'
-                : 'border-zinc-700 bg-zinc-950 text-zinc-300 hover:border-zinc-600 hover:text-white',
-            ].join(' ')}
+            onClick={onClose}
+            disabled={saving}
+            className="rounded-full p-1 text-zinc-400 hover:bg-zinc-800 hover:text-white focus:outline-none focus:ring-2 focus:ring-red-400"
+            aria-label="Close habit dialog"
           >
-            {option.label}
+            <X className="h-4 w-4" />
           </button>
-        );
-      })}
-    </div>
-  );
-}
+        </div>
 
-function QuestionBlock({ label, children, hint = null, error = null, required = false }) {
-  return (
-    <div>
-      <div className="flex items-center gap-2">
-        <label className="block text-sm font-medium text-white">
-          {label}
-        </label>
-        {required && (
-          <span className="rounded-full border border-zinc-700 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-zinc-400">
-            Required
-          </span>
+        <div className="mt-4 space-y-4">
+          <div>
+            <label htmlFor="habit-name" className="text-sm font-medium text-white">Habit name</label>
+            <input
+              id="habit-name"
+              value={form.name}
+              onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+              className={`mt-2 w-full rounded-xl border bg-zinc-950 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-red-400 ${nameError ? 'border-red-500' : 'border-zinc-700'}`}
+            />
+          </div>
+
+          <div>
+            <label htmlFor="habit-input-type" className="text-sm font-medium text-white">Input type</label>
+            <select
+              id="habit-input-type"
+              value={form.input_type}
+              onChange={(event) => setForm((current) => ({ ...current, input_type: event.target.value }))}
+              className="mt-2 w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-red-400"
+            >
+              {HABIT_INPUT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label htmlFor="habit-unit" className="text-sm font-medium text-white">Unit (optional)</label>
+            <input
+              id="habit-unit"
+              value={form.unit}
+              onChange={(event) => setForm((current) => ({ ...current, unit: event.target.value }))}
+              placeholder={form.input_type === 'duration' ? 'minutes' : form.input_type === 'number' ? 'hours' : ''}
+              className="mt-2 w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-red-400"
+            />
+          </div>
+
+          <fieldset>
+            <legend className="text-sm font-medium text-white">Schedule</legend>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {WEEKDAY_OPTIONS.map((day) => {
+                const selected = selectedDays.has(day.value);
+                return (
+                  <button
+                    key={day.value}
+                    type="button"
+                    onClick={() => {
+                      setForm((current) => {
+                        const next = new Set(current.scheduled_days);
+                        if (next.has(day.value)) next.delete(day.value);
+                        else next.add(day.value);
+                        return { ...current, scheduled_days: Array.from(next) };
+                      });
+                    }}
+                    className={`rounded-full border px-3 py-1 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-red-400 ${selected ? 'border-red-500 bg-red-500/10 text-white' : 'border-zinc-700 text-zinc-300 hover:border-zinc-500'}`}
+                    aria-pressed={selected}
+                  >
+                    {day.label}
+                  </button>
+                );
+              })}
+            </div>
+          </fieldset>
+        </div>
+
+        {(nameError || dayError || saveError) && (
+          <p className="mt-4 text-sm text-red-300">
+            {saveError || (nameError ? 'Habit name is required.' : 'Select at least one scheduled day.')}
+          </p>
         )}
+
+        <div className="mt-5 flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={saving}
+            className="rounded-full border border-zinc-700 px-4 py-2 text-sm text-zinc-200 hover:border-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-400"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={saving || nameError || dayError}
+            onClick={() => onSave({ ...form, name: form.name.trim(), unit: form.unit.trim() })}
+            className="rounded-full bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-500 focus:outline-none focus:ring-2 focus:ring-red-400 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        </div>
       </div>
-      {hint && <p className="mt-1 text-xs leading-relaxed text-zinc-500">{hint}</p>}
-      {children}
-      {error && <p className="mt-2 text-xs text-red-300">{error}</p>}
     </div>
   );
 }
 
 export default function TodayV2() {
-  const { user } = useAuth();
+  const auth = /** @type {{ user?: { id?: string } }} */ (useAuth());
+  const user = auth?.user;
   const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [sessionId, setSessionId] = useState(null);
   const [sessionDate, setSessionDate] = useState(localDateStr());
-  const [yesterdayPlan, setYesterdayPlan] = useState({ title: '', minimum: '', stretch: '' });
-  const [form, setForm] = useState(() => createEmptyForm());
-  const [formReady, setFormReady] = useState(false);
-  const [formTouched, setFormTouched] = useState(false);
-  const [draftState, setDraftState] = useState('idle');
+  const [hasPreviousPlan, setHasPreviousPlan] = useState(false);
+  const [actions, setActions] = useState([]);
+  const [habits, setHabits] = useState([]);
+  const [habitValues, setHabitValues] = useState({});
+  const [menuHabitId, setMenuHabitId] = useState(null);
+
   const [submitState, setSubmitState] = useState('idle');
   const [submitError, setSubmitError] = useState('');
-  const [showValidation, setShowValidation] = useState(false);
+  const [draftState, setDraftState] = useState('idle');
+  const [formTouched, setFormTouched] = useState(false);
+
+  const [habitModalOpen, setHabitModalOpen] = useState(false);
+  const [habitModalSaving, setHabitModalSaving] = useState(false);
+  const [habitModalError, setHabitModalError] = useState('');
+  const [editingHabit, setEditingHabit] = useState(null);
 
   const todayLabel = useMemo(() => formatSessionDate(sessionDate), [sessionDate]);
-  const draftStorageKey = useMemo(
-    () => getDraftStorageKey(user?.id, sessionDate),
-    [sessionDate, user?.id]
-  );
+  const draftStorageKey = useMemo(() => getDraftStorageKey(user?.id, sessionDate), [sessionDate, user?.id]);
 
-  const missingRequiredFields = useMemo(() => getMissingRequiredFields(form), [form]);
-  const missingRequiredCount = missingRequiredFields.length;
-  const missingRequiredSummary = useMemo(
-    () => formatMissingFieldList(missingRequiredFields),
-    [missingRequiredFields]
-  );
-  const fieldErrors = useMemo(
-    () => new Set(showValidation ? missingRequiredFields.map(({ key }) => key) : []),
-    [missingRequiredFields, showValidation]
-  );
+  const actionErrors = useMemo(() => actions.map((row) => actionRowError(row)), [actions]);
+  const canAddRetrospective = !hasPreviousPlan && actions.length < MAX_RETROSPECTIVE_ACTIONS;
 
-  const conditionalPrompt = useMemo(() => {
-    if (form.completionStatus === 'partial') {
-      return 'What progress did it create, and what remains?';
-    }
-
-    if (form.completionStatus === 'missed') {
-      return 'What was delayed or lost, what interfered, or what did you learn?';
-    }
-
-    return 'What tangible result or value did it create?';
-  }, [form.completionStatus]);
-
-  const setField = useCallback((field, value) => {
-    setFormTouched(true);
-    setSubmitError('');
-    setForm((currentForm) => ({
-      ...currentForm,
-      [field]: value,
-    }));
-  }, []);
-
-  const loadToday = useCallback(async () => {
+  const loadData = useCallback(async () => {
     if (!user?.id) return;
 
     setLoading(true);
     setLoadError('');
     setSubmitError('');
-    setFormReady(false);
-    setFormTouched(false);
 
     try {
       const session = await reflectionHelpers.getTodaySession(user.id);
-      const resolvedDate = session.date || localDateStr();
-      const storedDraft = readDraft(getDraftStorageKey(user.id, resolvedDate));
+      const date = session.date || localDateStr();
+      const draft = readDraft(getDraftStorageKey(user.id, date));
+      const context = await dailyWorkflow.loadReviewData(user.id, date);
 
-      const { data: yesterday, error } = await supabase
-        .from('reflection_sessions')
-        .select('tomorrow_commitment, commitment_minimum, commitment_stretch')
-        .eq('user_id', user.id)
-        .eq('date', offsetDateStr(resolvedDate, -1))
-        .maybeSingle();
+      const fromPlanRows = (context.planActions || []).map((row) => createActionRow(row));
+      const fromReviewRows = (context.actionReviews || []).map((row) => createActionRow(row));
 
-      if (error) throw error;
+      let nextActions;
+      if (draft?.actions?.length) {
+        nextActions = draft.actions.map((row) => createActionRow(row));
+      } else if (fromReviewRows.length) {
+        nextActions = fromReviewRows;
+      } else if (fromPlanRows.length) {
+        nextActions = fromPlanRows;
+      } else {
+        nextActions = [createActionRow({ is_primary: true })];
+      }
 
-      const prefillAction = yesterday?.tomorrow_commitment || '';
+      const nextHabitValues = draft?.habitValues
+        ? draft.habitValues
+        : createHabitValues(context.habits, context.checkins);
 
       setSessionId(session.id);
-      setSessionDate(resolvedDate);
-      setYesterdayPlan({
-        title: prefillAction,
-        minimum: yesterday?.commitment_minimum || '',
-        stretch: yesterday?.commitment_stretch || '',
-      });
-      setForm(buildFormFromSession(session, prefillAction, storedDraft));
-      setDraftState(storedDraft ? 'saved' : 'idle');
+      setSessionDate(date);
+      setHasPreviousPlan(fromPlanRows.length > 0);
+      setActions(nextActions);
+      setHabits(context.habits || []);
+      setHabitValues(nextHabitValues);
+      setDraftState(draft ? 'saved' : 'idle');
+      setFormTouched(false);
       setSubmitState('idle');
-      setShowValidation(false);
-      setFormReady(true);
     } catch (error) {
       console.error('[TodayV2] load failed:', error);
-      setLoadError('Could not load today’s review right now. Please try again.');
-      setSessionId(null);
-      setYesterdayPlan({ title: '', minimum: '', stretch: '' });
-      setForm(createEmptyForm());
-      setDraftState('idle');
-      setSubmitState('idle');
-      setShowValidation(false);
+      setLoadError('Could not load today’s review. Please try again.');
+      setActions([]);
+      setHabits([]);
+      setHabitValues({});
     } finally {
       setLoading(false);
     }
   }, [user?.id]);
 
   useEffect(() => {
-    loadToday();
-  }, [loadToday]);
+    loadData();
+  }, [loadData]);
 
   useEffect(() => {
-    if (!formReady || !draftStorageKey || !formTouched || submitState === 'success') return;
-
-    const didSave = writeDraft(draftStorageKey, sanitizeForm(form));
+    if (!draftStorageKey || !formTouched || submitState === 'success') return;
+    const didSave = writeDraft(draftStorageKey, { actions, habitValues });
     setDraftState(didSave ? 'saved' : 'error');
-  }, [draftStorageKey, form, formReady, formTouched, submitState]);
+  }, [actions, draftStorageKey, formTouched, habitValues, submitState]);
 
-  async function handleSubmitReview() {
-    if (!sessionId || submitState === 'saving') return;
+  const setActionField = (index, key, value) => {
+    setFormTouched(true);
+    setSubmitError('');
+    setActions((current) => current.map((row, rowIndex) => (rowIndex === index ? { ...row, [key]: value } : row)));
+  };
 
-    const sanitized = sanitizeForm(form);
-    const currentMissingFields = getMissingRequiredFields(sanitized);
+  const addRetrospectiveAction = () => {
+    setFormTouched(true);
+    setActions((current) => [...current, createActionRow({ is_primary: current.length === 0 })]);
+  };
 
-    if (currentMissingFields.length > 0) {
-      setShowValidation(true);
-      setSubmitError(`Please answer: ${formatMissingFieldList(currentMissingFields)}.`);
+  const setHabitValue = (habitId, patch) => {
+    setFormTouched(true);
+    setSubmitError('');
+    setHabitValues((current) => ({
+      ...current,
+      [habitId]: {
+        value_boolean: current[habitId]?.value_boolean ?? null,
+        value_number: current[habitId]?.value_number ?? '',
+        ...patch,
+      },
+    }));
+  };
+
+  const openAddHabitModal = () => {
+    setEditingHabit(null);
+    setHabitModalError('');
+    setHabitModalOpen(true);
+  };
+
+  const openEditHabitModal = (habit) => {
+    setEditingHabit(habit);
+    setHabitModalError('');
+    setHabitModalOpen(true);
+    setMenuHabitId(null);
+  };
+
+  const handleSaveHabit = async (habitInput) => {
+    if (!user?.id) return;
+
+    setHabitModalSaving(true);
+    setHabitModalError('');
+
+    try {
+      const nextOrder = editingHabit ? editingHabit.display_order : habits.length;
+      const saved = await dailyWorkflow.saveHabit(user.id, {
+        ...habitInput,
+        id: editingHabit?.id || null,
+        display_order: nextOrder,
+      });
+      await loadData();
+      setHabitModalOpen(false);
+      setEditingHabit(null);
+      setHabitValues((current) => ({
+        ...current,
+        [saved.id]: current[saved.id] || { value_boolean: null, value_number: '' },
+      }));
+    } catch (error) {
+      console.error('[TodayV2] save habit failed:', error);
+      setHabitModalError('Could not save habit. Please try again.');
+    } finally {
+      setHabitModalSaving(false);
+    }
+  };
+
+  const handleArchiveHabit = async (habit) => {
+    if (!user?.id) return;
+    setMenuHabitId(null);
+
+    const confirmed = window.confirm(`Archive "${habit.name}"? Existing check-ins stay in your history.`);
+    if (!confirmed) return;
+
+    try {
+      await dailyWorkflow.archiveHabit(user.id, habit.id);
+      await loadData();
+    } catch (error) {
+      console.error('[TodayV2] archive habit failed:', error);
+      setSubmitError('Could not archive habit. Please try again.');
+    }
+  };
+
+  const handleSubmit = async () => {
+    if (!user?.id || !sessionId || submitState === 'saving') return;
+
+    const normalized = normalizeActionsForValidation(actions);
+
+    if (!normalized.length) {
+      setSubmitError('Add at least one important action before continuing.');
       return;
     }
 
-    const reviewPayload = buildReviewPayload(sanitized);
+    const firstInvalid = normalized.find((row) => !row.action_text || !row.outcome);
+    if (firstInvalid) {
+      setSubmitError('Each action needs text plus Done, Partial, or Missed before continuing.');
+      return;
+    }
+
+    const reviewsPayload = normalized.map((row, index) => ({ ...row, is_primary: index === 0 || row.is_primary }));
+    const habitRows = habits.map((habit) => {
+      const value = habitValues[habit.id] || {};
+      const value_boolean = habit.input_type === 'boolean' ? value.value_boolean : null;
+      const hasNumber = value.value_number !== '' && value.value_number !== null && value.value_number !== undefined;
+      const value_number = habit.input_type !== 'boolean' && hasNumber ? Number(value.value_number) : null;
+      return {
+        habit_id: habit.id,
+        value_boolean,
+        value_number: Number.isFinite(value_number) ? value_number : null,
+      };
+    });
 
     setSubmitState('saving');
     setSubmitError('');
-    setShowValidation(false);
 
     try {
+      await dailyWorkflow.saveActionReviews({
+        userId: user.id,
+        sessionId,
+        reviewDate: sessionDate,
+        rows: reviewsPayload,
+      });
+
+      await dailyWorkflow.saveHabitCheckins({
+        userId: user.id,
+        reviewDate: sessionDate,
+        rows: habitRows,
+      });
+
+      const primaryReviewedAction = reviewsPayload.find((row) => row.is_primary) || reviewsPayload[0];
+      const primaryOutcome = primaryReviewedAction?.outcome || null;
+      const mappedCheckinOutcome = primaryOutcome === 'done' ? 'kept' : primaryOutcome;
+
       const session = await reflectionHelpers.getTodaySession(user.id);
-      const existingDetails =
-        session?.tomorrow_plan_details && typeof session.tomorrow_plan_details === 'object'
-          ? session.tomorrow_plan_details
-          : {};
+      const details = session?.tomorrow_plan_details && typeof session.tomorrow_plan_details === 'object'
+        ? session.tomorrow_plan_details
+        : {};
+
       const updates = {
-        checkin_outcome: sanitized.completionStatus,
-        commitment_checkin_done: Boolean(sanitized.completionStatus),
+        checkin_outcome: mappedCheckinOutcome,
+        commitment_checkin_done: Boolean(mappedCheckinOutcome),
         tomorrow_plan_details: {
-          ...existingDetails,
-          workflow: existingDetails.workflow || 'structured_plan_v1',
-          review_today: reviewPayload,
+          ...details,
+          workflow: 'review_today_plan_tomorrow_v2',
+          review_today: {
+            action_count: reviewsPayload.length,
+            reviewed_at: new Date().toISOString(),
+          },
         },
       };
 
       await reflectionHelpers.updateSession(sessionId, updates);
+
       setSubmitState('success');
       clearDraft(draftStorageKey);
       setDraftState('idle');
@@ -422,9 +504,9 @@ export default function TodayV2() {
     } catch (error) {
       console.error('[TodayV2] submit failed:', error);
       setSubmitState('error');
-      setSubmitError('Could not save today’s review. Please try again.');
+      setSubmitError('Could not save today’s review. Your entries are still here. Please retry.');
     }
-  }
+  };
 
   if (loading) {
     return (
@@ -432,7 +514,7 @@ export default function TodayV2() {
         <div className="flex h-full items-center justify-center px-4">
           <div className="flex items-center gap-3 rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm text-zinc-300">
             <Loader2 className="h-4 w-4 animate-spin text-red-400" />
-            Loading today’s review…
+            Loading Review Today…
           </div>
         </div>
       </AppShellV2>
@@ -451,22 +533,13 @@ export default function TodayV2() {
                   <h2 className="text-base font-semibold text-white">Couldn’t load Today</h2>
                   <p className="mt-1 text-sm text-zinc-300">{loadError}</p>
                 </div>
-                <div className="flex flex-wrap gap-3">
-                  <button
-                    type="button"
-                    onClick={loadToday}
-                    className="rounded-full bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-500 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-2 focus:ring-offset-zinc-900"
-                  >
-                    Try again
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => navigate('/reflection')}
-                    className="rounded-full border border-zinc-700 px-4 py-2 text-sm font-medium text-zinc-200 transition-colors hover:border-zinc-500 hover:text-white focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2 focus:ring-offset-zinc-900"
-                  >
-                    Open reflection chat
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onClick={loadData}
+                  className="rounded-full bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-500 focus:outline-none focus:ring-2 focus:ring-red-400"
+                >
+                  Try again
+                </button>
               </div>
             </div>
           </div>
@@ -477,306 +550,253 @@ export default function TodayV2() {
 
   return (
     <AppShellV2 title="Today">
+      <HabitModal
+        open={habitModalOpen}
+        saving={habitModalSaving}
+        saveError={habitModalError}
+        onClose={() => {
+          if (habitModalSaving) return;
+          setHabitModalOpen(false);
+          setEditingHabit(null);
+          setHabitModalError('');
+        }}
+        onSave={handleSaveHabit}
+        initialValue={editingHabit ? {
+          id: editingHabit.id,
+          name: editingHabit.name,
+          input_type: editingHabit.input_type,
+          unit: editingHabit.unit || '',
+          scheduled_days: editingHabit.scheduled_days || [],
+        } : {
+          id: null,
+          name: '',
+          input_type: 'boolean',
+          unit: '',
+          scheduled_days: [1, 2, 3, 4, 5],
+        }}
+      />
+
       <div className="h-full overflow-y-auto px-4 pb-8 pt-5">
         <div className="mx-auto max-w-xl space-y-5">
           <section className="rounded-3xl border border-zinc-800 bg-zinc-900 p-5 shadow-lg shadow-black/20">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">Part 1 · Review Today</p>
-                <h2 className="mt-1 text-xl font-semibold text-white">{todayLabel}</h2>
-                <p className="mt-2 text-sm leading-relaxed text-zinc-300">
-                  Action creates evidence. Reflection extracts wisdom. Capture reality first, then plan tomorrow.
-                </p>
-              </div>
-              <div className="rounded-full border border-red-500/30 bg-red-500/10 px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.2em] text-red-300">
-                Evidence
-              </div>
-            </div>
-
-            {yesterdayPlan.title ? (
-              <div className="mt-4 rounded-2xl border border-red-500/20 bg-zinc-950/80 p-4">
-                <div className="mb-2 flex items-center gap-2 text-red-300">
-                  <Target className="h-4 w-4" />
-                  <span className="text-xs font-medium uppercase tracking-[0.2em]">
-                    Yesterday’s planned highest-ROI action
-                  </span>
-                </div>
-                <p className="text-base font-medium leading-relaxed text-white">{yesterdayPlan.title}</p>
-                {(yesterdayPlan.minimum || yesterdayPlan.stretch) && (
-                  <dl className="mt-4 space-y-2 text-sm text-zinc-300">
-                    {yesterdayPlan.minimum && (
-                      <div className="flex items-start gap-2">
-                        <dt className="min-w-20 text-zinc-500">Minimum</dt>
-                        <dd>{yesterdayPlan.minimum}</dd>
-                      </div>
-                    )}
-                    {yesterdayPlan.stretch && (
-                      <div className="flex items-start gap-2">
-                        <dt className="min-w-20 text-zinc-500">Stretch</dt>
-                        <dd>{yesterdayPlan.stretch}</dd>
-                      </div>
-                    )}
-                  </dl>
-                )}
-              </div>
-            ) : (
-              <div className="mt-4 rounded-2xl border border-zinc-700 bg-zinc-950/70 p-4 text-sm text-zinc-300">
-                There was no previous-night commitment saved. Think about the action that created—or could
-                have created—the most meaningful progress today.
-              </div>
-            )}
+            <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">Review Today</p>
+            <h2 className="mt-1 text-xl font-semibold text-white">{todayLabel}</h2>
+            <p className="mt-2 text-sm leading-relaxed text-zinc-300">
+              Action creates evidence. Reflection extracts wisdom. Wisdom improves direction.
+            </p>
           </section>
 
           <section className="rounded-3xl border border-zinc-800 bg-zinc-900 p-5">
             <div className="flex items-center gap-2 text-zinc-200">
               <CheckCircle2 className="h-4 w-4 text-red-400" />
-              <h3 className="text-sm font-medium uppercase tracking-[0.2em] text-zinc-400">
-                Follow-through and context
-              </h3>
+              <h3 className="text-sm font-medium uppercase tracking-[0.2em] text-zinc-400">1. Follow-through</h3>
             </div>
 
-            <div className="mt-5 space-y-6">
-              <div className="space-y-4 rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4">
-                <h4 className="text-sm font-semibold text-white">1. Follow-Through</h4>
+            {hasPreviousPlan ? (
+              <p className="mt-3 text-sm text-zinc-300">
+                Review yesterday’s planned actions as separate rows. Primary is first.
+              </p>
+            ) : (
+              <p className="mt-3 rounded-2xl border border-zinc-700 bg-zinc-950/70 p-3 text-sm text-zinc-300">
+                What were today’s highest-ROI actions? Add up to {MAX_RETROSPECTIVE_ACTIONS} rows and score each one.
+              </p>
+            )}
 
-                <QuestionBlock
-                  label="What was today’s highest-ROI action?"
-                  hint={!yesterdayPlan.title ? 'Retrospective is valid—capture the action you attempted or should evaluate.' : null}
-                  error={fieldErrors.has('highestRoiAction') ? 'Please name the highest-ROI action you are reviewing.' : null}
-                  required
-                >
+            <div className="mt-4 space-y-3">
+              {actions.map((row, index) => (
+                <div key={row.id} className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="text-xs uppercase tracking-[0.18em] text-zinc-500">
+                      {index === 0 || row.is_primary ? 'Primary action' : 'Secondary action'}
+                    </div>
+                    {row.completion_measure && <span className="text-xs text-zinc-400">Measure: {row.completion_measure}</span>}
+                  </div>
+
                   <textarea
-                    id="today-highest-roi-action"
-                    value={form.highestRoiAction}
-                    onChange={(event) => setField('highestRoiAction', event.target.value)}
+                    id={`today-action-text-${index}`}
+                    value={row.action_text}
+                    onChange={(event) => setActionField(index, 'action_text', event.target.value)}
                     rows={2}
-                    aria-invalid={fieldErrors.has('highestRoiAction')}
-                    className={getTextFieldClass(fieldErrors.has('highestRoiAction'))}
+                    placeholder="Action text"
+                    className="mt-2 w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-red-400"
                   />
-                </QuestionBlock>
 
-                <QuestionBlock
-                  label="Did I complete it?"
-                  error={fieldErrors.has('completionStatus') ? 'Please choose Yes, Partly, or No.' : null}
-                  required
-                >
-                  <ChoiceGroup
-                    name="completionStatus"
-                    value={form.completionStatus}
-                    options={COMPLETION_OPTIONS}
-                    onChange={setField}
-                    invalid={fieldErrors.has('completionStatus')}
-                  />
-                </QuestionBlock>
-
-                <QuestionBlock
-                  label={conditionalPrompt}
-                  error={fieldErrors.has('resultValue') ? 'Please describe the result, progress, or honest lesson from what happened.' : null}
-                  required
-                >
-                  <textarea
-                    id="today-result-value"
-                    value={form.resultValue}
-                    onChange={(event) => setField('resultValue', event.target.value)}
-                    rows={3}
-                    aria-invalid={fieldErrors.has('resultValue')}
-                    className={getTextFieldClass(fieldErrors.has('resultValue'))}
-                  />
-                </QuestionBlock>
-              </div>
-
-              <div className="space-y-4 rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4">
-                <h4 className="text-sm font-semibold text-white">2. Habits</h4>
-
-                <QuestionBlock label="Sleep: ___ hours">
                   <input
-                    id="today-sleep-hours"
-                    type="number"
-                    inputMode="decimal"
-                    min="0"
-                    value={form.sleepHours}
-                    onChange={(event) => setField('sleepHours', event.target.value)}
-                    className={getTextFieldClass(false)}
+                    id={`today-action-measure-${index}`}
+                    value={row.completion_measure}
+                    onChange={(event) => setActionField(index, 'completion_measure', event.target.value)}
+                    placeholder="Optional measure or minimum context"
+                    className="mt-2 w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-red-400"
                   />
-                </QuestionBlock>
 
-                <QuestionBlock label="Exercise/movement">
-                  <ChoiceGroup
-                    name="movement"
-                    value={form.movement}
-                    options={YES_NO_OPTIONS}
-                    onChange={setField}
-                    columns={2}
-                  />
-                </QuestionBlock>
+                  <div className="mt-3 grid grid-cols-3 gap-2">
+                    {OUTCOME_OPTIONS.map((option) => {
+                      const selected = row.outcome === option.key;
+                      return (
+                        <button
+                          key={option.key}
+                          type="button"
+                          onClick={() => setActionField(index, 'outcome', option.key)}
+                          aria-pressed={selected}
+                          className={`rounded-xl border px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-red-400 ${selected ? 'border-red-500 bg-red-500/10 text-white' : 'border-zinc-700 text-zinc-300 hover:border-zinc-500'}`}
+                        >
+                          {option.label}
+                        </button>
+                      );
+                    })}
+                  </div>
 
-                <QuestionBlock label="Focused work: ___ minutes">
-                  <input
-                    id="today-focused-work"
-                    type="number"
-                    inputMode="numeric"
-                    min="0"
-                    value={form.focusedWorkMinutes}
-                    onChange={(event) => setField('focusedWorkMinutes', event.target.value)}
-                    className={getTextFieldClass(false)}
-                  />
-                </QuestionBlock>
+                  {actionErrors[index] && <p className="mt-2 text-xs text-red-300">{actionErrors[index]}</p>}
+                </div>
+              ))}
+            </div>
 
-                <QuestionBlock label="Personal habit">
-                  <input
-                    id="today-personal-habit-name"
-                    value={form.personalHabitName}
-                    onChange={(event) => setField('personalHabitName', event.target.value)}
-                    className={getTextFieldClass(false)}
-                  />
-                  <ChoiceGroup
-                    name="personalHabitDone"
-                    value={form.personalHabitDone}
-                    options={YES_NO_OPTIONS}
-                    onChange={setField}
-                    columns={2}
-                  />
-                </QuestionBlock>
-              </div>
+            {canAddRetrospective && (
+              <button
+                type="button"
+                onClick={addRetrospectiveAction}
+                className="mt-3 rounded-full border border-zinc-700 px-4 py-2 text-sm text-zinc-200 hover:border-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-400"
+              >
+                Add action
+              </button>
+            )}
+          </section>
 
-              <div className="space-y-4 rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4">
-                <h4 className="text-sm font-semibold text-white">3. Consequences and Benefits</h4>
+          <section className="rounded-3xl border border-zinc-800 bg-zinc-900 p-5">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-sm font-medium uppercase tracking-[0.2em] text-zinc-400">2. Habits</h3>
+              <button
+                type="button"
+                onClick={openAddHabitModal}
+                className="inline-flex items-center gap-1 rounded-full bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-500 focus:outline-none focus:ring-2 focus:ring-red-400"
+                aria-label="Add habit"
+              >
+                <Plus className="h-3.5 w-3.5" /> Add habit
+              </button>
+            </div>
 
-                <QuestionBlock
-                  label="What benefit came from the actions I took?"
-                  error={fieldErrors.has('benefitFromAction') ? 'Please name the benefit that came from your actions.' : null}
-                  required
-                >
-                  <textarea
-                    id="today-benefit-from-action"
-                    value={form.benefitFromAction}
-                    onChange={(event) => setField('benefitFromAction', event.target.value)}
-                    rows={3}
-                    aria-invalid={fieldErrors.has('benefitFromAction')}
-                    className={getTextFieldClass(fieldErrors.has('benefitFromAction'))}
-                  />
-                </QuestionBlock>
+            <div className="mt-4 space-y-3">
+              {habits.map((habit) => {
+                const habitValue = habitValues[habit.id] || { value_boolean: null, value_number: '' };
+                return (
+                  <div key={habit.id} className="relative rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium text-white">{habit.name}</p>
+                        {habit.unit && <p className="mt-0.5 text-xs text-zinc-500">Unit: {habit.unit}</p>}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setMenuHabitId((current) => (current === habit.id ? null : habit.id))}
+                        className="rounded-lg border border-zinc-700 p-1.5 text-zinc-300 hover:border-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-400"
+                        aria-haspopup="menu"
+                        aria-expanded={menuHabitId === habit.id}
+                        aria-label={`Open actions for ${habit.name}`}
+                      >
+                        <MoreHorizontal className="h-4 w-4" />
+                      </button>
+                    </div>
 
-                <QuestionBlock
-                  label="What did I lose or delay through inaction?"
-                  error={fieldErrors.has('costOfInaction') ? 'Please name the loss or delay from inaction.' : null}
-                  required
-                >
-                  <textarea
-                    id="today-cost-of-inaction"
-                    value={form.costOfInaction}
-                    onChange={(event) => setField('costOfInaction', event.target.value)}
-                    rows={3}
-                    aria-invalid={fieldErrors.has('costOfInaction')}
-                    className={getTextFieldClass(fieldErrors.has('costOfInaction'))}
-                  />
-                </QuestionBlock>
+                    {habit.input_type === 'boolean' ? (
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        {[
+                          { label: 'Yes', value: true },
+                          { label: 'No', value: false },
+                        ].map((option) => (
+                          <button
+                            key={option.label}
+                            type="button"
+                            onClick={() => setHabitValue(habit.id, { value_boolean: option.value })}
+                            aria-pressed={habitValue.value_boolean === option.value}
+                            className={`rounded-xl border px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-red-400 ${habitValue.value_boolean === option.value ? 'border-red-500 bg-red-500/10 text-white' : 'border-zinc-700 text-zinc-300 hover:border-zinc-500'}`}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <input
+                        id={`habit-value-${habit.id}`}
+                        type="number"
+                        inputMode="decimal"
+                        min="0"
+                        value={habitValue.value_number}
+                        onChange={(event) => setHabitValue(habit.id, { value_number: event.target.value })}
+                        className="mt-3 w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-red-400"
+                      />
+                    )}
 
-                <QuestionBlock
-                  label="If I repeated today’s choices, where would they take me?"
-                  error={fieldErrors.has('repeatedTrajectory') ? 'Please describe where repeating today’s choices would lead.' : null}
-                  required
-                >
-                  <textarea
-                    id="today-repeated-trajectory"
-                    value={form.repeatedTrajectory}
-                    onChange={(event) => setField('repeatedTrajectory', event.target.value)}
-                    rows={3}
-                    aria-invalid={fieldErrors.has('repeatedTrajectory')}
-                    className={getTextFieldClass(fieldErrors.has('repeatedTrajectory'))}
-                  />
-                </QuestionBlock>
-              </div>
-
-              <div className="space-y-4 rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4">
-                <h4 className="text-sm font-semibold text-white">4. Trajectory and Identity</h4>
-
-                <QuestionBlock
-                  label="Based on today’s evidence, who am I becoming?"
-                  hint="One day is evidence, not a permanent identity verdict."
-                  error={fieldErrors.has('becoming') ? 'Please describe who today’s evidence suggests you are becoming.' : null}
-                  required
-                >
-                  <textarea
-                    id="today-becoming"
-                    value={form.becoming}
-                    onChange={(event) => setField('becoming', event.target.value)}
-                    rows={3}
-                    aria-invalid={fieldErrors.has('becoming')}
-                    className={getTextFieldClass(fieldErrors.has('becoming'))}
-                  />
-                </QuestionBlock>
-
-                <QuestionBlock
-                  label="Is that who I want to become?"
-                  error={fieldErrors.has('desiredIdentityFit') ? 'Please choose whether that direction matches who you want to become.' : null}
-                  required
-                >
-                  <ChoiceGroup
-                    name="desiredIdentityFit"
-                    value={form.desiredIdentityFit}
-                    options={IDENTITY_OPTIONS}
-                    onChange={setField}
-                    invalid={fieldErrors.has('desiredIdentityFit')}
-                  />
-                </QuestionBlock>
-
-                <QuestionBlock
-                  label="What did today teach me about myself, my environment, or my methods?"
-                  error={fieldErrors.has('lesson') ? 'Please capture what today taught you.' : null}
-                  required
-                >
-                  <textarea
-                    id="today-lesson"
-                    value={form.lesson}
-                    onChange={(event) => setField('lesson', event.target.value)}
-                    rows={3}
-                    aria-invalid={fieldErrors.has('lesson')}
-                    className={getTextFieldClass(fieldErrors.has('lesson'))}
-                  />
-                </QuestionBlock>
-              </div>
+                    {menuHabitId === habit.id && (
+                      <div
+                        role="menu"
+                        className="absolute right-3 top-11 z-20 w-32 rounded-xl border border-zinc-700 bg-zinc-900 p-1 shadow-xl"
+                      >
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => openEditHabitModal(habit)}
+                          className="w-full rounded-lg px-3 py-2 text-left text-sm text-zinc-200 hover:bg-zinc-800"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => handleArchiveHabit(habit)}
+                          className="w-full rounded-lg px-3 py-2 text-left text-sm text-red-300 hover:bg-zinc-800"
+                        >
+                          Archive
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </section>
 
           <section className="rounded-3xl border border-zinc-800 bg-zinc-900 p-5">
-            <div className="text-xs leading-relaxed text-zinc-500">
-              {showValidation && missingRequiredCount > 0
-                ? `Please answer: ${missingRequiredSummary}.`
-                : missingRequiredCount > 0
-                ? `${missingRequiredCount} required answer${missingRequiredCount === 1 ? '' : 's'} still need evidence before continuing.`
-                : 'Review evidence is complete and ready to carry into Plan Tomorrow.'}
+            <div className="text-xs text-zinc-500">
+              Save all outcomes and habit evidence, then continue to plan tomorrow.
             </div>
 
             <div aria-live="polite" className="mt-3 min-h-6 text-sm">
-              {submitState === 'saving' && <span className="text-zinc-400">Saving today’s review…</span>}
-              {submitState === 'error' && <span className="text-red-400">{submitError}</span>}
+              {submitState === 'saving' && <span className="text-zinc-400">Saving review…</span>}
+              {submitError && <span className="text-red-400">{submitError}</span>}
             </div>
 
             <div className="mt-5 flex flex-col gap-3 sm:flex-row">
               <button
                 type="button"
-                onClick={handleSubmitReview}
+                onClick={handleSubmit}
                 disabled={!sessionId || submitState === 'saving'}
-                className="inline-flex items-center justify-center gap-2 rounded-full bg-red-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-red-500 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-2 focus:ring-offset-zinc-900 disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex items-center justify-center gap-2 rounded-full bg-red-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-red-500 focus:outline-none focus:ring-2 focus:ring-red-400 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                Submit Today’s Review &amp; Continue to Plan Tomorrow
+                Save review and plan tomorrow
                 <ArrowRight className="h-4 w-4" />
               </button>
-
               <button
                 type="button"
                 onClick={() => navigate('/reflection')}
-                className="rounded-full border border-zinc-700 px-4 py-2.5 text-sm font-medium text-zinc-200 transition-colors hover:border-zinc-500 hover:text-white focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2 focus:ring-offset-zinc-900"
+                className="rounded-full border border-zinc-700 px-4 py-2.5 text-sm font-medium text-zinc-200 hover:border-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-400"
               >
-                Open legacy reflection chat
+                Optional: open legacy reflection chat
               </button>
             </div>
 
             <div className="mt-4 text-xs leading-relaxed text-zinc-500">
               {draftState === 'error'
-                ? 'This review draft could not be stored locally right now.'
-                : 'Draft edits stay on this device until you submit. Submitted review evidence is saved to your reflection session.'}
+                ? 'Draft could not be saved locally right now.'
+                : 'Draft entries stay on this device until the save succeeds.'}
+            </div>
+          </section>
+
+          <section className="rounded-3xl border border-zinc-800 bg-zinc-900 p-4 text-xs text-zinc-500">
+            <div className="flex items-start gap-2">
+              <Target className="mt-0.5 h-4 w-4 text-red-400" />
+              <p>
+                Today is now evidence-focused. Consequences and trajectory prompts are reserved for future weekly review.
+              </p>
             </div>
           </section>
         </div>

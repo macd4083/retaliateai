@@ -5,13 +5,15 @@ import { createRoot } from 'react-dom/client';
 const {
   navigateMock,
   getTodaySessionMock,
-  getYesterdayCommitmentMock,
   updateSessionMock,
+  loadTomorrowPlanActionsMock,
+  publishTomorrowPlanMock,
 } = vi.hoisted(() => ({
   navigateMock: vi.fn(),
   getTodaySessionMock: vi.fn(),
-  getYesterdayCommitmentMock: vi.fn(),
   updateSessionMock: vi.fn(),
+  loadTomorrowPlanActionsMock: vi.fn(),
+  publishTomorrowPlanMock: vi.fn(),
 }));
 
 vi.mock('react-router-dom', () => ({
@@ -28,16 +30,26 @@ vi.mock('../components/v2/AppShellV2', () => ({
 }));
 
 vi.mock('../lib/AuthContext', () => ({
-  useAuth: () => ({
-    user: { id: 'user-1' },
-  }),
+  useAuth: () => ({ user: { id: 'user-1' } }),
 }));
 
 vi.mock('../lib/supabase/reflection', () => ({
   reflectionHelpers: {
     getTodaySession: getTodaySessionMock,
-    getYesterdayCommitment: getYesterdayCommitmentMock,
     updateSession: updateSessionMock,
+  },
+}));
+
+vi.mock('../lib/supabase/dailyWorkflow', () => ({
+  dailyWorkflow: {
+    loadTomorrowPlanActions: loadTomorrowPlanActionsMock,
+    publishTomorrowPlan: publishTomorrowPlanMock,
+  },
+  offsetDateStr: (dateStr, offsetDays) => {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const date = new Date(y, m - 1, d, 12);
+    date.setDate(date.getDate() + offsetDays);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
   },
 }));
 
@@ -47,7 +59,6 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 async function waitForCondition(condition, description = 'condition', timeout = 2000) {
   const start = Date.now();
-
   while (Date.now() - start < timeout) {
     if (condition()) return;
     await act(async () => {
@@ -55,7 +66,6 @@ async function waitForCondition(condition, description = 'condition', timeout = 
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
   }
-
   throw new Error(`Timed out after ${timeout}ms waiting for ${description}`);
 }
 
@@ -68,24 +78,18 @@ describe('PlanV2', () => {
 
     getTodaySessionMock.mockResolvedValue({
       id: 'session-1',
-      date: '2026-09-23',
-      checkin_outcome: 'partial',
-      tomorrow_commitment: null,
-      tomorrow_plan_details: {
-        review_today: {
-          highest_roi_action: 'Ship the revised offer',
-          repeated_trajectory: 'If repeated, this builds direct customer feedback loops.',
-          lesson: 'Prepare call notes before lunch.',
-          completion_status: 'partial',
-        },
-      },
-      commitment_why: null,
+      date: '2026-09-25',
+      tomorrow_plan_details: null,
     });
-    getYesterdayCommitmentMock.mockResolvedValue('Ship the revised offer');
-    updateSessionMock.mockImplementation(async (_sessionId, updates) => ({
-      tomorrow_commitment: updates.tomorrow_commitment,
-      tomorrow_plan_details: updates.tomorrow_plan_details,
-    }));
+
+    loadTomorrowPlanActionsMock.mockResolvedValue([]);
+
+    publishTomorrowPlanMock.mockResolvedValue([
+      { id: 'plan-1' },
+      { id: 'plan-2' },
+    ]);
+
+    updateSessionMock.mockResolvedValue({ id: 'session-1' });
   });
 
   afterEach(async () => {
@@ -108,103 +112,184 @@ describe('PlanV2', () => {
     });
 
     view = { container, root };
-    return view;
   }
 
-  function changeField(id, value) {
+  function findButton(text) {
+    return Array.from(view.container.querySelectorAll('button')).find((candidate) =>
+      candidate.textContent.includes(text)
+    );
+  }
+
+  function setInputValue(id, value) {
     const field = view.container.querySelector(`#${id}`);
     const prototype = field.tagName === 'TEXTAREA'
       ? window.HTMLTextAreaElement.prototype
       : window.HTMLInputElement.prototype;
-    const descriptor = Object.getOwnPropertyDescriptor(prototype, 'value');
-    descriptor.set.call(field, value);
+    Object.getOwnPropertyDescriptor(prototype, 'value').set.call(field, value);
     field.dispatchEvent(new window.Event('input', { bubbles: true }));
   }
 
-  it('uses Today review evidence as planning context and publishes tomorrow commitment fields', async () => {
+  it('requires user-authored desired direction and primary measured action before publishing', async () => {
     await renderPage();
 
     await waitForCondition(
-      () => view.container.textContent.includes('Evidence carried from Today'),
-      'plan load'
+      () => findButton('Commit to Tomorrow'),
+      'publish button render'
     );
 
-    expect(view.container.textContent).toContain('Ship the revised offer');
-    expect(view.container.textContent).toContain('Prepare call notes before lunch.');
+    const publishButton = findButton('Commit to Tomorrow');
+    expect(publishButton.disabled).toBe(true);
 
     await act(async () => {
-      changeField('plan-desired-direction', 'A seller who iterates from real objections.');
-      changeField('plan-value-to-strengthen', 'Directness and consistency.');
-      changeField('plan-primary-action', 'Call three warm leads before noon.');
-      changeField('plan-completion-definition', 'Three calls completed with notes in CRM.');
-      changeField('plan-additional-actions', 'Email follow-ups to any lead I miss by phone.');
-      changeField('plan-start-plan', '9:00 AM at my desk with the call list open.');
-      changeField('plan-obstacle', 'I may hide in admin tasks.');
-      changeField('plan-fallback-action', 'Make one call within 10 minutes no matter what.');
-      changeField('plan-tonight-preparation', 'Print call list and script opening line tonight.');
-      const checkbox = view.container.querySelector('#plan-confirm-checkbox');
-      checkbox.click();
+      setInputValue('plan-desired-direction', 'I am becoming someone who executes before overthinking.');
+      setInputValue('plan-action-text-0', 'Call three warm leads before noon.');
+      setInputValue('plan-action-measure-0', '3 calls with notes logged');
+      setInputValue('plan-action-minimum-0', 'At least one completed call');
+      view.container.querySelector('#plan-confirm-checkbox').click();
     });
 
-    const publishButton = Array.from(view.container.querySelectorAll('button')).find(
-      (candidate) => candidate.textContent.includes('Publish tomorrow’s action')
-    );
+    await waitForCondition(() => publishButton.disabled === false, 'publish enabled');
+  });
+
+  it('keeps additional actions bounded and subordinate', async () => {
+    await renderPage();
 
     await waitForCondition(
-      () => publishButton.disabled === false,
-      'publish button enabled'
+      () => findButton('Add optional action'),
+      'add optional action button'
     );
 
     await act(async () => {
-      publishButton.click();
+      findButton('Add optional action').click();
+      findButton('Add optional action').click();
+    });
+
+    const maybeThirdAdd = findButton('Add optional action');
+    if (maybeThirdAdd) {
+      await act(async () => {
+        maybeThirdAdd.click();
+      });
+    }
+
+    expect(findButton('Add optional action')).toBeUndefined();
+    expect(view.container.querySelector('#plan-action-text-3')).toBeNull();
+
+    expect(view.container.textContent).toContain('Additional action 1');
+    expect(view.container.textContent).toContain('Additional action 2');
+  });
+
+  it('prefers published plan rows over stale session draft actions when restoring', async () => {
+    getTodaySessionMock.mockResolvedValueOnce({
+      id: 'session-1',
+      date: '2026-09-25',
+      tomorrow_plan_details: {
+        plan_tomorrow_draft: {
+          desired_direction: 'Stale draft direction',
+          actions: [
+            {
+              action_text: 'Old draft action',
+              completion_measure: 'Old measure',
+              minimum_version: 'Old minimum',
+            },
+          ],
+        },
+      },
+    });
+    loadTomorrowPlanActionsMock.mockResolvedValueOnce([
+      {
+        id: 'plan-published-1',
+        action_text: 'Published action text',
+        completion_measure: 'Published measure',
+        minimum_version: 'Published minimum',
+        stretch_version: null,
+        is_primary: true,
+      },
+    ]);
+
+    await renderPage();
+
+    await waitForCondition(
+      () => view.container.querySelector('#plan-action-text-0'),
+      'plan action field'
+    );
+
+    expect(view.container.querySelector('#plan-action-text-0').value).toBe('Published action text');
+    expect(view.container.querySelector('#plan-action-measure-0').value).toBe('Published measure');
+    expect(view.container.querySelector('#plan-action-minimum-0').value).toBe('Published minimum');
+  });
+
+  it('saves drafts separately and publishes separate rows with backward-compatible fields on confirm', async () => {
+    await renderPage();
+
+    await waitForCondition(
+      () => findButton('Save draft'),
+      'save draft button'
+    );
+
+    await act(async () => {
+      setInputValue('plan-desired-direction', 'I am becoming consistent with direct sales outreach.');
+      setInputValue('plan-action-text-0', 'Call three warm leads before noon.');
+      setInputValue('plan-action-measure-0', '3 calls completed with CRM notes');
+      setInputValue('plan-action-minimum-0', 'At least 1 call completed');
+      setInputValue('plan-action-stretch-0', '5 total calls with follow-up messages');
+      findButton('Add optional action').click();
     });
 
     await waitForCondition(
-      () => updateSessionMock.mock.calls.length === 1,
-      'publish call'
+      () => view.container.querySelector('#plan-action-text-1'),
+      'first additional action field'
     );
+
+    await act(async () => {
+      setInputValue('plan-action-text-1', 'Send two proposal follow-ups');
+      setInputValue('plan-action-measure-1', '2 tailored emails sent');
+      findButton('Save draft').click();
+    });
+
+    await waitForCondition(() => updateSessionMock.mock.calls.length >= 1, 'draft session save call');
+    expect(updateSessionMock.mock.calls[0][1]).toEqual(expect.objectContaining({
+      tomorrow_plan_details: expect.objectContaining({
+        plan_tomorrow_draft: expect.objectContaining({
+          desired_direction: 'I am becoming consistent with direct sales outreach.',
+          actions: expect.arrayContaining([
+            expect.objectContaining({ action_text: 'Call three warm leads before noon.' }),
+            expect.objectContaining({ action_text: 'Send two proposal follow-ups' }),
+          ]),
+        }),
+      }),
+    }));
+    expect(publishTomorrowPlanMock).not.toHaveBeenCalled();
+
+    await act(async () => {
+      view.container.querySelector('#plan-confirm-checkbox').click();
+      findButton('Commit to Tomorrow').click();
+    });
+
+    await waitForCondition(() => publishTomorrowPlanMock.mock.calls.length === 1, 'publish rows call');
+
+    expect(publishTomorrowPlanMock).toHaveBeenCalledWith(expect.objectContaining({
+      planDate: '2026-09-26',
+      actions: expect.arrayContaining([
+        expect.objectContaining({ is_primary: true, action_text: 'Call three warm leads before noon.' }),
+        expect.objectContaining({ is_primary: false, action_text: 'Send two proposal follow-ups' }),
+      ]),
+    }));
 
     expect(updateSessionMock).toHaveBeenCalledWith(
       'session-1',
       expect.objectContaining({
         tomorrow_commitment: 'Call three warm leads before noon.',
-        commitment_minimum: 'Three calls completed with notes in CRM.',
-        commitment_stretch: 'Email follow-ups to any lead I miss by phone.',
-        commitment_why: 'A seller who iterates from real objections. | Directness and consistency.',
-        commitment_checkin_done: true,
-        checkin_outcome: 'partial',
+        commitment_minimum: 'At least 1 call completed',
+        commitment_stretch: '5 total calls with follow-up messages',
+        commitment_why: 'I am becoming consistent with direct sales outreach.',
         tomorrow_plan_details: expect.objectContaining({
-          workflow: 'structured_plan_v1',
-          what: 'Call three warm leads before noon.',
-          review_today: expect.objectContaining({
-            highest_roi_action: 'Ship the revised offer',
-            lesson: 'Prepare call notes before lunch.',
-          }),
           plan_tomorrow: expect.objectContaining({
-            obstacle: 'I may hide in admin tasks.',
-            minimum_action_if_blocked: 'Make one call within 10 minutes no matter what.',
+            desired_direction: 'I am becoming consistent with direct sales outreach.',
+            actions: expect.any(Array),
           }),
+          published_plan_action_ids: ['plan-1', 'plan-2'],
         }),
       })
-    );
-  });
-
-  it('shows a fallback prompt when review evidence is missing', async () => {
-    getYesterdayCommitmentMock.mockResolvedValueOnce('');
-    getTodaySessionMock.mockResolvedValueOnce({
-      id: 'session-1',
-      date: '2026-09-23',
-      checkin_outcome: null,
-      tomorrow_commitment: null,
-      tomorrow_plan_details: null,
-      commitment_why: null,
-    });
-
-    await renderPage();
-
-    await waitForCondition(
-      () => view.container.textContent.includes('Complete Today’s Review first'),
-      'missing review prompt'
     );
   });
 });
