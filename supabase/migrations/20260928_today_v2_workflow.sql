@@ -20,11 +20,15 @@ create table if not exists public.today_v2_daily_reviews (
   local_date date not null,
   timezone_name text not null,
   desired_direction text,
+  completed_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint today_v2_daily_reviews_user_date_unique unique (user_id, local_date),
   constraint today_v2_daily_reviews_timezone_check check (char_length(trim(timezone_name)) > 0)
 );
+
+alter table if exists public.today_v2_daily_reviews
+  add column if not exists completed_at timestamptz;
 
 create table if not exists public.today_v2_plan_inputs (
   id uuid primary key default gen_random_uuid(),

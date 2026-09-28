@@ -8,6 +8,7 @@ import SettingsV2 from './pages/SettingsV2';
 import OnboardingV2 from './pages/OnboardingV2';
 import AdminV2 from './pages/AdminV2';
 import TodayV2Page from './v2/pages/TodayV2Page';
+import HomeV2Page from './v2/pages/HomeV2Page';
 import AdminFeedback from './pages/AdminFeedback';
 import AdminSessionLog from './pages/AdminSessionLog';
 import LiveDemo from './pages/admin/LiveDemo';
@@ -27,6 +28,7 @@ import { supabase } from './lib/supabase/client';
 import { usePageTracking } from './lib/usePageTracking';
 import { stopAnalytics } from './lib/analytics';
 import { ENABLE_TODAY_V2 } from './lib/featureFlags';
+import { getTodayV2RouteTarget } from './v2/services/todayReview';
 import {
   isAnonymousGuestUser,
 } from './lib/guestSession';
@@ -113,6 +115,43 @@ function LoadingScreen() {
       <p className="text-zinc-500 text-sm tracking-wide">Loading...</p>
     </div>
   );
+}
+
+function TodayV2DefaultRedirect() {
+  const { user } = /** @type {{ user: any, loading: boolean }} */ (useAuth());
+  const [target, setTarget] = React.useState(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+
+    if (!ENABLE_TODAY_V2) {
+      setTarget('/reflection');
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    async function resolveTarget() {
+      try {
+        const nextTarget = await getTodayV2RouteTarget(user.id);
+        if (!cancelled) setTarget(nextTarget);
+      } catch (routeError) {
+        console.error('[TodayV2DefaultRedirect] route resolution failed:', routeError);
+        if (!cancelled) setTarget('/today');
+      }
+    }
+
+    if (user?.id) {
+      resolveTarget();
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
+  if (!target) return <LoadingScreen />;
+  return <Navigate to={target} replace />;
 }
 
 // ── AuthGuardV2 ───────────────────────────────────────────────────────────
@@ -270,6 +309,14 @@ export default function App() {
         }
       />
       <Route
+        path="/home"
+        element={
+          <AuthGuardV2>
+            {ENABLE_TODAY_V2 ? <HomeV2Page /> : <Navigate to="/reflection" replace />}
+          </AuthGuardV2>
+        }
+      />
+      <Route
         path="/insights"
         element={
           <AuthGuardV2>
@@ -327,7 +374,14 @@ export default function App() {
         }
       />
       {/* Catch-all */}
-      <Route path="*" element={<Navigate to={ENABLE_TODAY_V2 ? '/today' : '/reflection'} replace />} />
+      <Route
+        path="*"
+        element={
+          <AuthGuardV2>
+            {ENABLE_TODAY_V2 ? <TodayV2DefaultRedirect /> : <Navigate to="/reflection" replace />}
+          </AuthGuardV2>
+        }
+      />
     </Routes>
   );
 }
