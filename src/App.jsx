@@ -26,6 +26,7 @@ import { useAuth } from './lib/AuthContext';
 import { supabase } from './lib/supabase/client';
 import { usePageTracking } from './lib/usePageTracking';
 import { stopAnalytics } from './lib/analytics';
+import { ENABLE_TODAY_V2 } from './lib/featureFlags';
 import {
   isAnonymousGuestUser,
 } from './lib/guestSession';
@@ -33,9 +34,6 @@ import { shouldShowTrialExpiredModal } from './lib/trialModal';
 import { isMissingProfileColumn } from './lib/supabase/profileSchema';
 
 const OnboardingScreen = /** @type {any} */ (OnboardingV2);
-const ENABLE_TODAY_V2 =
-  String(import.meta.env.VITE_ENABLE_TODAY_V2 ?? 'true').toLowerCase() !== 'false';
-
 const PROFILE_BASE_FIELDS = ['onboarding_completed', 'trial_ends_at', 'subscription_status', 'feedback_submitted', 'trial_extended', 'role'];
 const PROFILE_FIELDS_BASE = PROFILE_BASE_FIELDS.join(', ');
 const PROFILE_FIELDS_WITH_GUEST_FLAGS = [

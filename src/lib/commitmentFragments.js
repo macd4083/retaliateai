@@ -1,13 +1,6 @@
-export function splitCommitmentIntoTasks(text) {
-  if (!text || !String(text).trim()) return [];
+import { splitCommitmentIntoTasks } from '../shared/commitmentFragmentation';
 
-  const parts = String(text)
-    .split(/\.\s+(?=[A-Z])|;\s*|,\s*(?:and|or)\s+|\s+(?:and|or)\s+/i)
-    .map((s) => s.replace(/\.\s*$/, '').trim())
-    .filter(Boolean);
-
-  return parts.length > 0 ? parts : [String(text).trim()];
-}
+export { splitCommitmentIntoTasks };
 
 export function buildCommitmentFragments({ tomorrowCommitment, commitmentMinimum, commitmentStretch }) {
   const minimum = String(commitmentMinimum || '').trim();

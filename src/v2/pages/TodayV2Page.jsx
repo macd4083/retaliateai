@@ -1,53 +1,85 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import AppShellV2 from '../../components/v2/AppShellV2';
 import { useAuth } from '../../lib/AuthContext';
-import { splitCommitmentIntoTasks } from '../../lib/commitmentFragments';
+import { getTodayV2BooleanAnswer, getTodayV2CommitmentStateLabel } from '../today/model';
+import { useTodayV2State } from '../today/useTodayV2State';
 import {
-  WEEKDAY_LABELS,
-  addManualFollowThroughItem,
-  archiveHabit,
-  loadTodayReviewState,
-  replaceTomorrowActions,
-  seedDefaultHabits,
-  setFollowThroughCompletion,
-  updateDesiredDirection,
-  upsertHabitDefinition,
-  upsertHabitLog,
-  weekdayIndexToday,
-} from '../services/todayReview';
+  TODAY_V2_COMMITMENT_STATES,
+  TODAY_V2_RESPONSE_TYPES,
+  TODAY_V2_WEEKDAY_LABELS,
+} from '../today/types';
 
-const EMPTY_HABIT_FORM = {
-  id: null,
-  name: '',
-  habit_type: 'boolean',
-  unit: '',
-  weekdays: [0, 1, 2, 3, 4, 5, 6],
-};
+function SegmentedChoice({ value, options, onChange }) {
+  return (
+    <div className="inline-flex rounded-lg border border-zinc-700 overflow-hidden">
+      {options.map((option) => {
+        const active = option.value === value;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => onChange(active && option.allowToggleOff ? null : option.value)}
+            className={`px-3 py-1.5 text-xs transition-colors ${active ? 'bg-red-600 text-white' : 'bg-zinc-950 text-zinc-400 hover:text-white'}`}
+          >
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function NumericHabitResponseInput({ occurrence, onSave }) {
+  const [draftValue, setDraftValue] = React.useState(occurrence.numeric_response ?? '');
+
+  React.useEffect(() => {
+    setDraftValue(occurrence.numeric_response ?? '');
+  }, [occurrence.id, occurrence.numeric_response]);
+
+  const commit = () => {
+    onSave(draftValue === '' ? null : Number(draftValue));
+  };
+
+  return (
+    <input
+      type="number"
+      value={draftValue}
+      onChange={(event) => setDraftValue(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') {
+          event.currentTarget.blur();
+        }
+      }}
+      className="w-24 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm"
+    />
+  );
+}
 
 function HabitEditorModal({ value, onClose, onSave }) {
-  const [draft, setDraft] = useState(value || EMPTY_HABIT_FORM);
+  const [draft, setDraft] = useState(value);
 
   const toggleWeekday = (dayIndex) => {
-    setDraft((prev) => {
-      const hasDay = prev.weekdays.includes(dayIndex);
-      const nextWeekdays = hasDay
-        ? prev.weekdays.filter((d) => d !== dayIndex)
-        : [...prev.weekdays, dayIndex].sort((a, b) => a - b);
-      return { ...prev, weekdays: nextWeekdays };
+    setDraft((previous) => {
+      const hasDay = previous.schedule_weekdays.includes(dayIndex);
+      const scheduleWeekdays = hasDay
+        ? previous.schedule_weekdays.filter((value) => value !== dayIndex)
+        : [...previous.schedule_weekdays, dayIndex].sort((left, right) => left - right);
+      return { ...previous, schedule_weekdays: scheduleWeekdays };
     });
   };
 
   return (
-    <div className="fixed inset-0 bg-black/70 z-40 flex items-center justify-center p-4">
-      <div className="w-full max-w-md bg-zinc-900 border border-zinc-700 rounded-2xl p-4 space-y-4">
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-4">
+      <div className="w-full max-w-md space-y-4 rounded-2xl border border-zinc-700 bg-zinc-900 p-4">
         <div className="flex items-center justify-between">
-          <h3 className="font-semibold text-white">Edit Habit</h3>
+          <h3 className="font-semibold text-white">{draft.id ? 'Edit Habit' : 'Add Habit'}</h3>
           <button type="button" onClick={onClose} className="text-zinc-400 hover:text-white">✕</button>
         </div>
 
         <input
           value={draft.name}
-          onChange={(e) => setDraft((prev) => ({ ...prev, name: e.target.value }))}
+          onChange={(event) => setDraft((previous) => ({ ...previous, name: event.target.value }))}
           placeholder="Habit name"
           className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm"
         />
@@ -55,40 +87,40 @@ function HabitEditorModal({ value, onClose, onSave }) {
         <div className="grid grid-cols-2 gap-2">
           <button
             type="button"
-            onClick={() => setDraft((prev) => ({ ...prev, habit_type: 'boolean', unit: '' }))}
-            className={`rounded-lg border px-3 py-2 text-sm ${draft.habit_type === 'boolean' ? 'border-red-500 text-white' : 'border-zinc-700 text-zinc-400'}`}
+            onClick={() => setDraft((previous) => ({ ...previous, response_type: TODAY_V2_RESPONSE_TYPES.BOOLEAN, unit: '' }))}
+            className={`rounded-lg border px-3 py-2 text-sm ${draft.response_type === TODAY_V2_RESPONSE_TYPES.BOOLEAN ? 'border-red-500 bg-red-600/10 text-white' : 'border-zinc-700 text-zinc-400'}`}
           >
             Yes / No
           </button>
           <button
             type="button"
-            onClick={() => setDraft((prev) => ({ ...prev, habit_type: 'number' }))}
-            className={`rounded-lg border px-3 py-2 text-sm ${draft.habit_type === 'number' ? 'border-red-500 text-white' : 'border-zinc-700 text-zinc-400'}`}
+            onClick={() => setDraft((previous) => ({ ...previous, response_type: TODAY_V2_RESPONSE_TYPES.NUMBER }))}
+            className={`rounded-lg border px-3 py-2 text-sm ${draft.response_type === TODAY_V2_RESPONSE_TYPES.NUMBER ? 'border-red-500 bg-red-600/10 text-white' : 'border-zinc-700 text-zinc-400'}`}
           >
             Number
           </button>
         </div>
 
-        {draft.habit_type === 'number' && (
+        {draft.response_type === TODAY_V2_RESPONSE_TYPES.NUMBER && (
           <input
             value={draft.unit}
-            onChange={(e) => setDraft((prev) => ({ ...prev, unit: e.target.value }))}
+            onChange={(event) => setDraft((previous) => ({ ...previous, unit: event.target.value }))}
             placeholder="Unit (hours, minutes, etc.)"
             className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm"
           />
         )}
 
         <div>
-          <p className="text-xs text-zinc-400 mb-2">Weekdays</p>
+          <p className="mb-2 text-xs text-zinc-400">Weekdays</p>
           <div className="grid grid-cols-7 gap-1">
-            {WEEKDAY_LABELS.map((label, dayIndex) => {
-              const active = draft.weekdays.includes(dayIndex);
+            {TODAY_V2_WEEKDAY_LABELS.map((label, dayIndex) => {
+              const active = draft.schedule_weekdays.includes(dayIndex);
               return (
                 <button
                   key={label}
                   type="button"
                   onClick={() => toggleWeekday(dayIndex)}
-                  className={`rounded-md border px-1 py-2 text-xs ${active ? 'border-red-500 text-white bg-red-600/20' : 'border-zinc-700 text-zinc-400'}`}
+                  className={`rounded-md border px-1 py-2 text-xs ${active ? 'border-red-500 bg-red-600/20 text-white' : 'border-zinc-700 text-zinc-400'}`}
                 >
                   {label}
                 </button>
@@ -100,7 +132,7 @@ function HabitEditorModal({ value, onClose, onSave }) {
         <button
           type="button"
           onClick={() => onSave(draft)}
-          disabled={!draft.name.trim() || draft.weekdays.length === 0}
+          disabled={!draft.name.trim() || draft.schedule_weekdays.length === 0}
           className="w-full rounded-lg bg-red-600 py-2 text-sm font-semibold disabled:opacity-50"
         >
           Save Habit
@@ -112,139 +144,59 @@ function HabitEditorModal({ value, onClose, onSave }) {
 
 export default function TodayV2Page() {
   const { user } = useAuth();
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [state, setState] = useState(null);
   const [manualActionInput, setManualActionInput] = useState('');
-  const [desiredDirection, setDesiredDirection] = useState('');
-  const [tomorrowInput, setTomorrowInput] = useState('');
-  const [tomorrowActions, setTomorrowActions] = useState([]);
   const [habitEditorValue, setHabitEditorValue] = useState(null);
   const [menuOpenHabitId, setMenuOpenHabitId] = useState(null);
-
-  const todayWeekday = weekdayIndexToday();
-
-  const visibleHabits = useMemo(() => {
-    const habits = state?.habits || [];
-    return habits.filter((habit) => Array.isArray(habit.weekdays) && habit.weekdays.includes(todayWeekday));
-  }, [state?.habits, todayWeekday]);
-
-  const habitValueMap = useMemo(() => {
-    const map = new Map();
-    for (const log of state?.habitLogs || []) {
-      map.set(log.habit_id, log);
-    }
-    return map;
-  }, [state?.habitLogs]);
-
-  const load = React.useCallback(async () => {
-    if (!user?.id) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-
-    try {
-      const seedResult = await seedDefaultHabits(user.id);
-      if (seedResult.error) {
-        console.warn('[TodayV2] seed_default_habits_for_user failed; rendering without seeded defaults', seedResult.error);
-      }
-      const next = await loadTodayReviewState(user.id);
-      setState(next);
-      setDesiredDirection(next.review?.desired_direction || '');
-      const loadedActions = next.tomorrowPlannedActions.map((a) => a.action_text);
-      setTomorrowActions(loadedActions);
-      setTomorrowInput(loadedActions.join('\n'));
-    } catch (loadError) {
-      console.error('[TodayV2] load failed:', loadError);
-      setError(loadError);
-    } finally {
-      setLoading(false);
-    }
-  }, [user?.id]);
-
-  React.useEffect(() => {
-    load();
-  }, [load]);
-
-  const onToggleFollowThrough = async (itemId, completed) => {
-    await setFollowThroughCompletion(itemId, completed);
-    setState((prev) => ({
-      ...prev,
-      followThroughItems: prev.followThroughItems.map((item) => (item.id === itemId ? { ...item, completed } : item)),
-    }));
-  };
+  const {
+    loading,
+    error,
+    state,
+    seedDiagnostic,
+    desiredDirection,
+    setDesiredDirection,
+    tomorrowInput,
+    setTomorrowInput,
+    tomorrowActions,
+    setTomorrowActions,
+    visibleHabits,
+    habitDefinitionsById,
+    load,
+    splitTomorrowActions,
+    saveTomorrowPlan,
+    saveCommitmentCompletion,
+    saveDesiredDirection,
+    saveHabitDefinition,
+    archiveHabitDefinition,
+    saveHabitResponse,
+    addManualFollowThrough,
+    createEmptyHabitDefinition,
+  } = useTodayV2State(user?.id);
 
   const onAddManualAction = async () => {
-    if (!manualActionInput.trim() || !state) return;
-    const created = await addManualFollowThroughItem(
-      user.id,
-      state.today,
-      manualActionInput.trim(),
-      state.followThroughItems.length
-    );
-    setState((prev) => ({ ...prev, followThroughItems: [...prev.followThroughItems, created] }));
+    if (!manualActionInput.trim()) return;
+    await addManualFollowThrough(manualActionInput.trim());
     setManualActionInput('');
   };
 
   const onSaveHabit = async (habitDraft) => {
     try {
-      const habitId = await upsertHabitDefinition(user.id, habitDraft);
+      await saveHabitDefinition(habitDraft);
       setHabitEditorValue(null);
       setMenuOpenHabitId(null);
-      await load();
-      return habitId;
     } catch (saveError) {
       window.alert(saveError?.message || 'Could not save habit.');
-      return null;
     }
   };
 
   const onDeleteHabit = async (habitId) => {
-    await archiveHabit(habitId);
+    await archiveHabitDefinition(habitId);
     setMenuOpenHabitId(null);
-    await load();
-  };
-
-  const onHabitValueChange = async (habit, value) => {
-    if (!state) return;
-    await upsertHabitLog(user.id, state.today, habit.id, habit.habit_type, value);
-    setState((prev) => {
-      const others = prev.habitLogs.filter((log) => log.habit_id !== habit.id);
-      return {
-        ...prev,
-        habitLogs: [
-          ...others,
-          {
-            habit_id: habit.id,
-            boolean_value: habit.habit_type === 'boolean' ? Boolean(value) : null,
-            number_value: habit.habit_type === 'number' && Number.isFinite(value) ? value : null,
-          },
-        ],
-      };
-    });
-  };
-
-  const onSaveDesiredDirection = async () => {
-    if (!state?.review?.id) return;
-    await updateDesiredDirection(state.review.id, desiredDirection.trim());
-  };
-
-  const onSplitTomorrowActions = () => {
-    setTomorrowActions(splitCommitmentIntoTasks(tomorrowInput));
-  };
-
-  const onSaveTomorrowActions = async () => {
-    if (!state) return;
-    await replaceTomorrowActions(state.tomorrow, tomorrowActions);
-    await load();
   };
 
   if (loading) {
     return (
       <AppShellV2 title="Today">
-        <div className="h-full flex items-center justify-center text-zinc-400">Loading Today…</div>
+        <div className="flex h-full items-center justify-center text-zinc-400">Loading Today…</div>
       </AppShellV2>
     );
   }
@@ -252,10 +204,10 @@ export default function TodayV2Page() {
   if (error) {
     return (
       <AppShellV2 title="Today">
-        <div className="h-full flex items-center justify-center p-4">
-          <div className="max-w-md w-full rounded-2xl border border-zinc-800 bg-zinc-900 p-5 text-center space-y-3">
-            <h2 className="text-white font-semibold">Couldn’t load Today</h2>
-            <p className="text-zinc-400 text-sm">Could not load today&apos;s review. Please try again.</p>
+        <div className="flex h-full items-center justify-center p-4">
+          <div className="w-full max-w-md space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-5 text-center">
+            <h2 className="font-semibold text-white">Couldn’t load Today</h2>
+            <p className="text-sm text-zinc-400">Could not load today&apos;s review. Please try again.</p>
             <button
               type="button"
               onClick={load}
@@ -272,96 +224,129 @@ export default function TodayV2Page() {
   if (!state) {
     return (
       <AppShellV2 title="Today">
-        <div className="h-full flex items-center justify-center text-zinc-400">Preparing Today…</div>
+        <div className="flex h-full items-center justify-center text-zinc-400">Preparing Today…</div>
       </AppShellV2>
     );
   }
 
   return (
     <AppShellV2 title="Today">
-      <div className="h-full overflow-y-auto p-4 space-y-4">
-        <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4 space-y-3">
+      <div className="h-full space-y-4 overflow-y-auto p-4">
+        {seedDiagnostic && (
+          <section className="rounded-2xl border border-amber-700/60 bg-amber-950/30 p-4 text-sm text-amber-100">
+            <p className="font-medium">Default habits weren’t initialized automatically.</p>
+            <p className="mt-1 text-amber-200/80">{seedDiagnostic.message}</p>
+          </section>
+        )}
+
+        <section className="space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
           <h2 className="font-semibold">1. Follow-Through</h2>
           {state.followThroughItems.length > 0 ? (
             <div className="space-y-2">
               {state.followThroughItems.map((item) => (
-                <label key={item.id} className="flex items-center gap-3 rounded-xl border border-zinc-800 p-3">
-                  <input
-                    type="checkbox"
-                    checked={item.completed}
-                    onChange={(e) => onToggleFollowThrough(item.id, e.target.checked)}
-                  />
-                  <span className={item.completed ? 'line-through text-zinc-500' : 'text-zinc-200'}>{item.action_text}</span>
-                  <span className="text-xs text-zinc-500 ml-auto">{item.completed ? 'Completed' : 'Not completed'}</span>
-                </label>
+                <div key={item.id} className="rounded-xl border border-zinc-800 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="text-sm text-zinc-200">{item.normalized_fragment_text || item.fragment_text}</p>
+                    <span className="text-xs text-zinc-500">{getTodayV2CommitmentStateLabel(item.completion_state)}</span>
+                  </div>
+                  <div className="mt-3 flex items-center gap-2">
+                    <SegmentedChoice
+                      value={item.completion_state}
+                      onChange={(nextValue) => saveCommitmentCompletion(item.id, nextValue || TODAY_V2_COMMITMENT_STATES.UNANSWERED)}
+                      options={[
+                        { value: TODAY_V2_COMMITMENT_STATES.KEPT, label: 'Kept', allowToggleOff: true },
+                        { value: TODAY_V2_COMMITMENT_STATES.NOT_KEPT, label: 'Not kept', allowToggleOff: true },
+                      ]}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => saveCommitmentCompletion(item.id, TODAY_V2_COMMITMENT_STATES.UNANSWERED)}
+                      className="text-xs text-zinc-500 hover:text-white"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
               ))}
             </div>
           ) : <p className="text-sm text-zinc-400">What were today&apos;s highest-ROI actions?</p>}
           <div className="flex gap-2">
             <input
               value={manualActionInput}
-              onChange={(e) => setManualActionInput(e.target.value)}
+              onChange={(event) => setManualActionInput(event.target.value)}
               placeholder="Add action"
               className="flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm"
             />
-            <button type="button" onClick={onAddManualAction} className="rounded-lg bg-zinc-100 text-zinc-900 px-3 py-2 text-sm">
+            <button type="button" onClick={onAddManualAction} className="rounded-lg bg-zinc-100 px-3 py-2 text-sm text-zinc-900">
               Add
             </button>
           </div>
         </section>
 
-        <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4 space-y-3 relative">
+        <section className="relative space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
           <button
             type="button"
-            onClick={() => setHabitEditorValue(EMPTY_HABIT_FORM)}
-            className="absolute right-4 top-4 h-7 w-7 rounded-full bg-red-600 text-white border border-red-400 flex items-center justify-center"
+            onClick={() => setHabitEditorValue(createEmptyHabitDefinition())}
+            className="absolute right-4 top-4 flex h-7 w-7 items-center justify-center rounded-full border border-red-400 bg-red-600 text-white"
             aria-label="Add habit"
           >
             +
           </button>
           <h2 className="font-semibold">2. Habits</h2>
           <div className="space-y-2">
-            {visibleHabits.map((habit) => {
-              const log = habitValueMap.get(habit.id);
+            {visibleHabits.map((occurrence) => {
+              const habitDefinition = habitDefinitionsById.get(occurrence.habit_definition_id) || occurrence;
+              const booleanAnswer = getTodayV2BooleanAnswer(occurrence.boolean_response, occurrence.answered_at);
               return (
-                <div key={habit.id} className="rounded-xl border border-zinc-800 p-3">
+                <div key={occurrence.id} className="rounded-xl border border-zinc-800 p-3">
                   <div className="flex items-start justify-between gap-3">
-                    <p className="text-sm text-zinc-200">{habit.name}</p>
+                    <div>
+                      <p className="text-sm text-zinc-200">{occurrence.snapshot_name}</p>
+                      <p className="mt-1 text-xs text-zinc-500">
+                        {occurrence.snapshot_response_type === TODAY_V2_RESPONSE_TYPES.NUMBER
+                          ? occurrence.snapshot_unit || 'units'
+                          : 'Answer yes or no'}
+                      </p>
+                    </div>
                     <div className="relative">
                       <button
                         type="button"
-                        onClick={() => setMenuOpenHabitId((prev) => (prev === habit.id ? null : habit.id))}
+                        onClick={() => setMenuOpenHabitId((current) => current === habitDefinition.id ? null : habitDefinition.id)}
                         className="text-zinc-400 hover:text-white"
                       >
                         ⋯
                       </button>
-                      {menuOpenHabitId === habit.id && (
-                        <div className="absolute right-0 mt-1 w-24 rounded-lg border border-zinc-700 bg-zinc-950 p-1 z-10">
-                          <button type="button" onClick={() => setHabitEditorValue(habit)} className="w-full text-left px-2 py-1 text-xs hover:bg-zinc-800 rounded">Edit</button>
-                          <button type="button" onClick={() => onDeleteHabit(habit.id)} className="w-full text-left px-2 py-1 text-xs text-red-400 hover:bg-zinc-800 rounded">Delete</button>
+                      {menuOpenHabitId === habitDefinition.id && (
+                        <div className="absolute right-0 z-10 mt-1 w-24 rounded-lg border border-zinc-700 bg-zinc-950 p-1">
+                          <button type="button" onClick={() => setHabitEditorValue(habitDefinition)} className="w-full rounded px-2 py-1 text-left text-xs hover:bg-zinc-800">Edit</button>
+                          <button type="button" onClick={() => onDeleteHabit(habitDefinition.id)} className="w-full rounded px-2 py-1 text-left text-xs text-red-400 hover:bg-zinc-800">Archive</button>
                         </div>
                       )}
                     </div>
                   </div>
 
-                  {habit.habit_type === 'boolean' ? (
-                    <label className="mt-2 inline-flex items-center gap-2 text-sm text-zinc-300">
-                      <input
-                        type="checkbox"
-                        checked={Boolean(log?.boolean_value)}
-                        onChange={(e) => onHabitValueChange(habit, e.target.checked)}
+                  {occurrence.snapshot_response_type === TODAY_V2_RESPONSE_TYPES.BOOLEAN ? (
+                    <div className="mt-3 flex items-center gap-2">
+                      <SegmentedChoice
+                        value={booleanAnswer}
+                        onChange={(nextValue) => saveHabitResponse(occurrence, nextValue === null ? null : nextValue === 'yes')}
+                        options={[
+                          { value: 'yes', label: 'Yes', allowToggleOff: true },
+                          { value: 'no', label: 'No', allowToggleOff: true },
+                        ]}
                       />
-                      Yes
-                    </label>
+                      <button
+                        type="button"
+                        onClick={() => saveHabitResponse(occurrence, null)}
+                        className="text-xs text-zinc-500 hover:text-white"
+                      >
+                        Clear
+                      </button>
+                    </div>
                   ) : (
                     <div className="mt-2 flex items-center gap-2">
-                      <input
-                        type="number"
-                        value={log?.number_value ?? ''}
-                        onChange={(e) => onHabitValueChange(habit, e.target.value === '' ? null : Number(e.target.value))}
-                        className="w-24 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm"
-                      />
-                      <span className="text-xs text-zinc-500">{habit.unit || 'units'}</span>
+                      <NumericHabitResponseInput occurrence={occurrence} onSave={(value) => saveHabitResponse(occurrence, value)} />
+                      <span className="text-xs text-zinc-500">{occurrence.snapshot_unit || 'units'}</span>
                     </div>
                   )}
                 </div>
@@ -371,42 +356,42 @@ export default function TodayV2Page() {
           </div>
         </section>
 
-        <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4 space-y-3">
+        <section className="space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
           <h2 className="font-semibold">3. Desired Direction</h2>
           <p className="text-xs text-zinc-500">Who am I actively becoming?</p>
           <textarea
             value={desiredDirection}
-            onChange={(e) => setDesiredDirection(e.target.value)}
-            className="w-full min-h-24 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm"
+            onChange={(event) => setDesiredDirection(event.target.value)}
+            className="min-h-24 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm"
           />
-          <button type="button" onClick={onSaveDesiredDirection} className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold">Save direction</button>
+          <button type="button" onClick={saveDesiredDirection} className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold">Save direction</button>
         </section>
 
-        <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4 space-y-3">
+        <section className="space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
           <h2 className="font-semibold">4. Highest-ROI Actions</h2>
           <p className="text-xs text-zinc-500">What measured task can I commit to tomorrow that will improve me the most?</p>
           <textarea
             value={tomorrowInput}
-            onChange={(e) => setTomorrowInput(e.target.value)}
-            className="w-full min-h-24 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm"
+            onChange={(event) => setTomorrowInput(event.target.value)}
+            className="min-h-24 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm"
           />
-          <button type="button" onClick={onSplitTomorrowActions} className="rounded-lg border border-zinc-700 px-3 py-2 text-sm">Split into actions</button>
+          <button type="button" onClick={splitTomorrowActions} className="rounded-lg border border-zinc-700 px-3 py-2 text-sm">Split into actions</button>
           {tomorrowActions.length > 0 && (
             <ul className="space-y-2">
-              {tomorrowActions.map((action, i) => (
-                <li key={`${action}-${i}`} className="rounded-lg border border-zinc-800 p-2 text-sm flex items-center gap-2">
+              {tomorrowActions.map((action, index) => (
+                <li key={`${action}-${index}`} className="flex items-center gap-2 rounded-lg border border-zinc-800 p-2 text-sm">
                   <input
                     value={action}
-                    onChange={(e) => {
+                    onChange={(event) => {
                       const next = [...tomorrowActions];
-                      next[i] = e.target.value;
+                      next[index] = event.target.value;
                       setTomorrowActions(next);
                     }}
                     className="flex-1 bg-transparent outline-none"
                   />
                   <button
                     type="button"
-                    onClick={() => setTomorrowActions((prev) => prev.filter((_, idx) => idx !== i))}
+                    onClick={() => setTomorrowActions((previous) => previous.filter((_, candidateIndex) => candidateIndex !== index))}
                     className="text-xs text-red-400"
                   >
                     Remove
@@ -415,7 +400,7 @@ export default function TodayV2Page() {
               ))}
             </ul>
           )}
-          <button type="button" onClick={onSaveTomorrowActions} className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold">Save tomorrow&apos;s actions</button>
+          <button type="button" onClick={saveTomorrowPlan} className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold">Save tomorrow&apos;s actions</button>
         </section>
       </div>
 

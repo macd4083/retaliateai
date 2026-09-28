@@ -4,13 +4,11 @@ import { Settings, Moon, BarChart2, X, Database, Download, Share, MessageSquare,
 import { useAuth } from '../../lib/AuthContext';
 import { supabase } from '../../lib/supabase/client';
 import { isAnonymousGuestUser } from '../../lib/guestSession';
+import { ENABLE_TODAY_V2 } from '../../lib/featureFlags';
 import { usePWAInstall } from '../../hooks/usePWAInstall';
 import PWAInstallBanner from '../pwa/PWAInstallBanner';
 
-const PRIMARY_REFLECTION_PATH =
-  String(import.meta.env.VITE_ENABLE_TODAY_V2 ?? 'true').toLowerCase() !== 'false'
-    ? '/today'
-    : '/reflection';
+const PRIMARY_REFLECTION_PATH = ENABLE_TODAY_V2 ? '/today' : '/reflection';
 
 const NAV_LINKS = [
   { label: 'Reflection', path: PRIMARY_REFLECTION_PATH, icon: Moon },

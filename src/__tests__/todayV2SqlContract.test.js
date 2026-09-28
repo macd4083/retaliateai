@@ -1,0 +1,49 @@
+import fs from 'node:fs';
+
+import { describe, expect, it } from 'vitest';
+
+const migrationPath = '/home/runner/work/retaliateai/retaliateai/supabase/migrations/20260928_today_v2_workflow.sql';
+const consolidatedSqlPath = '/home/runner/work/retaliateai/retaliateai/supabase/sql/today_v2_isolated_workflow.sql';
+const todayV2ServicePath = '/home/runner/work/retaliateai/retaliateai/src/v2/services/todayReview.js';
+
+describe('TodayV2 SQL contract', () => {
+  it('keeps the migration and SQL editor copy in sync', () => {
+    expect(fs.readFileSync(consolidatedSqlPath, 'utf8')).toBe(fs.readFileSync(migrationPath, 'utf8'));
+  });
+
+  it('defines isolated today_v2 tables, RPCs, uniqueness, and RLS', () => {
+    const sql = fs.readFileSync(migrationPath, 'utf8');
+
+    expect(sql).toContain('create table if not exists public.today_v2_daily_reviews');
+    expect(sql).toContain('create table if not exists public.today_v2_plan_inputs');
+    expect(sql).toContain('create table if not exists public.today_v2_commitment_fragments');
+    expect(sql).toContain('create table if not exists public.today_v2_habit_definitions');
+    expect(sql).toContain('create table if not exists public.today_v2_habit_occurrences');
+    expect(sql).toContain('today_v2_seed_default_habits_for_user');
+    expect(sql).toContain('today_v2_replace_plan_for_date');
+    expect(sql).toContain('today_v2_ensure_habit_occurrences_for_date');
+    expect(sql).toContain('today_v2_commitment_fragments_user_target_order_unique');
+    expect(sql).toContain('today_v2_habit_occurrences_user_habit_date_unique');
+    expect(sql).toContain('alter table public.today_v2_daily_reviews enable row level security;');
+    expect(sql).toContain('grant select, insert, update on public.today_v2_commitment_fragments to authenticated;');
+    expect(sql).toContain("notify pgrst, 'reload schema';");
+  });
+
+  it('does not reference superseded generic V2 or legacy persistence objects', () => {
+    const sql = fs.readFileSync(migrationPath, 'utf8');
+    const serviceSource = fs.readFileSync(todayV2ServicePath, 'utf8');
+
+    expect(sql).not.toContain('public.seed_default_habits_for_user');
+    expect(sql).not.toContain('replace_v2_planned_actions');
+    expect(sql).not.toContain('public.v2_daily_reviews');
+    expect(sql).not.toContain('public.v2_planned_actions');
+    expect(sql).not.toContain('public.v2_follow_through_items');
+    expect(serviceSource).not.toContain('reflection_sessions');
+    expect(serviceSource).not.toContain('reflection_messages');
+    expect(serviceSource).not.toContain('follow_up_queue');
+    expect(serviceSource).not.toContain('growth_markers');
+    expect(serviceSource).not.toContain('goal_commitment_log');
+    expect(serviceSource).not.toContain('seed_default_habits_for_user');
+    expect(serviceSource).not.toContain('replace_v2_planned_actions');
+  });
+});
