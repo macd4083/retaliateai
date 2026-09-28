@@ -48,6 +48,7 @@ export default function HomeV2Page() {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState(null);
   const [homeState, setHomeState] = React.useState(null);
+  const [commitmentSaveError, setCommitmentSaveError] = React.useState(null);
 
   const load = React.useCallback(async () => {
     if (!user?.id) {
@@ -75,11 +76,15 @@ export default function HomeV2Page() {
 
   const onSaveCommitmentCompletion = async (fragmentId, completionState) => {
     const nextState = completionState || TODAY_V2_COMMITMENT_STATES.UNANSWERED;
-    const savedRow = await setFollowThroughCompletion(fragmentId, nextState);
-    setHomeState((previous) => previous ? {
-      ...previous,
-      followThroughItems: previous.followThroughItems.map((item) => item.id === fragmentId ? { ...item, ...savedRow } : item),
-    } : previous);
+    setCommitmentSaveError(null);
+
+    try {
+      await setFollowThroughCompletion(fragmentId, nextState);
+      await load();
+    } catch (saveError) {
+      console.error('[HomeV2] commitment save failed:', saveError);
+      setCommitmentSaveError('Could not update that checklist item. Please try again.');
+    }
   };
 
   if (loading) {
@@ -148,6 +153,7 @@ export default function HomeV2Page() {
               </button>
             )}
           </div>
+          {commitmentSaveError && <p className="mt-3 text-xs text-amber-300">{commitmentSaveError}</p>}
           {homeState.followThroughItems.length > 0 ? (
             <div className="mt-3 space-y-2">
               {homeState.followThroughItems.map((item) => (

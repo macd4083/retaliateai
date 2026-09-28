@@ -324,11 +324,12 @@ export function useTodayV2State(userId) {
   }, [load, tomorrowPlanDirty, userId]);
 
   const flushAll = React.useCallback(async () => {
-    try {
-      await Promise.allSettled([flushDesiredDirection(), flushTomorrowPlan()]);
-    } catch {
-      // Individual save state already surfaced.
+    const results = await Promise.allSettled([flushDesiredDirection(), flushTomorrowPlan()]);
+    const rejected = results.find((result) => result.status === 'rejected');
+    if (rejected?.status === 'rejected') {
+      throw rejected.reason;
     }
+    return results;
   }, [flushDesiredDirection, flushTomorrowPlan]);
 
   const checkForDayRollover = React.useCallback(async () => {
