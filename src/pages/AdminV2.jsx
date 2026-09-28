@@ -17,6 +17,7 @@ import {
   LIVE_DEMO_SCRIPT_KEY,
   normalizeLiveDemoData,
 } from '../lib/liveDemo';
+import { buildCommitmentFragments } from '../lib/commitmentFragments';
 
 const ADMIN_SECRET = import.meta.env.VITE_ADMIN_SECRET;
 const GUEST_GUARDRAILS_DESCRIPTION =
@@ -42,54 +43,6 @@ async function adminFetch(body) {
     },
     body: JSON.stringify({ ...body, admin_secret: ADMIN_SECRET }),
   });
-}
-
-function parseTasksFromText(text) {
-  if (!text || !text.trim()) return [];
-  // Split on:
-  //   - ". " followed by uppercase (sentence boundary)
-  //   - "; "
-  //   - ", and " / ", or "
-  //   - " and " / " or " as clause separators (but not inside short phrases)
-  const parts = text
-    .split(/\.\s+(?=[A-Z])|;\s*|,\s*(?:and|or)\s+|\s+(?:and|or)\s+/i)
-    .map((s) => s.replace(/\.\s*$/, '').trim())
-    .filter(Boolean);
-  return parts.length > 0 ? parts : [text.trim()];
-}
-
-function buildCommitmentFragments({ tomorrowCommitment, commitmentMinimum, commitmentStretch }) {
-  const minimum = String(commitmentMinimum || '').trim();
-  const stretch = String(commitmentStretch || '').trim();
-  const commitment = String(tomorrowCommitment || '').trim();
-
-  // Parse each field independently into individual task fragments
-  const minimumTasks = parseTasksFromText(minimum);
-  const stretchTasks = parseTasksFromText(stretch);
-
-  const allTasks = [...minimumTasks, ...stretchTasks];
-
-  if (allTasks.length === 0 && commitment) {
-    const fallbackTasks = parseTasksFromText(commitment);
-    return fallbackTasks.map((task, i) => ({
-      commitment_text: task,
-      fragment_index: i,
-      commitment_type: null,
-    }));
-  }
-
-  return [
-    ...minimumTasks.map((task, i) => ({
-      commitment_text: task,
-      fragment_index: i,
-      commitment_type: 'minimum',
-    })),
-    ...stretchTasks.map((task, i) => ({
-      commitment_text: task,
-      fragment_index: minimumTasks.length + i,
-      commitment_type: 'stretch',
-    })),
-  ];
 }
 
 const DATA_TABS = [

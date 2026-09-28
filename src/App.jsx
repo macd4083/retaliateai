@@ -1,12 +1,13 @@
 import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 
-// ── V2 pages (new) ─────────────────────────────────────────────────────────
-import ReflectionV2 from './pages/ReflectionV2';
+// ── Legacy + V2 pages ───────────────────────────────────────────────────────
+import ReflectionLegacyPage from './pages/ReflectionV2';
 import InsightsV2 from './pages/InsightsV2';
 import SettingsV2 from './pages/SettingsV2';
 import OnboardingV2 from './pages/OnboardingV2';
 import AdminV2 from './pages/AdminV2';
+import TodayV2Page from './v2/pages/TodayV2Page';
 import AdminFeedback from './pages/AdminFeedback';
 import AdminSessionLog from './pages/AdminSessionLog';
 import LiveDemo from './pages/admin/LiveDemo';
@@ -32,6 +33,8 @@ import { shouldShowTrialExpiredModal } from './lib/trialModal';
 import { isMissingProfileColumn } from './lib/supabase/profileSchema';
 
 const OnboardingScreen = /** @type {any} */ (OnboardingV2);
+const ENABLE_TODAY_V2 =
+  String(import.meta.env.VITE_ENABLE_TODAY_V2 ?? 'true').toLowerCase() !== 'false';
 
 const PROFILE_BASE_FIELDS = ['onboarding_completed', 'trial_ends_at', 'subscription_status', 'feedback_submitted', 'trial_extended', 'role'];
 const PROFILE_FIELDS_BASE = PROFILE_BASE_FIELDS.join(', ');
@@ -241,12 +244,22 @@ export default function App() {
       {/* Post-session conversion page — public (guest arrives here after first session) */}
       <Route path="/post-session/next-steps" element={<PostSessionNextSteps />} />
 
-      {/* V2 protected routes */}
+      {/* Legacy route (kept unchanged for fallback) */}
+      <Route
+        path="/legacy/reflection"
+        element={
+          <AuthGuardV2>
+            <ReflectionLegacyPage />
+          </AuthGuardV2>
+        }
+      />
+
+      {/* Protected routes */}
       <Route
         path="/reflection"
         element={
           <AuthGuardV2>
-            <ReflectionV2 />
+            {ENABLE_TODAY_V2 ? <TodayV2Page /> : <ReflectionLegacyPage />}
           </AuthGuardV2>
         }
       />
