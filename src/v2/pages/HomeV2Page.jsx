@@ -75,6 +75,8 @@ export default function HomeV2Page() {
     load();
   }, [load]);
 
+  const actionsLocked = Boolean(homeState?.review?.completed_at);
+
   const onSaveCommitmentCompletion = async (fragmentId, completionState) => {
     const nextState = completionState || TODAY_V2_COMMITMENT_STATES.UNANSWERED;
     setCommitmentSaveError(null);
@@ -120,7 +122,6 @@ export default function HomeV2Page() {
   }
 
   const contractItems = homeState.review?.completed_at ? homeState.tomorrowFragments : [];
-  const actionsLocked = Boolean(homeState.review?.completed_at);
 
   return (
     <AppShellV2 title="Proof">
