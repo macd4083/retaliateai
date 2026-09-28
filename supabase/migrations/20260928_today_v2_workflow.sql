@@ -131,6 +131,9 @@ create unique index if not exists idx_today_v2_habit_definitions_user_active_nam
   on public.today_v2_habit_definitions(user_id, lower(name))
   where is_archived = false;
 
+create unique index if not exists idx_today_v2_habit_definitions_user_id
+  on public.today_v2_habit_definitions(user_id, id);
+
 create index if not exists idx_today_v2_daily_reviews_user_date
   on public.today_v2_daily_reviews(user_id, local_date desc);
 
@@ -148,6 +151,22 @@ create index if not exists idx_today_v2_habit_occurrences_user_date
 
 create index if not exists idx_today_v2_habit_occurrences_habit_date
   on public.today_v2_habit_occurrences(user_id, habit_definition_id, local_date desc);
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'today_v2_habit_occurrences_owner_fk'
+      and conrelid = 'public.today_v2_habit_occurrences'::regclass
+  ) then
+    alter table public.today_v2_habit_occurrences
+      add constraint today_v2_habit_occurrences_owner_fk
+      foreign key (user_id, habit_definition_id)
+      references public.today_v2_habit_definitions(user_id, id)
+      on delete restrict;
+  end if;
+end $$;
 
 drop trigger if exists today_v2_daily_reviews_set_updated_at on public.today_v2_daily_reviews;
 create trigger today_v2_daily_reviews_set_updated_at

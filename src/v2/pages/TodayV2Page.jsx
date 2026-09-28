@@ -29,6 +29,33 @@ function SegmentedChoice({ value, options, onChange }) {
   );
 }
 
+function NumericHabitResponseInput({ occurrence, onSave }) {
+  const [draftValue, setDraftValue] = React.useState(occurrence.numeric_response ?? '');
+
+  React.useEffect(() => {
+    setDraftValue(occurrence.numeric_response ?? '');
+  }, [occurrence.id, occurrence.numeric_response]);
+
+  const commit = () => {
+    onSave(draftValue === '' ? null : Number(draftValue));
+  };
+
+  return (
+    <input
+      type="number"
+      value={draftValue}
+      onChange={(event) => setDraftValue(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') {
+          event.currentTarget.blur();
+        }
+      }}
+      className="w-24 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm"
+    />
+  );
+}
+
 function HabitEditorModal({ value, onClose, onSave }) {
   const [draft, setDraft] = useState(value);
 
@@ -318,15 +345,7 @@ export default function TodayV2Page() {
                     </div>
                   ) : (
                     <div className="mt-2 flex items-center gap-2">
-                      <input
-                        type="number"
-                        value={occurrence.numeric_response ?? ''}
-                        onChange={(event) => saveHabitResponse(
-                          occurrence,
-                          event.target.value === '' ? null : Number(event.target.value)
-                        )}
-                        className="w-24 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm"
-                      />
+                      <NumericHabitResponseInput occurrence={occurrence} onSave={(value) => saveHabitResponse(occurrence, value)} />
                       <span className="text-xs text-zinc-500">{occurrence.snapshot_unit || 'units'}</span>
                     </div>
                   )}

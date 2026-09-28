@@ -246,12 +246,13 @@ export async function updateDesiredDirection(reviewId, desiredDirection) {
 }
 
 export async function replaceTomorrowActions({ targetLocalDate, sourceLocalDate, timezoneName, rawPlanText, actionTexts }) {
-  const fragments = coerceTodayV2EditableFragments(rawPlanText, actionTexts);
+  const normalizedRawText = String(rawPlanText || '').trim();
+  const fragments = normalizedRawText ? coerceTodayV2EditableFragments(normalizedRawText, actionTexts) : [];
   const { error } = await supabase.rpc(TODAY_V2_RPCS.REPLACE_PLAN, {
     p_target_local_date: targetLocalDate,
     p_source_local_date: sourceLocalDate,
     p_timezone_name: timezoneName,
-    p_raw_plan_text: String(rawPlanText || ''),
+    p_raw_plan_text: normalizedRawText,
     p_fragment_texts: fragments,
   });
 
