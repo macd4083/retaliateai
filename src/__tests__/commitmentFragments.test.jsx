@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { buildCommitmentFragments, splitCommitmentIntoTasks } from '../lib/commitmentFragments';
+import { splitCommitmentIntoTasks as splitSharedCommitmentIntoTasks } from '../shared/commitmentFragmentation';
 
 describe('commitmentFragments', () => {
   it('splits a sentence into multiple measured tasks', () => {
@@ -36,5 +37,11 @@ describe('commitmentFragments', () => {
       { commitment_text: 'Walk 30 minutes', fragment_index: 0, commitment_type: null },
       { commitment_text: 'prep lunch', fragment_index: 1, commitment_type: null },
     ]);
+  });
+
+  it('keeps the neutral shared splitter aligned with the legacy wrapper', () => {
+    const paragraph = 'Write 20 minutes, and review notes; then send summary.';
+
+    expect(splitSharedCommitmentIntoTasks(paragraph)).toEqual(splitCommitmentIntoTasks(paragraph));
   });
 });
