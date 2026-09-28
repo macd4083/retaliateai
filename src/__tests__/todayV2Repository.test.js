@@ -15,6 +15,7 @@ import {
   buildEmptyHabitDefinition,
   loadTodayReviewState,
   replaceTomorrowActions,
+  setFollowThroughCompletion,
   seedDefaultHabits,
 } from '../v2/services/todayReview';
 import {
@@ -208,6 +209,28 @@ describe('TodayV2 repository', () => {
       unit: '',
       schedule_weekdays: [0, 1, 2, 3, 4, 5, 6],
       display_order: 2,
+    });
+  });
+
+  it('persists completion state updates with the matching answered_at behavior', async () => {
+    const tracker = {};
+    supabaseMock.from.mockImplementation(() => createThenableBuilder({
+      data: { id: 'fragment-1', completion_state: 'kept', answered_at: '2026-09-28T12:00:00.000Z' },
+      error: null,
+    }, tracker));
+
+    await setFollowThroughCompletion('fragment-1', 'kept');
+
+    expect(tracker.update).toEqual({
+      completion_state: 'kept',
+      answered_at: expect.any(String),
+    });
+
+    await setFollowThroughCompletion('fragment-1', null);
+
+    expect(tracker.update).toEqual({
+      completion_state: 'unanswered',
+      answered_at: null,
     });
   });
 });

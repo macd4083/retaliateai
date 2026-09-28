@@ -88,16 +88,19 @@ export function useTodayV2State(userId) {
   const saveCommitmentCompletion = React.useCallback(async (fragmentId, completionState) => {
     const nextState = completionState || TODAY_V2_COMMITMENT_STATES.UNANSWERED;
     const savedRow = await setFollowThroughCompletion(fragmentId, nextState);
-    setState((previous) => ({
-      ...previous,
-      followThroughItems: previous.followThroughItems.map((item) => (
-        item.id === fragmentId
-          ? { ...item, ...savedRow }
-          : item
-      )),
-    }));
+    setState((previous) => {
+      if (!previous) return previous;
+      return {
+        ...previous,
+        followThroughItems: previous.followThroughItems.map((item) => (
+          item.id === fragmentId
+            ? { ...item, ...savedRow }
+            : item
+        )),
+      };
+    });
   }, []);
-
+ 
   const saveDesiredDirection = React.useCallback(async () => {
     if (!state?.review?.id) return;
     await updateDesiredDirection(state.review.id, desiredDirection.trim());
@@ -111,20 +114,23 @@ export function useTodayV2State(userId) {
   }, [load, userId]);
 
   const archiveHabitDefinition = React.useCallback(async (habitId) => {
-    await archiveHabit(habitId);
+    await archiveHabit(userId, habitId);
     await load();
-  }, [load]);
+  }, [load, userId]);
 
   const saveHabitResponse = React.useCallback(async (occurrence, value) => {
     const savedOccurrence = await upsertHabitLog(occurrence.id, occurrence.snapshot_response_type, value);
-    setState((previous) => ({
-      ...previous,
-      habitOccurrences: previous.habitOccurrences.map((item) => (
-        item.id === occurrence.id
-          ? { ...item, ...savedOccurrence }
-          : item
-      )),
-    }));
+    setState((previous) => {
+      if (!previous) return previous;
+      return {
+        ...previous,
+        habitOccurrences: previous.habitOccurrences.map((item) => (
+          item.id === occurrence.id
+            ? { ...item, ...savedOccurrence }
+            : item
+        )),
+      };
+    });
   }, []);
 
   const addManualFollowThrough = React.useCallback(async (actionText) => {
@@ -142,10 +148,13 @@ export function useTodayV2State(userId) {
       state.timezoneName
     );
 
-    setState((previous) => ({
-      ...previous,
-      followThroughItems: [...previous.followThroughItems, created],
-    }));
+    setState((previous) => {
+      if (!previous) return previous;
+      return {
+        ...previous,
+        followThroughItems: [...previous.followThroughItems, created],
+      };
+    });
 
     return created;
   }, [state, userId]);

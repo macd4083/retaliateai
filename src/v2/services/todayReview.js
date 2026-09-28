@@ -219,13 +219,14 @@ export async function upsertHabitDefinition(userId, habit) {
   return data.id;
 }
 
-export async function archiveHabit(habitId) {
+export async function archiveHabit(userId, habitId) {
   const { error } = await supabase
     .from(TODAY_V2_TABLES.HABIT_DEFINITIONS)
     .update({
       is_archived: true,
       archived_at: new Date().toISOString(),
     })
+    .eq('user_id', userId)
     .eq('id', habitId);
 
   if (error) throw error;
