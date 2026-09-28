@@ -142,6 +142,7 @@ describe('TodayV2 model helpers', () => {
       canComplete: true,
       followThroughSatisfied: true,
       unansweredHabitsCount: 1,
+      hasSoftHabitWarning: true,
       hasTomorrowActions: true,
     });
   });

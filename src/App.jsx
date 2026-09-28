@@ -133,7 +133,7 @@ function TodayV2DefaultRedirect() {
 
     async function resolveTarget() {
       try {
-        const nextTarget = await getTodayV2RouteTarget(user.id);
+        const nextTarget = await getTodayV2RouteTarget(user?.id);
         if (!cancelled) setTarget(nextTarget);
       } catch (routeError) {
         console.error('[TodayV2DefaultRedirect] route resolution failed:', routeError);

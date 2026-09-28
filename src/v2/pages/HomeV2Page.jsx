@@ -9,7 +9,7 @@ import {
 } from '../today/model';
 import { TODAY_V2_COMMITMENT_STATES } from '../today/types';
 
-function SegmentedChoice({ value, options, onChange }) {
+function SegmentedChoice({ value, options, onChange, disabled = false }) {
   return (
     <div className="inline-flex overflow-hidden rounded-lg border border-zinc-700">
       {options.map((option) => {
@@ -18,8 +18,9 @@ function SegmentedChoice({ value, options, onChange }) {
           <button
             key={option.value}
             type="button"
+            disabled={disabled}
             onClick={() => onChange(active && option.allowToggleOff ? null : option.value)}
-            className={`px-3 py-1.5 text-xs transition-colors ${active ? 'bg-red-600 text-white' : 'bg-zinc-950 text-zinc-400 hover:text-white'}`}
+            className={`px-3 py-1.5 text-xs transition-colors ${active ? 'bg-red-600 text-white' : 'bg-zinc-950 text-zinc-400 hover:text-white'} disabled:cursor-not-allowed disabled:opacity-50`}
           >
             {option.label}
           </button>
@@ -79,6 +80,7 @@ export default function HomeV2Page() {
     setCommitmentSaveError(null);
 
     try {
+      if (actionsLocked) return;
       await setFollowThroughCompletion(fragmentId, nextState);
       await load();
     } catch (saveError) {
@@ -118,6 +120,7 @@ export default function HomeV2Page() {
   }
 
   const contractItems = homeState.review?.completed_at ? homeState.tomorrowFragments : [];
+  const actionsLocked = Boolean(homeState.review?.completed_at);
 
   return (
     <AppShellV2 title="Proof">
@@ -164,6 +167,7 @@ export default function HomeV2Page() {
                   </div>
                   <div className="mt-3 flex items-center gap-2">
                     <SegmentedChoice
+                      disabled={actionsLocked}
                       value={item.completion_state}
                       onChange={(nextValue) => onSaveCommitmentCompletion(item.id, nextValue || TODAY_V2_COMMITMENT_STATES.UNANSWERED)}
                       options={[

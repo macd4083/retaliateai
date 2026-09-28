@@ -215,6 +215,7 @@ export function getTodayV2CompletionGate({ followThroughItems = [], habitOccurre
     canComplete: normalizedTomorrowActions.length > 0 && followThroughSatisfied,
     followThroughSatisfied,
     unansweredHabitsCount: unansweredHabits.length,
+    hasSoftHabitWarning: unansweredHabits.length > 0,
     hasTomorrowActions: normalizedTomorrowActions.length > 0,
   };
 }
