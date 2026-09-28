@@ -87,15 +87,16 @@ export function useTodayV2State(userId) {
   }, [load, state, tomorrowActions, tomorrowInput]);
 
   const saveCommitmentCompletion = React.useCallback(async (fragmentId, completionState) => {
-    await setFollowThroughCompletion(fragmentId, completionState);
+    const nextState = completionState || TODAY_V2_COMMITMENT_STATES.UNANSWERED;
+    await setFollowThroughCompletion(fragmentId, nextState);
     setState((previous) => ({
       ...previous,
       followThroughItems: previous.followThroughItems.map((item) => (
         item.id === fragmentId
           ? {
             ...item,
-            completion_state: completionState,
-            answered_at: completionState === TODAY_V2_COMMITMENT_STATES.UNANSWERED ? null : new Date().toISOString(),
+            completion_state: nextState,
+            answered_at: nextState === TODAY_V2_COMMITMENT_STATES.UNANSWERED ? null : new Date().toISOString(),
           }
           : item
       )),
@@ -142,12 +143,16 @@ export function useTodayV2State(userId) {
 
   const addManualFollowThrough = React.useCallback(async (actionText) => {
     if (!state || !userId) return null;
+    const nextFragmentOrder = state.followThroughItems.reduce(
+      (maxOrder, item) => Math.max(maxOrder, Number(item.fragment_order ?? -1)),
+      -1
+    ) + 1;
 
     const created = await addManualFollowThroughItem(
       userId,
       state.todayLocalDate,
       actionText,
-      state.followThroughItems.length,
+      nextFragmentOrder,
       state.timezoneName
     );
 

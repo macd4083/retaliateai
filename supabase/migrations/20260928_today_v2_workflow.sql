@@ -128,7 +128,7 @@ create unique index if not exists idx_today_v2_habit_definitions_user_seed_key
   where seed_key is not null;
 
 create unique index if not exists idx_today_v2_habit_definitions_user_active_name
-  on public.today_v2_habit_definitions(user_id, lower(name))
+  on public.today_v2_habit_definitions(user_id, name)
   where is_archived = false;
 
 create unique index if not exists idx_today_v2_habit_definitions_user_id
