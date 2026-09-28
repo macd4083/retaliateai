@@ -145,16 +145,17 @@ export default function TodayV2Page() {
     setLoading(true);
     setError(null);
 
-    const seedResult = await seedDefaultHabits(user.id);
-    if (seedResult.error) {
-      console.warn('[TodayV2] seed_default_habits_for_user failed; rendering without seeded defaults', seedResult.error);
-    }
-
     try {
+      const seedResult = await seedDefaultHabits(user.id);
+      if (seedResult.error) {
+        console.warn('[TodayV2] seed_default_habits_for_user failed; rendering without seeded defaults', seedResult.error);
+      }
       const next = await loadTodayReviewState(user.id);
       setState(next);
       setDesiredDirection(next.review?.desired_direction || '');
-      setTomorrowActions(next.todayPlannedActions.map((a) => a.action_text));
+      const loadedActions = next.tomorrowPlannedActions.map((a) => a.action_text);
+      setTomorrowActions(loadedActions);
+      setTomorrowInput(loadedActions.join('\n'));
     } catch (loadError) {
       console.error('[TodayV2] load failed:', loadError);
       setError(loadError);
@@ -188,11 +189,16 @@ export default function TodayV2Page() {
   };
 
   const onSaveHabit = async (habitDraft) => {
-    const habitId = await upsertHabitDefinition(user.id, habitDraft);
-    setHabitEditorValue(null);
-    setMenuOpenHabitId(null);
-    await load();
-    return habitId;
+    try {
+      const habitId = await upsertHabitDefinition(user.id, habitDraft);
+      setHabitEditorValue(null);
+      setMenuOpenHabitId(null);
+      await load();
+      return habitId;
+    } catch (saveError) {
+      window.alert(saveError?.message || 'Could not save habit.');
+      return null;
+    }
   };
 
   const onDeleteHabit = async (habitId) => {
@@ -231,7 +237,7 @@ export default function TodayV2Page() {
 
   const onSaveTomorrowActions = async () => {
     if (!state) return;
-    await replaceTomorrowActions(user.id, state.today, tomorrowActions);
+    await replaceTomorrowActions(state.tomorrow, tomorrowActions);
     await load();
   };
 
@@ -286,25 +292,22 @@ export default function TodayV2Page() {
                     onChange={(e) => onToggleFollowThrough(item.id, e.target.checked)}
                   />
                   <span className={item.completed ? 'line-through text-zinc-500' : 'text-zinc-200'}>{item.action_text}</span>
+                  <span className="text-xs text-zinc-500 ml-auto">{item.completed ? 'Completed' : 'Not completed'}</span>
                 </label>
               ))}
             </div>
-          ) : (
-            <div className="space-y-2">
-              <p className="text-sm text-zinc-400">What were today&apos;s highest-ROI actions?</p>
-              <div className="flex gap-2">
-                <input
-                  value={manualActionInput}
-                  onChange={(e) => setManualActionInput(e.target.value)}
-                  placeholder="Add action"
-                  className="flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm"
-                />
-                <button type="button" onClick={onAddManualAction} className="rounded-lg bg-zinc-100 text-zinc-900 px-3 py-2 text-sm">
-                  Add
-                </button>
-              </div>
-            </div>
-          )}
+          ) : <p className="text-sm text-zinc-400">What were today&apos;s highest-ROI actions?</p>}
+          <div className="flex gap-2">
+            <input
+              value={manualActionInput}
+              onChange={(e) => setManualActionInput(e.target.value)}
+              placeholder="Add action"
+              className="flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm"
+            />
+            <button type="button" onClick={onAddManualAction} className="rounded-lg bg-zinc-100 text-zinc-900 px-3 py-2 text-sm">
+              Add
+            </button>
+          </div>
         </section>
 
         <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4 space-y-3 relative">
@@ -391,7 +394,24 @@ export default function TodayV2Page() {
           {tomorrowActions.length > 0 && (
             <ul className="space-y-2">
               {tomorrowActions.map((action, i) => (
-                <li key={`${action}-${i}`} className="rounded-lg border border-zinc-800 px-3 py-2 text-sm">{action}</li>
+                <li key={`${action}-${i}`} className="rounded-lg border border-zinc-800 p-2 text-sm flex items-center gap-2">
+                  <input
+                    value={action}
+                    onChange={(e) => {
+                      const next = [...tomorrowActions];
+                      next[i] = e.target.value;
+                      setTomorrowActions(next);
+                    }}
+                    className="flex-1 bg-transparent outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setTomorrowActions((prev) => prev.filter((_, idx) => idx !== i))}
+                    className="text-xs text-red-400"
+                  >
+                    Remove
+                  </button>
+                </li>
               ))}
             </ul>
           )}

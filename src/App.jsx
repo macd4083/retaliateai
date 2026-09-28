@@ -244,7 +244,7 @@ export default function App() {
       {/* Post-session conversion page — public (guest arrives here after first session) */}
       <Route path="/post-session/next-steps" element={<PostSessionNextSteps />} />
 
-      {/* Legacy route (kept unchanged for fallback) */}
+      {/* Legacy route (kept unchanged) */}
       <Route
         path="/legacy/reflection"
         element={
@@ -254,9 +254,17 @@ export default function App() {
         }
       />
 
-      {/* Protected routes */}
+      {/* Legacy reflection route contract remains stable */}
       <Route
         path="/reflection"
+        element={
+          <AuthGuardV2>
+            <ReflectionLegacyPage />
+          </AuthGuardV2>
+        }
+      />
+      <Route
+        path="/today"
         element={
           <AuthGuardV2>
             {ENABLE_TODAY_V2 ? <TodayV2Page /> : <ReflectionLegacyPage />}
@@ -321,7 +329,7 @@ export default function App() {
         }
       />
       {/* Catch-all */}
-      <Route path="*" element={<Navigate to="/reflection" replace />} />
+      <Route path="*" element={<Navigate to={ENABLE_TODAY_V2 ? '/today' : '/reflection'} replace />} />
     </Routes>
   );
 }

@@ -13,19 +13,9 @@ export async function seedDefaultHabits(userId) {
 }
 
 async function ensureTodayReview(userId, reviewDate) {
-  const { data: existing, error } = await supabase
-    .from('v2_daily_reviews')
-    .select('id, review_date, desired_direction')
-    .eq('user_id', userId)
-    .eq('review_date', reviewDate)
-    .maybeSingle();
-
-  if (error) throw error;
-  if (existing) return existing;
-
   const { data: created, error: createError } = await supabase
     .from('v2_daily_reviews')
-    .insert({ user_id: userId, review_date: reviewDate })
+    .upsert({ user_id: userId, review_date: reviewDate }, { onConflict: 'user_id,review_date' })
     .select('id, review_date, desired_direction')
     .single();
 
@@ -36,6 +26,7 @@ async function ensureTodayReview(userId, reviewDate) {
 export async function loadTodayReviewState(userId) {
   const today = localDateStr(0);
   const yesterday = localDateStr(-1);
+  const tomorrow = localDateStr(1);
 
   const [review, plannedRes, todayPlannedRes, followRes, habitsRes, habitLogsRes] = await Promise.all([
     ensureTodayReview(userId, today),
@@ -49,7 +40,7 @@ export async function loadTodayReviewState(userId) {
       .from('v2_planned_actions')
       .select('id, action_text, action_order')
       .eq('user_id', userId)
-      .eq('review_date', today)
+      .eq('review_date', tomorrow)
       .order('action_order', { ascending: true }),
     supabase
       .from('v2_follow_through_items')
@@ -109,9 +100,10 @@ export async function loadTodayReviewState(userId) {
   return {
     today,
     yesterday,
+    tomorrow,
     review,
     yesterdayActions,
-    todayPlannedActions: todayPlannedRes.data || [],
+    tomorrowPlannedActions: todayPlannedRes.data || [],
     followThroughItems,
     habits: habitsRes.data || [],
     habitLogs: habitLogsRes.data || [],
@@ -155,13 +147,27 @@ export async function upsertHabitDefinition(userId, habit) {
   };
 
   if (habit.id) {
-    const { error } = await supabase.from('v2_habit_definitions').update(payload).eq('id', habit.id);
-    if (error) throw error;
+    const { error } = await supabase
+      .from('v2_habit_definitions')
+      .update(payload)
+      .eq('id', habit.id)
+      .eq('user_id', userId);
+    if (error) {
+      if (error.code === '23505') {
+        throw new Error('A habit with this name already exists.');
+      }
+      throw error;
+    }
     return habit.id;
   }
 
   const { data, error } = await supabase.from('v2_habit_definitions').insert(payload).select('id').single();
-  if (error) throw error;
+  if (error) {
+    if (error.code === '23505') {
+      throw new Error('A habit with this name already exists.');
+    }
+    throw error;
+  }
   return data.id;
 }
 
@@ -175,12 +181,13 @@ export async function archiveHabit(habitId) {
 }
 
 export async function upsertHabitLog(userId, logDate, habitId, habitType, value) {
+  const numberValue = habitType === 'number' && Number.isFinite(value) ? value : null;
   const payload = {
     user_id: userId,
     habit_id: habitId,
     log_date: logDate,
     boolean_value: habitType === 'boolean' ? Boolean(value) : null,
-    number_value: habitType === 'number' ? Number.isFinite(value) ? value : null : null,
+    number_value: numberValue,
   };
 
   const { error } = await supabase
@@ -199,23 +206,11 @@ export async function updateDesiredDirection(reviewId, desiredDirection) {
   if (error) throw error;
 }
 
-export async function replaceTomorrowActions(userId, reviewDate, actionTexts) {
-  const { error: deleteError } = await supabase
-    .from('v2_planned_actions')
-    .delete()
-    .eq('user_id', userId)
-    .eq('review_date', reviewDate);
-
-  if (deleteError) throw deleteError;
-  if (actionTexts.length === 0) return;
-
-  const payload = actionTexts.map((actionText, index) => ({
-    user_id: userId,
-    review_date: reviewDate,
-    action_text: actionText,
-    action_order: index,
-  }));
-
-  const { error: insertError } = await supabase.from('v2_planned_actions').insert(payload);
-  if (insertError) throw insertError;
+export async function replaceTomorrowActions(reviewDate, actionTexts) {
+  const normalized = actionTexts.map((action) => String(action || '').trim()).filter(Boolean);
+  const { error } = await supabase.rpc('replace_v2_planned_actions', {
+    p_review_date: reviewDate,
+    p_actions: normalized,
+  });
+  if (error) throw error;
 }

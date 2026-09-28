@@ -2,10 +2,10 @@
 
 ## Explicit switch
 - `src/App.jsx` contains the single switch: `ENABLE_TODAY_V2` (from `VITE_ENABLE_TODAY_V2`).
-- `/reflection` routes to:
+- `/today` routes to:
   - **V2**: `src/v2/pages/TodayV2Page.jsx` when enabled.
   - **Legacy**: `src/pages/ReflectionV2.jsx` when disabled.
-- `/legacy/reflection` always serves the legacy flow.
+- `/reflection` and `/legacy/reflection` always serve the legacy reflection flow.
 
 ## V2 namespace
 - `src/v2/pages/TodayV2Page.jsx`

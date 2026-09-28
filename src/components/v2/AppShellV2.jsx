@@ -7,14 +7,19 @@ import { isAnonymousGuestUser } from '../../lib/guestSession';
 import { usePWAInstall } from '../../hooks/usePWAInstall';
 import PWAInstallBanner from '../pwa/PWAInstallBanner';
 
+const PRIMARY_REFLECTION_PATH =
+  String(import.meta.env.VITE_ENABLE_TODAY_V2 ?? 'true').toLowerCase() !== 'false'
+    ? '/today'
+    : '/reflection';
+
 const NAV_LINKS = [
-  { label: 'Reflection', path: '/reflection', icon: Moon },
+  { label: 'Reflection', path: PRIMARY_REFLECTION_PATH, icon: Moon },
   { label: 'Insights', path: '/insights', icon: BarChart2 },
   { label: 'Settings', path: '/settings', icon: Settings },
 ];
 
 const GUEST_NAV_LINKS = [
-  { label: 'Reflection', path: '/reflection', icon: Moon },
+  { label: 'Reflection', path: PRIMARY_REFLECTION_PATH, icon: Moon },
   { label: 'Insights', path: '/insights', icon: BarChart2 },
 ];
 
