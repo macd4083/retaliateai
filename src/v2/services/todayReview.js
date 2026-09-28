@@ -3,6 +3,7 @@ import {
   buildTodayV2HabitResponsePatch,
   coerceTodayV2EditableFragments,
   getTodayV2DateContext,
+  normalizeTodayV2Text,
   validateTodayV2Weekdays,
 } from '../today/model';
 import {
@@ -134,15 +135,18 @@ export async function loadTodayReviewState(userId) {
 
 export async function setFollowThroughCompletion(fragmentId, completionState) {
   const nextState = completionState || TODAY_V2_COMMITMENT_STATES.UNANSWERED;
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from(TODAY_V2_TABLES.COMMITMENT_FRAGMENTS)
     .update({
       completion_state: nextState,
       answered_at: nextState === TODAY_V2_COMMITMENT_STATES.UNANSWERED ? null : new Date().toISOString(),
     })
-    .eq('id', fragmentId);
+    .eq('id', fragmentId)
+    .select('id, target_local_date, source_local_date, fragment_order, fragment_text, normalized_fragment_text, completion_state, answered_at, parser_version')
+    .single();
 
   if (error) throw error;
+  return data;
 }
 
 export async function addManualFollowThroughItem(userId, localDate, actionText, actionOrder, timezoneName) {
@@ -156,8 +160,8 @@ export async function addManualFollowThroughItem(userId, localDate, actionText, 
       timezone_name: timezoneName,
       fragment_order: actionOrder,
       fragment_text: actionText,
-      normalized_fragment_text: actionText,
-      parser_version: 'manual_follow_through',
+      normalized_fragment_text: normalizeTodayV2Text(actionText),
+      parser_version: 'manual_follow_through_same_day',
       completion_state: TODAY_V2_COMMITMENT_STATES.UNANSWERED,
     })
     .select('id, target_local_date, source_local_date, fragment_order, fragment_text, normalized_fragment_text, completion_state, answered_at, parser_version')
@@ -228,12 +232,16 @@ export async function archiveHabit(habitId) {
 }
 
 export async function upsertHabitLog(occurrenceId, habitType, value) {
-  const { error } = await supabase
+  const patch = buildTodayV2HabitResponsePatch(habitType, value);
+  const { data, error } = await supabase
     .from(TODAY_V2_TABLES.HABIT_OCCURRENCES)
-    .update(buildTodayV2HabitResponsePatch(habitType, value))
-    .eq('id', occurrenceId);
+    .update(patch)
+    .eq('id', occurrenceId)
+    .select('id, habit_definition_id, local_date, timezone_name, scheduled_weekday, snapshot_name, snapshot_response_type, snapshot_unit, snapshot_display_order, boolean_response, numeric_response, answered_at, created_at, updated_at')
+    .single();
 
   if (error) throw error;
+  return data;
 }
 
 export async function updateDesiredDirection(reviewId, desiredDirection) {
@@ -247,7 +255,7 @@ export async function updateDesiredDirection(reviewId, desiredDirection) {
 
 export async function replaceTomorrowActions({ targetLocalDate, sourceLocalDate, timezoneName, rawPlanText, actionTexts }) {
   const normalizedRawText = String(rawPlanText || '').trim();
-  const fragments = normalizedRawText ? coerceTodayV2EditableFragments(normalizedRawText, actionTexts) : [];
+  const fragments = coerceTodayV2EditableFragments(normalizedRawText, actionTexts);
   const { error } = await supabase.rpc(TODAY_V2_RPCS.REPLACE_PLAN, {
     p_target_local_date: targetLocalDate,
     p_source_local_date: sourceLocalDate,

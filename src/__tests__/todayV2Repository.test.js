@@ -180,6 +180,26 @@ describe('TodayV2 repository', () => {
     });
   });
 
+  it('preserves explicitly edited fragment rows even when the raw paragraph is blank', async () => {
+    supabaseMock.rpc.mockResolvedValue({ error: null });
+
+    await replaceTomorrowActions({
+      targetLocalDate: '2026-09-29',
+      sourceLocalDate: '2026-09-28',
+      timezoneName: 'UTC',
+      rawPlanText: '',
+      actionTexts: ['Call mentor', 'Review notes'],
+    });
+
+    expect(supabaseMock.rpc).toHaveBeenCalledWith(TODAY_V2_RPCS.REPLACE_PLAN, {
+      p_target_local_date: '2026-09-29',
+      p_source_local_date: '2026-09-28',
+      p_timezone_name: 'UTC',
+      p_raw_plan_text: '',
+      p_fragment_texts: ['Call mentor', 'Review notes'],
+    });
+  });
+
   it('creates new habit drafts with explicit TodayV2 fields', () => {
     expect(buildEmptyHabitDefinition([{ id: 'habit-1' }, { id: 'habit-2' }])).toEqual({
       id: null,

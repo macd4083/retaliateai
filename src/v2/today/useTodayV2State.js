@@ -1,7 +1,6 @@
 import React from 'react';
 import {
   TODAY_V2_COMMITMENT_STATES,
-  TODAY_V2_RESPONSE_TYPES,
 } from './types';
 import { buildTodayV2CommitmentDrafts } from './model';
 import {
@@ -88,16 +87,12 @@ export function useTodayV2State(userId) {
 
   const saveCommitmentCompletion = React.useCallback(async (fragmentId, completionState) => {
     const nextState = completionState || TODAY_V2_COMMITMENT_STATES.UNANSWERED;
-    await setFollowThroughCompletion(fragmentId, nextState);
+    const savedRow = await setFollowThroughCompletion(fragmentId, nextState);
     setState((previous) => ({
       ...previous,
       followThroughItems: previous.followThroughItems.map((item) => (
         item.id === fragmentId
-          ? {
-            ...item,
-            completion_state: nextState,
-            answered_at: nextState === TODAY_V2_COMMITMENT_STATES.UNANSWERED ? null : new Date().toISOString(),
-          }
+          ? { ...item, ...savedRow }
           : item
       )),
     }));
@@ -121,21 +116,12 @@ export function useTodayV2State(userId) {
   }, [load]);
 
   const saveHabitResponse = React.useCallback(async (occurrence, value) => {
-    await upsertHabitLog(occurrence.id, occurrence.snapshot_response_type, value);
+    const savedOccurrence = await upsertHabitLog(occurrence.id, occurrence.snapshot_response_type, value);
     setState((previous) => ({
       ...previous,
       habitOccurrences: previous.habitOccurrences.map((item) => (
         item.id === occurrence.id
-          ? {
-            ...item,
-            boolean_response: occurrence.snapshot_response_type === TODAY_V2_RESPONSE_TYPES.BOOLEAN
-              ? (value == null ? null : Boolean(value))
-              : null,
-            numeric_response: occurrence.snapshot_response_type === TODAY_V2_RESPONSE_TYPES.NUMBER && Number.isFinite(value)
-              ? value
-              : null,
-            answered_at: value == null || value === '' ? null : new Date().toISOString(),
-          }
+          ? { ...item, ...savedOccurrence }
           : item
       )),
     }));
