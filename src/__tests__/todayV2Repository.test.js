@@ -13,6 +13,8 @@ vi.mock('../lib/supabase/client', () => ({
 
 import {
   buildEmptyHabitDefinition,
+  completeTodayV2Review,
+  getTodayV2RouteTarget,
   loadTodayReviewState,
   replaceTomorrowActions,
   setFollowThroughCompletion,
@@ -45,6 +47,14 @@ function createThenableBuilder(result, tracker = {}) {
     },
     eq(column, value) {
       tracker.eq = [...(tracker.eq || []), [column, value]];
+      return this;
+    },
+    gte(column, value) {
+      tracker.gte = [...(tracker.gte || []), [column, value]];
+      return this;
+    },
+    lte(column, value) {
+      tracker.lte = [...(tracker.lte || []), [column, value]];
       return this;
     },
     order(column, options) {
@@ -106,7 +116,7 @@ describe('TodayV2 repository', () => {
 
       if (tableName === TODAY_V2_TABLES.DAILY_REVIEWS) {
         return createThenableBuilder({
-          data: { id: 'review-1', local_date: '2026-09-28', timezone_name: 'UTC', desired_direction: 'Builder' },
+          data: { id: 'review-1', local_date: '2026-09-28', timezone_name: 'UTC', desired_direction: 'Builder', completed_at: null, updated_at: '2026-09-28T12:00:00.000Z' },
           error: null,
         }, tracker);
       }
@@ -117,6 +127,7 @@ describe('TodayV2 repository', () => {
             id: 'plan-1',
             raw_plan_text: 'Write 20 minutes and review notes',
             target_local_date: '2026-09-29',
+            updated_at: '2026-09-28T12:00:00.000Z',
           },
           error: null,
         }, tracker);
@@ -159,6 +170,45 @@ describe('TodayV2 repository', () => {
     for (const token of TODAY_V2_FORBIDDEN_PERSISTENCE_TOKENS) {
       expect(trackers.some((tracker) => tracker.tableName === token)).toBe(false);
     }
+  });
+
+  it('shifts the working review day until the configured boundary hour passes', async () => {
+    const trackers = [];
+
+    supabaseMock.rpc
+      .mockResolvedValueOnce({ error: null })
+      .mockResolvedValueOnce({ error: null });
+
+    supabaseMock.from.mockImplementation((tableName) => {
+      const tracker = { tableName };
+      trackers.push(tracker);
+
+      if (tableName === TODAY_V2_TABLES.DAILY_REVIEWS) {
+        return createThenableBuilder({
+          data: { id: 'review-1', local_date: '2026-09-28', timezone_name: 'UTC', desired_direction: '', completed_at: null, updated_at: '2026-09-29T03:30:00.000Z' },
+          error: null,
+        }, tracker);
+      }
+
+      if (tableName === TODAY_V2_TABLES.PLAN_INPUTS) {
+        return createThenableBuilder({ data: null, error: null }, tracker);
+      }
+
+      return createThenableBuilder({ data: [], error: null }, tracker);
+    });
+
+    const state = await loadTodayReviewState('user-1', {
+      now: new Date('2026-09-29T03:30:00.000Z'),
+      dayBoundaryHour: 4,
+      timezoneName: 'UTC',
+    });
+
+    expect(state.todayLocalDate).toBe('2026-09-28');
+    expect(state.tomorrowLocalDate).toBe('2026-09-29');
+    expect(trackers.find((tracker) => tracker.tableName === TODAY_V2_TABLES.DAILY_REVIEWS).upsert.payload.local_date).toBe('2026-09-28');
+    const commitmentTrackers = trackers.filter((tracker) => tracker.tableName === TODAY_V2_TABLES.COMMITMENT_FRAGMENTS);
+    expect(commitmentTrackers[0].eq).toContainEqual(['target_local_date', '2026-09-28']);
+    expect(commitmentTrackers[1].eq).toContainEqual(['target_local_date', '2026-09-29']);
   });
 
   it('saves tomorrow plans through the isolated replace RPC', async () => {
@@ -232,5 +282,36 @@ describe('TodayV2 repository', () => {
       completion_state: 'unanswered',
       answered_at: null,
     });
+  });
+
+  it('persists review completion in the isolated daily review table', async () => {
+    const tracker = {};
+    supabaseMock.from.mockImplementation(() => createThenableBuilder({
+      data: { id: 'review-1', completed_at: '2026-09-28T22:30:00.000Z' },
+      error: null,
+    }, tracker));
+
+    await completeTodayV2Review('review-1');
+
+    expect(tracker.update).toEqual({
+      completed_at: expect.any(String),
+    });
+  });
+
+  it('routes completed reviews to /home without touching legacy tables', async () => {
+    const tracker = {};
+    supabaseMock.from.mockImplementation((tableName) => {
+      expect(tableName).toBe(TODAY_V2_TABLES.DAILY_REVIEWS);
+      return createThenableBuilder({
+        data: { id: 'review-1', local_date: '2026-09-28', timezone_name: 'UTC', desired_direction: '', completed_at: '2026-09-28T22:30:00.000Z', updated_at: '2026-09-28T22:30:00.000Z' },
+        error: null,
+      }, tracker);
+    });
+
+    await expect(getTodayV2RouteTarget('user-1')).resolves.toBe('/home');
+    expect(tracker.upsert.payload).toEqual(expect.objectContaining({
+      user_id: 'user-1',
+      local_date: '2026-09-28',
+    }));
   });
 });

@@ -16,6 +16,7 @@ describe('TodayV2 SQL contract', () => {
 
     expect(sql).toContain('create table if not exists public.today_v2_daily_reviews');
     expect(sql).toContain('create table if not exists public.today_v2_plan_inputs');
+    expect(sql).toContain('completed_at timestamptz');
     expect(sql).toContain('create table if not exists public.today_v2_commitment_fragments');
     expect(sql).toContain('create table if not exists public.today_v2_habit_definitions');
     expect(sql).toContain('create table if not exists public.today_v2_habit_occurrences');

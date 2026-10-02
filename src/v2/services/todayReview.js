@@ -1,8 +1,13 @@
 import { supabase } from '../../lib/supabase/client';
 import {
+  addDaysToLocalDate,
+  buildTodayV2DraftStorageKey,
   buildTodayV2HabitResponsePatch,
+  buildTodayV2HomeMetrics,
   coerceTodayV2EditableFragments,
+  getLatestTodayV2Identity,
   getTodayV2DateContext,
+  getTodayV2DefaultPath,
   normalizeTodayV2Text,
   validateTodayV2Weekdays,
 } from '../today/model';
@@ -46,7 +51,7 @@ export async function ensureTodayV2DailyReview(userId, localDate, timezoneName) 
       },
       { onConflict: 'user_id,local_date' }
     )
-    .select('id, local_date, timezone_name, desired_direction')
+    .select('id, local_date, timezone_name, desired_direction, updated_at, completed_at')
     .single();
 
   if (error) throw error;
@@ -62,8 +67,8 @@ export async function ensureTodayV2HabitOccurrences(localDate, timezoneName) {
   if (error) throw error;
 }
 
-export async function loadTodayReviewState(userId) {
-  const dateContext = getTodayV2DateContext();
+export async function loadTodayReviewState(userId, options = {}) {
+  const dateContext = getTodayV2DateContext(options);
   const seedResult = await seedDefaultHabits(userId);
 
   const review = await ensureTodayV2DailyReview(
@@ -89,7 +94,7 @@ export async function loadTodayReviewState(userId) {
       .order('fragment_order', { ascending: true }),
     supabase
       .from(TODAY_V2_TABLES.PLAN_INPUTS)
-      .select('id, raw_plan_text, target_local_date, source_local_date, timezone_name, parser_version')
+      .select('id, raw_plan_text, target_local_date, source_local_date, timezone_name, parser_version, updated_at')
       .eq('user_id', userId)
       .eq('target_local_date', dateContext.tomorrowLocalDate)
       .maybeSingle(),
@@ -123,6 +128,8 @@ export async function loadTodayReviewState(userId) {
   return {
     ...dateContext,
     review,
+    routeTarget: getTodayV2DefaultPath(review),
+    draftStorageKey: buildTodayV2DraftStorageKey(userId, dateContext.todayLocalDate),
     seedDiagnostic: seedResult.diagnostic,
     followThroughItems: todayFragmentsResult.data || [],
     tomorrowPlanInput: tomorrowPlanInputResult.data?.raw_plan_text || '',
@@ -131,6 +138,57 @@ export async function loadTodayReviewState(userId) {
     habitDefinitions: (habitDefinitionsResult.data || []).filter((habitDefinition) => !habitDefinition.is_archived),
     habitOccurrences: habitOccurrencesResult.data || [],
   };
+}
+
+export async function loadTodayV2HomeState(userId, options = {}) {
+  const current = await loadTodayReviewState(userId, options);
+  const last30Start = addDaysToLocalDate(current.todayLocalDate, -29);
+  const last7Start = addDaysToLocalDate(current.todayLocalDate, -6);
+
+  const [reviewsResult, fragmentsResult, habitOccurrencesResult] = await Promise.all([
+    supabase
+      .from(TODAY_V2_TABLES.DAILY_REVIEWS)
+      .select('local_date, desired_direction, completed_at')
+      .eq('user_id', userId)
+      .gte('local_date', last30Start)
+      .lte('local_date', current.todayLocalDate)
+      .order('local_date', { ascending: false }),
+    supabase
+      .from(TODAY_V2_TABLES.COMMITMENT_FRAGMENTS)
+      .select('target_local_date, completion_state')
+      .eq('user_id', userId)
+      .gte('target_local_date', last30Start)
+      .lte('target_local_date', current.todayLocalDate),
+    supabase
+      .from(TODAY_V2_TABLES.HABIT_OCCURRENCES)
+      .select('local_date, snapshot_name, snapshot_response_type, snapshot_unit, boolean_response, numeric_response, answered_at')
+      .eq('user_id', userId)
+      .gte('local_date', last7Start)
+      .lte('local_date', current.todayLocalDate),
+  ]);
+
+  if (reviewsResult.error) throw reviewsResult.error;
+  if (fragmentsResult.error) throw fragmentsResult.error;
+  if (habitOccurrencesResult.error) throw habitOccurrencesResult.error;
+
+  const reviewHistory = reviewsResult.data || [];
+
+  return {
+    ...current,
+    latestDesiredDirection: getLatestTodayV2Identity(reviewHistory, current.review?.desired_direction || ''),
+    metrics: buildTodayV2HomeMetrics({
+      reviews: reviewHistory,
+      fragments: fragmentsResult.data || [],
+      habitOccurrences: habitOccurrencesResult.data || [],
+      todayLocalDate: current.todayLocalDate,
+    }),
+  };
+}
+
+export async function getTodayV2RouteTarget(userId, options = {}) {
+  const dateContext = getTodayV2DateContext(options);
+  const review = await ensureTodayV2DailyReview(userId, dateContext.todayLocalDate, dateContext.timezoneName);
+  return getTodayV2DefaultPath(review);
 }
 
 export async function setFollowThroughCompletion(fragmentId, completionState) {
@@ -234,6 +292,10 @@ export async function archiveHabit(userId, habitId) {
 
 export async function upsertHabitLog(occurrenceId, habitType, value) {
   const patch = buildTodayV2HabitResponsePatch(habitType, value);
+  if (patch.answered_at !== null) {
+    patch.answered_at = new Date().toISOString();
+  }
+
   const { data, error } = await supabase
     .from(TODAY_V2_TABLES.HABIT_OCCURRENCES)
     .update(patch)
@@ -246,12 +308,38 @@ export async function upsertHabitLog(occurrenceId, habitType, value) {
 }
 
 export async function updateDesiredDirection(reviewId, desiredDirection) {
+  const normalizedDirection = String(desiredDirection || '').trim();
   const { error } = await supabase
     .from(TODAY_V2_TABLES.DAILY_REVIEWS)
-    .update({ desired_direction: desiredDirection })
+    .update({ desired_direction: normalizedDirection })
     .eq('id', reviewId);
 
   if (error) throw error;
+}
+
+export async function completeTodayV2Review(reviewId) {
+  const completedAt = new Date().toISOString();
+  const { data, error } = await supabase
+    .from(TODAY_V2_TABLES.DAILY_REVIEWS)
+    .update({ completed_at: completedAt })
+    .eq('id', reviewId)
+    .select('id, local_date, timezone_name, desired_direction, updated_at, completed_at')
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+export async function reopenTodayV2Review(reviewId) {
+  const { data, error } = await supabase
+    .from(TODAY_V2_TABLES.DAILY_REVIEWS)
+    .update({ completed_at: null })
+    .eq('id', reviewId)
+    .select('id, local_date, timezone_name, desired_direction, updated_at, completed_at')
+    .single();
+
+  if (error) throw error;
+  return data;
 }
 
 export async function replaceTomorrowActions({ targetLocalDate, sourceLocalDate, timezoneName, rawPlanText, actionTexts }) {
@@ -266,6 +354,10 @@ export async function replaceTomorrowActions({ targetLocalDate, sourceLocalDate,
   });
 
   if (error) throw error;
+  return {
+    rawPlanText: normalizedRawText,
+    fragments,
+  };
 }
 
 export function buildEmptyHabitDefinition(existingHabits = []) {
