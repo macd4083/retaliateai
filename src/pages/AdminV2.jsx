@@ -392,12 +392,12 @@ export default function AdminV2() {
           setIsAdmin(true);
         } else {
           setIsAdmin(false);
-          navigate('/reflection', { replace: true });
+          navigate('/app', { replace: true });
         }
       })
       .catch(() => {
         setIsAdmin(false);
-        navigate('/reflection', { replace: true });
+        navigate('/app', { replace: true });
       });
   }, [user?.id]);
 

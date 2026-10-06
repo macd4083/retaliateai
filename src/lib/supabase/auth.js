@@ -1,4 +1,5 @@
 import { supabase } from './client';
+import { getAuthCallbackUrl } from '../authReturn';
 
 export const authHelpers = {
   // Get current user
@@ -9,10 +10,11 @@ export const authHelpers = {
   },
 
   // Sign up
-  async signUp(email, password) {
+  async signUp(email, password, returnTo = '/app') {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
+      options: { emailRedirectTo: getAuthCallbackUrl(returnTo) },
     });
     if (error) throw error;
     return data;

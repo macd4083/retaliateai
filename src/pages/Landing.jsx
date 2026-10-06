@@ -12,24 +12,12 @@ export default function Landing() {
 
   const isAnonymousUser = isAnonymousGuestUser(user);
 
-  useEffect(() => {
-    if (!user) return;
-
-    // Non-anonymous signed-in users go straight to the app.
-    if (!isAnonymousUser) {
-      navigate('/reflection', { replace: true });
-    }
-    // Anonymous (guest) users stay on the landing page to choose their path intentionally.
-    // navigate is a stable reference from react-router-dom; user.id/is_anonymous drive re-runs.
-  }, [user?.id, isAnonymousUser, navigate]);
-
   const handleGetStarted = (location = 'hero') => {
     trackEvent('landing_cta_clicked', { location });
-    navigate('/login?signup=true');
+    navigate(user && !isAnonymousUser ? '/app' : '/login?signup=true');
   };
 
-  // Don't render anything while auth is resolving or while a signed-in non-anonymous user is being redirected.
-  if (loading || (user && !isAnonymousUser)) return null;
+  if (loading) return null;
 
   return (
     <div className="min-h-screen bg-black">
@@ -60,10 +48,10 @@ export default function Landing() {
               </div>
               <div className="flex items-center gap-4">
                 <button
-                  onClick={() => { trackEvent('landing_signin_clicked'); navigate('/login'); }}
+                  onClick={() => { trackEvent('landing_signin_clicked'); navigate(user && !isAnonymousUser ? '/app' : '/login'); }}
                   className="px-6 py-2 text-red-500 hover:text-red-400 font-semibold transition-colors border border-red-900 hover:border-red-700 rounded"
                 >
-                  Sign In
+                  {user && !isAnonymousUser ? 'Open app' : 'Sign In'}
                 </button>
                 <PWALandingBadge />
               </div>
@@ -103,7 +91,7 @@ export default function Landing() {
 
                 {/* Subtext: also shrinks when side-by-side to preserve video size */}
                 <p className="text-lg lg:text-sm xl:text-base 2xl:text-xl text-gray-400 leading-relaxed">
-                  Your future self is fighting for the habits that will build the life you want. Your present self is fighting for comfort. Build the consistency and discipline the best version of you has. Bring your ambitions to life.
+                  Turn ambition into daily follow-through. Review your commitments and habits, choose your direction, and plan measurable actions you can actually take.
                 </p>
 
               </div>
@@ -135,11 +123,11 @@ export default function Landing() {
                 onClick={handleGetStarted}
                 className="group px-10 py-5 bg-red-600 text-white rounded-lg hover:bg-red-700 font-bold text-lg transition-all shadow-2xl shadow-red-900/50 hover:shadow-red-900/70 flex items-center gap-3 uppercase tracking-wide"
               >
-                Start Your Free Week
+                {user && !isAnonymousUser ? 'Open app' : 'Start Your Free Week'}
                 <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
               </button>
               <p className="text-sm text-gray-500 tracking-wide">
-                7 days free • No credit card • Feedback earns you another week
+                7 days free • No credit card to start • Paid access requires checkout
               </p>
             </div>
           </div>
@@ -148,13 +136,13 @@ export default function Landing() {
           <div className="pb-32">
             <div className="text-center mb-16">
               <p className="text-red-500 text-sm font-bold uppercase tracking-widest mb-4">
-                Inside Every Session
+                Your Daily Review &amp; Plan
               </p>
               <h2 className="text-4xl md:text-5xl font-bold text-white mb-6 leading-tight">
-                Four phases of conversation directed by an ai coach.
+                A structured review. A practical plan.
               </h2>
               <p className="text-xl text-gray-400 max-w-3xl mx-auto leading-relaxed">
-                Taught to find what matters. Build and reinforce the why behind your desired identity shift.
+                Connect the direction you want with the effort you control. Track what you did, then decide what comes next.
               </p>
             </div>
 
@@ -165,13 +153,13 @@ export default function Landing() {
                   <span className="w-10 h-10 flex-shrink-0 rounded-full bg-red-600 text-white font-bold text-lg flex items-center justify-center">
                     1
                   </span>
-                  <h3 className="text-xl font-bold text-white uppercase tracking-wide">Accountability Check</h3>
+                  <h3 className="text-xl font-bold text-white uppercase tracking-wide">Review commitments and habits</h3>
                 </div>
                 <p className="text-red-400 italic mb-4">
                   "You said you'd do [X] yesterday. Did you?"
                 </p>
                 <p className="text-gray-400 leading-relaxed">
-                  Close the loop every other system skips. Answering honestly for yesterday's commitment is where real discipline forms. No quiet exits. No letting yourself off the hook unnoticed.
+                  Mark each commitment done, partial, or not done. Check in on your habits and notice what helped or got in the way.
                 </p>
               </div>
 
@@ -181,13 +169,13 @@ export default function Landing() {
                   <span className="w-10 h-10 flex-shrink-0 rounded-full bg-red-600 text-white font-bold text-lg flex items-center justify-center">
                     2
                   </span>
-                  <h3 className="text-xl font-bold text-white uppercase tracking-wide">Wins and Momentum</h3>
+                  <h3 className="text-xl font-bold text-white uppercase tracking-wide">Direction and controllable effort</h3>
                 </div>
                 <p className="text-red-400 italic mb-4">
                   "What moved forward today? Where is it taking you?"
                 </p>
                 <p className="text-gray-400 leading-relaxed">
-                  Not a highlight reel. A practice. Recognizing real wins and understanding what they signal about your trajectory is how confidence compounds into something you can actually feel.
+                  Name the direction you want to move in, then separate the outcome you hope for from the effort that is within your control.
                 </p>
               </div>
 
@@ -197,13 +185,13 @@ export default function Landing() {
                   <span className="w-10 h-10 flex-shrink-0 rounded-full bg-red-600 text-white font-bold text-lg flex items-center justify-center">
                     3
                   </span>
-                  <h3 className="text-xl font-bold text-white uppercase tracking-wide">Honest Reflection</h3>
+                  <h3 className="text-xl font-bold text-white uppercase tracking-wide">Measured actions and first five minutes</h3>
                 </div>
                 <p className="text-red-400 italic mb-4">
-                  "What didn't go as planned? What got in the way?"
+                  "What will you do tomorrow? How will you start?"
                 </p>
                 <p className="text-gray-400 leading-relaxed">
-                  Most people skip this and wonder why nothing changes. The AI hears excuses, acknowledges them, and pivots to what's actually in your control. No shame, no coddling.
+                  Write specific, measurable actions for tomorrow and choose your first five minutes. Make the next step small enough to begin.
                 </p>
               </div>
 
@@ -213,13 +201,13 @@ export default function Landing() {
                   <span className="w-10 h-10 flex-shrink-0 rounded-full bg-red-600 text-white font-bold text-lg flex items-center justify-center">
                     4
                   </span>
-                  <h3 className="text-xl font-bold text-white uppercase tracking-wide">Tomorrow's Commitment</h3>
+                  <h3 className="text-xl font-bold text-white uppercase tracking-wide">Follow-through</h3>
                 </div>
                 <p className="text-red-400 italic mb-4">
-                  "What are you committing to tomorrow, and why does it matter to you?"
+                  "What did you follow through on?"
                 </p>
                 <p className="text-gray-400 leading-relaxed">
-                  Vague intentions don't survive a real day. This phase turns intention into a specific promise tied to your long-term vision. The AI tracks whether you kept it and brings it back tomorrow night.
+                  See today's actions in Today and return to Review &amp; Plan to check in. Record what you actually did and build a repeatable practice of following through.
                 </p>
               </div>
             </div>
@@ -228,12 +216,12 @@ export default function Landing() {
           {/* ── Try guest session CTA ── */}
           <div className="pb-16 flex flex-col items-center text-center">
             <button
-              onClick={() => { trackEvent('landing_guest_session_clicked'); navigate('/start/guest'); }}
+              onClick={() => { trackEvent('landing_guest_session_clicked'); handleGetStarted('review'); }}
               className="px-10 py-4 bg-red-600 text-white rounded-lg hover:bg-red-700 font-bold text-base transition-all shadow-xl shadow-red-900/40 uppercase tracking-wide"
             >
-              Try guest session
+              {user && !isAnonymousUser ? 'Open app' : 'Start your review'}
             </button>
-            <p className="text-sm text-gray-500 mt-3 tracking-wide">No sign up required</p>
+            <p className="text-sm text-gray-500 mt-3 tracking-wide">Create an account to save your commitments and habits.</p>
           </div>
 
           {/* ── 8. SUCCESS VISION ── */}
@@ -266,14 +254,14 @@ export default function Landing() {
               {/* After */}
               <div className="bg-gradient-to-b from-red-950/40 to-transparent border border-red-800 rounded-2xl p-10">
                 <p className="text-red-500 text-sm font-bold uppercase tracking-widest mb-6">
-                  After 30 days
+                  What you can build
                 </p>
                 <ul className="space-y-4">
                   {[
-                    'You know exactly what you committed to and whether you kept it',
-                    'You understand the pattern behind your own inconsistency',
-                    'Your goals have a real why behind them. One you\'ve tested',
-                    'You\'re becoming someone who does what they say',
+                    'A record of what you committed to and what you completed',
+                    'A daily check-in on your habits and effort',
+                    'Specific actions connected to your desired direction',
+                    'A repeatable practice of reviewing and following through',
                   ].map((item) => (
                     <li key={item} className="flex items-start gap-3 text-white">
                       <CheckCircle className="mt-0.5 w-5 h-5 flex-shrink-0 text-red-500" />
@@ -306,7 +294,7 @@ export default function Landing() {
                 One week. No card. Real Commitment.
               </h2>
               <p className="text-xl text-gray-400 mb-10 max-w-2xl mx-auto">
-                Ultimately it's your responsibility to create your success and happiness in your life. Treat your future-self with the habit that will give you everything.
+                Start a daily practice of honest review, practical planning, and follow-through. Progress takes effort; this is a place to record it.
               </p>
               {/* Promo reminder card */}
               <div className="inline-block bg-red-950/60 border border-red-800 rounded-xl px-8 py-6 mb-10 text-left">
@@ -315,7 +303,7 @@ export default function Landing() {
                     '7 days free',
                     'No credit card required',
                     'Submit feedback → get a second week free',
-                    'Cancel anytime',
+                    'No automatic charge when your free week ends',
                   ].map((item) => (
                     <li key={item} className="flex items-center gap-3 text-white text-sm">
                       <CheckCircle className="w-4 h-4 flex-shrink-0 text-red-500" />
@@ -329,7 +317,7 @@ export default function Landing() {
                   onClick={() => handleGetStarted('bottom')}
                   className="px-12 py-6 bg-red-600 text-white rounded-lg hover:bg-red-700 font-bold text-xl transition-all shadow-2xl shadow-red-900/60 uppercase tracking-wide inline-flex items-center gap-3 group"
                 >
-                  Start Your Free Week
+                  {user && !isAnonymousUser ? 'Open app' : 'Start Your Free Week'}
                   <ArrowRight className="w-6 h-6 group-hover:translate-x-1 transition-transform" />
                 </button>
               </div>
@@ -377,12 +365,15 @@ export default function Landing() {
 }
 
 function PWALandingBadge() {
-  const { isInstallable, isStandalone, promptInstall } = usePWAInstall();
+  const { isInstallable, isIos, isStandalone, promptInstall } = usePWAInstall();
   if (isStandalone || !isInstallable) return null;
 
   return (
     <button
-      onClick={() => promptInstall()}
+      onClick={() => {
+        if (isIos) document.getElementById('install-web-app')?.scrollIntoView({ behavior: 'smooth' });
+        else promptInstall();
+      }}
       className="hidden sm:flex items-center gap-2 px-4 py-2 bg-zinc-900 border border-zinc-700 hover:border-red-700 text-zinc-300 hover:text-white rounded-lg text-sm font-medium transition-all"
     >
       <Download className="w-4 h-4" />
@@ -398,7 +389,7 @@ function PWALandingSection() {
   if (isStandalone) return null;
 
   return (
-    <div className="border border-zinc-800 rounded-2xl p-8 md:p-12 bg-zinc-950/80 backdrop-blur">
+    <div id="install-web-app" className="border border-zinc-800 rounded-2xl p-8 md:p-12 bg-zinc-950/80 backdrop-blur">
       <div className="flex flex-col md:flex-row items-center gap-8 mb-8">
         <div className="w-20 h-20 rounded-2xl bg-red-900/40 border border-red-800 flex items-center justify-center flex-shrink-0">
           <Smartphone className="w-10 h-10 text-red-500" />
@@ -408,8 +399,8 @@ function PWALandingSection() {
             Add to Your Home Screen
           </h3>
           <p className="text-gray-400 leading-relaxed max-w-xl">
-            Install Retaliate AI as an app. No App Store needed. Loads instantly and
-            feels native on every device. One tap to open, every night.
+            Add the Retaliate AI web app to your home screen in a supported browser.
+            Installation is optional. An internet connection is required to save reviews and load your data.
           </p>
         </div>
       </div>
@@ -421,10 +412,10 @@ function PWALandingSection() {
             className="flex items-center gap-2 px-6 py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg transition-all shadow-lg shadow-red-900/40 text-sm uppercase tracking-wide"
           >
             <Download className="w-4 h-4" />
-            Install Free App
+            Install web app
           </button>
           <div className="flex items-center gap-2 px-4 py-2.5 bg-zinc-900/50 rounded-lg text-xs text-zinc-500">
-            ✓ No App Store &nbsp;·&nbsp; ✓ Free &nbsp;·&nbsp; ✓ All devices
+            Optional install &nbsp;·&nbsp; Trial and subscription terms still apply
           </div>
         </div>
       ) : (

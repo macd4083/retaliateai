@@ -236,7 +236,7 @@ export default function TodayV2Page() {
 
   if (loading) {
     return (
-      <AppShellV2 title="Today">
+      <AppShellV2 title="Review & Plan">
         <div className="flex h-full items-center justify-center text-zinc-400">Loading Today…</div>
       </AppShellV2>
     );
@@ -244,10 +244,10 @@ export default function TodayV2Page() {
 
   if (error) {
     return (
-      <AppShellV2 title="Today">
+      <AppShellV2 title="Review & Plan">
         <div className="flex h-full items-center justify-center p-4">
           <div className="w-full max-w-md space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-5 text-center">
-            <h2 className="font-semibold text-white">Couldn’t load Today</h2>
+            <h2 className="font-semibold text-white">Couldn’t load Review &amp; Plan</h2>
             <p className="text-sm text-zinc-400">Could not load today&apos;s review. Please try again.</p>
             <button
               type="button"
@@ -264,14 +264,14 @@ export default function TodayV2Page() {
 
   if (!state) {
     return (
-      <AppShellV2 title="Today">
+      <AppShellV2 title="Review & Plan">
         <div className="flex h-full items-center justify-center text-zinc-400">Preparing Today…</div>
       </AppShellV2>
     );
   }
 
   return (
-    <AppShellV2 title="Today">
+    <AppShellV2 title="Review & Plan">
       <div className="h-full space-y-4 overflow-y-auto p-4">
         {seedDiagnostic && (
           <section className="rounded-2xl border border-amber-700/60 bg-amber-950/30 p-4 text-sm text-amber-100">

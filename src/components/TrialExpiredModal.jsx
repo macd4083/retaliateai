@@ -76,7 +76,7 @@ export default function TrialExpiredModal({ isSecondExpiry = false, onFeedbackEx
           <div className="flex flex-col items-center text-center mb-8">
             <img src="/logo.png" alt="Retaliate AI" className="w-16 h-16 object-contain mb-4" />
             <h1 className="text-3xl font-bold text-white">
-              {isSecondExpiry ? 'Your extended trial is up.' : 'Oh! Your free trial ran up.'}
+              {isSecondExpiry ? 'Your extended trial has ended.' : 'Your free trial has ended.'}
             </h1>
             <p className="text-red-400 mt-3">
               {isSecondExpiry
@@ -86,15 +86,21 @@ export default function TrialExpiredModal({ isSecondExpiry = false, onFeedbackEx
             {!isSecondExpiry && (
               <p className="text-zinc-400 mt-2">Takes 2 minutes. Honest answers only. We actually read these.</p>
             )}
+            <p className="text-zinc-400 mt-2 text-sm">Your trial ending does not start a paid subscription. Review the price and terms before confirming checkout.</p>
           </div>
 
           {isSecondExpiry ? (
-            <a
-              href="/settings"
-              className="w-full inline-flex items-center justify-center bg-red-600 hover:bg-red-700 text-white font-bold py-3.5 rounded-xl transition-colors"
-            >
-              Upgrade Now
-            </a>
+            <div>
+              {error && <p className="text-sm text-red-400 mb-3">{error}</p>}
+              <button
+                type="button"
+                onClick={startCheckout}
+                disabled={checkoutLoading}
+                className="w-full inline-flex items-center justify-center bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-bold py-3.5 rounded-xl transition-colors"
+              >
+                {checkoutLoading ? 'Loading...' : 'Review paid plan'}
+              </button>
+            </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-5">
               <div>
@@ -138,7 +144,7 @@ export default function TrialExpiredModal({ isSecondExpiry = false, onFeedbackEx
                   disabled={checkoutLoading}
                   className="text-sm text-zinc-300 hover:text-white disabled:opacity-50 transition-colors"
                 >
-                  {checkoutLoading ? 'Loading...' : 'Already paying? Upgrade now →'}
+                  {checkoutLoading ? 'Loading...' : 'Prefer paid access? Review the plan →'}
                 </button>
               </div>
             </form>

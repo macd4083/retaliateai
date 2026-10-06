@@ -3,15 +3,18 @@ import { supabase } from '../lib/supabase/client';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Mail, Lock, ArrowLeft, Eye, EyeOff } from 'lucide-react';
 import { trackEvent, identifyUser } from '../lib/analytics';
+import { getSafeAuthReturn, getAuthCallbackUrl, getAuthResetUrl } from '../lib/authReturn';
 
 export default function Login() {
   const [searchParams] = useSearchParams();
+  const returnTo = getSafeAuthReturn(searchParams.get('next'));
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [messageType, setMessageType] = useState('');
+  const [showResendConfirmation, setShowResendConfirmation] = useState(false);
   const [isSignUp, setIsSignUp] = useState(false);
   const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [showOtpInput, setShowOtpInput] = useState(false);
@@ -22,6 +25,9 @@ export default function Login() {
   useEffect(() => {
     if (searchParams.get('signup') === 'true') {
       setIsSignUp(true);
+    }
+    if (searchParams.get('reset') === 'true') {
+      setIsForgotPassword(true);
     }
   }, [searchParams]);
 
@@ -37,6 +43,7 @@ export default function Login() {
     e.preventDefault();
     setLoading(true);
     setMessage('');
+    setShowResendConfirmation(false);
     
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
@@ -46,14 +53,36 @@ export default function Login() {
     if (error) {
       setMessage(error.message);
       setMessageType('error');
+      setShowResendConfirmation(error.code === 'email_not_confirmed' || /email not confirmed/i.test(error.message || ''));
     } else {
       identifyUser(data.user.id, { email });
       trackEvent('login_completed');
       setMessage('Login successful!');
       setMessageType('success');
-      setTimeout(() => navigate('/reflection'), 1000);
+      navigate(returnTo, { replace: true });
     }
     setLoading(false);
+  };
+
+  const handleResendConfirmation = async () => {
+    setLoading(true);
+    setMessage('');
+    try {
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email,
+        options: { emailRedirectTo: getAuthCallbackUrl(returnTo) },
+      });
+      if (error) throw error;
+      setMessage('Confirmation email sent! Check your inbox and spam folder, then sign in.');
+      setMessageType('success');
+      setShowResendConfirmation(false);
+    } catch (error) {
+      setMessage(error?.message || 'Could not resend confirmation. Please try again.');
+      setMessageType('error');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleSignup = async (e) => {
@@ -66,7 +95,7 @@ export default function Login() {
       email,
       password,
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        emailRedirectTo: getAuthCallbackUrl(returnTo),
       }
     });
 
@@ -86,6 +115,12 @@ export default function Login() {
       }
       setLoading(false);
     } else {
+      if (data?.session) {
+        trackEvent('signup_completed');
+        navigate(returnTo, { replace: true });
+        setLoading(false);
+        return;
+      }
       setSignupEmail(email);
       setSignupPassword(password);
       setShowOtpInput(true);
@@ -102,7 +137,7 @@ export default function Login() {
     setMessage('');
 
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/auth/reset-password`,
+      redirectTo: getAuthResetUrl(returnTo),
     });
 
     if (error) {
@@ -120,6 +155,7 @@ export default function Login() {
     setPassword('');
     setMessage('');
     setMessageType('');
+    setShowResendConfirmation(false);
     setShowPassword(false);
     setShowOtpInput(false);
     setSignupEmail('');
@@ -133,6 +169,7 @@ export default function Login() {
         signupPassword={signupPassword}
         onBack={() => { setShowOtpInput(false); resetForm(); }} 
         navigate={navigate} 
+        returnTo={returnTo}
       />
     );
   }
@@ -290,6 +327,16 @@ export default function Login() {
           >
             {loading ? (isSignUp ? 'Creating account...' : 'Signing in...') : (isSignUp ? 'Sign Up' : 'Sign In')}
           </button>
+          {!isSignUp && showResendConfirmation && (
+            <button
+              type="button"
+              onClick={handleResendConfirmation}
+              disabled={loading || !email}
+              className="w-full text-sm text-red-400 hover:text-red-300 disabled:opacity-50"
+            >
+              Resend confirmation email
+            </button>
+          )}
         </form>
 
         <div className="mt-6 text-center">
@@ -318,7 +365,7 @@ export default function Login() {
   );
 }
 
-function VerificationWaitingScreen({ signupEmail, signupPassword, onBack, navigate }) {
+function VerificationWaitingScreen({ signupEmail, signupPassword, onBack, navigate, returnTo }) {
   const [dots, setDots] = useState('');
   const [otp, setOtp] = useState('');
   const [otpLoading, setOtpLoading] = useState(false);
@@ -350,7 +397,7 @@ function VerificationWaitingScreen({ signupEmail, signupPassword, onBack, naviga
           if (signInData?.session) {
             clearInterval(checkInterval);
             clearInterval(dotsInterval);
-            navigate('/reflection');
+            navigate(returnTo, { replace: true });
           }
         }
       } catch (err) {
@@ -362,7 +409,7 @@ function VerificationWaitingScreen({ signupEmail, signupPassword, onBack, naviga
       clearInterval(dotsInterval);
       clearInterval(checkInterval);
     };
-  }, [signupEmail, signupPassword, navigate]);
+  }, [signupEmail, signupPassword, navigate, returnTo]);
 
   const handleVerifyOtp = async (e) => {
     e.preventDefault();
@@ -394,7 +441,7 @@ function VerificationWaitingScreen({ signupEmail, signupPassword, onBack, naviga
       
       setOtpMessage('Email verified! Redirecting...');
       setOtpMessageType('success');
-      setTimeout(() => navigate('/reflection'), 1500);
+      navigate(returnTo, { replace: true });
     }
   };
 

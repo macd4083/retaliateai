@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ArrowRight, Smartphone } from 'lucide-react';
@@ -13,7 +13,7 @@ import ReflectionSummaryCard from '../components/v2/ReflectionSummaryCard';
  * Post-first-session conversion page for guest campaign users.
  * Shows the reflection summary (via shared component) and prompts:
  *   1. Start Free Trial  (primary CTA)
- *   2. Download the App  (secondary CTA)
+ *   2. Install the web app  (secondary CTA)
  *
  * Receives session summary via React Router navigation state:
  *   { summaryCardData, streak, followThroughStats }
@@ -22,7 +22,8 @@ export default function PostSessionNextSteps() {
   const navigate = useNavigate();
   const { state } = useLocation();
   const attribution = readAttribution();
-  const { isInstallable, isIos, promptInstall } = usePWAInstall();
+  const { isInstallable, isIos, isStandalone, promptInstall } = usePWAInstall();
+  const [showInstallHelp, setShowInstallHelp] = useState(false);
 
   const summaryCardData = state?.summaryCardData || {};
   const streak = state?.streak || 0;
@@ -46,8 +47,7 @@ export default function PostSessionNextSteps() {
     if (isInstallable && !isIos) {
       await promptInstall();
     } else {
-      // Fallback: navigate to the app store or landing page with install instructions
-      navigate('/');
+      setShowInstallHelp(true);
     }
   };
 
@@ -94,13 +94,24 @@ export default function PostSessionNextSteps() {
             <ArrowRight className="w-5 h-5" />
           </button>
 
-          <button
+          {!isStandalone && <button
             onClick={handleDownloadApp}
             className="w-full flex items-center justify-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white font-medium py-4 rounded-2xl border border-zinc-700 hover:border-zinc-600 transition-colors text-base"
           >
             <Smartphone className="w-5 h-5 text-zinc-400" />
-            Download the App
-          </button>
+            Install web app
+          </button>}
+          {showInstallHelp && (
+            <p className="text-zinc-400 text-sm leading-relaxed">
+              {isIos
+                ? 'In Safari, tap Share, then Add to Home Screen.'
+                : 'In a supported browser, use the menu or address-bar install option when available.'}
+              {' '}Internet is required to save reviews and load data.
+            </p>
+          )}
+          <p className="text-zinc-500 text-xs text-center">
+            Installing is optional and does not start a subscription.
+          </p>
 
           {/* Low-emphasis dismiss */}
           <button

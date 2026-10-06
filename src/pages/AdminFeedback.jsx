@@ -28,12 +28,12 @@ export default function AdminFeedback() {
           setIsAdmin(true);
         } else {
           setIsAdmin(false);
-          navigate('/reflection', { replace: true });
+          navigate('/app', { replace: true });
         }
       })
       .catch(() => {
         setIsAdmin(false);
-        navigate('/reflection', { replace: true });
+        navigate('/app', { replace: true });
       });
   }, [user?.id, navigate]);
 

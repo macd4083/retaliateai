@@ -7,22 +7,30 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
+      registerType: 'prompt',
+      injectRegister: null,
       includeAssets: ['logo.png'],
       manifest: {
+        id: '/reflection',
         name: 'Retaliate AI',
         short_name: 'Retaliate AI',
-        description: 'The accountability system that closes the loop.',
+        description: 'Review commitments and habits, plan measured actions, and track follow-through.',
         theme_color: '#09090b',
         background_color: '#09090b',
         display: 'standalone',
         orientation: 'portrait',
-        start_url: '/reflection',
+        start_url: '/app',
         scope: '/',
         icons: [
           { src: '/android-chrome2-192x192.png', sizes: '192x192', type: 'image/png' },
           { src: '/android-chrome2-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
         ],
+      },
+      workbox: {
+        skipWaiting: false,
+        clientsClaim: false,
+        navigateFallbackDenylist: [/^\/api\//],
+        importScripts: ['/push-sw.js'],
       },
     }),
   ],

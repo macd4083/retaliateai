@@ -1,16 +1,21 @@
 import React, { useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Lock, CheckCircle, Eye, EyeOff } from 'lucide-react';
+import { getAuthLinkError, getSafeAuthReturn } from '../lib/authReturn';
+import { useAuth } from '../lib/AuthContext';
 
 export default function ResetPassword() {
+  const { completePasswordRecovery } = useAuth();
+  const [searchParams] = useSearchParams();
+  const returnTo = getSafeAuthReturn(searchParams.get('next'));
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState('');
-  const [messageType, setMessageType] = useState('');
+  const [message, setMessage] = useState(() => getAuthLinkError(window.location.search, window.location.hash));
+  const [messageType, setMessageType] = useState('error');
   const [success, setSuccess] = useState(false);
   const navigate = useNavigate();
 
@@ -40,10 +45,11 @@ export default function ResetPassword() {
       setMessage(error.message);
       setMessageType('error');
     } else {
+      completePasswordRecovery?.();
       setMessage('Password updated successfully!');
       setMessageType('success');
       setSuccess(true);
-      setTimeout(() => navigate('/Journal'), 2000);
+      setTimeout(() => navigate(returnTo, { replace: true }), 2000);
     }
     setLoading(false);
   };
@@ -56,7 +62,7 @@ export default function ResetPassword() {
             <CheckCircle className="w-8 h-8 text-green-400" />
           </div>
           <h2 className="text-2xl font-bold text-white mb-2">Password Updated!</h2>
-          <p className="text-zinc-400 mb-4">Redirecting to your journal...</p>
+          <p className="text-zinc-400 mb-4">Returning to Retaliate AI...</p>
         </div>
       </div>
     );
@@ -154,6 +160,15 @@ export default function ResetPassword() {
             {loading ? 'Updating...' : 'Update Password'}
           </button>
         </form>
+        <button
+          onClick={() => {
+            completePasswordRecovery?.();
+            navigate(`/login?reset=true&next=${encodeURIComponent(returnTo)}`, { replace: true });
+          }}
+          className="w-full mt-4 text-sm text-zinc-400 hover:text-white"
+        >
+          Request a new reset link
+        </button>
       </div>
     </div>
   );
