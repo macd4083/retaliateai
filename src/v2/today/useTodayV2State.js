@@ -23,7 +23,6 @@ import {
   loadTodayReviewState,
   reopenTodayV2Review,
   replaceTomorrowActions,
-  removeUnansweredFollowThroughItem,
   setFollowThroughCompletion,
   updateControllableFocus,
   updateDesiredDirection,
@@ -155,8 +154,10 @@ export function useTodayV2State(userId) {
     if (!state) return false;
     return normalizeTodayV2Text(tomorrowInput) !== normalizeTodayV2Text(state.tomorrowPlanInput || '')
       || normalizedTomorrowActions.join('\n') !== loadedTomorrowActions.join('\n')
+      || JSON.stringify(actionIdentities.filter((item) => normalizeTodayV2Text(item.text)).map((item) => item.persistedId || null))
+        !== JSON.stringify((state.tomorrowFragments || []).map((item) => item.id))
       || normalizeTodayV2Text(firstFiveMinutes) !== normalizeTodayV2Text(state.firstFiveMinutes || '');
-  }, [firstFiveMinutes, loadedTomorrowActions, normalizedTomorrowActions, state, tomorrowInput]);
+  }, [actionIdentities, firstFiveMinutes, loadedTomorrowActions, normalizedTomorrowActions, state, tomorrowInput]);
 
   const completionGate = React.useMemo(() => getTodayV2CompletionGate({
     followThroughItems: state?.followThroughItems || [],
@@ -245,7 +246,9 @@ export function useTodayV2State(userId) {
         ? String(draft.tomorrowInput || '')
         : next.tomorrowPlanInput || '';
       const nextTomorrowActions = draft && (draft.tomorrowPlanNeedsSync || (!normalizeTodayV2Text(next.tomorrowPlanInput) && normalizeFragmentList(next.tomorrowFragments).length === 0))
-        ? coerceTodayV2EditableFragments(Array.isArray(draft.tomorrowActions) ? '' : String(draft.tomorrowInput || ''), draft.tomorrowActions || [])
+        ? Array.isArray(draft.tomorrowActions)
+          ? draft.tomorrowActions.map((text) => String(text ?? ''))
+          : coerceTodayV2EditableFragments(String(draft.tomorrowInput || ''), [])
         : normalizeFragmentList(next.tomorrowFragments || []);
       const nextFirstFiveMinutes = draft && draft.tomorrowPlanNeedsSync
         ? String(draft.firstFiveMinutes || '')
@@ -257,18 +260,27 @@ export function useTodayV2State(userId) {
       const draftIdentities = Array.isArray(draft?.actionIdentities) ? draft.actionIdentities : [];
       const recoveringPlan = Boolean(draft?.tomorrowPlanNeedsSync);
       const identityBase = recoveringPlan && draftIdentities.length === nextTomorrowActions.length
-        && draftIdentities.every((item, index) => normalizeTodayV2Text(item.text) === nextTomorrowActions[index])
+        && draftIdentities.every((item, index) => normalizeTodayV2Text(item.text) === normalizeTodayV2Text(nextTomorrowActions[index]))
         ? draftIdentities
         : savedIdentities.map((saved) => ({
           ...saved, key: draftIdentities.find((item) => item.persistedId === saved.persistedId)?.key || saved.key,
         }));
-      const nextIdentities = (identityBase.length === nextTomorrowActions.length
-        && identityBase.every((item, index) => normalizeTodayV2Text(item.text) === nextTomorrowActions[index])
+      const identityCandidates = (identityBase.length === nextTomorrowActions.length
+        && identityBase.every((item, index) => normalizeTodayV2Text(item.text) === normalizeTodayV2Text(nextTomorrowActions[index]))
         ? identityBase
-        : reconcileActionIdentities(identityBase, nextTomorrowActions)).map((item) => {
+        : reconcileActionIdentities(identityBase, nextTomorrowActions));
+      const assignedIds = new Set();
+      const nextIdentities = identityCandidates.map((item) => {
+        const validId = item.persistedId && savedIdentities.some((saved) => saved.persistedId === item.persistedId)
+          && !assignedIds.has(item.persistedId) ? item.persistedId : null;
+        if (validId) assignedIds.add(validId);
+        return { ...item, persistedId: validId };
+      }).map((item) => {
+        if (item.persistedId || (recoveringPlan && draftIdentities.length)) return item;
         const matches = savedIdentities.filter((saved) => saved.text === item.text);
-        const persistedId = savedIdentities.some((saved) => saved.persistedId === item.persistedId) ? item.persistedId : null;
-        return { ...item, persistedId: matches.length === 1 ? matches[0].persistedId : persistedId };
+        if (matches.length !== 1 || assignedIds.has(matches[0].persistedId)) return item;
+        assignedIds.add(matches[0].persistedId);
+        return { ...item, persistedId: matches[0].persistedId };
       });
       identitiesRef.current = nextIdentities;
       setActionIdentities(nextIdentities);
@@ -331,7 +343,7 @@ export function useTodayV2State(userId) {
       controllableFocus,
       controllableFocusNeedsSync: controllableFocusDirty,
       tomorrowInput,
-      tomorrowActions: normalizedTomorrowActions,
+      tomorrowActions,
       customTomorrowActions,
       actionIdentities,
       scheduleBlocks,
@@ -340,7 +352,7 @@ export function useTodayV2State(userId) {
       tomorrowPlanNeedsSync: tomorrowPlanDirty,
       updatedAt: new Date().toISOString(),
     });
-  }, [customTomorrowActions, actionIdentities, scheduleBlocks, scheduleSaveStatus, controllableFocus, controllableFocusDirty, desiredDirection, desiredDirectionDirty, firstFiveMinutes, normalizedTomorrowActions, state?.todayLocalDate, tomorrowInput, tomorrowPlanDirty, userId]);
+  }, [tomorrowActions, customTomorrowActions, actionIdentities, scheduleBlocks, scheduleSaveStatus, controllableFocus, controllableFocusDirty, desiredDirection, desiredDirectionDirty, firstFiveMinutes, normalizedTomorrowActions, state?.todayLocalDate, tomorrowInput, tomorrowPlanDirty, userId]);
 
   const flushDesiredDirection = React.useCallback(async () => {
     const reviewId = stateRef.current?.review?.id;
@@ -427,8 +439,17 @@ export function useTodayV2State(userId) {
   const flushTomorrowPlan = React.useCallback(async () => {
     const currentState = stateRef.current;
     if (!currentState) return;
+    if (identitiesRef.current.some((item) => !normalizeTodayV2Text(item.text))) {
+      const message = 'Finish editing empty actions or remove them before saving the plan.';
+      setTomorrowPlanError(message);
+      setTomorrowPlanSaveStatus('error');
+      setFirstFiveMinutesSaveStatus('error');
+      throw new Error(message);
+    }
     const currentDirty = normalizeTodayV2Text(tomorrowInputRef.current) !== normalizeTodayV2Text(currentState.tomorrowPlanInput)
       || coerceTodayV2EditableFragments('', tomorrowActionsRef.current).join('\n') !== normalizeFragmentList(currentState.tomorrowFragments).join('\n')
+      || JSON.stringify(identitiesRef.current.filter((item) => normalizeTodayV2Text(item.text)).map((item) => item.persistedId || null))
+        !== JSON.stringify((currentState.tomorrowFragments || []).map((item) => item.id))
       || normalizeTodayV2Text(firstFiveMinutesRef.current) !== normalizeTodayV2Text(currentState.firstFiveMinutes);
     if (!currentDirty) {
       setTomorrowPlanSaveStatus('saved');
@@ -474,8 +495,9 @@ export function useTodayV2State(userId) {
         if (generation !== loadGenerationRef.current) return;
         const savedRows = savedPlan.savedFragments || [];
         const savedIds = new Map(snapshot.map((item, index) => [item.key, savedRows[index]?.id || null]));
-        identitiesRef.current = identitiesRef.current.map((item) => savedIds.has(item.key)
-          ? { ...item, persistedId: savedIds.get(item.key) } : item);
+        identitiesRef.current = identitiesRef.current.map((item) => ({
+          ...item, persistedId: savedIds.get(item.key) || null,
+        }));
         setActionIdentities(identitiesRef.current);
         const nextState = {
           ...stateRef.current,
@@ -672,7 +694,7 @@ export function useTodayV2State(userId) {
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden') {
-        void flushAll();
+        void flushAll().catch(() => {});
         return;
       }
       void checkForDayRollover();
@@ -687,11 +709,11 @@ export function useTodayV2State(userId) {
     };
 
     const handlePageHide = () => {
-      void flushAll();
+      void flushAll().catch(() => {});
     };
 
     const handleOnline = () => {
-      void flushAll();
+      void flushAll().catch(() => {});
       void checkForDayRollover();
     };
 
@@ -743,7 +765,7 @@ export function useTodayV2State(userId) {
     setTomorrowPlanSaveStatus('saving');
     setFirstFiveMinutesSaveStatus('saving');
     const timeoutId = window.setTimeout(() => {
-      void flushTomorrowPlan();
+      void flushTomorrowPlan().catch(() => {});
     }, 800);
     return () => window.clearTimeout(timeoutId);
   }, [flushTomorrowPlan, state, tomorrowPlanDirty]);
@@ -773,19 +795,6 @@ export function useTodayV2State(userId) {
     });
   }, []);
 
-  const removeFollowThrough = React.useCallback(async (fragmentId) => {
-    const item = stateRef.current?.followThroughItems?.find((row) => row.id === fragmentId);
-    if (!userId || !item || item.answered_at || item.completion_state !== TODAY_V2_COMMITMENT_STATES.UNANSWERED) {
-      throw new Error('Only unanswered follow-through items can be removed');
-    }
-    const removedId = await removeUnansweredFollowThroughItem(userId, fragmentId);
-    setState((previous) => previous ? {
-      ...previous, followThroughItems: previous.followThroughItems.filter((row) => row.id !== removedId),
-      todaySchedules: (previous.todaySchedules || []).filter((row) => row.source_type !== 'action' || row.source_id !== removedId),
-    } : previous);
-    return removedId;
-  }, [userId]);
- 
   const saveDesiredDirection = React.useCallback(async () => flushDesiredDirection(), [flushDesiredDirection]);
 
   const saveHabitDefinition = React.useCallback(async (habitDraft) => {
@@ -914,7 +923,6 @@ export function useTodayV2State(userId) {
     splitTomorrowActions,
     saveTomorrowPlan,
     saveCommitmentCompletion,
-    removeFollowThrough,
     saveDesiredDirection,
     saveHabitDefinition,
     archiveHabitDefinition,

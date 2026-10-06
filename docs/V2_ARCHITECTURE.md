@@ -261,14 +261,16 @@ dashboard steps or verify production authorization without real credentials.
 4. Register the exact authorized redirect URI:
    - Development: `http://localhost:3000/api/google-calendar?action=callback`
      when running Vercel's local API server on port 3000.
-   - Production: `https://YOUR_RETALIATE_HOST/api/google-calendar?action=callback`.
-     Replace `YOUR_RETALIATE_HOST` with the actual deployment's canonical host;
-     use exactly that URL for the environment variable too.
+   - Production: `https://retaliateai.com/api/google-calendar?action=callback`,
+     matching this repository's canonical-domain intent in `public/sitemap.xml`.
+     Set `APP_ORIGIN=https://retaliateai.com` and use exactly that callback for
+     `GOOGLE_CALENDAR_REDIRECT_URI`. If the deployment uses a different canonical
+     host, explicitly register and configure its matching callback instead.
    - Register previews separately if needed; do not accept arbitrary preview
      hosts/return URLs dynamically. A Vite-only server on 5173 does not run the
      Vercel API; do not register its URL unless an actual API proxy is configured.
 5. Authorized JavaScript origins, if configured, are `http://localhost:3000`
-   and `https://YOUR_RETALIATE_HOST`, without paths. They do not replace redirect
+   and `https://retaliateai.com`, without paths. They do not replace redirect
    URI registration.
 6. Request only these two read-only permissions:
    `https://www.googleapis.com/auth/calendar.events.readonly` and
@@ -322,6 +324,10 @@ dedicated callback action. Ensure `/api/google-calendar` reaches the function
 instead of the SPA fallback, including the `action=callback` query. Deploy both
 API and frontend, not only static Vite output. Existing function memory/time
 limits apply; calendar count, pagination and retries must remain bounded.
+Use a supported Vercel Node runtime with native `fetch` and
+`AbortSignal.timeout` (Node 20 or newer). For local OAuth/API QA, use the Vercel
+CLI's `vercel dev --listen 3000` with the server variables above; `npm run dev`
+alone serves the frontend, not the Calendar API.
 Some Vercel plans limit function count: the repository already has other API
 functions, so verify the deployed plan's allowance before adding this endpoint.
 
@@ -363,3 +369,11 @@ Before rollout, use actual development and production test accounts to verify:
 
 Desktop/phone screenshots from a mocked fixture demonstrate layout only; real
 device and real-account QA remain required.
+
+- [Desktop planner screenshot](screenshots/schedule-tomorrow-desktop.png)
+- [Phone planner screenshot](screenshots/schedule-tomorrow-phone.png)
+
+Chromium fixture checks exercised tap scheduling, overlap confirmation, time
+editing and unscheduling, and confirmed no horizontal page overflow at 390px.
+Google responses were mocked; real touch-drag, OAuth consent and next-day
+production behavior still need the manual checks above.

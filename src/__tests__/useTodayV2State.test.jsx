@@ -17,7 +17,6 @@ const serviceMocks = vi.hoisted(() => ({
   loadTodayReviewState: vi.fn(),
   reopenTodayV2Review: vi.fn(),
   replaceTomorrowActions: vi.fn(),
-  removeUnansweredFollowThroughItem: vi.fn(),
   setFollowThroughCompletion: vi.fn(),
   updateDesiredDirection: vi.fn(),
   updateControllableFocus: vi.fn(),
@@ -362,22 +361,6 @@ describe('useTodayV2State', () => {
     expect(JSON.parse(window.localStorage.getItem('today-v2-draft:user-1:2026-09-28')).scheduleNeedsSync).toBe(true);
   });
 
-  it('removes only unanswered follow-through items', async () => {
-    serviceMocks.loadTodayReviewState.mockResolvedValue({
-      ...makeState(), followThroughItems: [
-        { id: 'unanswered', completion_state: 'unanswered', answered_at: null },
-        { id: 'answered', completion_state: 'kept', answered_at: '2026-09-28T10:00:00Z' },
-      ],
-    });
-    serviceMocks.removeUnansweredFollowThroughItem.mockResolvedValue('unanswered');
-    await renderHook();
-    await act(async () => { await expect(latest.removeFollowThrough('answered')).rejects.toThrow(/unanswered/); });
-    expect(serviceMocks.removeUnansweredFollowThroughItem).not.toHaveBeenCalled();
-    await act(async () => { await latest.removeFollowThrough('unanswered'); });
-    expect(serviceMocks.removeUnansweredFollowThroughItem).toHaveBeenCalledWith('user-1', 'unanswered');
-    expect(latest.state.followThroughItems.map((row) => row.id)).toEqual(['answered']);
-  });
-
   it('saves deleting the last action as an empty explicit list, without re-splitting the paragraph', async () => {
     await renderHook();
     await act(async () => { latest.setTomorrowInput('Write'); });
@@ -387,6 +370,114 @@ describe('useTodayV2State', () => {
       rawPlanText: 'Write', actionTexts: [], explicitActions: true,
     }));
     expect(latest.tomorrowActions).toEqual([]);
+  });
+
+  it('saves identity-only duplicate resplits before scheduling new sources', async () => {
+    serviceMocks.loadTodayReviewState.mockResolvedValue({
+      ...makeState(), scheduleAvailable: true, tomorrowPlanInput: 'Write and Write',
+      tomorrowFragments: [
+        { id: 'old-first', fragment_order: 0, fragment_text: 'Write', normalized_fragment_text: 'Write' },
+        { id: 'old-second', fragment_order: 1, fragment_text: 'Write', normalized_fragment_text: 'Write' },
+      ],
+      tomorrowSchedules: [{ source_type: 'action', source_id: 'old-first',
+        starts_at: '2026-09-29T10:00:00Z', ends_at: '2026-09-29T10:30:00Z' }],
+    });
+    await renderHook();
+    const oldKeys = latest.tomorrowActionKeys;
+    await act(async () => { latest.splitTomorrowActions(); });
+    expect(latest.tomorrowActions).toEqual(['Write', 'Write']);
+    expect(latest.tomorrowActionKeys.every((key) => !oldKeys.includes(key))).toBe(true);
+    expect(latest.scheduleBlocks).toEqual([]);
+    await act(async () => {
+      latest.updateSchedule(latest.tomorrowActionKeys[0], { starts_at: '2026-09-29T12:00:00Z' });
+      await latest.flushSchedule();
+    });
+    expect(serviceMocks.replaceTomorrowActions).toHaveBeenCalledWith(expect.objectContaining({
+      actionTexts: ['Write', 'Write'], fragmentIds: [null, null],
+    }));
+    expect(scheduleMocks.replaceSchedule).toHaveBeenCalledWith(expect.objectContaining({
+      blocks: [expect.objectContaining({ source_id: 'fragment-0' })],
+    }));
+    expect(latest.scheduleSaveStatus).toBe('saved');
+  });
+
+  it('does not reuse persisted identities or schedules after delete and re-add of identical text', async () => {
+    serviceMocks.loadTodayReviewState.mockResolvedValue({
+      ...makeState(), scheduleAvailable: true, tomorrowPlanInput: 'Write',
+      tomorrowFragments: [{ id: 'old-id', fragment_order: 0, fragment_text: 'Write', normalized_fragment_text: 'Write' }],
+      tomorrowSchedules: [{ source_type: 'action', source_id: 'old-id',
+        starts_at: '2026-09-29T10:00:00Z', ends_at: '2026-09-29T10:30:00Z' }],
+    });
+    await renderHook();
+    const oldKey = latest.tomorrowActionKeys[0];
+    await act(async () => {
+      latest.removeTomorrowAction(0);
+      latest.setTomorrowActions(['Write']);
+    });
+    expect(latest.tomorrowActions).toEqual(['Write']);
+    expect(latest.tomorrowActionKeys[0]).not.toBe(oldKey);
+    expect(latest.scheduleBlocks).toEqual([]);
+    await act(async () => { await latest.saveTomorrowPlan(); });
+    expect(serviceMocks.replaceTomorrowActions).toHaveBeenCalledWith(expect.objectContaining({ fragmentIds: [null] }));
+  });
+
+  it('prioritizes persisted draft identity over another action with the same edited text', async () => {
+    serviceMocks.loadTodayReviewState.mockResolvedValue({
+      ...makeState(), scheduleAvailable: true, tomorrowPlanInput: 'Write and Walk',
+      tomorrowFragments: [
+        { id: 'id1', fragment_order: 0, fragment_text: 'Write', normalized_fragment_text: 'Write' },
+        { id: 'id2', fragment_order: 1, fragment_text: 'Walk', normalized_fragment_text: 'Walk' },
+      ],
+    });
+    window.localStorage.setItem('today-v2-draft:user-1:2026-09-28', JSON.stringify({
+      tomorrowInput: 'Write and Walk', tomorrowActions: ['Walk', 'Walk'], tomorrowPlanNeedsSync: true,
+      actionIdentities: [
+        { key: 'key1', text: 'Walk', persistedId: 'id1' },
+        { key: 'key2', text: 'Walk', persistedId: 'id2' },
+      ],
+      scheduleNeedsSync: true,
+      scheduleBlocks: [{ source_key: 'key1', source_type: 'action', source_id: 'id1',
+        starts_at: '2026-09-29T10:00:00Z', ends_at: '2026-09-29T10:30:00Z' }],
+    }));
+    await renderHook();
+    expect(latest.tomorrowActionItems.map((item) => item.persistedId)).toEqual(['id1', 'id2']);
+    expect(latest.scheduleBlocks[0].source_key).toBe('key1');
+    await act(async () => { await latest.saveTomorrowPlan(); });
+    expect(serviceMocks.replaceTomorrowActions).toHaveBeenCalledWith(expect.objectContaining({ fragmentIds: ['id1', 'id2'] }));
+  });
+
+  it('defers blank-row autosave and retains scheduled identity through clear, pause, reload and retype', async () => {
+    serviceMocks.loadTodayReviewState.mockResolvedValue({
+      ...makeState(), scheduleAvailable: true, tomorrowPlanInput: 'Write',
+      tomorrowFragments: [{ id: 'retained-id', fragment_order: 0, fragment_text: 'Write', normalized_fragment_text: 'Write' }],
+      tomorrowSchedules: [{ source_type: 'action', source_id: 'retained-id',
+        starts_at: '2026-09-29T10:00:00Z', ends_at: '2026-09-29T10:30:00Z' }],
+    });
+    await renderHook();
+    const key = latest.tomorrowActionKeys[0];
+    await act(async () => { latest.editTomorrowAction(0, ''); });
+    await act(async () => {
+      vi.advanceTimersByTime(801);
+      await Promise.resolve();
+    });
+    expect(serviceMocks.replaceTomorrowActions).not.toHaveBeenCalled();
+    expect(latest.tomorrowPlanError).toMatch(/Finish editing empty actions or remove/);
+    expect(latest.scheduleBlocks[0]).toMatchObject({ source_key: key, source_id: 'retained-id' });
+    await act(async () => { await latest.load(); });
+    expect(latest.tomorrowActions).toEqual(['']);
+    expect(latest.tomorrowActionItems[0]).toMatchObject({ id: key, persistedId: 'retained-id' });
+    expect(latest.scheduleBlocks[0].source_key).toBe(key);
+    serviceMocks.replaceTomorrowActions.mockImplementationOnce(async ({ rawPlanText, actionTexts, fragmentIds }) => ({
+      rawPlanText, fragments: actionTexts, savedFragments: actionTexts.map((text, index) => ({
+        id: fragmentIds[index], fragment_order: index, fragment_text: text, normalized_fragment_text: text,
+      })),
+    }));
+    await act(async () => { latest.editTomorrowAction(0, 'Replacement'); });
+    await act(async () => { await latest.saveTomorrowPlan(); });
+    expect(serviceMocks.replaceTomorrowActions.mock.calls[0][0].fragmentIds).toEqual(['retained-id']);
+    expect(latest.tomorrowActions).toEqual(['Replacement']);
+    expect(latest.tomorrowActionKeys[0]).toBe(key);
+    expect(latest.scheduleBlocks[0]).toMatchObject({ source_key: key, source_id: 'retained-id' });
   });
 
   it('drains schedule edits made during atomic replacement without stale overwrite', async () => {

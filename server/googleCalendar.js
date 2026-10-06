@@ -296,9 +296,10 @@ export function createGoogleCalendarHandler({ env = process.env, supabase, fetch
         return res.status(200).json({ connected: false, selectedCalendarIds: [] });
       }
       let config;
+      let configError;
       try { config = configuration(env); } catch (error) {
-        if (action === 'status') return res.status(200).json({ configured: false, schemaAvailable: false, connected: false, selectedCalendarIds: [], message: error.message });
-        throw error;
+        if (action !== 'status') throw error;
+        configError = error;
       }
       if (req.method === 'POST' && req.headers?.origin && req.headers.origin !== config.origin) fail(403, 'invalid_origin', 'Request origin is not allowed.');
       if (action === 'callback') {
@@ -333,13 +334,17 @@ export function createGoogleCalendarHandler({ env = process.env, supabase, fetch
         return res.redirect(303, `${config.origin}${returnPath}?googleCalendar=connected`);
       }
       if (action === 'status') {
+        let row;
         try {
-          const row = await connection(userId);
+          row = await connection(userId);
           storage(await database().from(STATES).select('state_hash').limit(0));
           storage(await database().rpc('today_v2_consume_google_state', { p_state_hash: hash(randomBytes(32)) }));
-          return res.status(200).json({ configured: true, schemaAvailable: true, connected: Boolean(row), selectedCalendarIds: row?.selected_calendar_ids || [] });
+          return res.status(200).json({ configured: Boolean(config), schemaAvailable: true, connected: Boolean(row),
+            selectedCalendarIds: row?.selected_calendar_ids || [], ...(configError ? { message: configError.message } : {}) });
         } catch {
-          return res.status(200).json({ configured: true, schemaAvailable: false, connected: false, selectedCalendarIds: [], message: 'Google Calendar storage is unavailable. Apply the Google Calendar database migration.' });
+          return res.status(200).json({ configured: Boolean(config), schemaAvailable: false, connected: Boolean(row),
+            selectedCalendarIds: row?.selected_calendar_ids || [],
+            message: configError?.message || 'Google Calendar storage is unavailable. Apply the Google Calendar database migration.' });
         }
       }
       if (action === 'connect') {

@@ -61,9 +61,8 @@ describe('TodayV2 SQL contract', () => {
     expect(stablePlanSql).toContain('if v_entry.i is null then');
     expect(stablePlanSql).toContain('where id = v_entry.i and user_id = v_user_id and target_local_date = p_target_local_date');
     expect(stablePlanSql).not.toContain('on conflict (user_id, target_local_date, fragment_order)');
-    expect(sql).toContain('create policy "today_v2 unanswered fragments delete"');
-    expect(sql).toContain("using (auth.uid() = user_id and completion_state = 'unanswered')");
-    expect(sql).toContain('grant delete on public.today_v2_commitment_fragments to authenticated;');
+    expect(sql).not.toContain('grant delete on public.today_v2_commitment_fragments to authenticated;');
+    expect(sql).not.toContain('create policy "today_v2 unanswered fragments delete"');
     expect(sql).toContain('create or replace function public.today_v2_replace_schedule(');
     expect(sql).toContain('p_target_local_date date, p_timezone_name text, p_blocks jsonb');
     expect(sql).toContain('returns setof public.today_v2_schedule_blocks');

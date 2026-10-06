@@ -4,6 +4,7 @@ import { getScheduleDateBounds } from '../today/scheduling';
 
 const memoryCache = new Map();
 let cacheOwner = null;
+let cacheGeneration = 0;
 const buttonClass = 'rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-200 hover:border-zinc-500 disabled:opacity-50';
 
 async function calendarRequest(action, body, params = {}) {
@@ -44,24 +45,27 @@ export default function GoogleCalendarConnection({ userId, localDate, timezone =
   const refresh = React.useCallback(async () => {
     if (!userId) return;
     const generation = ++refreshGeneration.current;
+    const cacheVersion = cacheGeneration;
+    const isCurrent = () => generation === refreshGeneration.current && cacheVersion === cacheGeneration;
     setBusy(true);
     setError('');
+    setStale(memoryCache.has(cacheKey));
     lastRefresh.current = Date.now();
     try {
       const nextStatus = await calendarRequest('status');
-      if (generation !== refreshGeneration.current) return;
+      if (!isCurrent()) return;
       setStatus(nextStatus);
       setReconnect(false);
       if (nextStatus.message) setError(nextStatus.message);
       if (nextStatus.connected) {
         const list = await calendarRequest('calendars');
-        if (generation !== refreshGeneration.current) return;
+        if (!isCurrent()) return;
         setCalendars(list.calendars || []);
         setSelected(list.selectedCalendarIds || nextStatus.selectedCalendarIds || []);
         if (localDate && !settings) {
           const bounds = getScheduleDateBounds(localDate, timezone);
           const result = await calendarRequest('events', undefined, { timeMin: bounds.starts_at, timeMax: bounds.ends_at });
-          if (generation !== refreshGeneration.current) return;
+          if (!isCurrent()) return;
           const events = result.events || [];
           memoryCache.set(cacheKey, events);
           if (memoryCache.size > 14) memoryCache.delete(memoryCache.keys().next().value);
@@ -73,7 +77,7 @@ export default function GoogleCalendarConnection({ userId, localDate, timezone =
       }
       setStale(false);
     } catch (failure) {
-      if (generation !== refreshGeneration.current) return;
+      if (!isCurrent()) return;
       setError(failure.message);
       setReconnect(Boolean(failure.reconnect));
       setStale(memoryCache.has(cacheKey));
@@ -86,9 +90,10 @@ export default function GoogleCalendarConnection({ userId, localDate, timezone =
     if (cacheOwner !== userId) {
       memoryCache.clear();
       cacheOwner = userId;
+      cacheGeneration += 1;
     }
     setStatus(null);
-    setStale(false);
+    setStale(memoryCache.has(cacheKey));
     eventsCallback.current?.(memoryCache.get(cacheKey) || []);
     void refresh();
     const resume = () => {
@@ -134,6 +139,8 @@ export default function GoogleCalendarConnection({ userId, localDate, timezone =
     setBusy(true);
     try {
       await calendarRequest('disconnect', {});
+      cacheGeneration += 1;
+      refreshGeneration.current += 1;
       for (const key of memoryCache.keys()) if (key.startsWith(`${userId}:`)) memoryCache.delete(key);
       setStatus({ connected: false });
       setCalendars([]);

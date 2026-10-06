@@ -18,7 +18,6 @@ import {
   loadTodayReviewState,
   reopenTodayV2Review,
   replaceTomorrowActions,
-  removeUnansweredFollowThroughItem,
   setFollowThroughCompletion,
   seedDefaultHabits,
   updateControllableFocus,
@@ -46,14 +45,6 @@ function createThenableBuilder(result, tracker = {}) {
     },
     update(payload) {
       tracker.update = payload;
-      return this;
-    },
-    delete() {
-      tracker.delete = true;
-      return this;
-    },
-    is(column, value) {
-      tracker.is = [...(tracker.is || []), [column, value]];
       return this;
     },
     eq(column, value) {
@@ -306,18 +297,6 @@ describe('TodayV2 repository', () => {
       schedule_weekdays: [0, 1, 2, 3, 4, 5, 6],
       display_order: 2,
     });
-  });
-
-  it('removes only owned unanswered fragments and rejects a concurrent answer', async () => {
-    const tracker = {};
-    supabaseMock.from.mockReturnValue(createThenableBuilder({ data: { id: 'fragment-id' }, error: null }, tracker));
-    await expect(removeUnansweredFollowThroughItem('user-1', 'fragment-id')).resolves.toBe('fragment-id');
-    expect(tracker.delete).toBe(true);
-    expect(tracker.eq).toContainEqual(['user_id', 'user-1']);
-    expect(tracker.eq).toContainEqual(['completion_state', 'unanswered']);
-    expect(tracker.is).toContainEqual(['answered_at', null]);
-    supabaseMock.from.mockReturnValue(createThenableBuilder({ data: null, error: null }));
-    await expect(removeUnansweredFollowThroughItem('user-1', 'fragment-id')).rejects.toThrow(/unanswered/);
   });
 
   it('persists completion state updates with the matching answered_at behavior', async () => {

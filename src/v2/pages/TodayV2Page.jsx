@@ -168,7 +168,7 @@ export default function TodayV2Page() {
     tomorrowInput,
     setTomorrowInput,
     tomorrowActions,
-    tomorrowActionKeys,
+    tomorrowActionItems,
     editTomorrowAction,
     removeTomorrowAction,
     removeFollowThrough,
@@ -500,7 +500,7 @@ export default function TodayV2Page() {
           {tomorrowActions.length > 0 && (
             <ul className="space-y-2">
               {tomorrowActions.map((action, index) => (
-                <li key={tomorrowActionKeys?.[index] || index} className="flex items-center gap-2 rounded-lg border border-zinc-800 p-2 text-sm">
+                <li key={tomorrowActionItems?.[index]?.id || index} className="flex items-center gap-2 rounded-lg border border-zinc-800 p-2 text-sm">
                   {index === 0 && <span className="text-xs font-semibold text-red-300">Primary</span>}
                   <input
                     readOnly={readOnly}
@@ -552,6 +552,12 @@ export default function TodayV2Page() {
             timezone={state.timezoneName}
             items={schedulerItems}
             blocks={scheduleBlocks}
+            contextBlocks={(state.todaySchedules || []).map((block) => {
+              const sourceId = block.source_id || block.commitment_fragment_id || block.habit_definition_id;
+              const action = state.followThroughItems.find((item) => item.id === sourceId);
+              const habit = (state.habitOccurrences || []).find((item) => item.habit_definition_id === sourceId);
+              return { ...block, label: action ? action.normalized_fragment_text || action.fragment_text : habit?.snapshot_name || 'Previous-day plan' };
+            })}
             available={scheduleAvailable}
             readOnly={readOnly}
             saveStatus={scheduleSaveStatus}

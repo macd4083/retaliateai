@@ -35,6 +35,14 @@ describe('zoned scheduling', () => {
       expect((Date.parse(bounds.ends_at) - Date.parse(bounds.starts_at)) / 3600000).toBe(hours);
     }
   });
+  it('uses the first real instant when a timezone skips local midnight', () => {
+    const bounds = getScheduleDateBounds('2026-09-06', 'America/Santiago');
+    expect(bounds).toEqual({
+      starts_at: '2026-09-06T04:00:00.000Z',
+      ends_at: '2026-09-07T03:00:00.000Z',
+    });
+    expect(() => zonedLocalTimeToTimestamp('2026-09-06', '00:30', 'America/Santiago')).toThrow(/gap/);
+  });
   it('snaps by fifteen minutes, defaults to thirty, allows midnight crossing up to 24 hours', () => {
     expect(snapScheduleMinutes(37)).toBe(30);
     const block = normalizeScheduleBlock({ starts_at: '2026-09-29T23:45:00Z' });

@@ -55,9 +55,26 @@ export function zonedLocalTimeToTimestamp(localDate, localTime, timezoneName, di
 }
 
 export function getScheduleDateBounds(localDate, timezoneName) {
+  const startOfDate = (date) => {
+    try {
+      return zonedLocalTimeToTimestamp(date, '00:00', timezoneName, 'earlier');
+    } catch (error) {
+      if (!/DST gap/.test(error.message)) throw error;
+      // Some zones jump forward at midnight: the date starts at its first real minute.
+      for (let minute = 1; minute < 1440; minute += 1) {
+        const time = `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`;
+        try {
+          return zonedLocalTimeToTimestamp(date, time, timezoneName, 'earlier');
+        } catch (timeError) {
+          if (!/DST gap/.test(timeError.message)) throw timeError;
+        }
+      }
+      throw new Error('This local date does not exist in the selected timezone');
+    }
+  };
   return {
-    starts_at: zonedLocalTimeToTimestamp(localDate, '00:00', timezoneName, 'earlier'),
-    ends_at: zonedLocalTimeToTimestamp(addDaysToLocalDate(localDate, 1), '00:00', timezoneName, 'earlier'),
+    starts_at: startOfDate(localDate),
+    ends_at: startOfDate(addDaysToLocalDate(localDate, 1)),
   };
 }
 

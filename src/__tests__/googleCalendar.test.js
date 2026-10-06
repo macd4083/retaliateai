@@ -136,9 +136,29 @@ describe('secure read-only Google Calendar backend', () => {
   it('returns a useful safe missing-configuration status', async () => {
     handler = createGoogleCalendarHandler({ env: { ...ENV, GOOGLE_CALENDAR_CLIENT_SECRET: '' }, supabase: db });
     const res = await call('status');
-    expect(res.body).toMatchObject({ configured: false, connected: false, schemaAvailable: false });
+    expect(res.body).toMatchObject({ configured: false, connected: false, schemaAvailable: true });
     expect(res.body.message).toContain('GOOGLE_CALENDAR_CLIENT_SECRET');
     expect(JSON.stringify(res.body)).not.toContain(ENV.SUPABASE_SERVICE_ROLE_KEY);
+  });
+  it('reports an existing connection without decryption when Google configuration is removed', async () => {
+    connected();
+    db.connections.get(USER).tokens_encrypted = 'unreadable-after-lost-key';
+    handler = createGoogleCalendarHandler({ env: { ...ENV, GOOGLE_CALENDAR_CLIENT_SECRET: '', GOOGLE_CALENDAR_ENCRYPTION_KEY: '' }, supabase: db, fetchImpl });
+    const res = await call('status');
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({ configured: false, schemaAvailable: true, connected: true, selectedCalendarIds: ['primary'] });
+    expect(res.body.message).toContain('GOOGLE_CALENDAR_ENCRYPTION_KEY');
+    expect(JSON.stringify(res.body)).not.toContain('unreadable-after-lost-key');
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect((await call('disconnect')).statusCode).toBe(200);
+    expect(db.connections.has(USER)).toBe(false);
+  });
+  it('still reports an existing connection when missing Google configuration coincides with unavailable state schema', async () => {
+    connected();
+    handler = createGoogleCalendarHandler({ env: { ...ENV, GOOGLE_CALENDAR_CLIENT_SECRET: '' }, supabase: db });
+    db.rpc.mockResolvedValueOnce({ error: { message: 'RPC missing' } });
+    const res = await call('status');
+    expect(res.body).toMatchObject({ configured: false, schemaAvailable: false, connected: true, selectedCalendarIds: ['primary'] });
   });
   it('detects unavailable schema and the required atomic RPC', async () => {
     db.rpc.mockResolvedValueOnce({ error: { message: 'RPC missing' } });

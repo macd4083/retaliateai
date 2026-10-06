@@ -144,9 +144,7 @@ end;
 $$;
 set local role authenticated;
 do $$
-declare
-  v_fragment uuid;
-  v_deleted integer;
+declare v_fragment uuid;
 begin
   assert not exists (select 1 from public.today_v2_schedule_blocks where user_id <> auth.uid());
   select id into v_fragment from public.today_v2_replace_plan_stable(
@@ -155,15 +153,6 @@ begin
     jsonb_build_array(jsonb_build_object('commitment_fragment_id',v_fragment,
       'starts_at','2099-01-07T10:00:00Z','ends_at','2099-01-07T11:00:00Z')));
   assert exists (select 1 from public.today_v2_schedule_blocks where commitment_fragment_id = v_fragment);
-  delete from public.today_v2_commitment_fragments where id = v_fragment and user_id = auth.uid() and completion_state = 'unanswered';
-  assert not exists (select 1 from public.today_v2_commitment_fragments where id = v_fragment);
-  assert not exists (select 1 from public.today_v2_schedule_blocks where commitment_fragment_id = v_fragment), 'Owner deletion cascades schedule';
-  delete from public.today_v2_commitment_fragments where fragment_text = 'B';
-  get diagnostics v_deleted = row_count;
-  assert v_deleted = 0, 'Answered fragments cannot be deleted';
-  delete from public.today_v2_commitment_fragments where user_id = '00000000-0000-4000-8000-000000000072';
-  get diagnostics v_deleted = row_count;
-  assert v_deleted = 0, 'Foreign fragments cannot be deleted';
   perform pg_temp.expect_failure('select * from public.today_v2_google_oauth_states');
   perform pg_temp.expect_failure('select * from public.today_v2_consume_google_state(''test-expired'')');
   perform set_config('request.jwt.claim.sub','',true);

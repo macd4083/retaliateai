@@ -92,10 +92,7 @@ grant select on public.today_v2_schedule_blocks to authenticated;
 grant all on public.today_v2_schedule_blocks to service_role;
 
 drop policy if exists "today_v2 unanswered fragments delete" on public.today_v2_commitment_fragments;
-create policy "today_v2 unanswered fragments delete" on public.today_v2_commitment_fragments
-  for delete to authenticated
-  using (auth.uid() = user_id and completion_state = 'unanswered');
-grant delete on public.today_v2_commitment_fragments to authenticated;
+revoke delete on public.today_v2_commitment_fragments from authenticated;
 
 create or replace function public.today_v2_replace_plan_stable(
   p_target_local_date date, p_source_local_date date, p_timezone_name text,

@@ -233,20 +233,6 @@ export async function setFollowThroughCompletion(fragmentId, completionState) {
   return data;
 }
 
-export async function removeUnansweredFollowThroughItem(userId, fragmentId) {
-  const { data, error } = await supabase.from(TODAY_V2_TABLES.COMMITMENT_FRAGMENTS)
-    .delete()
-    .eq('user_id', userId)
-    .eq('id', fragmentId)
-    .eq('completion_state', TODAY_V2_COMMITMENT_STATES.UNANSWERED)
-    .is('answered_at', null)
-    .select('id')
-    .maybeSingle();
-  if (error) throw error;
-  if (!data) throw new Error('Only unanswered follow-through items can be removed');
-  return data.id;
-}
-
 export async function addManualFollowThroughItem(userId, localDate, actionText, actionOrder, timezoneName) {
   const { data, error } = await supabase
     .from(TODAY_V2_TABLES.COMMITMENT_FRAGMENTS)

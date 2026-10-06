@@ -36,7 +36,7 @@ describe('GoogleCalendarConnection UI contract', () => {
     document.body.appendChild(container);
     root = createRoot(container);
   });
-  afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
+  afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); window.history.replaceState({}, '', '/'); });
 
   it('uses authenticated API requests and a timezone-aware 25-hour DST date range', async () => {
     await render();
@@ -91,5 +91,82 @@ describe('GoogleCalendarConnection UI contract', () => {
     await render({ userId: 'different-user' });
     expect(events.mock.calls.at(-1)[0]).toEqual([]);
     expect(container.textContent).not.toContain('Showing cached calendar events');
+  });
+
+  it('posts selected calendars using the exact authenticated camelCase payload', async () => {
+    await render();
+    await act(async () => container.querySelector('input[type="checkbox"]').click());
+    await click('Apply calendars');
+    const request = fetchMock.mock.calls.find(([url]) => url.includes('action=select'));
+    expect(request[1].method).toBe('POST');
+    expect(JSON.parse(request[1].body)).toEqual({ calendarIds: [] });
+    expect(request[1].headers['Content-Type']).toBe('application/json');
+    expect(request[1].credentials).toBe('same-origin');
+  });
+
+  it('posts the OAuth returnPath and rejects an unexpected authorization destination', async () => {
+    window.history.replaceState({}, '', '/settings');
+    fetchMock.mockImplementation((url) => {
+      if (url.includes('action=connect')) return response({ authorizationUrl: 'https://unexpected.example/authorize' });
+      return response({ connected: false, configured: true, schemaAvailable: true, selectedCalendarIds: [] });
+    });
+    await render({ settings: true });
+    await click('Connect Google Calendar');
+    const request = fetchMock.mock.calls.find(([url]) => url.includes('action=connect'));
+    expect(JSON.parse(request[1].body)).toEqual({ returnPath: '/settings' });
+    expect(request[1].method).toBe('POST');
+    expect(request[1].credentials).toBe('same-origin');
+    expect(container.textContent).toContain('Invalid Google connection link.');
+  });
+
+  it('marks previously cached events stale immediately while a remount refresh is pending', async () => {
+    await render();
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    let resolveStatus;
+    fetchMock.mockImplementation(() => new Promise((resolve) => { resolveStatus = resolve; }));
+    await render();
+    expect(events.mock.calls.at(-1)[0][0].title).toBe('Meeting');
+    expect(container.textContent).toContain('Showing cached calendar events');
+    await act(async () => resolveStatus(await response({ connected: false, configured: true, schemaAvailable: true })));
+    expect(container.textContent).not.toContain('Showing cached calendar events');
+  });
+
+  it('marks the current calendar view stale during a throttled resume refresh', async () => {
+    await render();
+    const resumedAt = Date.now() + 60_001;
+    vi.spyOn(Date, 'now').mockReturnValue(resumedAt);
+    let resolveStatus;
+    fetchMock.mockImplementation(() => new Promise((resolve) => { resolveStatus = resolve; }));
+    await act(async () => window.dispatchEvent(new Event('focus')));
+    expect(container.textContent).toContain('Showing cached calendar events');
+    await act(async () => resolveStatus(await response({ connected: false, configured: true, schemaAvailable: true })));
+    expect(container.textContent).not.toContain('Showing cached calendar events');
+  });
+
+  it('does not repopulate shared cache from a request started before Settings disconnects', async () => {
+    await render();
+    const settingsContainer = document.createElement('div');
+    document.body.appendChild(settingsContainer);
+    const settingsRoot = createRoot(settingsContainer);
+    try {
+      await act(async () => settingsRoot.render(<GoogleCalendarConnection userId={`user-${sequence}`} settings />));
+      const originalFetch = fetchMock.getMockImplementation();
+      let resolveEvents;
+      fetchMock.mockImplementation((url, options) => url.includes('action=events') ? new Promise((resolve) => { resolveEvents = resolve; }) : originalFetch(url, options));
+      await click('Refresh');
+      const disconnect = [...settingsContainer.querySelectorAll('button')].find((node) => node.textContent === 'Disconnect');
+      await act(async () => disconnect.click());
+      await act(async () => resolveEvents(await response({ events: [{ id: 'late', title: 'Should not return' }] })));
+      await act(async () => root.unmount());
+      root = createRoot(container);
+      events.mockClear();
+      fetchMock.mockImplementation(() => response({ connected: false, configured: true, schemaAvailable: true }));
+      await render();
+      expect(events.mock.calls.some(([rows]) => rows.some((event) => event.title === 'Should not return'))).toBe(false);
+    } finally {
+      await act(async () => settingsRoot.unmount());
+      settingsContainer.remove();
+    }
   });
 });

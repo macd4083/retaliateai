@@ -85,6 +85,36 @@ describe('TomorrowScheduler UI', () => {
     expect([...select.options].map((option) => option.value)).toEqual(['earlier', 'later']);
   });
 
+  it('renders 25 elapsed hours with separate timestamp slots and positions for repeated wall times', async () => {
+    await render({ localDate: '2026-11-01', timezone: 'America/New_York', blocks: [
+      { source_key: 'action-1', starts_at: '2026-11-01T05:30:00Z', ends_at: '2026-11-01T05:45:00Z' },
+      { source_key: 'habit-1', starts_at: '2026-11-01T06:30:00Z', ends_at: '2026-11-01T06:45:00Z' },
+    ] });
+    expect(container.querySelectorAll('[data-slot-timestamp]')).toHaveLength(100);
+    expect(container.querySelector('[aria-label^="25-hour timeline"]')).toBeTruthy();
+    expect(container.querySelector('[data-slot-timestamp="2026-11-01T05:30:00.000Z"]')).toBeTruthy();
+    expect(container.querySelector('[data-slot-timestamp="2026-11-01T06:30:00.000Z"]')).toBeTruthy();
+    expect(container.querySelector('[data-schedule-key="action-1"]').style.top).toBe('216px');
+    expect(container.querySelector('[data-schedule-key="habit-1"]').style.top).toBe('360px');
+    expect(container.textContent).toContain('GMT-4');
+    expect(container.textContent).toContain('GMT-5');
+  });
+
+  it('uses real elapsed height when a block crosses the fallback transition', async () => {
+    await render({ localDate: '2026-11-01', timezone: 'America/New_York', blocks: [
+      { source_key: 'action-1', starts_at: '2026-11-01T05:45:00Z', ends_at: '2026-11-01T06:15:00Z' },
+    ] });
+    expect(container.querySelector('[data-schedule-key="action-1"]').style.height).toBe('72px');
+    expect(container.textContent).toContain('01:45–01:15 (GMT-4 → GMT-5)');
+  });
+
+  it('renders 23 elapsed hours with no nonexistent spring-forward slots', async () => {
+    await render({ localDate: '2026-03-08', timezone: 'America/New_York' });
+    expect(container.querySelectorAll('[data-slot-timestamp]')).toHaveLength(92);
+    expect(container.querySelector('[aria-label^="23-hour timeline"]')).toBeTruthy();
+    expect(container.textContent).not.toContain('02:00');
+  });
+
   it('preserves the later DST occurrence when editing an existing block', async () => {
     await render({ localDate: '2026-11-01', timezone: 'America/New_York', blocks: [{ source_key: 'action-1', starts_at: '2026-11-01T06:30:00Z', ends_at: '2026-11-01T06:45:00Z' }] });
     await click('Write a chapter');
@@ -116,5 +146,55 @@ describe('TomorrowScheduler UI', () => {
     await click('Write a chapter');
     await act(async () => document.querySelector('[role="dialog"] form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
     expect(document.querySelector('[role="dialog"]').textContent).toContain('Offline: try again');
+  });
+
+  it('exposes recoverable offline synchronization status', async () => {
+    await render({ saveStatus: 'offline' });
+    expect(container.textContent).toContain('Schedule saved on this device — reconnect to sync.');
+  });
+
+  it('allows keyboard handle editing and restores focus when canceled', async () => {
+    await render();
+    const handle = container.querySelector('[aria-label^="Drag Write a chapter"]');
+    handle.focus();
+    await act(async () => handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(dialog).toBeTruthy();
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    await click('Cancel');
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(document.activeElement).toBe(handle);
+  });
+
+  it('unschedules through the explicit source identity without removing the item', async () => {
+    const unschedule = vi.fn();
+    await render({ onUnschedule: unschedule, blocks: [{ source_key: 'action-1', starts_at: '2026-10-07T09:00:00Z', ends_at: '2026-10-07T09:30:00Z' }] });
+    await click('Write a chapter');
+    await click('Unschedule');
+    expect(unschedule).toHaveBeenCalledWith('action-1');
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('shows a cross-midnight block on its start planning date with an explicit next-day label', async () => {
+    await render({ blocks: [{ source_key: 'action-1', starts_at: '2026-10-07T23:45:00Z', ends_at: '2026-10-08T00:15:00Z' }] });
+    expect(container.textContent).toContain('23:45–00:15 (+1 day)');
+    expect(container.querySelector('[data-schedule-key="action-1"]').style.height).toBe('36px');
+    await click('Write a chapter');
+    expect(document.querySelector('[role="dialog"] input[type="number"]').value).toBe('30');
+  });
+
+  it('shows previous-day carryover read-only and warns against scheduling through it', async () => {
+    await render({
+      blocks: [{ source_key: 'action-1', starts_at: '2026-10-07T00:15:00Z', ends_at: '2026-10-07T00:45:00Z' }],
+      contextBlocks: [{ id: 'previous-block', source_id: 'previous-action', target_local_date: '2026-10-06', label: 'Late work', starts_at: '2026-10-06T23:30:00Z', ends_at: '2026-10-07T00:30:00Z' }],
+    });
+    const context = container.querySelector('[data-context-schedule-id="previous-block"]');
+    expect(context.textContent).toContain('Previous-day · 2026-10-06 · read-only');
+    expect(context.style.height).toBe('72px');
+    expect(context.querySelector('button')).toBeNull();
+    expect(container.textContent).toContain('Unscheduled (1)');
+    await click('Write a chapter');
+    expect(document.querySelector('[role="dialog"] input[type="checkbox"]')).toBeTruthy();
+    expect(update).not.toHaveBeenCalled();
   });
 });
