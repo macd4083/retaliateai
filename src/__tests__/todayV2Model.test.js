@@ -9,8 +9,10 @@ import {
   getTodayV2BooleanAnswer,
   getTodayV2CompletionGate,
   getTodayV2DateContext,
+  getTodayV2DayBoundaryHour,
   getTodayV2DefaultPath,
   getTodayV2MsUntilNextBoundary,
+  getTodayV2WeekdayDisplayOrder,
 } from '../v2/today/model';
 import { TODAY_V2_COMMITMENT_STATES, TODAY_V2_RESPONSE_TYPES } from '../v2/today/types';
 
@@ -128,6 +130,27 @@ describe('TodayV2 model helpers', () => {
     expect(getTodayV2MsUntilNextBoundary({ now, dayBoundaryHour: 4 })).toBe(30_000);
   });
 
+  it('keeps the default 4 AM boundary for null and empty overrides', () => {
+    window.localStorage.removeItem('today_v2_day_boundary_hour');
+    vi.stubEnv('VITE_TODAY_V2_DAY_BOUNDARY_HOUR', '');
+    expect(getTodayV2DayBoundaryHour()).toBe(4);
+    window.localStorage.setItem('today_v2_day_boundary_hour', '');
+    expect(getTodayV2DayBoundaryHour()).toBe(4);
+    vi.unstubAllEnvs();
+  });
+
+  it('maps Monday through Sunday to the existing Sunday-zero weekday values', () => {
+    expect(getTodayV2WeekdayDisplayOrder()).toEqual([
+      { label: 'M', weekdayIndex: 1 },
+      { label: 'T', weekdayIndex: 2 },
+      { label: 'W', weekdayIndex: 3 },
+      { label: 'Th', weekdayIndex: 4 },
+      { label: 'F', weekdayIndex: 5 },
+      { label: 'Sa', weekdayIndex: 6 },
+      { label: 'Su', weekdayIndex: 0 },
+    ]);
+  });
+
   it('summarizes completion gating with habits as a soft warning only', () => {
     expect(getTodayV2CompletionGate({
       followThroughItems: [
@@ -144,6 +167,10 @@ describe('TodayV2 model helpers', () => {
       unansweredHabitsCount: 1,
       hasSoftHabitWarning: true,
       hasTomorrowActions: true,
+      hasControllableFocus: false,
+      hasFirstFiveMinutes: false,
+      hasSoftControllableFocusWarning: true,
+      hasSoftFirstFiveMinutesWarning: true,
     });
   });
 

@@ -51,7 +51,7 @@ export async function ensureTodayV2DailyReview(userId, localDate, timezoneName) 
       },
       { onConflict: 'user_id,local_date' }
     )
-    .select('id, local_date, timezone_name, desired_direction, updated_at, completed_at')
+    .select('id, local_date, timezone_name, desired_direction, controllable_focus, updated_at, completed_at')
     .single();
 
   if (error) throw error;
@@ -82,6 +82,8 @@ export async function loadTodayReviewState(userId, options = {}) {
   const [
     todayFragmentsResult,
     tomorrowPlanInputResult,
+    todayPlanInputResult,
+    previousReviewResult,
     tomorrowFragmentsResult,
     habitDefinitionsResult,
     habitOccurrencesResult,
@@ -94,9 +96,25 @@ export async function loadTodayReviewState(userId, options = {}) {
       .order('fragment_order', { ascending: true }),
     supabase
       .from(TODAY_V2_TABLES.PLAN_INPUTS)
-      .select('id, raw_plan_text, target_local_date, source_local_date, timezone_name, parser_version, updated_at')
+      .select('id, raw_plan_text, first_five_minutes, target_local_date, source_local_date, timezone_name, parser_version, updated_at')
       .eq('user_id', userId)
       .eq('target_local_date', dateContext.tomorrowLocalDate)
+      .maybeSingle(),
+    supabase
+      .from(TODAY_V2_TABLES.PLAN_INPUTS)
+      .select('first_five_minutes')
+      .eq('user_id', userId)
+      .eq('target_local_date', dateContext.todayLocalDate)
+      .maybeSingle(),
+    supabase
+      .from(TODAY_V2_TABLES.DAILY_REVIEWS)
+      .select('desired_direction')
+      .eq('user_id', userId)
+      .lt('local_date', dateContext.todayLocalDate)
+      .neq('desired_direction', '')
+      .not('desired_direction', 'is', null)
+      .order('local_date', { ascending: false })
+      .limit(1)
       .maybeSingle(),
     supabase
       .from(TODAY_V2_TABLES.COMMITMENT_FRAGMENTS)
@@ -121,6 +139,8 @@ export async function loadTodayReviewState(userId, options = {}) {
 
   if (todayFragmentsResult.error) throw todayFragmentsResult.error;
   if (tomorrowPlanInputResult.error) throw tomorrowPlanInputResult.error;
+  if (todayPlanInputResult.error) throw todayPlanInputResult.error;
+  if (previousReviewResult.error) throw previousReviewResult.error;
   if (tomorrowFragmentsResult.error) throw tomorrowFragmentsResult.error;
   if (habitDefinitionsResult.error) throw habitDefinitionsResult.error;
   if (habitOccurrencesResult.error) throw habitOccurrencesResult.error;
@@ -134,6 +154,9 @@ export async function loadTodayReviewState(userId, options = {}) {
     followThroughItems: todayFragmentsResult.data || [],
     tomorrowPlanInput: tomorrowPlanInputResult.data?.raw_plan_text || '',
     tomorrowPlanMeta: tomorrowPlanInputResult.data || null,
+    firstFiveMinutes: tomorrowPlanInputResult.data?.first_five_minutes || '',
+    todayFirstFiveMinutes: todayPlanInputResult.data?.first_five_minutes || '',
+    previousDesiredDirection: previousReviewResult.data?.desired_direction || '',
     tomorrowFragments: tomorrowFragmentsResult.data || [],
     habitDefinitions: (habitDefinitionsResult.data || []).filter((habitDefinition) => !habitDefinition.is_archived),
     habitOccurrences: habitOccurrencesResult.data || [],
@@ -148,7 +171,7 @@ export async function loadTodayV2HomeState(userId, options = {}) {
   const [reviewsResult, fragmentsResult, habitOccurrencesResult] = await Promise.all([
     supabase
       .from(TODAY_V2_TABLES.DAILY_REVIEWS)
-      .select('local_date, desired_direction, completed_at')
+      .select('local_date, desired_direction, controllable_focus, completed_at')
       .eq('user_id', userId)
       .gte('local_date', last30Start)
       .lte('local_date', current.todayLocalDate)
@@ -317,13 +340,23 @@ export async function updateDesiredDirection(reviewId, desiredDirection) {
   if (error) throw error;
 }
 
+export async function updateControllableFocus(reviewId, controllableFocus) {
+  const normalizedFocus = String(controllableFocus || '').trim();
+  const { error } = await supabase
+    .from(TODAY_V2_TABLES.DAILY_REVIEWS)
+    .update({ controllable_focus: normalizedFocus || null })
+    .eq('id', reviewId);
+
+  if (error) throw error;
+}
+
 export async function completeTodayV2Review(reviewId) {
   const completedAt = new Date().toISOString();
   const { data, error } = await supabase
     .from(TODAY_V2_TABLES.DAILY_REVIEWS)
     .update({ completed_at: completedAt })
     .eq('id', reviewId)
-    .select('id, local_date, timezone_name, desired_direction, updated_at, completed_at')
+    .select('id, local_date, timezone_name, desired_direction, controllable_focus, updated_at, completed_at')
     .single();
 
   if (error) throw error;
@@ -335,14 +368,21 @@ export async function reopenTodayV2Review(reviewId) {
     .from(TODAY_V2_TABLES.DAILY_REVIEWS)
     .update({ completed_at: null })
     .eq('id', reviewId)
-    .select('id, local_date, timezone_name, desired_direction, updated_at, completed_at')
+    .select('id, local_date, timezone_name, desired_direction, controllable_focus, updated_at, completed_at')
     .single();
 
   if (error) throw error;
   return data;
 }
 
-export async function replaceTomorrowActions({ targetLocalDate, sourceLocalDate, timezoneName, rawPlanText, actionTexts }) {
+export async function replaceTomorrowActions({
+  targetLocalDate,
+  sourceLocalDate,
+  timezoneName,
+  rawPlanText,
+  actionTexts,
+  firstFiveMinutes = '',
+}) {
   const normalizedRawText = String(rawPlanText || '').trim();
   const fragments = coerceTodayV2EditableFragments(normalizedRawText, actionTexts);
   const { error } = await supabase.rpc(TODAY_V2_RPCS.REPLACE_PLAN, {
@@ -351,6 +391,7 @@ export async function replaceTomorrowActions({ targetLocalDate, sourceLocalDate,
     p_timezone_name: timezoneName,
     p_raw_plan_text: normalizedRawText,
     p_fragment_texts: fragments,
+    p_first_five_minutes: String(firstFiveMinutes || '').trim() || null,
   });
 
   if (error) throw error;

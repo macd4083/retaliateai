@@ -129,12 +129,17 @@ export default function HomeV2Page() {
         <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
           <p className="text-xs uppercase tracking-[0.2em] text-red-300">Identity</p>
           <p className="mt-3 text-xl font-semibold text-white">
-            {homeState.latestDesiredDirection || 'Who you are actively becoming still needs words tonight.'}
+            {homeState.latestDesiredDirection || 'Who are you becoming, or what are you changing about yourself?'}
           </p>
         </section>
 
         <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
           <h2 className="font-semibold text-white">Tomorrow you said you&apos;d prove it by:</h2>
+          {homeState.review?.controllable_focus && (
+            <p className="mt-3 text-sm text-zinc-300">
+              <span className="font-medium text-white">Under your control:</span> {homeState.review.controllable_focus}
+            </p>
+          )}
           {contractItems.length > 0 ? (
             <ul className="mt-3 space-y-2">
               {contractItems.map((item) => (
@@ -145,6 +150,11 @@ export default function HomeV2Page() {
             </ul>
           ) : (
             <p className="mt-3 text-sm text-zinc-500">Finish tonight&apos;s review to lock in tomorrow&apos;s contract.</p>
+          )}
+          {homeState.review?.completed_at && homeState.firstFiveMinutes && (
+            <p className="mt-3 text-sm text-zinc-300">
+              <span className="font-medium text-white">Start with:</span> {homeState.firstFiveMinutes}
+            </p>
           )}
         </section>
 
@@ -158,6 +168,11 @@ export default function HomeV2Page() {
             )}
           </div>
           {commitmentSaveError && <p className="mt-3 text-xs text-amber-300">{commitmentSaveError}</p>}
+          {homeState.todayFirstFiveMinutes && (
+            <p className="mt-3 text-sm text-zinc-300">
+              <span className="font-medium text-white">Start with:</span> {homeState.todayFirstFiveMinutes}
+            </p>
+          )}
           {homeState.followThroughItems.length > 0 ? (
             <div className="mt-3 space-y-2">
               {homeState.followThroughItems.map((item) => (

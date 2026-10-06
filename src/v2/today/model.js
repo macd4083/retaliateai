@@ -3,6 +3,8 @@ import {
   TODAY_V2_COMMITMENT_STATES,
   TODAY_V2_PARSER_VERSION,
   TODAY_V2_RESPONSE_TYPES,
+  TODAY_V2_WEEKDAY_DISPLAY_ORDER,
+  TODAY_V2_WEEKDAY_LABELS,
 } from './types';
 
 export const TODAY_V2_DEFAULT_DAY_BOUNDARY_HOUR = 4;
@@ -12,6 +14,7 @@ export function getTodayV2TimezoneName() {
 }
 
 function coerceTodayV2BoundaryHour(value) {
+  if (value == null || String(value).trim() === '') return null;
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 0 || parsed > 23) return null;
   return parsed;
@@ -104,6 +107,13 @@ export function validateTodayV2Weekdays(weekdays) {
     .sort((left, right) => left - right);
 
   return normalized;
+}
+
+export function getTodayV2WeekdayDisplayOrder() {
+  return TODAY_V2_WEEKDAY_DISPLAY_ORDER.map((weekdayIndex) => ({
+    weekdayIndex,
+    label: TODAY_V2_WEEKDAY_LABELS[weekdayIndex],
+  }));
 }
 
 export function normalizeTodayV2Text(value) {
@@ -200,7 +210,13 @@ export function buildTodayV2DraftStorageKey(userId, localDate) {
   return `today-v2-draft:${userId || 'anonymous'}:${localDate || 'unknown'}`;
 }
 
-export function getTodayV2CompletionGate({ followThroughItems = [], habitOccurrences = [], tomorrowActions = [] }) {
+export function getTodayV2CompletionGate({
+  followThroughItems = [],
+  habitOccurrences = [],
+  tomorrowActions = [],
+  controllableFocus = '',
+  firstFiveMinutes = '',
+}) {
   const normalizedTomorrowActions = coerceTodayV2EditableFragments('', tomorrowActions);
   const followThroughSatisfied = followThroughItems.every((item) => item.completion_state !== TODAY_V2_COMMITMENT_STATES.UNANSWERED);
   const unansweredHabits = habitOccurrences.filter((occurrence) => {
@@ -217,6 +233,10 @@ export function getTodayV2CompletionGate({ followThroughItems = [], habitOccurre
     unansweredHabitsCount: unansweredHabits.length,
     hasSoftHabitWarning: unansweredHabits.length > 0,
     hasTomorrowActions: normalizedTomorrowActions.length > 0,
+    hasControllableFocus: Boolean(normalizeTodayV2Text(controllableFocus)),
+    hasFirstFiveMinutes: Boolean(normalizeTodayV2Text(firstFiveMinutes)),
+    hasSoftControllableFocusWarning: !normalizeTodayV2Text(controllableFocus),
+    hasSoftFirstFiveMinutesWarning: !normalizeTodayV2Text(firstFiveMinutes),
   };
 }
 
