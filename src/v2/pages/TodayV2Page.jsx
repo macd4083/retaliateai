@@ -5,12 +5,12 @@ import { useAuth } from '../../lib/AuthContext';
 import {
   getTodayV2BooleanAnswer,
   getTodayV2CommitmentStateLabel,
+  getTodayV2WeekdayDisplayOrder,
 } from '../today/model';
 import { useTodayV2State } from '../today/useTodayV2State';
 import {
   TODAY_V2_COMMITMENT_STATES,
   TODAY_V2_RESPONSE_TYPES,
-  TODAY_V2_WEEKDAY_LABELS,
 } from '../today/types';
 
 function SegmentedChoice({ value, options, onChange, disabled = false }) {
@@ -77,10 +77,10 @@ function HabitEditorModal({ value, onClose, onSave }) {
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-4">
-      <div className="w-full max-w-md space-y-4 rounded-2xl border border-zinc-700 bg-zinc-900 p-4">
+      <div role="dialog" aria-modal="true" aria-labelledby="habit-editor-title" className="w-full max-w-md space-y-4 rounded-2xl border border-zinc-700 bg-zinc-900 p-4">
         <div className="flex items-center justify-between">
-          <h3 className="font-semibold text-white">{draft.id ? 'Edit Habit' : 'Add Habit'}</h3>
-          <button type="button" onClick={onClose} className="text-zinc-400 hover:text-white">✕</button>
+          <h3 id="habit-editor-title" className="font-semibold text-white">{draft.id ? 'Edit Habit' : 'Add Habit'}</h3>
+          <button type="button" aria-label="Close habit editor" onClick={onClose} className="text-zinc-400 hover:text-white">✕</button>
         </div>
 
         <input
@@ -119,13 +119,13 @@ function HabitEditorModal({ value, onClose, onSave }) {
         <div>
           <p className="mb-2 text-xs text-zinc-400">Weekdays</p>
           <div className="grid grid-cols-7 gap-1">
-            {TODAY_V2_WEEKDAY_LABELS.map((label, dayIndex) => {
-              const active = draft.schedule_weekdays.includes(dayIndex);
+            {getTodayV2WeekdayDisplayOrder().map(({ label, weekdayIndex }) => {
+              const active = draft.schedule_weekdays.includes(weekdayIndex);
               return (
                 <button
-                  key={label}
+                  key={weekdayIndex}
                   type="button"
-                  onClick={() => toggleWeekday(dayIndex)}
+                  onClick={() => toggleWeekday(weekdayIndex)}
                   className={`rounded-md border px-1 py-2 text-xs ${active ? 'border-red-500 bg-red-600/20 text-white' : 'border-zinc-700 text-zinc-400'}`}
                 >
                   {label}
@@ -161,10 +161,14 @@ export default function TodayV2Page() {
     seedDiagnostic,
     desiredDirection,
     setDesiredDirection,
+    controllableFocus,
+    setControllableFocus,
     tomorrowInput,
     setTomorrowInput,
     tomorrowActions,
     setTomorrowActions,
+    firstFiveMinutes,
+    setFirstFiveMinutes,
     visibleHabits,
     habitDefinitionsById,
     load,
@@ -181,7 +185,9 @@ export default function TodayV2Page() {
     completionGate,
     completionSaving,
     desiredDirectionSaveLabel,
+    controllableFocusSaveLabel,
     tomorrowPlanSaveLabel,
+    firstFiveMinutesSaveLabel,
     tomorrowPlanError,
     isCompleted,
     createEmptyHabitDefinition,
@@ -206,6 +212,7 @@ export default function TodayV2Page() {
   };
 
   const onDeleteHabit = async (habitId) => {
+    if (!window.confirm('Delete this habit? Its history will be kept.')) return;
     await archiveHabitDefinition(habitId);
     setMenuOpenHabitId(null);
   };
@@ -291,8 +298,9 @@ export default function TodayV2Page() {
           </section>
         )}
 
+        <h2 className="pt-2 text-lg font-semibold text-white">Part 1: Review Today</h2>
         <section className="space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
-          <h2 className="font-semibold">1. Follow-Through</h2>
+          <h3 className="font-semibold">1. Follow-Through</h3>
           {state.followThroughItems.length > 0 ? (
             <div className="space-y-2">
               {state.followThroughItems.map((item) => (
@@ -351,7 +359,7 @@ export default function TodayV2Page() {
               +
             </button>
           )}
-          <h2 className="font-semibold">2. Habits</h2>
+          <h3 className="font-semibold">2. Habits</h3>
           <div className="space-y-2">
             {visibleHabits.map((occurrence) => {
               const habitDefinition = habitDefinitionsById.get(occurrence.habit_definition_id) || occurrence;
@@ -371,6 +379,7 @@ export default function TodayV2Page() {
                       <div className="relative">
                         <button
                           type="button"
+                          aria-label={`Habit options for ${occurrence.snapshot_name}`}
                           onClick={() => setMenuOpenHabitId((current) => current === habitDefinition.id ? null : habitDefinition.id)}
                           className="text-zinc-400 hover:text-white"
                         >
@@ -379,7 +388,7 @@ export default function TodayV2Page() {
                         {menuOpenHabitId === habitDefinition.id && (
                           <div className="absolute right-0 z-10 mt-1 w-24 rounded-lg border border-zinc-700 bg-zinc-950 p-1">
                             <button type="button" onClick={() => setHabitEditorValue(habitDefinition)} className="w-full rounded px-2 py-1 text-left text-xs hover:bg-zinc-800">Edit</button>
-                            <button type="button" onClick={() => onDeleteHabit(habitDefinition.id)} className="w-full rounded px-2 py-1 text-left text-xs text-red-400 hover:bg-zinc-800">Archive</button>
+                            <button type="button" onClick={() => onDeleteHabit(habitDefinition.id)} className="w-full rounded px-2 py-1 text-left text-xs text-red-400 hover:bg-zinc-800">Delete</button>
                           </div>
                         )}
                       </div>
@@ -416,28 +425,51 @@ export default function TodayV2Page() {
                 </div>
               );
             })}
+            {!readOnly && state.habitDefinitions.length < 4 && (
+              <button
+                type="button"
+                onClick={() => setHabitEditorValue({
+                  ...createEmptyHabitDefinition(),
+                  response_type: TODAY_V2_RESPONSE_TYPES.BOOLEAN,
+                })}
+                className="w-full rounded-xl border border-dashed border-zinc-700 p-3 text-left text-sm text-zinc-300 hover:border-zinc-500"
+              >
+                Add your personal habit (Yes/No)
+              </button>
+            )}
             {visibleHabits.length === 0 && <p className="text-sm text-zinc-500">No habits scheduled for today.</p>}
           </div>
         </section>
 
+        <h2 className="pt-2 text-lg font-semibold text-white">Part 2: Plan Tomorrow</h2>
         <section className="space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
-          <h2 className="font-semibold">3. Desired Direction</h2>
-          <p className="text-xs text-zinc-500">Who am I actively becoming?</p>
+          <h3 className="font-semibold">5.1 Desired Direction</h3>
+          <p className="text-xs text-zinc-500">Who are you becoming, or what are you changing about yourself?</p>
           <textarea
             value={desiredDirection}
             readOnly={readOnly}
+            placeholder={state.previousDesiredDirection || ''}
             onChange={(event) => setDesiredDirection(event.target.value)}
             onBlur={() => { if (!readOnly) void saveDesiredDirection(); }}
             className="min-h-24 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm read-only:cursor-not-allowed read-only:opacity-70"
           />
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-xs text-zinc-500">{desiredDirectionSaveLabel}</p>
-            {!readOnly && <button type="button" onClick={saveDesiredDirection} className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold">Save direction</button>}
-          </div>
+          <p className="text-xs text-zinc-500">{desiredDirectionSaveLabel}</p>
         </section>
 
         <section className="space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
-          <h2 className="font-semibold">4. Highest-ROI Actions</h2>
+          <h3 className="font-semibold">5.2 Right effort and non-attachment</h3>
+          <p className="text-xs text-zinc-500">What is directly under your control that will influence your chances of success tomorrow?</p>
+          <textarea
+            value={controllableFocus}
+            readOnly={readOnly}
+            onChange={(event) => setControllableFocus(event.target.value)}
+            className="min-h-24 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm read-only:cursor-not-allowed read-only:opacity-70"
+          />
+          <p className="text-xs text-zinc-500">{controllableFocusSaveLabel}</p>
+        </section>
+
+        <section className="space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
+          <h3 className="font-semibold">6.1 Highest-ROI Actions</h3>
           <p className="text-xs text-zinc-500">What measured task can I commit to tomorrow that will improve me the most?</p>
           <textarea
             value={tomorrowInput}
@@ -451,6 +483,7 @@ export default function TodayV2Page() {
             <ul className="space-y-2">
               {tomorrowActions.map((action, index) => (
                 <li key={`${action}-${index}`} className="flex items-center gap-2 rounded-lg border border-zinc-800 p-2 text-sm">
+                  {index === 0 && <span className="text-xs font-semibold text-red-300">Primary</span>}
                   <input
                     readOnly={readOnly}
                     value={action}
@@ -484,6 +517,20 @@ export default function TodayV2Page() {
         </section>
 
         <section className="space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
+          <h3 className="font-semibold">6.2 Start focus</h3>
+          <p className="text-xs text-zinc-500">What do the first five minutes of starting to work on this commitment look like?</p>
+          <p className="text-xs text-zinc-500">Describe only how you&apos;ll begin — not how much you&apos;ll get done.</p>
+          <textarea
+            value={firstFiveMinutes}
+            readOnly={readOnly}
+            onChange={(event) => setFirstFiveMinutes(event.target.value)}
+            onBlur={() => { if (!readOnly) void saveTomorrowPlan(); }}
+            className="min-h-24 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm read-only:cursor-not-allowed read-only:opacity-70"
+          />
+          <p className="text-xs text-zinc-500">{firstFiveMinutesSaveLabel}</p>
+        </section>
+
+        <section className="space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
           <div className="flex items-center justify-between gap-3">
             <div>
               <h2 className="font-semibold">Complete tonight&apos;s review</h2>
@@ -508,6 +555,12 @@ export default function TodayV2Page() {
           )}
           {completionGate.unansweredHabitsCount > 0 && (
             <p className="text-xs text-zinc-500">Soft warning: {completionGate.unansweredHabitsCount} habit {completionGate.unansweredHabitsCount === 1 ? 'is' : 'are'} still unanswered.</p>
+          )}
+          {completionGate.hasSoftControllableFocusWarning && (
+            <p className="text-xs text-zinc-500">Soft reminder: 5.2 is empty.</p>
+          )}
+          {completionGate.hasSoftFirstFiveMinutesWarning && (
+            <p className="text-xs text-zinc-500">Soft reminder: 6.2 is empty.</p>
           )}
         </section>
       </div>

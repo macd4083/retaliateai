@@ -3,12 +3,31 @@ import fs from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const migrationPath = '/home/runner/work/retaliateai/retaliateai/supabase/migrations/20260928_today_v2_workflow.sql';
+const featureMigrationPath = '/home/runner/work/retaliateai/retaliateai/supabase/migrations/20261006_today_v2_controllable_and_first_five.sql';
 const consolidatedSqlPath = '/home/runner/work/retaliateai/retaliateai/supabase/sql/today_v2_isolated_workflow.sql';
 const todayV2ServicePath = '/home/runner/work/retaliateai/retaliateai/src/v2/services/todayReview.js';
 
 describe('TodayV2 SQL contract', () => {
   it('keeps the migration and SQL editor copy in sync', () => {
-    expect(fs.readFileSync(consolidatedSqlPath, 'utf8')).toBe(fs.readFileSync(migrationPath, 'utf8'));
+    const consolidatedSql = fs.readFileSync(consolidatedSqlPath, 'utf8');
+    const initialMigration = fs.readFileSync(migrationPath, 'utf8');
+    const featureMigration = fs.readFileSync(featureMigrationPath, 'utf8');
+
+    expect(consolidatedSql.startsWith(initialMigration)).toBe(true);
+    expect(consolidatedSql.slice(initialMigration.length).trim()).toBe(featureMigration.trim());
+  });
+
+  it('adds autosaved fields and the guarded plan RPC argument', () => {
+    const sql = fs.readFileSync(featureMigrationPath, 'utf8');
+
+    expect(sql).toContain('add column if not exists controllable_focus text');
+    expect(sql).toContain('add column if not exists first_five_minutes text');
+    expect(sql).toContain('p_first_five_minutes text default null');
+    expect(sql).toContain('first_five_minutes = excluded.first_five_minutes');
+    expect(sql).toContain('on conflict (user_id, target_local_date, fragment_order)');
+    expect(sql).toContain('and not (fragment_order = any(v_keep_orders))');
+    expect(sql).toContain('cannot overwrite answered fragments');
+    expect(sql).toContain('grant execute on function public.today_v2_replace_plan_for_date(date, date, text, text, text[], text) to authenticated;');
   });
 
   it('defines isolated today_v2 tables, RPCs, uniqueness, and RLS', () => {

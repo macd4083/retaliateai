@@ -19,6 +19,7 @@ const serviceMocks = vi.hoisted(() => ({
   replaceTomorrowActions: vi.fn(),
   setFollowThroughCompletion: vi.fn(),
   updateDesiredDirection: vi.fn(),
+  updateControllableFocus: vi.fn(),
   upsertHabitDefinition: vi.fn(),
   upsertHabitLog: vi.fn(),
 }));
@@ -41,6 +42,7 @@ function makeState({ todayLocalDate = '2026-09-28', tomorrowLocalDate = '2026-09
       local_date: todayLocalDate,
       timezone_name: 'UTC',
       desired_direction: '',
+      controllable_focus: null,
       completed_at: null,
       updated_at: `${todayLocalDate}T12:00:00.000Z`,
     },
@@ -88,6 +90,7 @@ describe('useTodayV2State', () => {
 
     serviceMocks.loadTodayReviewState.mockResolvedValue(makeState());
     serviceMocks.updateDesiredDirection.mockResolvedValue(undefined);
+    serviceMocks.updateControllableFocus.mockResolvedValue(undefined);
     serviceMocks.replaceTomorrowActions.mockImplementation(async ({ rawPlanText, actionTexts }) => ({
       rawPlanText: rawPlanText.trim(),
       fragments: actionTexts,
@@ -119,7 +122,9 @@ describe('useTodayV2State', () => {
 
     await act(async () => {
       latest.setDesiredDirection('Builder');
+      latest.setControllableFocus('Protect the first work block');
       latest.setTomorrowInput('Write 20 minutes and review notes');
+      latest.setFirstFiveMinutes('Open the outline and write one sentence');
     });
 
     await act(async () => {
@@ -128,14 +133,17 @@ describe('useTodayV2State', () => {
     });
 
     await waitForCondition(() => serviceMocks.updateDesiredDirection.mock.calls.length > 0, 'direction autosave');
+    await waitForCondition(() => serviceMocks.updateControllableFocus.mock.calls.length > 0, 'controllable focus autosave');
     await waitForCondition(() => serviceMocks.replaceTomorrowActions.mock.calls.length > 0, 'plan autosave');
 
     expect(serviceMocks.updateDesiredDirection).toHaveBeenCalledWith('review-2026-09-28', 'Builder');
+    expect(serviceMocks.updateControllableFocus).toHaveBeenCalledWith('review-2026-09-28', 'Protect the first work block');
     expect(serviceMocks.replaceTomorrowActions).toHaveBeenCalledWith(expect.objectContaining({
       targetLocalDate: '2026-09-29',
       sourceLocalDate: '2026-09-28',
       rawPlanText: 'Write 20 minutes and review notes',
       actionTexts: ['Write 20 minutes', 'review notes'],
+      firstFiveMinutes: 'Open the outline and write one sentence',
     }));
   });
 
@@ -144,7 +152,9 @@ describe('useTodayV2State', () => {
 
     await act(async () => {
       latest.setDesiredDirection('Builder');
+      latest.setControllableFocus('Protect the first work block');
       latest.setTomorrowInput('Write 20 minutes');
+      latest.setFirstFiveMinutes('Open the outline');
     });
 
     Object.defineProperty(document, 'visibilityState', {
@@ -158,10 +168,47 @@ describe('useTodayV2State', () => {
     });
 
     expect(serviceMocks.updateDesiredDirection).toHaveBeenCalledWith('review-2026-09-28', 'Builder');
+    expect(serviceMocks.updateControllableFocus).toHaveBeenCalledWith('review-2026-09-28', 'Protect the first work block');
     expect(serviceMocks.replaceTomorrowActions).toHaveBeenCalledWith(expect.objectContaining({
       rawPlanText: 'Write 20 minutes',
       actionTexts: ['Write 20 minutes'],
+      firstFiveMinutes: 'Open the outline',
     }));
+  });
+
+  it('saves first five minutes through the plan replacement path', async () => {
+    await renderHook();
+
+    await act(async () => {
+      latest.setTomorrowInput('Write 20 minutes');
+      latest.setFirstFiveMinutes('Open the document');
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(801);
+      await Promise.resolve();
+    });
+
+    await waitForCondition(() => serviceMocks.replaceTomorrowActions.mock.calls.length > 0, 'first five minutes plan save');
+    expect(serviceMocks.replaceTomorrowActions).toHaveBeenCalledWith(expect.objectContaining({
+      targetLocalDate: '2026-09-29',
+      firstFiveMinutes: 'Open the document',
+    }));
+  });
+
+  it('resets completion saving and rethrows when a flush fails', async () => {
+    await renderHook();
+    serviceMocks.updateDesiredDirection.mockRejectedValueOnce(new Error('flush failed'));
+
+    await act(async () => {
+      latest.setDesiredDirection('Builder');
+    });
+
+    await act(async () => {
+      await expect(latest.completeReview()).rejects.toThrow('flush failed');
+    });
+
+    expect(latest.completionSaving).toBe(false);
+    expect(serviceMocks.completeTodayV2Review).not.toHaveBeenCalled();
   });
 
   it('reloads stale in-memory state after a visibility change across the review-day boundary', async () => {

@@ -12,6 +12,7 @@ export const TODAY_V2_COMMITMENT_STATES = Object.freeze({
 export const TODAY_V2_PARSER_VERSION = 'commitment-fragmentation-v2';
 
 export const TODAY_V2_WEEKDAY_LABELS = Object.freeze(['Su', 'M', 'T', 'W', 'Th', 'F', 'Sa']);
+export const TODAY_V2_WEEKDAY_DISPLAY_ORDER = Object.freeze([1, 2, 3, 4, 5, 6, 0]);
 
 export const TODAY_V2_TABLES = Object.freeze({
   DAILY_REVIEWS: 'today_v2_daily_reviews',

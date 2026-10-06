@@ -20,6 +20,7 @@ import {
   reopenTodayV2Review,
   replaceTomorrowActions,
   setFollowThroughCompletion,
+  updateControllableFocus,
   updateDesiredDirection,
   upsertHabitDefinition,
   upsertHabitLog,
@@ -72,27 +73,37 @@ export function useTodayV2State(userId) {
   const [state, setState] = React.useState(null);
   const [seedDiagnostic, setSeedDiagnostic] = React.useState(null);
   const [desiredDirection, setDesiredDirectionState] = React.useState('');
+  const [controllableFocus, setControllableFocusState] = React.useState('');
   const [tomorrowInput, setTomorrowInputState] = React.useState('');
   const [tomorrowActions, setTomorrowActionsState] = React.useState([]);
+  const [firstFiveMinutes, setFirstFiveMinutesState] = React.useState('');
   const [desiredDirectionSaveStatus, setDesiredDirectionSaveStatus] = React.useState('idle');
+  const [controllableFocusSaveStatus, setControllableFocusSaveStatus] = React.useState('idle');
   const [tomorrowPlanSaveStatus, setTomorrowPlanSaveStatus] = React.useState('idle');
+  const [firstFiveMinutesSaveStatus, setFirstFiveMinutesSaveStatus] = React.useState('idle');
   const [tomorrowPlanError, setTomorrowPlanError] = React.useState(null);
   const [completionSaving, setCompletionSaving] = React.useState(false);
   const [customTomorrowActions, setCustomTomorrowActions] = React.useState(false);
 
   const stateRef = React.useRef(null);
   const desiredDirectionRef = React.useRef('');
+  const controllableFocusRef = React.useRef('');
   const tomorrowInputRef = React.useRef('');
   const tomorrowActionsRef = React.useRef([]);
+  const firstFiveMinutesRef = React.useRef('');
   const desiredDirectionSavePromiseRef = React.useRef(Promise.resolve());
+  const controllableFocusSavePromiseRef = React.useRef(Promise.resolve());
   const tomorrowPlanSavePromiseRef = React.useRef(Promise.resolve());
   const desiredDirectionSavingRef = React.useRef(false);
+  const controllableFocusSavingRef = React.useRef(false);
   const tomorrowPlanSavingRef = React.useRef(false);
 
   stateRef.current = state;
   desiredDirectionRef.current = desiredDirection;
+  controllableFocusRef.current = controllableFocus;
   tomorrowInputRef.current = tomorrowInput;
   tomorrowActionsRef.current = tomorrowActions;
+  firstFiveMinutesRef.current = firstFiveMinutes;
 
   const visibleHabits = React.useMemo(
     () => state?.habitOccurrences || [],
@@ -119,20 +130,32 @@ export function useTodayV2State(userId) {
     [desiredDirection, state?.review?.desired_direction]
   );
 
+  const controllableFocusDirty = React.useMemo(
+    () => normalizeTodayV2Text(controllableFocus) !== normalizeTodayV2Text(state?.review?.controllable_focus || ''),
+    [controllableFocus, state?.review?.controllable_focus]
+  );
+
   const tomorrowPlanDirty = React.useMemo(() => {
     if (!state) return false;
     return normalizeTodayV2Text(tomorrowInput) !== normalizeTodayV2Text(state.tomorrowPlanInput || '')
-      || normalizedTomorrowActions.join('\n') !== loadedTomorrowActions.join('\n');
-  }, [loadedTomorrowActions, normalizedTomorrowActions, state, tomorrowInput]);
+      || normalizedTomorrowActions.join('\n') !== loadedTomorrowActions.join('\n')
+      || normalizeTodayV2Text(firstFiveMinutes) !== normalizeTodayV2Text(state.firstFiveMinutes || '');
+  }, [firstFiveMinutes, loadedTomorrowActions, normalizedTomorrowActions, state, tomorrowInput]);
 
   const completionGate = React.useMemo(() => getTodayV2CompletionGate({
     followThroughItems: state?.followThroughItems || [],
     habitOccurrences: state?.habitOccurrences || [],
     tomorrowActions,
-  }), [state?.followThroughItems, state?.habitOccurrences, tomorrowActions]);
+    controllableFocus,
+    firstFiveMinutes,
+  }), [controllableFocus, firstFiveMinutes, state?.followThroughItems, state?.habitOccurrences, tomorrowActions]);
 
   const setDesiredDirection = React.useCallback((value) => {
     setDesiredDirectionState(value);
+  }, []);
+
+  const setControllableFocus = React.useCallback((value) => {
+    setControllableFocusState(value);
   }, []);
 
   const setTomorrowInput = React.useCallback((value) => {
@@ -142,6 +165,10 @@ export function useTodayV2State(userId) {
   const setTomorrowActions = React.useCallback((value) => {
     setCustomTomorrowActions(true);
     setTomorrowActionsState((previous) => (typeof value === 'function' ? value(previous) : value));
+  }, []);
+
+  const setFirstFiveMinutes = React.useCallback((value) => {
+    setFirstFiveMinutesState(value);
   }, []);
 
   const load = React.useCallback(async () => {
@@ -160,22 +187,32 @@ export function useTodayV2State(userId) {
       const nextDesiredDirection = draft && (draft.desiredDirectionNeedsSync || !normalizeTodayV2Text(next.review?.desired_direction))
         ? String(draft.desiredDirection || '')
         : next.review?.desired_direction || '';
+      const nextControllableFocus = draft && (draft.controllableFocusNeedsSync || !normalizeTodayV2Text(next.review?.controllable_focus))
+        ? String(draft.controllableFocus || '')
+        : next.review?.controllable_focus || '';
       const nextTomorrowInput = draft && (draft.tomorrowPlanNeedsSync || (!normalizeTodayV2Text(next.tomorrowPlanInput) && normalizeFragmentList(next.tomorrowFragments).length === 0))
         ? String(draft.tomorrowInput || '')
         : next.tomorrowPlanInput || '';
       const nextTomorrowActions = draft && (draft.tomorrowPlanNeedsSync || (!normalizeTodayV2Text(next.tomorrowPlanInput) && normalizeFragmentList(next.tomorrowFragments).length === 0))
         ? coerceTodayV2EditableFragments(String(draft.tomorrowInput || ''), draft.tomorrowActions || [])
         : normalizeFragmentList(next.tomorrowFragments || []);
+      const nextFirstFiveMinutes = draft && draft.tomorrowPlanNeedsSync
+        ? String(draft.firstFiveMinutes || '')
+        : next.firstFiveMinutes || '';
       const autoSplit = buildTodayV2CommitmentDrafts(nextTomorrowInput).map((draftItem) => draftItem.normalizedFragmentText);
 
       setState(next);
       setSeedDiagnostic(next.seedDiagnostic || null);
       setDesiredDirectionState(nextDesiredDirection);
+      setControllableFocusState(nextControllableFocus);
       setTomorrowInputState(nextTomorrowInput);
       setTomorrowActionsState(nextTomorrowActions);
+      setFirstFiveMinutesState(nextFirstFiveMinutes);
       setCustomTomorrowActions(nextTomorrowActions.join('\n') !== autoSplit.join('\n'));
       setDesiredDirectionSaveStatus(draft?.desiredDirectionNeedsSync ? 'offline' : 'saved');
+      setControllableFocusSaveStatus(draft?.controllableFocusNeedsSync ? 'offline' : 'saved');
       setTomorrowPlanSaveStatus(draft?.tomorrowPlanNeedsSync ? 'offline' : 'saved');
+      setFirstFiveMinutesSaveStatus(draft?.tomorrowPlanNeedsSync ? 'offline' : 'saved');
       setTomorrowPlanError(null);
     } catch (loadError) {
       console.error('[TodayV2] load failed:', loadError);
@@ -200,12 +237,15 @@ export function useTodayV2State(userId) {
     writeDraft(userId, state.todayLocalDate, {
       desiredDirection,
       desiredDirectionNeedsSync: desiredDirectionDirty,
+      controllableFocus,
+      controllableFocusNeedsSync: controllableFocusDirty,
       tomorrowInput,
       tomorrowActions: normalizedTomorrowActions,
+      firstFiveMinutes,
       tomorrowPlanNeedsSync: tomorrowPlanDirty,
       updatedAt: new Date().toISOString(),
     });
-  }, [desiredDirection, desiredDirectionDirty, normalizedTomorrowActions, state?.todayLocalDate, tomorrowInput, tomorrowPlanDirty, userId]);
+  }, [controllableFocus, controllableFocusDirty, desiredDirection, desiredDirectionDirty, firstFiveMinutes, normalizedTomorrowActions, state?.todayLocalDate, tomorrowInput, tomorrowPlanDirty, userId]);
 
   const flushDesiredDirection = React.useCallback(async () => {
     const reviewId = stateRef.current?.review?.id;
@@ -250,27 +290,70 @@ export function useTodayV2State(userId) {
     return desiredDirectionSavePromiseRef.current;
   }, [desiredDirectionDirty, userId]);
 
+  const flushControllableFocus = React.useCallback(async () => {
+    const reviewId = stateRef.current?.review?.id;
+    if (!reviewId) return;
+    if (!controllableFocusDirty && !readDraft(userId, stateRef.current?.todayLocalDate)?.controllableFocusNeedsSync) {
+      setControllableFocusSaveStatus('saved');
+      return;
+    }
+    if (controllableFocusSavingRef.current) return controllableFocusSavePromiseRef.current;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      setControllableFocusSaveStatus('offline');
+      return;
+    }
+
+    controllableFocusSavingRef.current = true;
+    setControllableFocusSaveStatus('saving');
+    const nextFocus = controllableFocusRef.current;
+
+    controllableFocusSavePromiseRef.current = updateControllableFocus(reviewId, nextFocus)
+      .then(() => {
+        setState((previous) => previous ? {
+          ...previous,
+          review: {
+            ...previous.review,
+            controllable_focus: normalizeTodayV2Text(nextFocus) || null,
+          },
+        } : previous);
+        setControllableFocusSaveStatus('saved');
+      })
+      .catch((saveError) => {
+        setControllableFocusSaveStatus(isOfflineLikeError(saveError) ? 'offline' : 'error');
+        throw saveError;
+      })
+      .finally(() => {
+        controllableFocusSavingRef.current = false;
+      });
+
+    return controllableFocusSavePromiseRef.current;
+  }, [controllableFocusDirty, userId]);
+
   const flushTomorrowPlan = React.useCallback(async () => {
     const currentState = stateRef.current;
     if (!currentState) return;
     const draft = readDraft(userId, currentState.todayLocalDate);
     if (!tomorrowPlanDirty && !draft?.tomorrowPlanNeedsSync) {
       setTomorrowPlanSaveStatus('saved');
+      setFirstFiveMinutesSaveStatus('saved');
       setTomorrowPlanError(null);
       return;
     }
     if (tomorrowPlanSavingRef.current) return tomorrowPlanSavePromiseRef.current;
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
       setTomorrowPlanSaveStatus('offline');
+      setFirstFiveMinutesSaveStatus('offline');
       return;
     }
 
     tomorrowPlanSavingRef.current = true;
     setTomorrowPlanSaveStatus('saving');
+    setFirstFiveMinutesSaveStatus('saving');
     setTomorrowPlanError(null);
 
     const rawPlanText = tomorrowInputRef.current;
     const fragments = coerceTodayV2EditableFragments(rawPlanText, tomorrowActionsRef.current);
+    const firstFiveMinutesValue = firstFiveMinutesRef.current;
 
     tomorrowPlanSavePromiseRef.current = replaceTomorrowActions({
       targetLocalDate: currentState.tomorrowLocalDate,
@@ -278,14 +361,17 @@ export function useTodayV2State(userId) {
       timezoneName: currentState.timezoneName,
       rawPlanText,
       actionTexts: fragments,
+      firstFiveMinutes: firstFiveMinutesValue,
     })
       .then((savedPlan) => {
         setState((previous) => previous ? {
           ...previous,
           tomorrowPlanInput: savedPlan.rawPlanText,
+          firstFiveMinutes: normalizeTodayV2Text(firstFiveMinutesValue),
           tomorrowPlanMeta: {
             ...(previous.tomorrowPlanMeta || {}),
             raw_plan_text: savedPlan.rawPlanText,
+            first_five_minutes: normalizeTodayV2Text(firstFiveMinutesValue) || null,
             target_local_date: previous.tomorrowLocalDate,
             source_local_date: previous.todayLocalDate,
             timezone_name: previous.timezoneName,
@@ -305,11 +391,13 @@ export function useTodayV2State(userId) {
         } : previous);
         setTomorrowActionsState(savedPlan.fragments);
         setTomorrowPlanSaveStatus('saved');
+        setFirstFiveMinutesSaveStatus('saved');
       })
       .catch(async (saveError) => {
         const message = String(saveError?.message || saveError?.details || '');
         const isOverwriteError = /cannot overwrite answered fragments/i.test(message);
         setTomorrowPlanSaveStatus(isOfflineLikeError(saveError) ? 'offline' : 'error');
+        setFirstFiveMinutesSaveStatus(isOfflineLikeError(saveError) ? 'offline' : 'error');
         setTomorrowPlanError(isOverwriteError ? 'Those follow-through answers are already locked in. Reloaded the current plan instead of overwriting it.' : null);
         if (isOverwriteError) {
           await load();
@@ -321,16 +409,16 @@ export function useTodayV2State(userId) {
       });
 
     return tomorrowPlanSavePromiseRef.current;
-  }, [load, tomorrowPlanDirty, userId]);
+  }, [firstFiveMinutes, load, tomorrowPlanDirty, userId]);
 
   const flushAll = React.useCallback(async () => {
-    const results = await Promise.allSettled([flushDesiredDirection(), flushTomorrowPlan()]);
+    const results = await Promise.allSettled([flushDesiredDirection(), flushControllableFocus(), flushTomorrowPlan()]);
     const rejected = results.find((result) => result.status === 'rejected');
     if (rejected?.status === 'rejected') {
       throw rejected.reason;
     }
     return results;
-  }, [flushDesiredDirection, flushTomorrowPlan]);
+  }, [flushControllableFocus, flushDesiredDirection, flushTomorrowPlan]);
 
   const checkForDayRollover = React.useCallback(async () => {
     const currentState = stateRef.current;
@@ -339,11 +427,15 @@ export function useTodayV2State(userId) {
     if (nextDateContext.todayLocalDate === currentState.todayLocalDate) return;
 
     setDesiredDirectionState('');
+    setControllableFocusState('');
     setTomorrowInputState('');
     setTomorrowActionsState([]);
+    setFirstFiveMinutesState('');
     setCustomTomorrowActions(false);
     setDesiredDirectionSaveStatus('idle');
+    setControllableFocusSaveStatus('idle');
     setTomorrowPlanSaveStatus('idle');
+    setFirstFiveMinutesSaveStatus('idle');
     setTomorrowPlanError(null);
     await load();
   }, [load]);
@@ -411,8 +503,18 @@ export function useTodayV2State(userId) {
   }, [desiredDirectionDirty, flushDesiredDirection, state]);
 
   React.useEffect(() => {
+    if (!state || !controllableFocusDirty) return undefined;
+    setControllableFocusSaveStatus('saving');
+    const timeoutId = window.setTimeout(() => {
+      void flushControllableFocus();
+    }, 800);
+    return () => window.clearTimeout(timeoutId);
+  }, [controllableFocusDirty, flushControllableFocus, state]);
+
+  React.useEffect(() => {
     if (!state || !tomorrowPlanDirty) return undefined;
     setTomorrowPlanSaveStatus('saving');
+    setFirstFiveMinutesSaveStatus('saving');
     const timeoutId = window.setTimeout(() => {
       void flushTomorrowPlan();
     }, 800);
@@ -503,8 +605,8 @@ export function useTodayV2State(userId) {
   const completeReview = React.useCallback(async () => {
     if (!state?.review?.id) return null;
     setCompletionSaving(true);
-    await flushAll();
     try {
+      await flushAll();
       const savedReview = await completeTodayV2Review(state.review.id);
       setState((previous) => previous ? {
         ...previous,
@@ -541,10 +643,14 @@ export function useTodayV2State(userId) {
     seedDiagnostic,
     desiredDirection,
     setDesiredDirection,
+    controllableFocus,
+    setControllableFocus,
     tomorrowInput,
     setTomorrowInput,
     tomorrowActions,
     setTomorrowActions,
+    firstFiveMinutes,
+    setFirstFiveMinutes,
     visibleHabits,
     habitDefinitionsById,
     load,
@@ -562,8 +668,12 @@ export function useTodayV2State(userId) {
     completionSaving,
     desiredDirectionSaveStatus,
     desiredDirectionSaveLabel: SAVE_STATUS_LABELS[desiredDirectionSaveStatus] || SAVE_STATUS_LABELS.idle,
+    controllableFocusSaveStatus,
+    controllableFocusSaveLabel: SAVE_STATUS_LABELS[controllableFocusSaveStatus] || SAVE_STATUS_LABELS.idle,
     tomorrowPlanSaveStatus,
     tomorrowPlanSaveLabel: SAVE_STATUS_LABELS[tomorrowPlanSaveStatus] || SAVE_STATUS_LABELS.idle,
+    firstFiveMinutesSaveStatus,
+    firstFiveMinutesSaveLabel: SAVE_STATUS_LABELS[firstFiveMinutesSaveStatus] || SAVE_STATUS_LABELS.idle,
     tomorrowPlanError,
     isCompleted: Boolean(state?.review?.completed_at),
     createEmptyHabitDefinition: React.useCallback(() => buildEmptyHabitDefinition(state?.habitDefinitions || []), [state?.habitDefinitions]),

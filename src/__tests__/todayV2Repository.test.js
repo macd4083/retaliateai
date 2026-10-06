@@ -16,9 +16,11 @@ import {
   completeTodayV2Review,
   getTodayV2RouteTarget,
   loadTodayReviewState,
+  reopenTodayV2Review,
   replaceTomorrowActions,
   setFollowThroughCompletion,
   seedDefaultHabits,
+  updateControllableFocus,
 } from '../v2/services/todayReview';
 import {
   TODAY_V2_FORBIDDEN_PERSISTENCE_TOKENS,
@@ -55,6 +57,22 @@ function createThenableBuilder(result, tracker = {}) {
     },
     lte(column, value) {
       tracker.lte = [...(tracker.lte || []), [column, value]];
+      return this;
+    },
+    lt(column, value) {
+      tracker.lt = [...(tracker.lt || []), [column, value]];
+      return this;
+    },
+    neq(column, value) {
+      tracker.neq = [...(tracker.neq || []), [column, value]];
+      return this;
+    },
+    not(column, operator, value) {
+      tracker.not = [...(tracker.not || []), [column, operator, value]];
+      return this;
+    },
+    limit(value) {
+      tracker.limit = value;
       return this;
     },
     order(column, options) {
@@ -116,7 +134,7 @@ describe('TodayV2 repository', () => {
 
       if (tableName === TODAY_V2_TABLES.DAILY_REVIEWS) {
         return createThenableBuilder({
-          data: { id: 'review-1', local_date: '2026-09-28', timezone_name: 'UTC', desired_direction: 'Builder', completed_at: null, updated_at: '2026-09-28T12:00:00.000Z' },
+          data: { id: 'review-1', local_date: '2026-09-28', timezone_name: 'UTC', desired_direction: 'Builder', controllable_focus: null, completed_at: null, updated_at: '2026-09-28T12:00:00.000Z' },
           error: null,
         }, tracker);
       }
@@ -126,6 +144,7 @@ describe('TodayV2 repository', () => {
           data: {
             id: 'plan-1',
             raw_plan_text: 'Write 20 minutes and review notes',
+            first_five_minutes: 'Open the outline',
             target_local_date: '2026-09-29',
             updated_at: '2026-09-28T12:00:00.000Z',
           },
@@ -161,11 +180,14 @@ describe('TodayV2 repository', () => {
 
     expect(state.todayLocalDate).toBe('2026-09-28');
     expect(state.tomorrowLocalDate).toBe('2026-09-29');
+    expect(state.firstFiveMinutes).toBe('Open the outline');
 
     const commitmentTrackers = trackers.filter((tracker) => tracker.tableName === TODAY_V2_TABLES.COMMITMENT_FRAGMENTS);
     expect(commitmentTrackers).toHaveLength(2);
     expect(commitmentTrackers[0].eq).toContainEqual(['target_local_date', '2026-09-28']);
     expect(commitmentTrackers[1].eq).toContainEqual(['target_local_date', '2026-09-29']);
+    expect(trackers.find((tracker) => tracker.tableName === TODAY_V2_TABLES.PLAN_INPUTS).selection).toContain('first_five_minutes');
+    expect(trackers.find((tracker) => tracker.tableName === TODAY_V2_TABLES.DAILY_REVIEWS).selection).toContain('controllable_focus');
 
     for (const token of TODAY_V2_FORBIDDEN_PERSISTENCE_TOKENS) {
       expect(trackers.some((tracker) => tracker.tableName === token)).toBe(false);
@@ -220,6 +242,7 @@ describe('TodayV2 repository', () => {
       timezoneName: 'UTC',
       rawPlanText: 'Write 20 minutes and review notes',
       actionTexts: [],
+      firstFiveMinutes: 'Open the outline',
     });
 
     expect(supabaseMock.rpc).toHaveBeenCalledWith(TODAY_V2_RPCS.REPLACE_PLAN, {
@@ -228,6 +251,7 @@ describe('TodayV2 repository', () => {
       p_timezone_name: 'UTC',
       p_raw_plan_text: 'Write 20 minutes and review notes',
       p_fragment_texts: ['Write 20 minutes', 'review notes'],
+      p_first_five_minutes: 'Open the outline',
     });
   });
 
@@ -240,6 +264,7 @@ describe('TodayV2 repository', () => {
       timezoneName: 'UTC',
       rawPlanText: '',
       actionTexts: ['Call mentor', 'Review notes'],
+      firstFiveMinutes: '',
     });
 
     expect(supabaseMock.rpc).toHaveBeenCalledWith(TODAY_V2_RPCS.REPLACE_PLAN, {
@@ -248,6 +273,7 @@ describe('TodayV2 repository', () => {
       p_timezone_name: 'UTC',
       p_raw_plan_text: '',
       p_fragment_texts: ['Call mentor', 'Review notes'],
+      p_first_five_minutes: null,
     });
   });
 
@@ -296,6 +322,24 @@ describe('TodayV2 repository', () => {
     expect(tracker.update).toEqual({
       completed_at: expect.any(String),
     });
+  });
+
+  it('reads and writes controllable focus and includes it in review selections', async () => {
+    const trackers = [];
+    supabaseMock.from.mockImplementation(() => {
+      const tracker = {};
+      trackers.push(tracker);
+      return createThenableBuilder({
+        data: { id: 'review-1', controllable_focus: 'Protect the work block' },
+        error: null,
+      }, tracker);
+    });
+
+    await updateControllableFocus('review-1', '  Protect the work block  ');
+    expect(trackers[0].update).toEqual({ controllable_focus: 'Protect the work block' });
+
+    await reopenTodayV2Review('review-1');
+    expect(trackers[1].selection).toContain('controllable_focus');
   });
 
   it('routes completed reviews to /home without touching legacy tables', async () => {
