@@ -12,8 +12,10 @@ export default function PWAInstallBanner() {
   const [declined, setDeclined] = useState(false);
 
   useEffect(() => {
-    if (isStandalone) return;
-    if (!isInstallable) return;
+    if (isStandalone || !isInstallable) {
+      setVisible(false);
+      return;
+    }
     if (localStorage.getItem(STORAGE_KEY_DISMISSED) === 'true') return;
 
     const current = parseInt(localStorage.getItem(STORAGE_KEY_COUNT) || '0', 10);

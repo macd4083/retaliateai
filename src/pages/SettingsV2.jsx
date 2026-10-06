@@ -3,6 +3,7 @@ import { Check } from 'lucide-react';
 import { CardElement, Elements, useElements, useStripe } from '@stripe/react-stripe-js';
 import { loadStripe } from '@stripe/stripe-js';
 import toast, { Toaster } from 'react-hot-toast';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase/client';
 import AppShellV2 from '../components/v2/AppShellV2';
@@ -150,6 +151,7 @@ function PaymentMethodForm({ userId, getAuthHeaders, onUpdated }) {
 
 export default function SettingsV2() {
   const { user, signOut } = useAuth();
+  const navigate = useNavigate();
 
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -320,7 +322,12 @@ export default function SettingsV2() {
   };
 
   const handleSignOut = async () => {
-    await signOut();
+    try {
+      await signOut();
+      navigate('/login', { replace: true });
+    } catch (error) {
+      toast.error(error?.message || 'Could not sign out. Please try again.');
+    }
   };
 
   const handleSaveIdentityField = async (fieldName) => {

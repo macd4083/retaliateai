@@ -47,7 +47,7 @@ function queueQuery(data, error = null) {
     const builder = {
       then: (resolve, reject) => Promise.resolve({ data, error }).then(resolve, reject),
     };
-    for (const name of ['select', 'eq', 'in', 'not', 'lt', 'limit', 'update', 'delete', 'maybeSingle']) {
+    for (const name of ['select', 'eq', 'in', 'not', 'lt', 'limit', 'order', 'update', 'delete', 'maybeSingle']) {
       builder[name] = (...args) => {
         record.operations.push([name, ...args]);
         return builder;
@@ -71,6 +71,7 @@ function missedProfile(overrides = {}) {
 }
 function queueMissedEligibility() {
   queueQuery([missedProfile()]);
+  queueQuery({ local_date: '2026-09-30', completed_at: '2026-09-30T20:00:00Z', timezone_name: 'America/Los_Angeles' });
   queueQuery([]);
   queueQuery([{ local_date: '2026-09-30', completed_at: '2026-09-30T20:00:00Z' }]);
   queueQuery(null);
@@ -163,14 +164,17 @@ describe('V2 missed-review email', () => {
       html: expect.stringContaining('https://retaliateai.com/today'),
     }));
     expect(queryLog.map(({ table }) => table)).toEqual([
-      'user_profiles', 'today_v2_daily_reviews', 'today_v2_daily_reviews', 'user_profiles',
+      'user_profiles', 'today_v2_daily_reviews', 'today_v2_daily_reviews', 'today_v2_daily_reviews', 'user_profiles',
     ]);
-    expect(queryLog[1].operations).toContainEqual(['in', 'local_date', ['2026-10-04', '2026-10-03', '2026-10-05']]);
+    expect(queryLog[1].operations).toContainEqual(['order', 'completed_at', { ascending: false }]);
     expect(queryLog[1].operations).toContainEqual(['not', 'completed_at', 'is', null]);
-    expect(queryLog[2].operations).toContainEqual(['lt', 'local_date', '2026-10-03']);
+    expect(queryLog[2].operations).toContainEqual(['in', 'local_date', ['2026-10-04', '2026-10-03', '2026-10-05']]);
     expect(queryLog[2].operations).toContainEqual(['not', 'completed_at', 'is', null]);
-    expect(queryLog[3].operations).toContainEqual(['update', { last_reengagement_email_sent: '2026-10-06T10:30:00.000Z' }]);
+    expect(queryLog[3].operations).toContainEqual(['lt', 'local_date', '2026-10-03']);
+    expect(queryLog[3].operations).toContainEqual(['not', 'completed_at', 'is', null]);
+    expect(queryLog[4].operations).toContainEqual(['update', { last_reengagement_email_sent: '2026-10-06T10:30:00.000Z' }]);
     expect(mocks.sendEmail.mock.calls[0][0].html).not.toMatch(/streak|excuses|untrusted/);
+    expect(mocks.sendEmail.mock.calls[0][0].html).toContain('Review &amp; Plan');
     expect(res.json).toHaveBeenCalledWith({ sent: 1, users: ['user-1'] });
   });
   it.each([
@@ -178,6 +182,7 @@ describe('V2 missed-review email', () => {
     { data: null, error: { message: 'database unavailable' } },
   ])('sends no email for recent completion or a failed recent query', async ({ data, error }) => {
     queueQuery([missedProfile()]);
+    queueQuery({ timezone_name: 'America/Los_Angeles' });
     queueQuery(data, error);
     await missedHandler(request(), response());
     expect(mocks.sendEmail).not.toHaveBeenCalled();
@@ -188,23 +193,23 @@ describe('V2 missed-review email', () => {
     { data: null, error: { message: 'database unavailable' } },
   ])('requires a successful prior-completion lookup', async ({ data, error }) => {
     queueQuery([missedProfile()]);
+    queueQuery({ timezone_name: 'America/Los_Angeles' });
     queueQuery([]);
     queueQuery(data, error);
     await missedHandler(request(), response());
     expect(mocks.sendEmail).not.toHaveBeenCalled();
   });
   it('does not email users without a trustworthy timezone or within seven days', async () => {
-    queueQuery([
-      missedProfile({ timezone: null }),
-      missedProfile({ timezone: 'invalid' }),
-      missedProfile({ last_reengagement_email_sent: '2026-09-30T10:30:00Z' }),
-    ]);
+    queueQuery([missedProfile(), missedProfile(), missedProfile({ last_reengagement_email_sent: '2026-09-30T10:30:00Z' })]);
+    queueQuery({ timezone_name: null });
+    queueQuery({ timezone_name: 'invalid' });
     await missedHandler(request(), response());
-    expect(queryLog).toHaveLength(1);
+    expect(queryLog).toHaveLength(3);
     expect(mocks.sendEmail).not.toHaveBeenCalled();
   });
   it('permits sending exactly seven days after the previous email', async () => {
     queueQuery([missedProfile({ last_reengagement_email_sent: '2026-09-29T10:30:00Z' })]);
+    queueQuery({ timezone_name: 'America/Los_Angeles' });
     queueQuery([]);
     queueQuery([{ completed_at: '2026-09-28T23:00:00Z' }]);
     queueQuery(null);
@@ -215,7 +220,7 @@ describe('V2 missed-review email', () => {
     queueMissedEligibility();
     mocks.sendEmail.mockResolvedValue({ error: { message: 'delivery failed' } });
     await missedHandler(request(), response());
-    expect(queryLog).toHaveLength(3);
+    expect(queryLog).toHaveLength(4);
   });
   it('fails without sending on a profile query error', async () => {
     queueQuery(null, { message: 'database unavailable' });
@@ -223,6 +228,26 @@ describe('V2 missed-review email', () => {
     await missedHandler(request(), res);
     expect(res.status).toHaveBeenCalledWith(500);
     expect(mocks.sendEmail).not.toHaveBeenCalled();
+  });
+  it('uses the last completed V2 review timezone rather than a stale profile default', async () => {
+    queueQuery([missedProfile({ timezone: 'America/New_York' })]);
+    queueQuery({ timezone_name: 'America/Los_Angeles', completed_at: '2026-09-30T20:00:00Z' });
+    queueQuery([]);
+    queueQuery([{ local_date: '2026-09-30', completed_at: '2026-09-30T20:00:00Z' }]);
+    queueQuery(null);
+    await missedHandler(request(), response());
+    expect(queryLog[2].operations).toContainEqual(['in', 'local_date', ['2026-10-04', '2026-10-03', '2026-10-05']]);
+    expect(mocks.sendEmail).toHaveBeenCalledOnce();
+  });
+  it.each([
+    { data: null, error: null },
+    { data: null, error: { message: 'database unavailable' } },
+  ])('requires a trustworthy completed V2 review timezone lookup', async ({ data, error }) => {
+    queueQuery([missedProfile()]);
+    queueQuery(data, error);
+    await missedHandler(request(), response());
+    expect(mocks.sendEmail).not.toHaveBeenCalled();
+    expect(queryLog).toHaveLength(2);
   });
 });
 
@@ -324,10 +349,10 @@ describe('installed service worker notification routing', () => {
       },
       clients,
     };
-    vm.runInNewContext(readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8'), context);
+    vm.runInNewContext(readFileSync(new URL('../../public/push-sw.js', import.meta.url), 'utf8'), context);
     return { listeners, showNotification, clients };
   }
-  it.each([undefined, '/reflection', '/Reflection?legacy=1', 'https://evil.example/steal', '//evil.example', 'https://retaliateai.com//evil.example', 'javascript:alert(1)'])(
+  it.each([undefined, '', '   ', '/reflection', ' /reflection ', '/Reflection?legacy=1', 'https://evil.example/steal', '//evil.example', 'https://retaliateai.com//evil.example', 'javascript:alert(1)'])(
     'normalizes missing, unsafe, or legacy payload URLs: %s', async (url) => {
       const { listeners, showNotification } = loadWorker();
       let promise;
@@ -394,5 +419,12 @@ describe('push cron SQL deployment contract', () => {
     expect(sql).toContain("secret.name = 'cron_secret'");
     expect(sql).toContain("body := '{}'::jsonb");
     expect(sql).not.toMatch(/cron\.unschedule|drop table|delete from|reflection_sessions|commitment/i);
+  });
+  it('preserves the installed worker URL and includes handlers in the generated worker', () => {
+    const worker = readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8');
+    const config = readFileSync(new URL('../../vite.config.js', import.meta.url), 'utf8');
+    expect(worker).toContain("importScripts('/push-sw.js')");
+    expect(config).toContain("importScripts: ['/push-sw.js']");
+    expect(worker).not.toMatch(/skipWaiting|clients\.claim|reload/);
   });
 });

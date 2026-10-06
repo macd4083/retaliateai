@@ -14,7 +14,7 @@ function buildEmailHtml() {
   return `
 <h2>Your daily review is here when you're ready.</h2>
 <p>Review today and prepare tomorrow. Start with your habits, review your commitments, and make a plan for tomorrow.</p>
-<p><a href="${escapeHtml(publicAppUrl('/today'))}" style="display:inline-block;padding:12px 24px;background-color:#dc2626;color:white;text-decoration:none;border-radius:8px;font-weight:600;">Open Today</a></p>
+<p><a href="${escapeHtml(publicAppUrl('/today'))}" style="display:inline-block;padding:12px 24px;background-color:#dc2626;color:white;text-decoration:none;border-radius:8px;font-weight:600;">Review &amp; Plan</a></p>
 <p style="color:#94a3b8;font-size:12px;">Retaliate AI</p>
 `;
 }
@@ -26,7 +26,7 @@ export default async function handler(req, res) {
   const now = new Date();
   const { data: profiles, error: profileError } = await supabase
     .from('user_profiles')
-    .select('id, timezone, last_reengagement_email_sent')
+    .select('id, last_reengagement_email_sent')
     .eq('onboarding_completed', true);
   if (profileError) {
     return res.status(500).json({ error: 'Unable to load reminder profiles' });
@@ -39,7 +39,17 @@ export default async function handler(req, res) {
         const lastSent = new Date(profile.last_reengagement_email_sent).getTime();
         if (!Number.isFinite(lastSent) || now.getTime() - lastSent < SEVEN_DAYS_MS) continue;
       }
-      const context = getLocalReviewContext(now, profile.timezone);
+      const { data: lastCompletedReview, error: lastCompletedError } = await supabase
+        .from('today_v2_daily_reviews')
+        .select('local_date, completed_at, timezone_name')
+        .eq('user_id', profile.id)
+        .not('completed_at', 'is', null)
+        .order('completed_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (lastCompletedError || !lastCompletedReview) continue;
+      // V2 stores the browser's actual review timezone; profile defaults can be stale.
+      const context = getLocalReviewContext(now, lastCompletedReview.timezone_name);
       if (!context) continue;
 
       const { data: recentReviews, error: recentError } = await supabase

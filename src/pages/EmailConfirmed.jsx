@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase/client';
 import { CheckCircle, X } from 'lucide-react';
-import { getSafeAuthReturn, getAuthLinkError } from '../lib/authReturn';
+import { getSafeAuthReturn, getAuthLinkError, resolveAuthCallbackSession } from '../lib/authReturn';
+import { useAuth } from '../lib/AuthContext';
 
 export default function EmailConfirmed() {
   const navigate = useNavigate();
+  const { isPasswordRecovery } = useAuth();
   const [searchParams] = useSearchParams();
   const returnTo = getSafeAuthReturn(searchParams.get('next'));
   const [status, setStatus] = useState('verifying');
@@ -22,9 +24,10 @@ export default function EmailConfirmed() {
           navigate(`/auth/reset-password${window.location.search}${window.location.hash}`, { replace: true });
           return;
         }
-        // The Supabase client processes OAuth/PKCE and email tokens on initialization.
-        const { data: { session }, error } = await supabase.auth.getSession();
-        if (cancelled) return;
+        // Preserve implicit links, and explicitly exchange PKCE only if no session exists.
+        const { data, error } = await resolveAuthCallbackSession(supabase.auth, searchParams.get('code'));
+        const session = data?.session;
+        if (cancelled || isPasswordRecovery?.()) return;
         
         if (error || !session) {
           console.error('Verification error:', error);
@@ -55,7 +58,7 @@ export default function EmailConfirmed() {
 
     handleEmailConfirmation();
     return () => { cancelled = true; };
-  }, [navigate, searchParams]);
+  }, [navigate, searchParams, isPasswordRecovery]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-green-50 via-blue-50 to-purple-50 px-4">

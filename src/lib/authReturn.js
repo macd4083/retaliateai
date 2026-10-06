@@ -23,9 +23,23 @@ export function getAuthCallbackUrl(returnTo, origin = window.location.origin) {
   return url.href;
 }
 
+export function getAuthResetUrl(returnTo, origin = window.location.origin) {
+  const url = new URL('/auth/reset-password', origin);
+  url.searchParams.set('next', getSafeAuthReturn(returnTo, origin));
+  return url.href;
+}
+
 export function getAuthLinkError(search, hash) {
   const query = new URLSearchParams(search);
   const fragment = new URLSearchParams(hash.replace(/^#/, ''));
   return query.get('error_description') || fragment.get('error_description')
     || query.get('error') || fragment.get('error') || '';
+}
+
+export async function resolveAuthCallbackSession(auth, code) {
+  const result = await auth.getSession();
+  if (!result.data?.session && code) {
+    return auth.exchangeCodeForSession(code);
+  }
+  return result;
 }

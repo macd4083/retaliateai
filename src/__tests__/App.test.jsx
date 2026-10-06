@@ -158,11 +158,22 @@ describe('shouldShowTrialExpiredModal', () => {
       expect(router.state.location.pathname).toBe('/today');
     });
 
-    it('preserves the anonymous guest onboarding bypass', async () => {
+    it.each([
+      ['/today', 'Structured Today'],
+      ['/legacy/reflection', 'Legacy Reflection'],
+    ])('preserves the anonymous guest onboarding bypass on %s', async (path, text) => {
       mocks.auth.user = { id: 'guest-1', is_anonymous: true };
       mocks.profile = { onboarding_completed: false };
-      await render('/today');
-      expect(container.textContent).toBe('Structured Today');
+      await render(path);
+      expect(router.state.location.pathname).toBe(path);
+      expect(container.textContent).toBe(text);
+    });
+
+    it('keeps the legacy route accessible to guest campaign profiles after account transfer', async () => {
+      mocks.profile = { onboarding_completed: false, is_guest_campaign_user: true };
+      await render('/legacy/reflection');
+      expect(router.state.location.pathname).toBe('/legacy/reflection');
+      expect(container.textContent).toBe('Legacy Reflection');
     });
   });
 

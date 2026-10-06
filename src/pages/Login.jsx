@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase/client';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Mail, Lock, ArrowLeft, Eye, EyeOff } from 'lucide-react';
 import { trackEvent, identifyUser } from '../lib/analytics';
-import { getSafeAuthReturn, getAuthCallbackUrl } from '../lib/authReturn';
+import { getSafeAuthReturn, getAuthCallbackUrl, getAuthResetUrl } from '../lib/authReturn';
 
 export default function Login() {
   const [searchParams] = useSearchParams();
@@ -14,6 +14,7 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [messageType, setMessageType] = useState('');
+  const [showResendConfirmation, setShowResendConfirmation] = useState(false);
   const [isSignUp, setIsSignUp] = useState(false);
   const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [showOtpInput, setShowOtpInput] = useState(false);
@@ -42,6 +43,7 @@ export default function Login() {
     e.preventDefault();
     setLoading(true);
     setMessage('');
+    setShowResendConfirmation(false);
     
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
@@ -51,6 +53,7 @@ export default function Login() {
     if (error) {
       setMessage(error.message);
       setMessageType('error');
+      setShowResendConfirmation(error.code === 'email_not_confirmed' || /email not confirmed/i.test(error.message || ''));
     } else {
       identifyUser(data.user.id, { email });
       trackEvent('login_completed');
@@ -59,6 +62,27 @@ export default function Login() {
       navigate(returnTo, { replace: true });
     }
     setLoading(false);
+  };
+
+  const handleResendConfirmation = async () => {
+    setLoading(true);
+    setMessage('');
+    try {
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email,
+        options: { emailRedirectTo: getAuthCallbackUrl(returnTo) },
+      });
+      if (error) throw error;
+      setMessage('Confirmation email sent! Check your inbox and spam folder, then sign in.');
+      setMessageType('success');
+      setShowResendConfirmation(false);
+    } catch (error) {
+      setMessage(error?.message || 'Could not resend confirmation. Please try again.');
+      setMessageType('error');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleSignup = async (e) => {
@@ -113,7 +137,7 @@ export default function Login() {
     setMessage('');
 
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/auth/reset-password`,
+      redirectTo: getAuthResetUrl(returnTo),
     });
 
     if (error) {
@@ -131,6 +155,7 @@ export default function Login() {
     setPassword('');
     setMessage('');
     setMessageType('');
+    setShowResendConfirmation(false);
     setShowPassword(false);
     setShowOtpInput(false);
     setSignupEmail('');
@@ -302,6 +327,16 @@ export default function Login() {
           >
             {loading ? (isSignUp ? 'Creating account...' : 'Signing in...') : (isSignUp ? 'Sign Up' : 'Sign In')}
           </button>
+          {!isSignUp && showResendConfirmation && (
+            <button
+              type="button"
+              onClick={handleResendConfirmation}
+              disabled={loading || !email}
+              className="w-full text-sm text-red-400 hover:text-red-300 disabled:opacity-50"
+            >
+              Resend confirmation email
+            </button>
+          )}
         </form>
 
         <div className="mt-6 text-center">

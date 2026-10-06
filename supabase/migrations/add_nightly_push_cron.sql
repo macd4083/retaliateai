@@ -4,7 +4,11 @@
 --   public_app_origin: https://retaliateai.com (match Vercel PUBLIC_APP_ORIGIN)
 --   cron_secret: the same value as Vercel's server-only CRON_SECRET
 -- Existing Vercel email crons send Authorization: ****** automatically.
--- Deploy the authenticated /api/push before applying; missing secrets send no request.
+-- Deployment order: provision the Vercel environment variables and Vault secrets
+-- first, apply this database cron update against the existing endpoint, verify the
+-- named job, then deploy the authenticated /api/push implementation and verify HTTP 200.
+-- The existing endpoint ignores the added authorization header; the new endpoint
+-- requires it. Missing Vault secrets send no request.
 -- cron.schedule updates the named job in place, preserving unrelated jobs.
 -- Verify after deploy:
 --   SELECT jobid, jobname, schedule, active FROM cron.job

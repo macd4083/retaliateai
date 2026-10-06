@@ -207,7 +207,7 @@ export default function Landing() {
                   "What did you follow through on?"
                 </p>
                 <p className="text-gray-400 leading-relaxed">
-                  See today's actions in Today, return to Review &amp; Plan to check in, and use Progress to see your recorded commitments over time.
+                  See today's actions in Today and return to Review &amp; Plan to check in. Record what you actually did and build a repeatable practice of following through.
                 </p>
               </div>
             </div>

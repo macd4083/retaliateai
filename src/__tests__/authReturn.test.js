@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getAuthCallbackUrl, getAuthLinkError, getSafeAuthReturn } from '../lib/authReturn';
+import { getAuthCallbackUrl, getAuthLinkError, getAuthResetUrl, getSafeAuthReturn } from '../lib/authReturn';
 
 const origin = 'https://retaliate.example';
 
@@ -36,6 +36,14 @@ describe('safe auth return destinations', () => {
     expect(url.searchParams.get('next')).toBe('/app');
     expect(new URL(getAuthCallbackUrl('/today?source=email', origin)).searchParams.get('next'))
       .toBe('/today?source=email');
+  });
+
+  it('builds reset URLs with the same safe return policy', () => {
+    const url = new URL(getAuthResetUrl('/settings', origin));
+    expect(url.origin).toBe(origin);
+    expect(url.pathname).toBe('/auth/reset-password');
+    expect(url.searchParams.get('next')).toBe('/settings');
+    expect(new URL(getAuthResetUrl('//evil.example', origin)).searchParams.get('next')).toBe('/app');
   });
 });
 

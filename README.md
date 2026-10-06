@@ -22,7 +22,7 @@ actions and the first five minutes, and track follow-through.
 | Push reminders, notification fallback and old `/reflection` payloads | `/today`; focus and navigate an existing same-origin app window |
 | Trial reminders and paid welcome email Open app | `/app`; upgrade stays `/settings` |
 | Missed V2 review email | `/today`, only after prior completed V2 use and two missed review days |
-| PWA manifests (static and Vite-generated) | `start_url: /app`, existing `/` scope and icons |
+| PWA manifests (static and Vite-generated) | `start_url: /app`, stable historical `id: /reflection`, existing `/` scope and icons |
 | Sitemap | Public `/`, `/privacy`, `/terms`; no private app routes |
 | Administration access fallback | `/app`; editor page selectors use the structured navigation labels |
 
@@ -36,8 +36,10 @@ authentication-only, not Calendar OAuth.
 `/legacy/reflection`, its AI coach, guest records and signup transfer remain.
 Legacy reflection tables, historical Insights queries, admin session tooling,
 and isolated admin dialogue demos are not migrated or deleted. `/reflection`
-survives only as a compatibility input (route/auth/old notification handling),
-not a normal user navigation destination. This does not rebuild Progress.
+survives as a compatibility input (route/auth/old notification handling) and
+the explicit PWA manifest identity, not a normal navigation or launch
+destination. The manifest ID preserves the previous implicit app identity
+while the start URL changes. This does not rebuild Progress.
 
 `VITE_ENABLE_TODAY_V2=false` is a documented emergency rollback: rebuild and
 redeploy to send generic `/app` entry to `/legacy/reflection`. Explicit `/today`
@@ -67,7 +69,8 @@ for automated tests.
    until a successful update. An invalid link must offer a new reset request.
    Sign out and confirm private routes require authentication again.
 5. Install from Chrome/Android and Safari's Share → Add to Home Screen on iOS.
-   Inspect both served manifests: `start_url` is `/app`, scope and icons unchanged.
+   Inspect both served manifests: `start_url` is `/app`, `id` is `/reflection`,
+   scope and icons unchanged.
    Launch signed out and signed in before/after completing a review. Existing
    installations with old start URLs must resolve through compatibility routing.
 6. Keep an unsaved review open while deploying an update: no automatic reload.
@@ -100,10 +103,14 @@ state. No production settings or database changes have been applied by this PR.
   it, set `VITE_TODAY_V2_DAY_BOUNDARY_HOUR` consistently for the client build and
   server deployment (integer 0–23), then rebuild/redeploy.
 - **Supabase Auth dashboard:** Site URL should be the canonical public origin.
-  Allow the production and authorized preview/local `/auth/callback` and
-  `/auth/reset-password` redirect URLs, including callback query parameters
-  needed for intended destinations. Use narrowly scoped URL patterns, not
-  arbitrary production origins. Ensure confirmation templates use Supabase's
+  Set production redirect allowlist entries to:
+  - `https://retaliateai.com/auth/callback`
+  - `https://retaliateai.com/auth/callback?next=**`
+  - `https://retaliateai.com/auth/reset-password`
+  - `https://retaliateai.com/auth/reset-password?next=**`
+  Add equivalent entries only for explicitly authorized preview/local origins;
+  do not wildcard arbitrary production origins. The client still independently
+  allowlists the return path. Ensure confirmation templates use Supabase's
   confirmation URL / supplied redirect URL rather than a legacy hardcoded path.
 - Keep existing Supabase, Resend, VAPID and Stripe credentials/price settings.
   Verify the Resend sender is authorized; do not change trial-extension rules.

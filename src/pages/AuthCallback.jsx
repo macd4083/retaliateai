@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { getSafeAuthReturn, getAuthLinkError } from '../lib/authReturn';
+import { getSafeAuthReturn, getAuthLinkError, resolveAuthCallbackSession } from '../lib/authReturn';
 import { supabase } from '../lib/supabase/client';
+import { useAuth } from '../lib/AuthContext';
 
 export default function AuthCallback() {
   const navigate = useNavigate();
+  const { isPasswordRecovery } = useAuth();
   const [searchParams] = useSearchParams();
   const returnTo = getSafeAuthReturn(searchParams.get('next'));
   const [status, setStatus] = useState('verifying');
@@ -21,11 +23,11 @@ export default function AuthCallback() {
           navigate(`/auth/reset-password${window.location.search}${window.location.hash}`, { replace: true });
           return;
         }
-        // Session initialization already exchanges URL tokens; do not exchange twice.
-        const { data, error } = await supabase.auth.getSession();
-        if (cancelled) return;
+        // Preserve implicit links, and explicitly exchange PKCE only if no session exists.
+        const { data, error } = await resolveAuthCallbackSession(supabase.auth, searchParams.get('code'));
+        if (cancelled || isPasswordRecovery?.()) return;
         if (error) throw error;
-        if (data.session) {
+        if (data?.session) {
           setStatus('success');
           navigate(returnTo, { replace: true });
         } else {
@@ -41,7 +43,7 @@ export default function AuthCallback() {
 
     handleCallback();
     return () => { cancelled = true; };
-  }, [navigate, returnTo, searchParams]);
+  }, [navigate, returnTo, searchParams, isPasswordRecovery]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-zinc-950">

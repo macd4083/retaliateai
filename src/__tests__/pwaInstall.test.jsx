@@ -2,6 +2,7 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { usePWAInstall } from '../hooks/usePWAInstall';
+import PWAInstallBanner from '../components/pwa/PWAInstallBanner';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -16,6 +17,7 @@ describe('PWA installation preserves work', () => {
   }
 
   beforeEach(async () => {
+    localStorage.clear();
     vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false })));
     vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Chrome desktop');
     container = document.createElement('div');
@@ -53,5 +55,15 @@ describe('PWA installation preserves work', () => {
     expect(state.isInstallable).toBe(true);
     await act(async () => window.dispatchEvent(new Event('appinstalled')));
     expect(state.isInstallable).toBe(false);
+  });
+
+  it('removes the banner after a dismissed browser prompt instead of offering a dead install button', async () => {
+    await act(async () => root.render(<PWAInstallBanner />));
+    const event = new Event('beforeinstallprompt', { cancelable: true });
+    Object.assign(event, { prompt: vi.fn(), userChoice: Promise.resolve({ outcome: 'dismissed' }) });
+    await act(async () => window.dispatchEvent(event));
+    expect(container.textContent).toContain('Install web app');
+    await act(async () => container.querySelector('button').click());
+    expect(container.textContent).toBe('');
   });
 });

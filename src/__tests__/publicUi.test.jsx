@@ -41,9 +41,11 @@ describe('public metadata and PWA contract', () => {
   it('both manifests open the resolver and worker updates do not reload drafts', () => {
     const manifest = JSON.parse(source('public/site.webmanifest'));
     const config = source('vite.config.js');
+    expect(manifest.id).toBe('/reflection');
     expect(manifest.start_url).toBe('/app');
     expect(manifest.scope).toBe('/');
     expect(config).toContain("start_url: '/app'");
+    expect(config).toContain("id: '/reflection'");
     expect(config).toContain("registerType: 'prompt'");
     expect(config).toContain('injectRegister: null');
     expect(config).toContain('skipWaiting: false');

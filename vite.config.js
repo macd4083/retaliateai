@@ -11,6 +11,7 @@ export default defineConfig({
       injectRegister: null,
       includeAssets: ['logo.png'],
       manifest: {
+        id: '/reflection',
         name: 'Retaliate AI',
         short_name: 'Retaliate AI',
         description: 'Review commitments and habits, plan measured actions, and track follow-through.',

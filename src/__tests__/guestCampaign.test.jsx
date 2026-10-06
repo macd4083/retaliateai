@@ -11,6 +11,7 @@ vi.mock('posthog-js', () => ({ default: posthogMock }));
 vi.mock('../lib/supabase/client', () => ({ supabase: supabaseMock }));
 
 import GuestEntry from '../pages/GuestEntry';
+import Login from '../pages/Login';
 import { buildSignupPath, extractAttribution, fetchGuestGuardrailsEnabled, readAttribution, saveAttribution } from '../lib/guestSession';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -28,6 +29,7 @@ describe('guest campaign signup fallback', () => {
   afterEach(async () => {
     if (root) await act(async () => root.unmount());
     container?.remove();
+    delete window.fbq;
   });
 
   it('extracts attribution defensively and preserves signup query parameters', () => {
@@ -43,12 +45,15 @@ describe('guest campaign signup fallback', () => {
     posthogMock.capture.mockImplementation(() => {
       if (blocked) throw new Error('ERR_BLOCKED_BY_CLIENT');
     });
+    window.fbq = vi.fn(() => {
+      if (blocked) throw new Error('ERR_BLOCKED_BY_CLIENT');
+    });
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
     const router = createMemoryRouter([
       { path: '/start/guest', element: <GuestEntry /> },
-      { path: '/login', element: <div>Signup</div> },
+      { path: '/login', element: <Login /> },
     ], { initialEntries: ['/start/guest?src=instagram&utm_source=instagram&utm_campaign=launch'] });
     await act(async () => root.render(<RouterProvider router={router} />));
     expect(router.state.location.pathname).toBe('/login');
@@ -61,7 +66,10 @@ describe('guest campaign signup fallback', () => {
     expect(supabaseMock.auth.signOut).not.toHaveBeenCalled();
     expect(supabaseMock.auth.signInAnonymously).not.toHaveBeenCalled();
     expect(supabaseMock.from).not.toHaveBeenCalled();
-    expect(container.textContent).toBe('Signup');
+    expect(window.fbq).toHaveBeenCalledWith('track', 'Lead');
+    expect(container.textContent).toContain('Create your account');
+    expect(container.querySelector('input[type="email"]')).not.toBeNull();
+    expect(container.textContent).toContain('Sign Up');
   });
 
   it.each([
