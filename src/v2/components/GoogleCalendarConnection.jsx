@@ -7,6 +7,11 @@ let cacheOwner = null;
 let cacheGeneration = 0;
 const buttonClass = 'rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-200 hover:border-zinc-500 disabled:opacity-50';
 
+function invalidateCalendarCache(userId) {
+  cacheGeneration += 1;
+  for (const key of memoryCache.keys()) if (key.startsWith(`${userId}:`)) memoryCache.delete(key);
+}
+
 async function calendarRequest(action, body, params = {}) {
   const { data } = await supabase.auth.getSession();
   if (!data?.session?.access_token) throw new Error('Please sign in again to connect your calendar.');
@@ -57,7 +62,7 @@ export default function GoogleCalendarConnection({ userId, localDate, timezone =
       setStatus(nextStatus);
       setReconnect(false);
       if (nextStatus.message) setError(nextStatus.message);
-      if (nextStatus.connected) {
+      if (nextStatus.connected && nextStatus.configured !== false && nextStatus.schemaAvailable !== false) {
         const list = await calendarRequest('calendars');
         if (!isCurrent()) return;
         setCalendars(list.calendars || []);
@@ -72,7 +77,9 @@ export default function GoogleCalendarConnection({ userId, localDate, timezone =
           eventsCallback.current?.(events);
         }
       } else {
-        memoryCache.delete(cacheKey);
+        invalidateCalendarCache(userId);
+        setCalendars([]);
+        setSelected([]);
         eventsCallback.current?.([]);
       }
       setStale(false);
@@ -139,10 +146,9 @@ export default function GoogleCalendarConnection({ userId, localDate, timezone =
     setBusy(true);
     try {
       await calendarRequest('disconnect', {});
-      cacheGeneration += 1;
+      invalidateCalendarCache(userId);
       refreshGeneration.current += 1;
-      for (const key of memoryCache.keys()) if (key.startsWith(`${userId}:`)) memoryCache.delete(key);
-      setStatus({ connected: false });
+      setStatus((previous) => ({ ...previous, connected: false, selectedCalendarIds: [] }));
       setCalendars([]);
       setSelected([]);
       setStale(false);
@@ -160,7 +166,7 @@ export default function GoogleCalendarConnection({ userId, localDate, timezone =
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h3 className="text-sm font-semibold text-zinc-200">Google Calendar</h3>
-          <p className="mt-1 text-xs text-zinc-400">{status?.connected ? 'Connected · read-only availability' : 'See your availability alongside your plan.'}</p>
+          <p className="mt-1 text-xs text-zinc-400">{status?.connected ? status.configured === false || status.schemaAvailable === false ? 'Connected · availability currently unavailable' : 'Connected · read-only availability' : 'See your availability alongside your plan.'}</p>
         </div>
         <div className="flex gap-2">
           {(!status?.connected || reconnect) && <button type="button" className={buttonClass} disabled={busy || status?.configured === false || status?.schemaAvailable === false} onClick={connect}>{reconnect ? 'Reconnect Google Calendar' : 'Connect Google Calendar'}</button>}

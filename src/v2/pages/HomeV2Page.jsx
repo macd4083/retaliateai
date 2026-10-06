@@ -191,8 +191,10 @@ export default function HomeV2Page() {
             </p>
           )}
           {ENABLE_TODAY_V2_SCHEDULER && homeState.review?.completed_at && (homeState.tomorrowSchedules || []).filter((schedule) => schedule.habit_definition_id || schedule.source_type === 'habit').map((schedule) => {
-            const habit = (homeState.habitDefinitions || []).find((candidate) => candidate.id === (schedule.habit_definition_id || schedule.source_id));
-            return habit ? <div key={schedule.id || schedule.habit_definition_id || schedule.source_id} className="mt-2 rounded-lg border border-zinc-800 p-2 text-sm text-zinc-300">{habit.name} · Habit<ScheduleTime schedule={schedule} timezone={homeState.timezoneName} /></div> : null;
+            const sourceId = schedule.habit_definition_id || schedule.source_id;
+            const habit = (homeState.habitDefinitions || []).find((candidate) => candidate.id === sourceId);
+            const snapshot = todayHabits.find((candidate) => candidate.habit_definition_id === sourceId);
+            return <div key={schedule.id || sourceId} className="mt-2 rounded-lg border border-zinc-800 p-2 text-sm text-zinc-300">{habit?.name || snapshot?.snapshot_name || 'Scheduled habit'} · Habit<ScheduleTime schedule={schedule} timezone={homeState.timezoneName} /></div>;
           })}
         </section>
 

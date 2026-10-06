@@ -285,6 +285,29 @@ language sql security definer set search_path = public as $$
 $$;
 revoke all on function public.today_v2_consume_google_state(text) from public, anon, authenticated;
 grant execute on function public.today_v2_consume_google_state(text) to service_role;
+
+create or replace function public.today_v2_finish_google_authorization(
+  p_state_hash text, p_tokens_encrypted text, p_selected_calendar_ids text[]
+)
+returns setof public.today_v2_google_connections
+language sql security definer set search_path = public as $$
+  with consumed_state as (
+    delete from public.today_v2_google_oauth_states
+    where state_hash = p_state_hash and expires_at > now()
+    returning user_id
+  )
+  insert into public.today_v2_google_connections(user_id, tokens_encrypted, selected_calendar_ids)
+  select user_id, p_tokens_encrypted, coalesce(p_selected_calendar_ids, '{}'::text[])
+  from consumed_state
+  on conflict (user_id) do update set
+    tokens_encrypted = excluded.tokens_encrypted,
+    selected_calendar_ids = excluded.selected_calendar_ids,
+    updated_at = now()
+  returning *;
+$$;
+revoke all on function public.today_v2_finish_google_authorization(text, text, text[]) from public, anon, authenticated;
+grant execute on function public.today_v2_finish_google_authorization(text, text, text[]) to service_role;
+
 revoke all on function public.today_v2_validate_schedule_block() from public, anon, authenticated;
 revoke all on function public.today_v2_archive_habit_schedule() from public, anon, authenticated;
 

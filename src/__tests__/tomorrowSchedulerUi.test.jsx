@@ -46,6 +46,13 @@ describe('TomorrowScheduler UI', () => {
     expect(container.querySelector('[aria-label^="24-hour"]')).toBeNull();
   });
 
+  it('exposes unavailable pending-schedule errors without claiming completion is allowed', async () => {
+    await render({ available: false, saveError: new Error('Scheduling is unavailable. Pending schedule changes are saved locally; retry before completing.') });
+    expect(container.textContent).toContain('Pending schedule changes are saved locally');
+    expect(container.textContent).toContain('Retry scheduling before completing your review');
+    expect(container.textContent).not.toContain('You can still save your actions and complete your review');
+  });
+
   it('has 96 slots and shows a scheduled item only once, outside the tray', async () => {
     await render({ blocks: [{ id: 'block', source_key: 'action-1', starts_at: '2026-10-07T09:00:00Z', ends_at: '2026-10-07T09:30:00Z' }] });
     expect(container.textContent).toContain('Unscheduled (1)');
@@ -196,5 +203,16 @@ describe('TomorrowScheduler UI', () => {
     await click('Write a chapter');
     expect(document.querySelector('[role="dialog"] input[type="checkbox"]')).toBeTruthy();
     expect(update).not.toHaveBeenCalled();
+  });
+
+  it('preserves read-only schedule evidence without exposing archived sources in the editable tray', async () => {
+    const props = { items: [], blocks: [{ id: 'preserved', source_key: 'habit:archived', source_type: 'habit', label: 'Past reading', starts_at: '2026-10-07T09:00:00Z', ends_at: '2026-10-07T09:30:00Z' }] };
+    await render({ ...props, readOnly: true });
+    const preserved = container.querySelector('[data-schedule-key="habit:archived"]');
+    expect(preserved.textContent).toContain('Past reading');
+    expect(preserved.textContent).toContain('Preserved plan · read-only');
+    expect(preserved.querySelector('button')).toBeNull();
+    await render({ ...props, readOnly: false });
+    expect(container.textContent).not.toContain('Past reading');
   });
 });

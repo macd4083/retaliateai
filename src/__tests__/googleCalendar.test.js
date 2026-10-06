@@ -27,10 +27,16 @@ function mockDatabase() {
   const db = {
     connections, states, operations,
     auth: { getUser: vi.fn(async () => ({ data: { user: { id: USER } }, error: null })) },
-    rpc: vi.fn(async (_name, { p_state_hash: stateHash }) => {
+    rpc: vi.fn(async (name, { p_state_hash: stateHash, p_tokens_encrypted: encrypted, p_selected_calendar_ids: selected }) => {
       const row = states.get(stateHash);
       if (!row || Date.parse(row.expires_at) <= CLOCK) return { data: [], error: null };
       states.delete(stateHash);
+      if (name === 'today_v2_finish_google_authorization') {
+        const connection = { user_id: row.user_id, tokens_encrypted: encrypted, selected_calendar_ids: selected,
+          updated_at: new Date(CLOCK).toISOString() };
+        connections.set(row.user_id, connection);
+        return { data: [connection], error: null };
+      }
       return { data: [row], error: null };
     }),
     from: vi.fn((table) => {
@@ -165,6 +171,11 @@ describe('secure read-only Google Calendar backend', () => {
     const res = await call('status');
     expect(res.body).toMatchObject({ configured: true, schemaAvailable: false, connected: false });
   });
+  it('detects an unavailable atomic authorization finalizer in status', async () => {
+    db.rpc.mockImplementation(async (name) => name === 'today_v2_finish_google_authorization' ?
+      { data: null, error: { message: 'Finalizer missing' } } : { data: [], error: null });
+    expect((await call('status')).body.schemaAvailable).toBe(false);
+  });
   it('reports status without decrypting or returning credentials', async () => {
     connected();
     const res = await call('status');
@@ -250,6 +261,11 @@ describe('secure read-only Google Calendar backend', () => {
     expect(res.location).toBe('https://example.test/settings?googleCalendar=connected');
     expect(res.headers['Set-Cookie']).toContain('Max-Age=0');
     expect(db.connections.has(USER)).toBe(true);
+    expect(db.rpc).toHaveBeenCalledWith('today_v2_finish_google_authorization', {
+      p_state_hash: hash(state), p_tokens_encrypted: db.connections.get(USER).tokens_encrypted, p_selected_calendar_ids: [],
+    });
+    expect(db.rpc.mock.calls.some(([name]) => name === 'today_v2_consume_google_state')).toBe(false);
+    expect(db.operations.some((operation) => operation.action === 'upsert')).toBe(false);
     expect(JSON.stringify(db.connections.get(USER))).not.toContain('new-google-access-value');
     const exchange = new URLSearchParams(fetchImpl.mock.calls[0][1].body);
     expect(exchange.get('code_verifier')).toHaveLength(43);
@@ -269,6 +285,72 @@ describe('secure read-only Google Calendar backend', () => {
     expect(res.location).toBe('https://example.test/settings?googleCalendar=denied');
     expect(db.states.size).toBe(0);
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+  it('atomically consumes malformed callbacks without attempting token exchange or finalization', async () => {
+    const { state, cookie } = await flow();
+    const res = await call('callback', { query: { state }, headers: { cookie } });
+    expect(res.body.code).toBe('invalid_callback');
+    expect(db.states.size).toBe(0);
+    expect(db.rpc).toHaveBeenCalledWith('today_v2_consume_google_state', { p_state_hash: hash(state) });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+  it('cannot recreate credentials when disconnect succeeds during a paused token exchange', async () => {
+    connected();
+    const { state, cookie } = await flow();
+    let releaseExchange;
+    let exchangeStarted;
+    const started = new Promise((resolve) => { exchangeStarted = resolve; });
+    const exchange = new Promise((resolve) => { releaseExchange = resolve; });
+    fetchImpl.mockImplementation((url) => {
+      if (url === 'https://oauth2.googleapis.com/token') {
+        exchangeStarted();
+        return exchange;
+      }
+      return Promise.resolve(googleResponse({}));
+    });
+    const callback = call('callback', { query: { state, code: 'code' }, headers: { cookie } });
+    await started;
+    // The validated state remains pending until the token exchange can be atomically finalized.
+    expect(db.states.has(hash(state))).toBe(true);
+    expect(db.rpc).not.toHaveBeenCalled();
+    expect((await call('disconnect')).statusCode).toBe(200);
+    expect(db.connections.has(USER)).toBe(false);
+    expect(db.states.size).toBe(0);
+    const deletes = db.operations.filter((operation) => operation.action === 'delete');
+    expect(deletes.slice(-2).map((operation) => operation.table)).toEqual([
+      'today_v2_google_oauth_states', 'today_v2_google_connections',
+    ]);
+    releaseExchange(googleResponse({ access_token: 'late-access-value', refresh_token: 'late-refresh-value', expires_in: 3600 }));
+    const res = await callback;
+    expect(res.statusCode).toBe(400);
+    expect(res.body.code).toBe('invalid_state');
+    expect(db.connections.has(USER)).toBe(false);
+    const revocations = fetchImpl.mock.calls.filter(([url]) => url === 'https://oauth2.googleapis.com/revoke');
+    expect(revocations).toHaveLength(2);
+    expect(new URLSearchParams(revocations[1][1].body).get('token')).toBe('late-refresh-value');
+  });
+  it('revokes a newly issued grant if state expires during the token exchange', async () => {
+    const { state, cookie } = await flow();
+    fetchImpl.mockImplementationOnce(async () => {
+      db.states.get(hash(state)).expires_at = new Date(CLOCK - 1).toISOString();
+      return googleResponse({ access_token: 'expired-state-access-value', refresh_token: 'expired-state-refresh-value', expires_in: 3600 });
+    });
+    fetchImpl.mockResolvedValueOnce(googleResponse({}));
+    const res = await call('callback', { query: { state, code: 'code' }, headers: { cookie } });
+    expect(res.body.code).toBe('invalid_state');
+    expect(db.connections.size).toBe(0);
+    expect(fetchImpl.mock.calls[1][0]).toBe('https://oauth2.googleapis.com/revoke');
+    expect(new URLSearchParams(fetchImpl.mock.calls[1][1].body).get('token')).toBe('expired-state-refresh-value');
+  });
+  it('does not persist credentials if atomic finalization fails and revocation is unavailable', async () => {
+    const { state, cookie } = await flow();
+    tokenSuccess();
+    db.rpc.mockResolvedValueOnce({ error: { message: 'Atomic finalization unavailable' } });
+    fetchImpl.mockRejectedValueOnce(new Error('Revoke unavailable'));
+    const res = await call('callback', { query: { state, code: 'code' }, headers: { cookie } });
+    expect(res.body.code).toBe('storage_unavailable');
+    expect(db.connections.size).toBe(0);
+    expect(fetchImpl.mock.calls[1][0]).toBe('https://oauth2.googleapis.com/revoke');
   });
   it('preserves existing refresh token and selection on reconnect', async () => {
     const old = connected();

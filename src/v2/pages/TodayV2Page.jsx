@@ -171,7 +171,6 @@ export default function TodayV2Page() {
     tomorrowActionItems,
     editTomorrowAction,
     removeTomorrowAction,
-    removeFollowThrough,
     schedulerItems,
     scheduleBlocks,
     scheduleSaveStatus,
@@ -339,12 +338,6 @@ export default function TodayV2Page() {
                       >
                         Clear
                       </button>
-                    )}
-                    {!readOnly && item.completion_state === TODAY_V2_COMMITMENT_STATES.UNANSWERED && (
-                      <button type="button" aria-label={`Remove ${item.normalized_fragment_text || item.fragment_text}`} onClick={async () => {
-                        try { await removeFollowThrough(item.id); }
-                        catch (failure) { window.alert(failure.message || 'Could not remove this item.'); }
-                      }} className="text-xs text-red-300">Remove unanswered item</button>
                     )}
                   </div>
                 </div>
@@ -551,7 +544,12 @@ export default function TodayV2Page() {
             localDate={state.tomorrowLocalDate}
             timezone={state.timezoneName}
             items={schedulerItems}
-            blocks={scheduleBlocks}
+            blocks={(scheduleBlocks || []).map((block) => {
+              const sourceId = block.source_id || block.commitment_fragment_id || block.habit_definition_id;
+              const action = (state.tomorrowFragments || []).find((item) => item.id === sourceId);
+              const habit = (state.habitOccurrences || []).find((item) => item.habit_definition_id === sourceId);
+              return { ...block, label: block.label || (action ? action.normalized_fragment_text || action.fragment_text : habit?.snapshot_name) };
+            })}
             contextBlocks={(state.todaySchedules || []).map((block) => {
               const sourceId = block.source_id || block.commitment_fragment_id || block.habit_definition_id;
               const action = state.followThroughItems.find((item) => item.id === sourceId);

@@ -169,4 +169,31 @@ describe('GoogleCalendarConnection UI contract', () => {
       settingsContainer.remove();
     }
   });
+
+  it('keeps Disconnect usable for an existing connection after server configuration is removed', async () => {
+    fetchMock.mockImplementation((url) => url.includes('action=disconnect')
+      ? response({ connected: false, selectedCalendarIds: [] })
+      : response({ connected: true, configured: false, schemaAvailable: true, selectedCalendarIds: ['primary'], message: 'Calendar credentials are unavailable.' }));
+    await render({ settings: true });
+    expect(fetchMock.mock.calls).toHaveLength(1);
+    expect(container.textContent).toContain('Calendar credentials are unavailable.');
+    const disconnect = [...container.querySelectorAll('button')].find((node) => node.textContent === 'Disconnect');
+    expect(disconnect.disabled).toBe(false);
+    await click('Disconnect');
+    const connect = [...container.querySelectorAll('button')].find((node) => node.textContent === 'Connect Google Calendar');
+    expect(connect.disabled).toBe(true);
+    expect(events.mock.calls.at(-1)[0]).toEqual([]);
+  });
+
+  it('clears imported calendar events and skips further imports when configuration becomes unavailable', async () => {
+    await render();
+    fetchMock.mockClear();
+    fetchMock.mockImplementation(() => response({ connected: true, configured: false, schemaAvailable: true, selectedCalendarIds: ['primary'], message: 'Calendar configuration is unavailable.' }));
+    await click('Refresh');
+    expect(fetchMock.mock.calls).toHaveLength(1);
+    expect(fetchMock.mock.calls[0][0]).toContain('action=status');
+    expect(events.mock.calls.at(-1)[0]).toEqual([]);
+    expect(container.textContent).not.toContain('Choose calendars');
+    expect(container.textContent).not.toContain('Showing cached calendar events');
+  });
 });

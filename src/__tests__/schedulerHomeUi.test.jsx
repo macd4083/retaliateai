@@ -52,4 +52,18 @@ describe('scheduled Home check-ins', () => {
     expect(container.textContent).not.toMatch(/9:00|09:00/);
     expect(container.textContent).toContain('Write');
   });
+
+  it('keeps completed scheduled-habit evidence using an occurrence snapshot after its definition is archived', async () => {
+    const base = await mocks.load();
+    mocks.load.mockResolvedValue({
+      ...base,
+      review: { completed_at: '2026-10-07T22:00:00Z' },
+      habitDefinitions: [],
+      tomorrowSchedules: [{ id: 'preserved', habit_definition_id: 'definition', starts_at: '2026-10-08T11:00:00Z', ends_at: '2026-10-08T11:30:00Z' }],
+    });
+    await render();
+    expect(container.textContent).toContain('Read · Habit');
+    expect(container.textContent).toContain('11:00');
+    expect(mocks.habit).not.toHaveBeenCalled();
+  });
 });

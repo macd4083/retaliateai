@@ -170,10 +170,13 @@ export function createGoogleCalendarHandler({ env = process.env, supabase, fetch
     return storage(await database().from(CONNECTIONS).select('tokens_encrypted,selected_calendar_ids').eq('user_id', userId).maybeSingle());
   }
 
-  async function saveTokens(userId, tokens, config, selectedIds) {
-    const values = { user_id: userId, tokens_encrypted: encrypt(tokens, config.key, `tokens:${userId}`), updated_at: new Date(now()).toISOString() };
-    if (selectedIds !== undefined) values.selected_calendar_ids = selectedIds;
-    storage(await database().from(CONNECTIONS).upsert(values, { onConflict: 'user_id' }));
+  async function revoke(token) {
+    if (!token) return;
+    try {
+      await fetchImpl('https://oauth2.googleapis.com/revoke', { method: 'POST', redirect: 'error',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ token }).toString(),
+        signal: AbortSignal.timeout(3000) });
+    } catch { /* Revocation is best effort; local deletion or atomic finalization is authoritative. */ }
   }
 
   function mergeTokens(body, previous = {}) {
@@ -277,6 +280,8 @@ export function createGoogleCalendarHandler({ env = process.env, supabase, fetch
         userId = data.user.id;
       }
       if (action === 'disconnect') {
+        // State locks serialize against OAuth finalization before reading or deleting its saved connection.
+        storage(await database().from(STATES).delete().eq('user_id', userId));
         const row = await connection(userId);
         let revokeToken;
         try {
@@ -286,13 +291,7 @@ export function createGoogleCalendarHandler({ env = process.env, supabase, fetch
           }
         } catch { /* Missing or rotated encryption configuration must not block local deletion. */ }
         storage(await database().from(CONNECTIONS).delete().eq('user_id', userId));
-        storage(await database().from(STATES).delete().eq('user_id', userId));
-        if (revokeToken) {
-          try {
-            await fetchImpl('https://oauth2.googleapis.com/revoke', { method: 'POST', redirect: 'error',
-              headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ token: revokeToken }).toString(), signal: AbortSignal.timeout(3000) });
-          } catch { /* Google revocation is best effort; local disconnection is authoritative. */ }
-        }
+        await revoke(revokeToken);
         return res.status(200).json({ connected: false, selectedCalendarIds: [] });
       }
       let config;
@@ -312,17 +311,20 @@ export function createGoogleCalendarHandler({ env = process.env, supabase, fetch
         if (!pending || !Number.isFinite(Date.parse(pending.expires_at)) || Date.parse(pending.expires_at) <= now()) fail(400, 'invalid_state', 'Calendar authorization expired. Try connecting again.');
         const binding = decrypt(pending.verifier_encrypted, config.key, `state:${stateHash}`);
         if (!equal(binding.browser_hash, hash(nonce))) fail(400, 'invalid_state', 'Calendar authorization did not originate in this browser.');
-        const consumed = storage(await database().rpc('today_v2_consume_google_state', { p_state_hash: stateHash }));
-        const saved = Array.isArray(consumed) ? consumed[0] : consumed;
-        if (!saved || saved.user_id !== pending.user_id || saved.verifier_encrypted !== pending.verifier_encrypted ||
-          !Number.isFinite(Date.parse(saved.expires_at)) || Date.parse(saved.expires_at) <= now()) fail(400, 'invalid_state', 'Calendar authorization was already used or expired.');
-        const returnPath = saved.return_path === '/settings' ? '/settings' : '/today';
-        if (req.query?.error) return res.redirect(303, `${config.origin}${returnPath}?googleCalendar=denied`);
-        if (typeof req.query?.code !== 'string' || !req.query.code || req.query.code.length > 4096) fail(400, 'invalid_callback', 'Google authorization code is missing.');
-        const previous = await connection(saved.user_id);
+        const returnPath = pending.return_path === '/settings' ? '/settings' : '/today';
+        const invalidCode = typeof req.query?.code !== 'string' || !req.query.code || req.query.code.length > 4096;
+        if (req.query?.error || invalidCode) {
+          const consumed = storage(await database().rpc('today_v2_consume_google_state', { p_state_hash: stateHash }));
+          const saved = Array.isArray(consumed) ? consumed[0] : consumed;
+          if (!saved || saved.user_id !== pending.user_id || saved.verifier_encrypted !== pending.verifier_encrypted ||
+            !Number.isFinite(Date.parse(saved.expires_at)) || Date.parse(saved.expires_at) <= now()) fail(400, 'invalid_state', 'Calendar authorization was already used or expired.');
+          if (req.query?.error) return res.redirect(303, `${config.origin}${returnPath}?googleCalendar=denied`);
+          fail(400, 'invalid_callback', 'Google authorization code is missing.');
+        }
+        const previous = await connection(pending.user_id);
         let oldTokens = {};
         if (previous) {
-          try { oldTokens = decrypt(previous.tokens_encrypted, config.key, `tokens:${saved.user_id}`); }
+          try { oldTokens = decrypt(previous.tokens_encrypted, config.key, `tokens:${pending.user_id}`); }
           catch { /* Fresh offline consent can repair credentials encrypted with a lost or rotated key. */ }
         }
         const previousIds = previous?.selected_calendar_ids;
@@ -330,7 +332,18 @@ export function createGoogleCalendarHandler({ env = process.env, supabase, fetch
           previousIds.every((id) => typeof id === 'string' && id && id.length <= 1024) &&
           new Set(previousIds).size === previousIds.length ? previousIds : [];
         const body = await tokenRequest({ grant_type: 'authorization_code', code: req.query.code, redirect_uri: config.redirect, code_verifier: binding.verifier }, config, deadline);
-        await saveTokens(saved.user_id, mergeTokens(body, oldTokens), config, selectedIds);
+        try {
+          const tokens = mergeTokens(body, oldTokens);
+          const finalized = storage(await database().rpc('today_v2_finish_google_authorization', {
+            p_state_hash: stateHash, p_tokens_encrypted: encrypt(tokens, config.key, `tokens:${pending.user_id}`),
+            p_selected_calendar_ids: selectedIds,
+          }));
+          const saved = Array.isArray(finalized) ? finalized[0] : finalized;
+          if (!saved || saved.user_id !== pending.user_id) fail(400, 'invalid_state', 'Calendar authorization was already used, expired, or disconnected.');
+        } catch (error) {
+          await revoke(body.refresh_token || body.access_token);
+          throw error;
+        }
         return res.redirect(303, `${config.origin}${returnPath}?googleCalendar=connected`);
       }
       if (action === 'status') {
@@ -339,6 +352,9 @@ export function createGoogleCalendarHandler({ env = process.env, supabase, fetch
           row = await connection(userId);
           storage(await database().from(STATES).select('state_hash').limit(0));
           storage(await database().rpc('today_v2_consume_google_state', { p_state_hash: hash(randomBytes(32)) }));
+          storage(await database().rpc('today_v2_finish_google_authorization', {
+            p_state_hash: hash(randomBytes(32)), p_tokens_encrypted: 'schema-probe', p_selected_calendar_ids: [],
+          }));
           return res.status(200).json({ configured: Boolean(config), schemaAvailable: true, connected: Boolean(row),
             selectedCalendarIds: row?.selected_calendar_ids || [], ...(configError ? { message: configError.message } : {}) });
         } catch {

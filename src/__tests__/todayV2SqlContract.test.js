@@ -129,6 +129,24 @@ describe('TodayV2 SQL contract', () => {
     expect(sql).toContain('grant execute on function public.today_v2_replace_plan_for_date(date, date, text, text, text[], text) to authenticated;');
   });
 
+  it('atomically finalizes Google authorization from unexpired state with backend-only execution', () => {
+    const sql = fs.readFileSync(schedulingMigrationPath, 'utf8');
+    const finishSql = sql.split('create or replace function public.today_v2_finish_google_authorization(')[1];
+
+    expect(finishSql).toContain('p_state_hash text, p_tokens_encrypted text, p_selected_calendar_ids text[]');
+    expect(finishSql).toContain('returns setof public.today_v2_google_connections');
+    expect(finishSql).toContain('with consumed_state as (');
+    expect(finishSql).toContain('delete from public.today_v2_google_oauth_states');
+    expect(finishSql).toContain('where state_hash = p_state_hash and expires_at > now()');
+    expect(finishSql).toContain('returning user_id');
+    expect(finishSql).toContain('insert into public.today_v2_google_connections(user_id, tokens_encrypted, selected_calendar_ids)');
+    expect(finishSql).toContain('from consumed_state');
+    expect(finishSql).toContain('on conflict (user_id) do update set');
+    expect(finishSql).toContain('tokens_encrypted = excluded.tokens_encrypted');
+    expect(finishSql).toContain('revoke all on function public.today_v2_finish_google_authorization(text, text, text[]) from public, anon, authenticated;');
+    expect(finishSql).toContain('grant execute on function public.today_v2_finish_google_authorization(text, text, text[]) to service_role;');
+  });
+
   it('defines isolated today_v2 tables, RPCs, uniqueness, and RLS', () => {
     const sql = fs.readFileSync(migrationPath, 'utf8');
 

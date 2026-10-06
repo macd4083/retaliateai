@@ -139,9 +139,35 @@ begin
   assert not has_table_privilege('anon','public.today_v2_google_oauth_states','SELECT');
   assert not has_function_privilege('authenticated','public.today_v2_consume_google_state(text)','EXECUTE');
   assert has_function_privilege('service_role','public.today_v2_consume_google_state(text)','EXECUTE');
+  assert not has_function_privilege('authenticated','public.today_v2_finish_google_authorization(text,text,text[])','EXECUTE');
+  assert not has_function_privilege('anon','public.today_v2_finish_google_authorization(text,text,text[])','EXECUTE');
+  assert has_function_privilege('service_role','public.today_v2_finish_google_authorization(text,text,text[])','EXECUTE');
   assert not has_table_privilege('authenticated','public.today_v2_schedule_blocks','INSERT');
 end;
 $$;
+insert into public.today_v2_google_oauth_states values
+  ('finish-live','00000000-0000-4000-8000-000000000071',now()+interval '5 minutes','test-encrypted','/today'),
+  ('finish-upsert','00000000-0000-4000-8000-000000000071',now()+interval '5 minutes','test-encrypted','/today'),
+  ('finish-expired','00000000-0000-4000-8000-000000000072',now()-interval '5 minutes','test-encrypted','/today'),
+  ('finish-invalidated','00000000-0000-4000-8000-000000000072',now()+interval '5 minutes','test-encrypted','/today');
+delete from public.today_v2_google_oauth_states where state_hash = 'finish-invalidated';
+set local role service_role;
+do $$
+begin
+  assert (select count(*) = 0 from public.today_v2_finish_google_authorization('finish-invalidated','test-tokens','{}'));
+  assert (select count(*) = 0 from public.today_v2_finish_google_authorization('finish-expired','test-tokens','{}'));
+  assert not exists (select 1 from public.today_v2_google_connections where user_id = '00000000-0000-4000-8000-000000000072');
+  assert (select count(*) = 1 from public.today_v2_finish_google_authorization('finish-live','test-tokens',array['primary']));
+  assert not exists (select 1 from public.today_v2_google_oauth_states where state_hash = 'finish-live');
+  assert (select count(*) = 0 from public.today_v2_finish_google_authorization('finish-live','replayed-tokens','{}'));
+  assert (select tokens_encrypted = 'test-tokens' and selected_calendar_ids = array['primary']
+    from public.today_v2_google_connections where user_id = '00000000-0000-4000-8000-000000000071');
+  assert (select count(*) = 1 from public.today_v2_finish_google_authorization('finish-upsert','updated-tokens',array['primary','shared']));
+  assert (select tokens_encrypted = 'updated-tokens' and selected_calendar_ids = array['primary','shared']
+    from public.today_v2_google_connections where user_id = '00000000-0000-4000-8000-000000000071');
+end;
+$$;
+reset role;
 set local role authenticated;
 do $$
 declare v_fragment uuid;
@@ -155,6 +181,7 @@ begin
   assert exists (select 1 from public.today_v2_schedule_blocks where commitment_fragment_id = v_fragment);
   perform pg_temp.expect_failure('select * from public.today_v2_google_oauth_states');
   perform pg_temp.expect_failure('select * from public.today_v2_consume_google_state(''test-expired'')');
+  perform pg_temp.expect_failure('select * from public.today_v2_finish_google_authorization(''finish-live'',''test-tokens'',''{}'')');
   perform set_config('request.jwt.claim.sub','',true);
   perform pg_temp.expect_failure($q$select public.today_v2_replace_schedule('2099-01-05','UTC','[]')$q$);
 end;

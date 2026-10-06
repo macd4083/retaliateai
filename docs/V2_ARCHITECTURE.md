@@ -187,7 +187,8 @@ from pg_proc
 where pronamespace = 'public'::regnamespace
   and proname in ('today_v2_replace_plan_stable',
                   'today_v2_replace_schedule',
-                  'today_v2_consume_google_state');
+                  'today_v2_consume_google_state',
+                  'today_v2_finish_google_authorization');
 
 select tablename, rowsecurity
 from pg_tables
@@ -209,7 +210,7 @@ where table_schema = 'public'
   and grantee in ('anon', 'authenticated');
 ```
 
-Expect all three tables and RPCs to exist, all three tables to have RLS enabled,
+Expect all three tables and four RPCs to exist, all three tables to have RLS enabled,
 schedule source exclusivity/time/ownership constraints and per-source date
 uniqueness, and **zero** browser-role grants on the Google tables. Validate RLS
 with two separate authenticated test accounts: direct foreign source UUIDs must
@@ -309,6 +310,10 @@ Access/refresh tokens and PKCE verifiers are encrypted in backend-only storage;
 OAuth state is short-lived and consumed once. The dedicated Calendar callback
 is not a Supabase login/password-reset callback. Browser requests use verified
 Retaliate bearer authentication; submitted account UUIDs are not authority.
+Successful authorization consumes state and stores encrypted credentials in
+one database transaction. Disconnect invalidates pending state before deleting
+credentials, so an authorization-code exchange already in flight cannot
+silently recreate a disconnected connection.
 Reconnect preserves an existing refresh token if Google omits a new one.
 Disconnect removes stored credentials and attempts revocation without touching
 local schedules.
@@ -329,7 +334,10 @@ Use a supported Vercel Node runtime with native `fetch` and
 CLI's `vercel dev --listen 3000` with the server variables above; `npm run dev`
 alone serves the frontend, not the Calendar API.
 Some Vercel plans limit function count: the repository already has other API
-functions, so verify the deployed plan's allowance before adding this endpoint.
+functions; this endpoint brings the current top-level `api/*.js` count to **13**.
+Verify that the deployed plan supports that count before deployment. Disabling
+the frontend feature flag does not remove a deployed serverless function or
+bypass a hosting-plan limit.
 
 Imports cover only the planner's bounded date window, expand recurring instances,
 handle cancellation/pagination and preserve exclusive all-day end dates. Events

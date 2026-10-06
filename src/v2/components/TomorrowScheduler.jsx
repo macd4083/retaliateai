@@ -35,16 +35,16 @@ function Slot({ minute, timestamp, disabled }) {
   return <div ref={setNodeRef} data-slot-timestamp={timestamp} aria-hidden="true" className={`h-9 border-t ${minute % 60 === 0 ? 'border-zinc-600/60' : 'border-zinc-800/60'} ${isOver ? 'bg-red-500/25' : ''}`} />;
 }
 
-function DraggableItem({ item, onEdit, disabled, style, children }) {
+function DraggableItem({ item, onEdit, disabled, style, compact = false, short = false, timeDescription, children }) {
   const key = itemKey(item);
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, isDragging } = useDraggable({ id: key, data: { item }, disabled });
   return (
-    <div ref={setNodeRef} style={style} className={`flex gap-1 rounded-lg border ${item.type === 'habit' ? 'border-emerald-700/70 bg-emerald-950/40' : 'border-red-800/60 bg-zinc-900'} p-2 text-xs ${isDragging ? 'opacity-40' : ''}`}>
-      {!disabled && <button type="button" ref={setActivatorNodeRef} {...attributes} {...listeners} aria-label={`Drag ${item.label}; press Enter to edit time`} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onEdit(item); } }} style={{ touchAction: 'none' }} className="shrink-0 rounded px-1 text-zinc-400 hover:text-white">⠿</button>}
-      <button type="button" disabled={disabled} onClick={() => onEdit(item)} className="min-w-0 flex-1 text-left text-zinc-100">
-        <span className="block break-words font-medium">{item.label}</span>
+    <div ref={setNodeRef} style={style} className={`flex gap-1 rounded-lg border ${item.type === 'habit' ? 'border-emerald-700/70 bg-emerald-950/40' : 'border-red-800/60 bg-zinc-900'} ${compact ? 'h-full overflow-hidden p-1' : 'p-2'} text-xs ${isDragging ? 'opacity-40' : ''}`}>
+      {!disabled && <button type="button" ref={setActivatorNodeRef} {...attributes} {...listeners} data-scheduler-drag-key={key} aria-label={`Drag ${item.label}; press Enter to edit time`} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onEdit(item); } }} style={{ touchAction: 'none' }} className="shrink-0 rounded px-1 text-zinc-400 hover:text-white">⠿</button>}
+      <button type="button" data-scheduler-edit-key={key} disabled={disabled} aria-label={`${item.label} · ${item.type === 'habit' ? 'Habit' : 'Commitment'}${timeDescription ? ` · ${timeDescription}` : ''}${disabled ? '' : ' · Edit time'}`} title={`${item.label}${timeDescription ? ` · ${timeDescription}` : ''}`} onClick={() => onEdit(item)} className={`min-w-0 flex-1 text-left text-zinc-100 ${compact ? 'min-h-0 overflow-hidden' : ''}`}>
+        <span className={`font-medium ${compact ? short ? 'block truncate text-[10px] leading-3' : 'line-clamp-2 break-words leading-[14px]' : 'block break-words'}`}>{compact && <span aria-hidden="true">{item.type === 'habit' ? '↻ ' : '◆ '}</span>}{item.label}</span>
         {children}
-        <span className={`mt-1 block text-[10px] ${item.type === 'habit' ? 'text-emerald-300' : 'text-red-300'}`}>{item.type === 'habit' ? '↻ Habit' : '◆ Commitment'}{!disabled && ' · Edit time'}</span>
+        {!short && <span className={`block truncate text-[10px] ${compact ? 'leading-3' : 'mt-1'} ${item.type === 'habit' ? 'text-emerald-300' : 'text-red-300'}`}>{item.type === 'habit' ? '↻ Habit' : '◆ Commitment'}{!disabled && !compact && ' · Edit time'}</span>}
       </button>
     </div>
   );
@@ -65,7 +65,9 @@ export default function TomorrowScheduler({
   const [saving, setSaving] = React.useState(false);
   const [googleEvents, setGoogleEvents] = React.useState([]);
   const timeline = React.useRef(null);
+  const schedulerRoot = React.useRef(null);
   const focusReturn = React.useRef(null);
+  const focusItemKey = React.useRef(null);
   const dayBounds = React.useMemo(() => getScheduleDateBounds(localDate, timezone), [localDate, timezone]);
   const dayStart = Date.parse(dayBounds.starts_at);
   const dayEnd = Date.parse(dayBounds.ends_at);
@@ -94,6 +96,7 @@ export default function TomorrowScheduler({
 
   const edit = (item, timestamp) => {
     focusReturn.current = document.activeElement;
+    focusItemKey.current = itemKey(item);
     const existing = blocks.find((block) => blockKey(block) === itemKey(item));
     const chosenStart = timestamp || existing?.starts_at;
     const chosenTime = chosenStart ? localParts(chosenStart, timezone).time : '09:00';
@@ -160,13 +163,13 @@ export default function TomorrowScheduler({
   };
 
   return (
-    <section aria-labelledby="tomorrow-scheduler-title" className="space-y-4 rounded-2xl border border-zinc-700 bg-zinc-900 p-4">
+    <section ref={schedulerRoot} aria-labelledby="tomorrow-scheduler-title" className="space-y-4 rounded-2xl border border-zinc-700 bg-zinc-900 p-4">
       <div>
         <h3 id="tomorrow-scheduler-title" className="font-semibold text-white">Schedule tomorrow</h3>
         <p className="mt-1 text-sm text-zinc-400">Give your actions a place in the day. Scheduling is optional.</p>
         <p className="mt-2 text-xs text-zinc-400">{localDate} · {timezone} · Times are optional</p>
       </div>
-      {!available ? <div role="status" className="space-y-2 rounded-xl bg-amber-950/30 p-3 text-sm text-amber-200"><p>Scheduling is not available yet. You can still save your actions and complete your review. Try again after scheduling has been enabled for your account.</p>{onRetry && <button type="button" onClick={onRetry} className={buttonClass}>Retry scheduling</button>}</div> : <>
+      {!available ? <div role="status" className="space-y-2 rounded-xl bg-amber-950/30 p-3 text-sm text-amber-200">{saveError ? <><p>{typeof saveError === 'string' ? saveError : saveError.message}</p><p>Your local schedule changes are preserved. Retry scheduling before completing your review.</p></> : <p>Scheduling is not available yet. You can still save your actions and complete your review. Try again after scheduling has been enabled for your account.</p>}{onRetry && <button type="button" onClick={onRetry} className={buttonClass}>Retry scheduling</button>}</div> : <>
         <GoogleCalendarConnection userId={userId} localDate={localDate} timezone={timezone} onEvents={setGoogleEvents} />
         <div role="status" aria-live="polite" className="text-xs text-zinc-400">{saveError ? <span className="text-amber-300">{typeof saveError === 'string' ? saveError : saveError.message}</span> : saveStatus === 'saving' ? 'Saving schedule…' : saveStatus === 'saved' ? 'Schedule saved' : saveStatus === 'offline' ? 'Schedule saved on this device — reconnect to sync.' : saveStatus === 'error' ? 'Schedule could not sync. Your review is still available.' : 'Schedule changes save automatically.'}</div>
         <DndContext sensors={sensors} onDragStart={({ active: dragged }) => setActive(dragged.data.current.item)} onDragCancel={() => setActive(null)} onDragEnd={drop}>
@@ -177,7 +180,7 @@ export default function TomorrowScheduler({
               <div className="flex gap-2 overflow-x-auto pb-2 md:flex-col md:overflow-x-visible">
                 {unscheduled.map((item) => <div key={itemKey(item)} className="min-w-[160px] md:min-w-0"><DraggableItem item={item} onEdit={edit} disabled={readOnly} /></div>)}
               </div>
-              {!unscheduled.length && <p className="text-xs text-zinc-500">{items.length ? 'Everything has a time.' : 'Save an action or add a habit to begin.'}</p>}
+              {!unscheduled.length && <p className="text-xs text-zinc-500">{readOnly ? 'No unscheduled items.' : items.length ? 'Everything has a time.' : 'Save an action or add a habit to begin.'}</p>}
             </aside>
             <div className="min-w-0">
               {allDay.length > 0 && <div aria-label="All-day Google events" className="mb-2 space-y-1 rounded-lg border border-zinc-700 p-2"><p className="text-xs text-zinc-400">All day · Google (read-only)</p>{allDay.map((event) => <p key={event.id} className="text-xs text-zinc-500">{event.summary || event.title || 'Busy'}{event.ends_at || event.end ? ` · until ${event.ends_at || event.end?.date || event.end} (exclusive)` : ''}{event.transparency === 'transparent' ? ' · Free · non-blocking' : ''}</p>)}</div>}
@@ -190,7 +193,8 @@ export default function TomorrowScheduler({
                     <div className="pointer-events-none absolute inset-0">{localLanes.map((block) => {
                       if (block.read_only_context) return <div key={`carryover:${block.id || block.source_id || block.starts_at}`} data-context-schedule-id={block.id} style={blockPosition(block, laneCount)} className="pointer-events-auto rounded-lg border border-indigo-800/60 bg-indigo-950/40 p-2 text-[10px] text-indigo-200"><span className="block break-words font-medium">{block.label || 'Previous-day plan'}</span><span className="mt-1 block">{timeLabel(block)}</span><span className="mt-1 block text-indigo-300">Previous-day · {block.target_local_date || localParts(block.starts_at, timezone).date} · read-only</span></div>;
                       const item = itemMap.get(blockKey(block));
-                      return item ? <div key={block.id || blockKey(block)} data-schedule-key={blockKey(block)} className="pointer-events-auto" style={blockPosition(block, laneCount)}><DraggableItem item={item} onEdit={edit} disabled={readOnly}><span className={`mt-1 block ${item.type === 'habit' ? 'text-emerald-200' : 'text-red-200'}`}>{timeLabel(block)}</span></DraggableItem></div> : null;
+                      if (!item && readOnly) return <div key={block.id || blockKey(block)} data-schedule-key={blockKey(block)} style={blockPosition(block, laneCount)} className="pointer-events-auto rounded-lg border border-zinc-700 bg-zinc-800/60 p-2 text-xs text-zinc-300"><span className="block break-words font-medium">{block.label || (block.source_type === 'habit' || block.habit_definition_id ? 'Scheduled habit' : 'Scheduled commitment')}</span><span className="mt-1 block">{timeLabel(block)}</span><span className="mt-1 block text-[10px] text-zinc-400">Preserved plan · read-only</span></div>;
+                      return item ? <div key={block.id || blockKey(block)} data-schedule-key={blockKey(block)} className="pointer-events-auto" style={blockPosition(block, laneCount)}><DraggableItem item={item} onEdit={edit} disabled={readOnly} compact short={blockPosition(block, laneCount).height <= 36} timeDescription={timeLabel(block)}><span className={`block truncate text-[10px] leading-3 ${item.type === 'habit' ? 'text-emerald-200' : 'text-red-200'}`}>{timeLabel(block)}</span></DraggableItem></div> : null;
                     })}</div>
                   </div>
                   <div className="relative border-l border-zinc-700" aria-label="Google events">{googleLanes.map((event) => <div key={event.id} style={blockPosition(event, googleLaneCount)} className="rounded border border-zinc-700 bg-zinc-800/60 p-1 text-[10px] text-zinc-400"><span className="block break-words">{event.summary || event.title || 'Busy'}</span><span>{timeLabel(event)}</span>{event.transparency === 'transparent' && <span className="block">Free · non-blocking</span>}</div>)}</div>
@@ -204,7 +208,12 @@ export default function TomorrowScheduler({
       <Dialog.Root open={Boolean(editing)} onOpenChange={(open) => { if (!open && !saving) setEditing(null); }}>
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-50 bg-black/75" />
-          <Dialog.Content onCloseAutoFocus={(event) => { event.preventDefault(); focusReturn.current?.focus?.(); }} className="fixed left-1/2 top-1/2 z-50 max-h-[90dvh] w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 space-y-4 overflow-y-auto rounded-2xl border border-zinc-700 bg-zinc-900 p-5 text-white shadow-xl">
+          <Dialog.Content onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            const fallback = [...(schedulerRoot.current?.querySelectorAll('[data-scheduler-edit-key]') || [])].find((node) => node.getAttribute('data-scheduler-edit-key') === focusItemKey.current);
+            const target = focusReturn.current?.isConnected && focusReturn.current !== document.body ? focusReturn.current : fallback;
+            target?.focus();
+          }} className="fixed left-1/2 top-1/2 z-50 max-h-[90dvh] w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 space-y-4 overflow-y-auto rounded-2xl border border-zinc-700 bg-zinc-900 p-5 text-white shadow-xl">
             <Dialog.Title className="font-semibold">Choose a time</Dialog.Title>
             <Dialog.Description className="text-sm text-zinc-400">{editing?.label} · {localDate} · {timezone}</Dialog.Description>
             <form onSubmit={save} className="space-y-4">
