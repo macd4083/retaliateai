@@ -1,19 +1,34 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase/client';
 import { CheckCircle, X } from 'lucide-react';
+import { getSafeAuthReturn, getAuthLinkError } from '../lib/authReturn';
 
 export default function EmailConfirmed() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const returnTo = getSafeAuthReturn(searchParams.get('next'));
   const [status, setStatus] = useState('verifying');
+  const [errorMessage, setErrorMessage] = useState('');
 
   useEffect(() => {
+    let cancelled = false;
     const handleEmailConfirmation = async () => {
       try {
+        const linkError = getAuthLinkError(window.location.search, window.location.hash);
+        if (linkError) throw new Error(linkError);
+        const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+        if (fragment.get('type') === 'recovery' || searchParams.get('type') === 'recovery') {
+          navigate(`/auth/reset-password${window.location.search}${window.location.hash}`, { replace: true });
+          return;
+        }
+        // The Supabase client processes OAuth/PKCE and email tokens on initialization.
         const { data: { session }, error } = await supabase.auth.getSession();
+        if (cancelled) return;
         
         if (error || !session) {
           console.error('Verification error:', error);
+          setErrorMessage(error?.message || 'The verification link may be expired or invalid. Sign in or request a new verification email.');
           setStatus('error');
           return;
         }
@@ -31,13 +46,16 @@ export default function EmailConfirmed() {
         }
         
       } catch (err) {
+        if (cancelled) return;
         console.error('Confirmation error:', err);
+        setErrorMessage(err?.message || 'Unable to verify your email. Please try signing in again.');
         setStatus('error');
       }
     };
 
-    setTimeout(handleEmailConfirmation, 500);
-  }, [navigate]);
+    handleEmailConfirmation();
+    return () => { cancelled = true; };
+  }, [navigate, searchParams]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-green-50 via-blue-50 to-purple-50 px-4">
@@ -79,9 +97,15 @@ export default function EmailConfirmed() {
                 You're all set!
               </p>
               <p className="text-sm text-blue-700">
-                Close this tab and return to the previous tab to continue using Retaliate AI.
+                Continue here, or return to your original tab to finish signing in.
               </p>
             </div>
+            <button
+              onClick={() => navigate(returnTo, { replace: true })}
+              className="w-full mt-6 bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 transition-colors font-medium"
+            >
+              Continue to Retaliate AI
+            </button>
           </>
         )}
         
@@ -92,10 +116,10 @@ export default function EmailConfirmed() {
             </div>
             <h1 className="text-2xl font-bold text-slate-900 mb-3">Verification Failed</h1>
             <p className="text-slate-600 mb-6">
-              The verification link may be expired or invalid.
+              {errorMessage}
             </p>
             <button
-              onClick={() => navigate('/login')}
+              onClick={() => navigate(`/login?next=${encodeURIComponent(returnTo)}`, { replace: true })}
               className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 transition-colors font-medium"
             >
               Back to Login

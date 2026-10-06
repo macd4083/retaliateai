@@ -120,11 +120,11 @@ export default function AdminSessionLog() {
           setIsAdmin(true);
         } else {
           setIsAdmin(false);
-          navigate('/reflection', { replace: true });
+          navigate('/app', { replace: true });
         }
       } catch (_error) {
         setIsAdmin(false);
-        navigate('/reflection', { replace: true });
+        navigate('/app', { replace: true });
       }
     })();
   }, [user?.id, navigate]);

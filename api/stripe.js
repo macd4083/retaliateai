@@ -1,6 +1,7 @@
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 import { getAuthenticatedUserId } from '../src/lib/auth.js';
+import { publicAppUrl } from '../server/notifications.js';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 const supabase = createClient(
@@ -75,8 +76,8 @@ export default async function handler(req, res) {
         mode: 'subscription',
         customer: customerId,
         line_items: [{ price: process.env.STRIPE_PRICE_ID, quantity: 1 }],
-        success_url: 'https://retaliateai.com/settings?checkout=success',
-        cancel_url: 'https://retaliateai.com/settings',
+        success_url: publicAppUrl('/settings?checkout=success'),
+        cancel_url: publicAppUrl('/settings'),
       });
 
       return res.status(200).json({ url: session.url });

@@ -1,49 +1,47 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { getSafeAuthReturn, getAuthLinkError } from '../lib/authReturn';
 import { supabase } from '../lib/supabase/client';
 
 export default function AuthCallback() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const returnTo = getSafeAuthReturn(searchParams.get('next'));
   const [status, setStatus] = useState('verifying');
+  const [errorMessage, setErrorMessage] = useState('');
 
   useEffect(() => {
+    let cancelled = false;
     const handleCallback = async () => {
       try {
-        // Exchange PKCE code / magic-link token from the URL for a session
-        const { error } = await supabase.auth.exchangeCodeForSession(window.location.href);
-
-        if (error) {
-          console.error('Auth error:', error);
-          setStatus('error');
+        const linkError = getAuthLinkError(window.location.search, window.location.hash);
+        if (linkError) throw new Error(linkError);
+        const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+        if (fragment.get('type') === 'recovery' || searchParams.get('type') === 'recovery') {
+          navigate(`/auth/reset-password${window.location.search}${window.location.hash}`, { replace: true });
           return;
         }
-
-        // Listen for the session to be confirmed
-        let subscription;
-        ({ data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-          if (session) {
-            subscription.unsubscribe();
-            setStatus('success');
-            // AuthGuardV2 will handle the onboarding redirect automatically
-            navigate('/reflection', { replace: true });
-          }
-        }));
-
-        // Also check immediately in case the session is already set
-        const { data } = await supabase.auth.getSession();
+        // Session initialization already exchanges URL tokens; do not exchange twice.
+        const { data, error } = await supabase.auth.getSession();
+        if (cancelled) return;
+        if (error) throw error;
         if (data.session) {
-          subscription.unsubscribe();
           setStatus('success');
-          navigate('/reflection', { replace: true });
+          navigate(returnTo, { replace: true });
+        } else {
+          throw new Error('The link may be expired or invalid. Please sign in or request a new link.');
         }
       } catch (err) {
+        if (cancelled) return;
         console.error('Callback error:', err);
+        setErrorMessage(err?.message || 'Unable to complete sign in.');
         setStatus('error');
       }
     };
 
     handleCallback();
-  }, [navigate]);
+    return () => { cancelled = true; };
+  }, [navigate, returnTo, searchParams]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-zinc-950">
@@ -80,9 +78,9 @@ export default function AuthCallback() {
           <>
             <div className="text-red-500 text-5xl mb-4">✗</div>
             <p className="text-white font-semibold mb-2">Verification failed</p>
-            <p className="text-zinc-400 mb-6">The link may be expired or invalid.</p>
+            <p className="text-zinc-400 mb-6">{errorMessage}</p>
             <button
-              onClick={() => navigate('/login')}
+              onClick={() => navigate(`/login?next=${encodeURIComponent(returnTo)}`, { replace: true })}
               className="px-6 py-2.5 bg-red-600 hover:bg-red-500 text-white font-semibold rounded-xl transition-colors"
             >
               Back to Login

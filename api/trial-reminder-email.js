@@ -1,5 +1,6 @@
 import { Resend } from 'resend';
 import { createClient } from '@supabase/supabase-js';
+import { escapeHtml, isAuthorizedCron, publicAppUrl } from '../server/notifications.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -18,14 +19,14 @@ function trialEndingSoonHtml() {
   return `
 <h2>2 days left.</h2>
 <p>Your Retaliate AI trial is about to end.</p>
-<p>Keep momentum by checking in tonight. If you need more time, you'll see an option in-app to give feedback and unlock one more free week.</p>
+<p>Keep reviewing today and preparing tomorrow. If you need more time, you'll see an option in-app to give feedback and unlock one more free week.</p>
 <p>
-  <a href="https://retaliateai.com/reflection" style="display:inline-block;padding:12px 24px;background-color:#dc2626;color:#fff;text-decoration:none;border-radius:8px;font-weight:600;">
-    Open Reflection
+  <a href="${escapeHtml(publicAppUrl('/app'))}" style="display:inline-block;padding:12px 24px;background-color:#dc2626;color:#fff;text-decoration:none;border-radius:8px;font-weight:600;">
+    Open App
   </a>
 </p>
-<p><a href="https://retaliateai.com/settings">Upgrade in Settings</a></p>
-<p style="color:#94a3b8;font-size:12px;">Built for people who are done making excuses.</p>
+<p><a href="${escapeHtml(publicAppUrl('/settings'))}">Upgrade in Settings</a></p>
+<p style="color:#94a3b8;font-size:12px;">Review today and prepare tomorrow.</p>
 `;
 }
 
@@ -35,29 +36,30 @@ function trialExpiredFeedbackOfferHtml() {
 <p>You can still get one more free week.</p>
 <p>Open the app, submit quick feedback, and your trial gets extended by 7 days.</p>
 <p>
-  <a href="https://retaliateai.com/reflection" style="display:inline-block;padding:12px 24px;background-color:#dc2626;color:#fff;text-decoration:none;border-radius:8px;font-weight:600;">
+  <a href="${escapeHtml(publicAppUrl('/app'))}" style="display:inline-block;padding:12px 24px;background-color:#dc2626;color:#fff;text-decoration:none;border-radius:8px;font-weight:600;">
     Open App &amp; Submit Feedback
   </a>
 </p>
-<p style="color:#94a3b8;font-size:12px;">Built for people who are done making excuses.</p>
+<p style="color:#94a3b8;font-size:12px;">Review today and prepare tomorrow.</p>
 `;
 }
 
 function extendedTrialExpiredHtml() {
   return `
 <h2>Your extended trial is up.</h2>
-<p>You already got the extra week. If this is helping, lock it in with a paid plan.</p>
+<p>Your extra week has ended. If daily reviews are helping, you can continue with a paid plan.</p>
 <p>
-  <a href="https://retaliateai.com/settings" style="display:inline-block;padding:12px 24px;background-color:#dc2626;color:#fff;text-decoration:none;border-radius:8px;font-weight:600;">
+  <a href="${escapeHtml(publicAppUrl('/settings'))}" style="display:inline-block;padding:12px 24px;background-color:#dc2626;color:#fff;text-decoration:none;border-radius:8px;font-weight:600;">
     Upgrade Now
   </a>
 </p>
-<p style="color:#94a3b8;font-size:12px;">Built for people who are done making excuses.</p>
+<p style="color:#94a3b8;font-size:12px;">Review today and prepare tomorrow.</p>
 `;
 }
 
 export default async function handler(req, res) {
   if (req.method !== 'GET' && req.method !== 'POST') return res.status(405).end();
+  if (!isAuthorizedCron(req)) return res.status(401).json({ error: 'Unauthorized' });
 
   const now = new Date();
   const twoDaysFromNow = new Date(now.getTime() + TWO_DAYS_MS);

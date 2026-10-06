@@ -3,9 +3,11 @@ import { supabase } from '../lib/supabase/client';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Mail, Lock, ArrowLeft, Eye, EyeOff } from 'lucide-react';
 import { trackEvent, identifyUser } from '../lib/analytics';
+import { getSafeAuthReturn, getAuthCallbackUrl } from '../lib/authReturn';
 
 export default function Login() {
   const [searchParams] = useSearchParams();
+  const returnTo = getSafeAuthReturn(searchParams.get('next'));
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -22,6 +24,9 @@ export default function Login() {
   useEffect(() => {
     if (searchParams.get('signup') === 'true') {
       setIsSignUp(true);
+    }
+    if (searchParams.get('reset') === 'true') {
+      setIsForgotPassword(true);
     }
   }, [searchParams]);
 
@@ -51,7 +56,7 @@ export default function Login() {
       trackEvent('login_completed');
       setMessage('Login successful!');
       setMessageType('success');
-      setTimeout(() => navigate('/reflection'), 1000);
+      navigate(returnTo, { replace: true });
     }
     setLoading(false);
   };
@@ -66,7 +71,7 @@ export default function Login() {
       email,
       password,
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        emailRedirectTo: getAuthCallbackUrl(returnTo),
       }
     });
 
@@ -86,6 +91,12 @@ export default function Login() {
       }
       setLoading(false);
     } else {
+      if (data?.session) {
+        trackEvent('signup_completed');
+        navigate(returnTo, { replace: true });
+        setLoading(false);
+        return;
+      }
       setSignupEmail(email);
       setSignupPassword(password);
       setShowOtpInput(true);
@@ -133,6 +144,7 @@ export default function Login() {
         signupPassword={signupPassword}
         onBack={() => { setShowOtpInput(false); resetForm(); }} 
         navigate={navigate} 
+        returnTo={returnTo}
       />
     );
   }
@@ -318,7 +330,7 @@ export default function Login() {
   );
 }
 
-function VerificationWaitingScreen({ signupEmail, signupPassword, onBack, navigate }) {
+function VerificationWaitingScreen({ signupEmail, signupPassword, onBack, navigate, returnTo }) {
   const [dots, setDots] = useState('');
   const [otp, setOtp] = useState('');
   const [otpLoading, setOtpLoading] = useState(false);
@@ -350,7 +362,7 @@ function VerificationWaitingScreen({ signupEmail, signupPassword, onBack, naviga
           if (signInData?.session) {
             clearInterval(checkInterval);
             clearInterval(dotsInterval);
-            navigate('/reflection');
+            navigate(returnTo, { replace: true });
           }
         }
       } catch (err) {
@@ -362,7 +374,7 @@ function VerificationWaitingScreen({ signupEmail, signupPassword, onBack, naviga
       clearInterval(dotsInterval);
       clearInterval(checkInterval);
     };
-  }, [signupEmail, signupPassword, navigate]);
+  }, [signupEmail, signupPassword, navigate, returnTo]);
 
   const handleVerifyOtp = async (e) => {
     e.preventDefault();
@@ -394,7 +406,7 @@ function VerificationWaitingScreen({ signupEmail, signupPassword, onBack, naviga
       
       setOtpMessage('Email verified! Redirecting...');
       setOtpMessageType('success');
-      setTimeout(() => navigate('/reflection'), 1500);
+      navigate(returnTo, { replace: true });
     }
   };
 

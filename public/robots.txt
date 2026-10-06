@@ -1,5 +1,17 @@
 User-agent: *
 Allow: /
 Disallow: /api/
+Disallow: /app
+Disallow: /home
+Disallow: /today
+Disallow: /insights
+Disallow: /settings
+Disallow: /reflection
+Disallow: /legacy/
+Disallow: /admin
+Disallow: /login
+Disallow: /auth/
+Disallow: /start/
+Disallow: /post-session/
 
 Sitemap: https://retaliateai.com/sitemap.xml

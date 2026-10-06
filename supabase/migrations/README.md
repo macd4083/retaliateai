@@ -33,3 +33,11 @@ Run files in filename order (alphabetical / chronological).
 24. `20260509_stripe_columns.sql` — Adds Stripe customer/subscription columns and trial fields to user_profiles
 25. `20260609_fix_trial_start.sql` — Ensures trial default behavior on signup and backfills missing trial_ends_at for trialing users
 26. `20260609_user_feedback.sql` — Creates user_feedback table and adds feedback/trial email tracking columns to user_profiles
+
+## Daily review reminders: deployment checklist
+
+- Deploy the V2 review schema before enabling reminders. Missed-review email eligibility uses only `today_v2_daily_reviews.completed_at`, never legacy sessions: two missed review days, a prior completed review, and a seven-day email cooldown. Query failures suppress delivery.
+- Set server-only `CRON_SECRET` in Vercel. Both email cron endpoints and direct/broadcast push requests require its Authorization bearer header; an unset secret disables delivery. The existing `vercel.json` email schedules remain unchanged, and Vercel attaches the configured cron authorization automatically.
+- Set `PUBLIC_APP_ORIGIN` to your canonical HTTP(S) origin; the default is `https://retaliateai.com`, verified against the sitemap. Email and checkout links never use a request Host header. Review reminders open `/today`, trial/payment app links open `/app`, and upgrade/billing links open `/settings`.
+- Server review dates use each profile's valid `timezone`, with `VITE_TODAY_V2_DAY_BOUNDARY_HOUR` (default **4 AM**) matching the V2 deployment setting. Invalid/missing timezones are skipped. Browser-only `today_v2_day_boundary_hour` localStorage overrides are not available to server jobs; no new persisted preference is introduced. A browser timezone that differs from the profile's reminder timezone may also produce different review-day boundaries.
+- Enable Supabase `pg_cron`, `pg_net`, and Vault. Create Vault secrets named `public_app_origin` and `cron_secret` matching the deployment values, then run **`add_nightly_push_cron.sql`**. It updates only the named minute job in place and never deletes application data. Its SQL includes job and HTTP-response verification queries; verify HTTP 200 after deployment without displaying secret values.

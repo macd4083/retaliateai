@@ -54,7 +54,7 @@ export default function PWAInstallBanner() {
                   <strong className="text-zinc-300">"Add to Home Screen"</strong> to install Retaliate AI.
                 </>
               ) : (
-                'Download Retaliate AI to your home screen — faster, offline-ready, and no browser chrome.'
+                'Install the web app for home-screen access. Internet is required to save reviews and load data.'
               )}
             </p>
             <div className="flex items-center gap-3 mt-2.5">
@@ -64,7 +64,7 @@ export default function PWAInstallBanner() {
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold rounded-lg transition-colors"
                 >
                   <Download className="w-3 h-3" />
-                  Download App
+                  Install web app
                 </button>
               )}
               <button
@@ -78,8 +78,8 @@ export default function PWAInstallBanner() {
         ) : (
           <>
             <p className="text-zinc-300 text-sm leading-relaxed">
-              If you ever change your mind, you can download the app with the{' '}
-              <Download className="inline w-3.5 h-3.5 text-zinc-400" /> download button in the top right.
+              When installation is available, use the{' '}
+              <Download className="inline w-3.5 h-3.5 text-zinc-400" /> install button in the top right.
             </p>
             <button
               onClick={handleOkay}

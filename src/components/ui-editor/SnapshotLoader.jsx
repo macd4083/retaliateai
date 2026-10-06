@@ -16,8 +16,9 @@ import { useUIEditorStore } from '@/store/uiEditorStore';
 const APP_PAGES = [
   { name: 'Landing', route: '/' },
   { name: 'Login', route: '/login' },
-  { name: 'Reflection', route: '/reflection' },
-  { name: 'Insights', route: '/insights' },
+  { name: 'Today', route: '/home' },
+  { name: 'Review & Plan', route: '/today' },
+  { name: 'Progress', route: '/insights' },
   { name: 'Settings', route: '/settings' },
   { name: 'Privacy Policy', route: '/privacy' },
   { name: 'Terms of Service', route: '/terms' },

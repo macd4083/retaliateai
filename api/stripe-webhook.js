@@ -1,6 +1,7 @@
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 import { Resend } from 'resend';
+import { escapeHtml, publicAppUrl } from '../server/notifications.js';
 
 export const config = { api: { bodyParser: false } };
 
@@ -125,17 +126,17 @@ export default async function handler(req, res) {
         const userEmail = await getEmailByUserId(profile?.id);
         await sendEmail({
           to: userEmail,
-          subject: "You're in. Payment confirmed. 🔥",
+          subject: 'Payment confirmed — your subscription is active',
           html: `
-<h2>Payment confirmed. You're all in.</h2>
+<h2>Payment confirmed.</h2>
 <p>Your subscription is active and ready.</p>
-<p>You now have full access to nightly reflection, accountability tracking, and insight history.</p>
+<p>You now have full access to daily reviews: track habits, review commitments, and prepare tomorrow's plan.</p>
 <p>
-  <a href="https://retaliateai.com/reflection" style="display:inline-block;padding:12px 24px;background-color:#dc2626;color:#fff;text-decoration:none;border-radius:8px;font-weight:600;">
+  <a href="${escapeHtml(publicAppUrl('/app'))}" style="display:inline-block;padding:12px 24px;background-color:#dc2626;color:#fff;text-decoration:none;border-radius:8px;font-weight:600;">
     Open Retaliate AI
   </a>
 </p>
-<p style="color:#94a3b8;font-size:12px;">Built for people who are done making excuses.</p>
+<p style="color:#94a3b8;font-size:12px;">Review today and prepare tomorrow.</p>
 `,
         });
         break;
@@ -178,18 +179,18 @@ export default async function handler(req, res) {
           const nextBillingAt = asIsoTimestamp(periodEnd);
           await sendEmail({
             to: userEmail,
-            subject: 'Billing confirmed — another month of showing up.',
+            subject: 'Retaliate AI billing confirmed',
             html: `
 <h2>Billing confirmed.</h2>
-<p>Amount charged: <strong>${formatCurrency(invoice.amount_paid, invoice.currency)}</strong></p>
-<p>Billing date: <strong>${formatDate(paidAt)}</strong></p>
-<p>Next billing date: <strong>${formatDate(nextBillingAt)}</strong></p>
+<p>Amount charged: <strong>${escapeHtml(formatCurrency(invoice.amount_paid, invoice.currency))}</strong></p>
+<p>Billing date: <strong>${escapeHtml(formatDate(paidAt))}</strong></p>
+<p>Next billing date: <strong>${escapeHtml(formatDate(nextBillingAt))}</strong></p>
 <p>
-  <a href="https://retaliateai.com/settings" style="display:inline-block;padding:12px 24px;background-color:#dc2626;color:#fff;text-decoration:none;border-radius:8px;font-weight:600;">
+  <a href="${escapeHtml(publicAppUrl('/settings'))}" style="display:inline-block;padding:12px 24px;background-color:#dc2626;color:#fff;text-decoration:none;border-radius:8px;font-weight:600;">
     Open Billing History
   </a>
 </p>
-<p style="color:#94a3b8;font-size:12px;">Built for people who are done making excuses.</p>
+<p style="color:#94a3b8;font-size:12px;">Review today and prepare tomorrow.</p>
 `,
           });
         }

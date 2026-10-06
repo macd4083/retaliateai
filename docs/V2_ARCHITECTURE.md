@@ -2,11 +2,12 @@
 
 ## Explicit route and feature switch
 - `src/lib/featureFlags.js` is the single source of truth for `ENABLE_TODAY_V2`.
-- `src/App.jsx` uses that flag to choose the `/today` route target:
-  - **V2**: `src/v2/pages/TodayV2Page.jsx`
-  - **Legacy**: `src/pages/ReflectionV2.jsx`
-- `/reflection` and `/legacy/reflection` always remain on legacy persistence.
-- `src/components/v2/AppShellV2.jsx` reads the same shared flag only for navigation labels; it does not change persistence.
+- `/app` is the authenticated generic entry point. It uses the existing V2 completion resolver: incomplete or unavailable completion metadata goes to `/today`; completed reviews go to `/home`.
+- `/reflection` is a compatibility redirect to `/app`. Historical users can bookmark `/legacy/reflection`, which retains the AI dialogue and legacy persistence.
+- Explicit `/today` always opens the structured nightly workflow, including its completed-review reopen/edit behavior; `/home` always opens the live checklist.
+- Emergency rollback: set `VITE_ENABLE_TODAY_V2=false` and rebuild/redeploy. This changes only generic `/app` entry to `/legacy/reflection`; explicit V2 routes and user navigation remain available. Restore `true` to return generic entry to V2.
+- User navigation is Today (`/home`), Review & Plan (`/today`), Progress (`/insights`), Settings (`/settings`). Administration remains separate.
+- Progress currently uses the existing Insights implementation. Migrating its reporting data to V2 is separate work; this change does not merge legacy and V2 histories.
 
 ## Boundary map
 
@@ -57,17 +58,18 @@ These generic objects are replaced by the isolated Today V2 schema and should no
 - `public.v2_habit_logs`
 
 ## Data flow
-1. `/today` resolves through `ENABLE_TODAY_V2`.
+1. `/app` resolves the destination; explicit `/today` always opens Today V2.
 2. `TodayV2Page` calls `useTodayV2State`.
 3. `useTodayV2State` delegates all persistence to `src/v2/services/todayReview.js`.
 4. The DAL reads/writes only `today_v2_*` tables and `today_v2_*` RPCs.
 5. Commitment splitting happens in `src/shared/commitmentFragmentation.js`, then the resulting fragments are saved through `today_v2_replace_plan_for_date`.
-6. Legacy routes keep using `reflection_sessions` and related legacy objects without any shared writes.
+6. `/legacy/reflection` keeps using `reflection_sessions` and related legacy objects without any shared writes.
 
 ## Schema/data-flow diagram (text)
 ```text
-ENABLE_TODAY_V2
-  -> /today route
+/app (ENABLE_TODAY_V2=true)
+  -> completion resolver -> /home or /today
+  /today
     -> TodayV2Page
       -> useTodayV2State
         -> todayReview DAL
@@ -75,7 +77,9 @@ ENABLE_TODAY_V2
           -> today_v2_ensure_habit_occurrences_for_date()
           -> today_v2_* tables only
 
-/reflection
+/reflection -> /app (compatibility)
+
+/legacy/reflection (also /app rollback target when flag=false)
   -> ReflectionV2
     -> legacy reflectionHelpers
       -> reflection_sessions + legacy tables only

@@ -93,7 +93,7 @@ export default function HomeV2Page() {
 
   if (loading) {
     return (
-      <AppShellV2 title="Proof">
+      <AppShellV2 title="Today">
         <div className="flex h-full items-center justify-center text-zinc-400">Loading Proof…</div>
       </AppShellV2>
     );
@@ -101,10 +101,10 @@ export default function HomeV2Page() {
 
   if (error) {
     return (
-      <AppShellV2 title="Proof">
+      <AppShellV2 title="Today">
         <div className="flex h-full items-center justify-center p-4">
           <div className="w-full max-w-md space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-5 text-center">
-            <h2 className="font-semibold text-white">Couldn’t load Home</h2>
+            <h2 className="font-semibold text-white">Couldn’t load Today</h2>
             <p className="text-sm text-zinc-400">Could not load your Proof screen. Please try again.</p>
             <button type="button" onClick={load} className="inline-flex rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold">Try again</button>
           </div>
@@ -115,7 +115,7 @@ export default function HomeV2Page() {
 
   if (!homeState) {
     return (
-      <AppShellV2 title="Proof">
+      <AppShellV2 title="Today">
         <div className="flex h-full items-center justify-center text-zinc-400">Preparing Proof…</div>
       </AppShellV2>
     );
@@ -124,7 +124,7 @@ export default function HomeV2Page() {
   const contractItems = homeState.review?.completed_at ? homeState.tomorrowFragments : [];
 
   return (
-    <AppShellV2 title="Proof">
+    <AppShellV2 title="Today">
       <div className="h-full space-y-4 overflow-y-auto p-4">
         <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
           <p className="text-xs uppercase tracking-[0.2em] text-red-300">Identity</p>

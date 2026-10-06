@@ -311,13 +311,13 @@ export default function InsightsV2() {
 
   if (isAnonymousGuestUser(user)) {
     return (
-      <AppShellV2 title="Insights">
+      <AppShellV2 title="Progress">
         <div className="h-full overflow-y-auto flex flex-col items-center justify-center gap-6 px-6 text-center">
           <div className="w-16 h-16 rounded-full bg-zinc-800 flex items-center justify-center">
             <BarChart2 className="w-8 h-8 text-zinc-500" />
           </div>
           <div>
-            <h2 className="text-white font-semibold text-lg mb-2">Unlock Your Insights</h2>
+            <h2 className="text-white font-semibold text-lg mb-2">Save Your Progress</h2>
             <p className="text-zinc-400 text-sm max-w-xs leading-relaxed">
               Sign up or log in to track your streaks, commitments, and personal growth over time.
             </p>
@@ -343,7 +343,7 @@ export default function InsightsV2() {
 
   if (loading) {
     return (
-      <AppShellV2 title="Insights">
+      <AppShellV2 title="Progress">
         <div className="h-full overflow-y-auto flex items-center justify-center">
           <div className="w-8 h-8 border-2 border-zinc-700 border-t-red-500 rounded-full animate-spin" />
         </div>
@@ -381,7 +381,7 @@ export default function InsightsV2() {
   const missedFragments = fragmentHistory.filter((f) => f.kept === false);
 
   return (
-    <AppShellV2 title="Insights">
+    <AppShellV2 title="Progress">
       <div className="h-full overflow-y-auto">
         <div className="max-w-4xl mx-auto px-4 md:px-6 py-6 space-y-6">
 

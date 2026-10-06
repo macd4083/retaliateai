@@ -1,5 +1,11 @@
 import webpush from 'web-push';
 import { createClient } from '@supabase/supabase-js';
+import {
+  getLocalReviewContext,
+  isAuthorizedCron,
+  REVIEW_REMINDER_BODY,
+  REVIEW_REMINDER_TITLE,
+} from '../server/notifications.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -12,15 +18,19 @@ webpush.setVapidDetails(
   process.env.VAPID_PRIVATE_KEY
 );
 
-async function sendPushToUser(userId, title, body, url = '/reflection') {
-  const { data: subs } = await supabase
+async function sendPushToUser(userId) {
+  const { data: subs, error } = await supabase
     .from('push_subscriptions')
     .select('subscription')
     .eq('user_id', userId);
 
-  if (!subs?.length) return 0;
+  if (error || !subs?.length) return 0;
 
-  const payload = JSON.stringify({ title, body, url });
+  const payload = JSON.stringify({
+    title: REVIEW_REMINDER_TITLE,
+    body: REVIEW_REMINDER_BODY,
+    url: '/today',
+  });
   let sent = 0;
 
   for (const row of subs) {
@@ -43,12 +53,13 @@ async function sendPushToUser(userId, title, body, url = '/reflection') {
 
 export default async function handler(req, res) {
   if (req.method !== 'GET' && req.method !== 'POST') return res.status(405).end();
+  if (!isAuthorizedCron(req)) return res.status(401).json({ error: 'Unauthorized' });
 
-  const { user_id, title, body, url } = req.body || {};
+  const { user_id } = req.body || {};
 
   // Direct-send mode
   if (user_id) {
-    const sent = await sendPushToUser(user_id, title, body, url || '/reflection');
+    const sent = await sendPushToUser(user_id);
     return res.status(200).json({ sent });
   }
 
@@ -70,46 +81,20 @@ export default async function handler(req, res) {
 
   for (const profile of profiles || []) {
     try {
-      const userNow = new Date(now.toLocaleString('en-US', { timeZone: profile.timezone }));
-      const userHour = userNow.getHours();
-      const userMinute = userNow.getMinutes();
+      const context = getLocalReviewContext(now, profile.timezone);
+      if (!context) continue;
       const [prefHour, prefMinute] = profile.preferred_reflection_time.split(':').map(Number);
 
-      if (userHour === prefHour && userMinute === prefMinute) {
-        const yesterday = new Date();
-        yesterday.setDate(yesterday.getDate() - 1);
-        const yesterdayStr = yesterday.toISOString().slice(0, 10);
-
-        const { data: lastSession } = await supabase
-          .from('reflection_sessions')
-          .select('tomorrow_commitment, commitment_minimum, is_complete, date, reflection_streak')
+      if (context.hour === prefHour && context.minute === prefMinute) {
+        const { data: todayReview, error: reviewError } = await supabase
+          .from('today_v2_daily_reviews')
+          .select('completed_at')
           .eq('user_id', profile.id)
-          .eq('date', yesterdayStr)
+          .eq('local_date', context.reviewDate)
           .maybeSingle();
 
-        const todayStr = new Date().toISOString().slice(0, 10);
-        const { data: todaySession } = await supabase
-          .from('reflection_sessions')
-          .select('is_complete')
-          .eq('user_id', profile.id)
-          .eq('date', todayStr)
-          .maybeSingle();
-
-        if (todaySession?.is_complete === true) continue;
-
-        const streak = lastSession?.reflection_streak || 0;
-        let notifTitle = 'Retaliate AI';
-        let notifBody = 'Time for your nightly reflection. 🌙';
-
-        if (lastSession?.tomorrow_commitment) {
-          const commitment = lastSession.commitment_minimum || lastSession.tomorrow_commitment;
-          const shortCommitment = commitment.length > 65 ? `${commitment.slice(0, 62)}...` : commitment;
-          notifBody = `You said you'd: "${shortCommitment}" — did you?`;
-        } else if (streak >= 3) {
-          notifBody = `${streak}-night streak. Don't break it tonight. 🔥`;
-        }
-
-        const sent = await sendPushToUser(profile.id, notifTitle, notifBody, '/reflection');
+        if (reviewError || todayReview?.completed_at) continue;
+        const sent = await sendPushToUser(profile.id);
         totalSent += sent;
       }
     } catch (err) {

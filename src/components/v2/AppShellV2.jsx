@@ -4,23 +4,20 @@ import { Settings, Moon, BarChart2, X, Database, Download, Share, MessageSquare,
 import { useAuth } from '../../lib/AuthContext';
 import { supabase } from '../../lib/supabase/client';
 import { isAnonymousGuestUser } from '../../lib/guestSession';
-import { ENABLE_TODAY_V2 } from '../../lib/featureFlags';
 import { usePWAInstall } from '../../hooks/usePWAInstall';
 import PWAInstallBanner from '../pwa/PWAInstallBanner';
 
-const PRIMARY_REFLECTION_PATH = ENABLE_TODAY_V2 ? '/today' : '/reflection';
-
 const NAV_LINKS = [
-  ...(ENABLE_TODAY_V2 ? [{ label: 'Home', path: '/home', icon: House }] : []),
-  { label: 'Reflection', path: PRIMARY_REFLECTION_PATH, icon: Moon },
-  { label: 'Insights', path: '/insights', icon: BarChart2 },
+  { label: 'Today', path: '/home', icon: House },
+  { label: 'Review & Plan', path: '/today', icon: Moon },
+  { label: 'Progress', path: '/insights', icon: BarChart2 },
   { label: 'Settings', path: '/settings', icon: Settings },
 ];
 
 const GUEST_NAV_LINKS = [
-  ...(ENABLE_TODAY_V2 ? [{ label: 'Home', path: '/home', icon: House }] : []),
-  { label: 'Reflection', path: PRIMARY_REFLECTION_PATH, icon: Moon },
-  { label: 'Insights', path: '/insights', icon: BarChart2 },
+  { label: 'Today', path: '/home', icon: House },
+  { label: 'Review & Plan', path: '/today', icon: Moon },
+  { label: 'Progress', path: '/insights', icon: BarChart2 },
 ];
 
 const LIVE_DEMO_USER_NAV_LINKS = [
@@ -256,6 +253,9 @@ export default function AppShellV2({ title, children, adminAction = null, shellM
                   </button>
                 );
               })}
+              {!isLiveDemoUserShell && isAdmin && (
+                <p className="px-3 pt-4 pb-1 text-xs uppercase tracking-wider text-zinc-500">Administration</p>
+              )}
               {!isLiveDemoUserShell && isAdmin && (
                 <button
                   onClick={() => {

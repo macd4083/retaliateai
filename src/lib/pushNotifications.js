@@ -14,6 +14,7 @@ export async function subscribeToPush(userId, supabase) {
   if (permission !== 'granted') return null;
 
   const registration = await navigator.serviceWorker.ready;
+  // Reuse the installed worker and subscription; reminders do not require a reload.
   const existing = await registration.pushManager.getSubscription();
   if (existing) {
     await savePushSubscription(userId, existing, supabase);

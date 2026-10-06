@@ -1,5 +1,5 @@
 import React from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 
 // ── Legacy + V2 pages ───────────────────────────────────────────────────────
 import ReflectionLegacyPage from './pages/ReflectionV2';
@@ -34,6 +34,7 @@ import {
 } from './lib/guestSession';
 import { shouldShowTrialExpiredModal } from './lib/trialModal';
 import { isMissingProfileColumn } from './lib/supabase/profileSchema';
+import { getSafeAuthReturn } from './lib/authReturn';
 
 const OnboardingScreen = /** @type {any} */ (OnboardingV2);
 const PROFILE_BASE_FIELDS = ['onboarding_completed', 'trial_ends_at', 'subscription_status', 'feedback_submitted', 'trial_extended', 'role'];
@@ -125,7 +126,7 @@ function TodayV2DefaultRedirect() {
     let cancelled = false;
 
     if (!ENABLE_TODAY_V2) {
-      setTarget('/reflection');
+      setTarget('/legacy/reflection');
       return () => {
         cancelled = true;
       };
@@ -160,6 +161,7 @@ function TodayV2DefaultRedirect() {
 // onboarding on first visit, and see a signup gate if they try a second session.
 function AuthGuardV2({ children }) {
   const { user, loading } = /** @type {{ user: any, loading: boolean }} */ (useAuth());
+  const location = useLocation();
 
   // FIX: Start as null (unknown), not false.
   // null = "haven't checked yet" → show loading screen
@@ -168,6 +170,7 @@ function AuthGuardV2({ children }) {
   const [onboardingCompleted, setOnboardingCompleted] = React.useState(null);
   const [profileData, setProfileData] = React.useState(null);
   const [profileLoading, setProfileLoading] = React.useState(true);
+  const [profileUserId, setProfileUserId] = React.useState(null);
   const [feedbackDismissed, setFeedbackDismissed] = React.useState(false);
 
   React.useEffect(() => {
@@ -187,6 +190,7 @@ function AuthGuardV2({ children }) {
     }
 
     async function loadProfile() {
+      setProfileLoading(true);
       const { data, error } = await fetchUserProfile(user.id);
       if (cancelled) return;
       if (error) {
@@ -198,6 +202,7 @@ function AuthGuardV2({ children }) {
       // Stop tracking for users who have already completed onboarding
       if (completed) stopAnalytics();
       setProfileData(data || null);
+      setProfileUserId(user.id);
       setProfileLoading(false);
     }
 
@@ -210,11 +215,14 @@ function AuthGuardV2({ children }) {
 
   // Show loading screen until BOTH auth AND profile check are done.
   // onboardingCompleted === null means we haven't gotten the answer yet.
-  if (loading || profileLoading || onboardingCompleted === null) {
+  if (loading || profileLoading || onboardingCompleted === null || (user?.id && profileUserId !== user.id)) {
     return <LoadingScreen />;
   }
 
-  if (!user) return <Navigate to="/login" replace />;
+  if (!user) {
+    const returnTo = getSafeAuthReturn(`${location.pathname}${location.search}${location.hash}`);
+    return <Navigate to={`/login?next=${encodeURIComponent(returnTo)}`} replace />;
+  }
 
   // Guest campaign users bypass onboarding — go straight to the session.
   const isGuestUser = isGuestCampaignUser(profileData, user);
@@ -291,12 +299,13 @@ export default function App() {
         }
       />
 
-      {/* Legacy reflection route contract remains stable */}
+      {/* Compatibility links now enter the structured app. */}
+      <Route path="/reflection" element={<Navigate to="/app" replace />} />
       <Route
-        path="/reflection"
+        path="/app"
         element={
           <AuthGuardV2>
-            <ReflectionLegacyPage />
+            <TodayV2DefaultRedirect />
           </AuthGuardV2>
         }
       />
@@ -304,7 +313,7 @@ export default function App() {
         path="/today"
         element={
           <AuthGuardV2>
-            {ENABLE_TODAY_V2 ? <TodayV2Page /> : <ReflectionLegacyPage />}
+            <TodayV2Page />
           </AuthGuardV2>
         }
       />
@@ -312,7 +321,7 @@ export default function App() {
         path="/home"
         element={
           <AuthGuardV2>
-            {ENABLE_TODAY_V2 ? <HomeV2Page /> : <Navigate to="/reflection" replace />}
+            <HomeV2Page />
           </AuthGuardV2>
         }
       />
@@ -376,11 +385,7 @@ export default function App() {
       {/* Catch-all */}
       <Route
         path="*"
-        element={
-          <AuthGuardV2>
-            {ENABLE_TODAY_V2 ? <TodayV2DefaultRedirect /> : <Navigate to="/reflection" replace />}
-          </AuthGuardV2>
-        }
+        element={<Navigate to="/app" replace />}
       />
     </Routes>
   );

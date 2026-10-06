@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useNavigate } from 'react-router-dom';
 import { Lock, CheckCircle, Eye, EyeOff } from 'lucide-react';
+import { getAuthLinkError } from '../lib/authReturn';
 
 export default function ResetPassword() {
   const [password, setPassword] = useState('');
@@ -9,8 +10,8 @@ export default function ResetPassword() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState('');
-  const [messageType, setMessageType] = useState('');
+  const [message, setMessage] = useState(() => getAuthLinkError(window.location.search, window.location.hash));
+  const [messageType, setMessageType] = useState('error');
   const [success, setSuccess] = useState(false);
   const navigate = useNavigate();
 
@@ -43,7 +44,7 @@ export default function ResetPassword() {
       setMessage('Password updated successfully!');
       setMessageType('success');
       setSuccess(true);
-      setTimeout(() => navigate('/Journal'), 2000);
+      setTimeout(() => navigate('/app', { replace: true }), 2000);
     }
     setLoading(false);
   };
@@ -56,7 +57,7 @@ export default function ResetPassword() {
             <CheckCircle className="w-8 h-8 text-green-400" />
           </div>
           <h2 className="text-2xl font-bold text-white mb-2">Password Updated!</h2>
-          <p className="text-zinc-400 mb-4">Redirecting to your journal...</p>
+          <p className="text-zinc-400 mb-4">Redirecting to your daily review...</p>
         </div>
       </div>
     );
@@ -154,6 +155,12 @@ export default function ResetPassword() {
             {loading ? 'Updating...' : 'Update Password'}
           </button>
         </form>
+        <button
+          onClick={() => navigate('/login?reset=true', { replace: true })}
+          className="w-full mt-4 text-sm text-zinc-400 hover:text-white"
+        >
+          Request a new reset link
+        </button>
       </div>
     </div>
   );

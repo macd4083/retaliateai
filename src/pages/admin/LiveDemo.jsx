@@ -169,12 +169,12 @@ export default function LiveDemo() {
           setIsAdmin(true);
         } else {
           setIsAdmin(false);
-          navigate('/reflection', { replace: true });
+          navigate('/app', { replace: true });
         }
       } catch (_e) {
         if (cancelled) return;
         setIsAdmin(false);
-        navigate('/reflection', { replace: true });
+        navigate('/app', { replace: true });
       }
     })();
     return () => {
