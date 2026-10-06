@@ -24,6 +24,8 @@ describe('TodayV2 SQL contract', () => {
     expect(sql).toContain('add column if not exists first_five_minutes text');
     expect(sql).toContain('p_first_five_minutes text default null');
     expect(sql).toContain('first_five_minutes = excluded.first_five_minutes');
+    expect(sql).toContain('on conflict (user_id, target_local_date, fragment_order)');
+    expect(sql).toContain('and not (fragment_order = any(v_keep_orders))');
     expect(sql).toContain('cannot overwrite answered fragments');
     expect(sql).toContain('grant execute on function public.today_v2_replace_plan_for_date(date, date, text, text, text[], text) to authenticated;');
   });

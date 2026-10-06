@@ -533,6 +533,7 @@ declare
   v_has_answered_fragments boolean;
   v_trimmed_text text;
   v_trimmed_first_five_minutes text;
+  v_keep_orders integer[];
 begin
   v_user_id := auth.uid();
 
@@ -597,10 +598,10 @@ begin
     updated_at = now()
   returning id into v_plan_input_id;
 
-  delete from public.today_v2_commitment_fragments
-  where user_id = v_user_id
-    and target_local_date = p_target_local_date
-    and completion_state = 'unanswered';
+  select coalesce(array_agg((fragment_input.idx - 1)::integer), array[]::integer[])
+  into v_keep_orders
+  from unnest(coalesce(p_fragment_texts, array[]::text[])) with ordinality as fragment_input(fragment_text, idx)
+  where trim(fragment_input.fragment_text) <> '';
 
   insert into public.today_v2_commitment_fragments (
     plan_input_id,
@@ -626,7 +627,22 @@ begin
     'commitment-fragmentation-v2',
     'unanswered'
   from unnest(coalesce(p_fragment_texts, array[]::text[])) with ordinality as fragment_input(fragment_text, idx)
-  where trim(fragment_input.fragment_text) <> '';
+  where trim(fragment_input.fragment_text) <> ''
+  on conflict (user_id, target_local_date, fragment_order)
+  do update set
+    plan_input_id = excluded.plan_input_id,
+    source_local_date = excluded.source_local_date,
+    timezone_name = excluded.timezone_name,
+    fragment_text = excluded.fragment_text,
+    normalized_fragment_text = excluded.normalized_fragment_text,
+    parser_version = excluded.parser_version,
+    updated_at = now();
+
+  delete from public.today_v2_commitment_fragments
+  where user_id = v_user_id
+    and target_local_date = p_target_local_date
+    and completion_state = 'unanswered'
+    and not (fragment_order = any(v_keep_orders));
 end;
 $$;
 
