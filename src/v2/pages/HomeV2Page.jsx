@@ -2,7 +2,8 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import AppShellV2 from '../../components/v2/AppShellV2';
 import { useAuth } from '../../lib/AuthContext';
-import { loadTodayV2HomeState, setFollowThroughCompletion } from '../services/todayReview';
+import { loadTodayV2HomeState, setFollowThroughCompletion, upsertHabitLog } from '../services/todayReview';
+import { ENABLE_TODAY_V2_SCHEDULER } from '../../lib/featureFlags';
 import {
   getTodayV2CommitmentStateLabel,
   getTodayV2NextBoundaryDate,
@@ -41,6 +42,22 @@ function formatBoundaryTime(dayBoundaryHour) {
     hour: 'numeric',
     minute: '2-digit',
   }).format(nextBoundary);
+}
+
+function ScheduleTime({ schedule, timezone }) {
+  if (!schedule) return null;
+  const options = { timeZone: timezone || 'UTC', hour: 'numeric', minute: '2-digit' };
+  const dateOptions = { timeZone: timezone || 'UTC', year: 'numeric', month: '2-digit', day: '2-digit' };
+  const start = new Date(schedule.starts_at);
+  const end = new Date(schedule.ends_at);
+  const nextDay = new Intl.DateTimeFormat('en-CA', dateOptions).format(start) !== new Intl.DateTimeFormat('en-CA', dateOptions).format(end);
+  return <span className="mt-1 block text-xs text-red-300">{new Intl.DateTimeFormat(undefined, options).format(start)}–{new Intl.DateTimeFormat(undefined, options).format(end)}{nextDay ? ' (+1 day)' : ''}</span>;
+}
+
+function NumericHabitCheckIn({ occurrence, disabled, onSave }) {
+  const [draft, setDraft] = React.useState(occurrence.numeric_response ?? '');
+  React.useEffect(() => setDraft(occurrence.numeric_response ?? ''), [occurrence.id, occurrence.numeric_response]);
+  return <label className="flex items-center gap-2 text-xs text-zinc-400">{occurrence.snapshot_unit || 'Value'}<input aria-label={`${occurrence.snapshot_name} value`} type="number" disabled={disabled} value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={() => onSave(draft === '' ? null : Number(draft))} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} className="w-24 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm text-white" /></label>;
 }
 
 export default function HomeV2Page() {
@@ -91,6 +108,20 @@ export default function HomeV2Page() {
     }
   };
 
+  const onSaveHabit = async (occurrence, value) => {
+    if (actionsLocked) return;
+    setCommitmentSaveError(null);
+    try {
+      const saved = await upsertHabitLog(occurrence.id, occurrence.snapshot_response_type, value);
+      setHomeState((previous) => ({
+        ...previous,
+        habitOccurrences: previous.habitOccurrences.map((habit) => habit.id === occurrence.id ? { ...habit, ...saved } : habit),
+      }));
+    } catch {
+      setCommitmentSaveError('Could not update that habit. Please try again.');
+    }
+  };
+
   if (loading) {
     return (
       <AppShellV2 title="Today">
@@ -122,6 +153,8 @@ export default function HomeV2Page() {
   }
 
   const contractItems = homeState.review?.completed_at ? homeState.tomorrowFragments : [];
+  const findSchedule = (schedules, sourceId) => ENABLE_TODAY_V2_SCHEDULER ? (schedules || []).find((schedule) => schedule.source_id === sourceId || schedule.commitment_fragment_id === sourceId || schedule.habit_definition_id === sourceId) : null;
+  const todayHabits = homeState.habitOccurrences || [];
 
   return (
     <AppShellV2 title="Today">
@@ -145,6 +178,7 @@ export default function HomeV2Page() {
               {contractItems.map((item) => (
                 <li key={item.id} className="rounded-xl border border-zinc-800 px-3 py-2 text-sm text-zinc-200">
                   {item.normalized_fragment_text || item.fragment_text}
+                  <ScheduleTime schedule={findSchedule(homeState.tomorrowSchedules, item.id)} timezone={homeState.timezoneName} />
                 </li>
               ))}
             </ul>
@@ -156,6 +190,10 @@ export default function HomeV2Page() {
               <span className="font-medium text-white">Start with:</span> {homeState.firstFiveMinutes}
             </p>
           )}
+          {ENABLE_TODAY_V2_SCHEDULER && homeState.review?.completed_at && (homeState.tomorrowSchedules || []).filter((schedule) => schedule.habit_definition_id || schedule.source_type === 'habit').map((schedule) => {
+            const habit = (homeState.habitDefinitions || []).find((candidate) => candidate.id === (schedule.habit_definition_id || schedule.source_id));
+            return habit ? <div key={schedule.id || schedule.habit_definition_id || schedule.source_id} className="mt-2 rounded-lg border border-zinc-800 p-2 text-sm text-zinc-300">{habit.name} · Habit<ScheduleTime schedule={schedule} timezone={homeState.timezoneName} /></div> : null;
+          })}
         </section>
 
         <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
@@ -178,7 +216,7 @@ export default function HomeV2Page() {
               {homeState.followThroughItems.map((item) => (
                 <div key={item.id} className="rounded-xl border border-zinc-800 p-3">
                   <div className="flex items-start justify-between gap-3">
-                    <p className="text-sm text-zinc-200">{item.normalized_fragment_text || item.fragment_text}</p>
+                    <div><p className="text-sm text-zinc-200">{item.normalized_fragment_text || item.fragment_text}</p><ScheduleTime schedule={findSchedule(homeState.todaySchedules, item.id)} timezone={homeState.timezoneName} /></div>
                     <span className="text-xs text-zinc-500">{getTodayV2CommitmentStateLabel(item.completion_state)}</span>
                   </div>
                   <div className="mt-3 flex items-center gap-2">
@@ -199,6 +237,21 @@ export default function HomeV2Page() {
             <p className="mt-3 text-sm text-zinc-500">No live commitments yet for today.</p>
           )}
         </section>
+
+        {ENABLE_TODAY_V2_SCHEDULER && (
+          <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
+            <h2 className="font-semibold text-white">Today&apos;s habits</h2>
+            <p className="mt-1 text-xs text-zinc-400">{homeState.todayLocalDate} · {homeState.timezoneName}</p>
+            {todayHabits.length ? <div className="mt-3 space-y-2">{todayHabits.map((habit) => (
+              <div key={habit.id} className="space-y-2 rounded-xl border border-zinc-800 p-3">
+                <p className="text-sm text-zinc-200">{habit.snapshot_name}</p>
+                <ScheduleTime schedule={findSchedule(homeState.todaySchedules, habit.id) || findSchedule(homeState.todaySchedules, habit.habit_definition_id)} timezone={homeState.timezoneName} />
+                {habit.snapshot_response_type === 'boolean' ? <div className="flex items-center gap-2"><SegmentedChoice disabled={actionsLocked} value={habit.answered_at ? habit.boolean_response ? 'yes' : 'no' : null} onChange={(value) => onSaveHabit(habit, value === null ? null : value === 'yes')} options={[{ value: 'yes', label: 'Yes', allowToggleOff: true }, { value: 'no', label: 'No', allowToggleOff: true }]} />{!actionsLocked && habit.answered_at && <button type="button" className="text-xs text-zinc-400" onClick={() => onSaveHabit(habit, null)}>Clear</button>}</div> : <NumericHabitCheckIn occurrence={habit} disabled={actionsLocked} onSave={(value) => onSaveHabit(habit, value)} />}
+              </div>
+            ))}</div> : <p className="mt-3 text-sm text-zinc-500">No habits scheduled for today.</p>}
+            {homeState.scheduleAvailable === false && <p className="mt-3 text-xs text-amber-300">Schedule times are unavailable. Your check-ins still work.</p>}
+          </section>
+        )}
 
         <section className="grid grid-cols-2 gap-3">
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">

@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AppShellV2 from '../../components/v2/AppShellV2';
 import { useAuth } from '../../lib/AuthContext';
+import { ENABLE_TODAY_V2_SCHEDULER } from '../../lib/featureFlags';
+import TomorrowScheduler from '../components/TomorrowScheduler';
 import {
   getTodayV2BooleanAnswer,
   getTodayV2CommitmentStateLabel,
@@ -166,7 +168,17 @@ export default function TodayV2Page() {
     tomorrowInput,
     setTomorrowInput,
     tomorrowActions,
-    setTomorrowActions,
+    tomorrowActionKeys,
+    editTomorrowAction,
+    removeTomorrowAction,
+    removeFollowThrough,
+    schedulerItems,
+    scheduleBlocks,
+    scheduleSaveStatus,
+    scheduleError,
+    scheduleAvailable,
+    updateSchedule,
+    unschedule,
     firstFiveMinutes,
     setFirstFiveMinutes,
     visibleHabits,
@@ -328,6 +340,12 @@ export default function TodayV2Page() {
                         Clear
                       </button>
                     )}
+                    {!readOnly && item.completion_state === TODAY_V2_COMMITMENT_STATES.UNANSWERED && (
+                      <button type="button" aria-label={`Remove ${item.normalized_fragment_text || item.fragment_text}`} onClick={async () => {
+                        try { await removeFollowThrough(item.id); }
+                        catch (failure) { window.alert(failure.message || 'Could not remove this item.'); }
+                      }} className="text-xs text-red-300">Remove unanswered item</button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -482,22 +500,19 @@ export default function TodayV2Page() {
           {tomorrowActions.length > 0 && (
             <ul className="space-y-2">
               {tomorrowActions.map((action, index) => (
-                <li key={`${action}-${index}`} className="flex items-center gap-2 rounded-lg border border-zinc-800 p-2 text-sm">
+                <li key={tomorrowActionKeys?.[index] || index} className="flex items-center gap-2 rounded-lg border border-zinc-800 p-2 text-sm">
                   {index === 0 && <span className="text-xs font-semibold text-red-300">Primary</span>}
                   <input
                     readOnly={readOnly}
                     value={action}
-                    onChange={(event) => {
-                      const next = [...tomorrowActions];
-                      next[index] = event.target.value;
-                      setTomorrowActions(next);
-                    }}
+                    aria-label={`Tomorrow action ${index + 1}`}
+                    onChange={(event) => editTomorrowAction(index, event.target.value)}
                     className="flex-1 bg-transparent outline-none read-only:cursor-not-allowed read-only:opacity-70"
                   />
                   {!readOnly && (
                     <button
                       type="button"
-                      onClick={() => setTomorrowActions((previous) => previous.filter((_, candidateIndex) => candidateIndex !== index))}
+                      onClick={() => removeTomorrowAction(index)}
                       className="text-xs text-red-400"
                     >
                       Remove
@@ -529,6 +544,23 @@ export default function TodayV2Page() {
           />
           <p className="text-xs text-zinc-500">{firstFiveMinutesSaveLabel}</p>
         </section>
+
+        {ENABLE_TODAY_V2_SCHEDULER && (
+          <TomorrowScheduler
+            userId={user?.id}
+            localDate={state.tomorrowLocalDate}
+            timezone={state.timezoneName}
+            items={schedulerItems}
+            blocks={scheduleBlocks}
+            available={scheduleAvailable}
+            readOnly={readOnly}
+            saveStatus={scheduleSaveStatus}
+            saveError={scheduleError}
+            onUpdate={updateSchedule}
+            onUnschedule={unschedule}
+            onRetry={load}
+          />
+        )}
 
         <section className="space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
           <div className="flex items-center justify-between gap-3">

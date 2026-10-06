@@ -18,6 +18,7 @@ import {
   loadTodayReviewState,
   reopenTodayV2Review,
   replaceTomorrowActions,
+  removeUnansweredFollowThroughItem,
   setFollowThroughCompletion,
   seedDefaultHabits,
   updateControllableFocus,
@@ -45,6 +46,14 @@ function createThenableBuilder(result, tracker = {}) {
     },
     update(payload) {
       tracker.update = payload;
+      return this;
+    },
+    delete() {
+      tracker.delete = true;
+      return this;
+    },
+    is(column, value) {
+      tracker.is = [...(tracker.is || []), [column, value]];
       return this;
     },
     eq(column, value) {
@@ -98,6 +107,7 @@ describe('TodayV2 repository', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-09-28T12:00:00.000Z'));
     vi.clearAllMocks();
+    supabaseMock.from.mockImplementation(() => createThenableBuilder({ data: [], error: null }));
   });
 
   afterEach(() => {
@@ -235,8 +245,14 @@ describe('TodayV2 repository', () => {
 
   it('saves tomorrow plans through the isolated replace RPC', async () => {
     supabaseMock.rpc.mockResolvedValue({ error: null });
+    const savedFragments = [
+      { id: '8cfde77d-dcaa-4c7c-a409-f9ef5e70e321', fragment_order: 0, fragment_text: 'Write 20 minutes' },
+      { id: '8cfde77d-dcaa-4c7c-a409-f9ef5e70e322', fragment_order: 1, fragment_text: 'review notes' },
+    ];
+    const tracker = {};
+    supabaseMock.from.mockImplementation(() => createThenableBuilder({ data: savedFragments, error: null }, tracker));
 
-    await replaceTomorrowActions({
+    const result = await replaceTomorrowActions({
       targetLocalDate: '2026-09-29',
       sourceLocalDate: '2026-09-28',
       timezoneName: 'UTC',
@@ -253,6 +269,10 @@ describe('TodayV2 repository', () => {
       p_fragment_texts: ['Write 20 minutes', 'review notes'],
       p_first_five_minutes: 'Open the outline',
     });
+    expect(result.savedFragments).toEqual(savedFragments);
+    expect(supabaseMock.from).toHaveBeenCalledWith(TODAY_V2_TABLES.COMMITMENT_FRAGMENTS);
+    expect(tracker.eq).toContainEqual(['target_local_date', '2026-09-29']);
+    expect(tracker.order).toContainEqual(['fragment_order', { ascending: true }]);
   });
 
   it('preserves explicitly edited fragment rows even when the raw paragraph is blank', async () => {
@@ -286,6 +306,18 @@ describe('TodayV2 repository', () => {
       schedule_weekdays: [0, 1, 2, 3, 4, 5, 6],
       display_order: 2,
     });
+  });
+
+  it('removes only owned unanswered fragments and rejects a concurrent answer', async () => {
+    const tracker = {};
+    supabaseMock.from.mockReturnValue(createThenableBuilder({ data: { id: 'fragment-id' }, error: null }, tracker));
+    await expect(removeUnansweredFollowThroughItem('user-1', 'fragment-id')).resolves.toBe('fragment-id');
+    expect(tracker.delete).toBe(true);
+    expect(tracker.eq).toContainEqual(['user_id', 'user-1']);
+    expect(tracker.eq).toContainEqual(['completion_state', 'unanswered']);
+    expect(tracker.is).toContainEqual(['answered_at', null]);
+    supabaseMock.from.mockReturnValue(createThenableBuilder({ data: null, error: null }));
+    await expect(removeUnansweredFollowThroughItem('user-1', 'fragment-id')).rejects.toThrow(/unanswered/);
   });
 
   it('persists completion state updates with the matching answered_at behavior', async () => {

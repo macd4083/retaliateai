@@ -7,6 +7,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase/client';
 import AppShellV2 from '../components/v2/AppShellV2';
+import { ENABLE_TODAY_V2_SCHEDULER } from '../lib/featureFlags';
+import GoogleCalendarConnection from '../v2/components/GoogleCalendarConnection';
 
 const TIMEZONES = [
   { label: 'Eastern (ET)', value: 'America/New_York' },
@@ -515,6 +517,12 @@ export default function SettingsV2() {
               </div>
             )}
           </section>
+
+          {ENABLE_TODAY_V2_SCHEDULER && (
+            <section className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
+              <GoogleCalendarConnection userId={user?.id} timezone={profile?.timezone || 'UTC'} settings />
+            </section>
+          )}
 
           {/* ── Your Why ────────────────────────────────────────────── */}
           <section className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5">

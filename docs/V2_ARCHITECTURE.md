@@ -153,3 +153,213 @@ History rules:
 2. Wait for `notify pgrst, 'reload schema';` to refresh the schema cache.
 3. Deploy the app code using the new Today V2 client modules.
 4. Open `/today` with `ENABLE_TODAY_V2=true` and verify habits can still be added manually even if default seeding is unavailable.
+
+## Optional next-day scheduling and Google Calendar
+
+Scheduling is V2-only and never changes a commitment's completion state. There
+is no Calendar navigation tab, Google event writing, AI scheduling, or legacy
+journal integration. `/today` and `/home` use the same
+`today_v2_schedule_blocks` dataset.
+
+### SQL → verification → deploy
+
+Keep `VITE_ENABLE_TODAY_V2_SCHEDULER=false` (the default) until verification
+passes. This is a build-time public feature switch, not a secret.
+
+For an existing installation, copy/paste **the complete contents** of
+`supabase/migrations/20261007_today_v2_scheduling.sql` into the Supabase SQL
+Editor and run it. Apply the earlier `20260928_today_v2_workflow.sql` and
+`20261006_today_v2_controllable_and_first_five.sql` migrations first if they
+have not already been applied. For a fresh installation, copy/paste the complete
+`supabase/sql/today_v2_isolated_workflow.sql` instead. Do not run superseded
+generic V2 or legacy journal SQL. Neither path deletes historical check-ins.
+
+Run these copy/paste verification queries **before deploying/enabling**:
+
+```sql
+select to_regclass('public.today_v2_schedule_blocks') as schedules,
+       to_regclass('public.today_v2_google_connections') as connections,
+       to_regclass('public.today_v2_google_oauth_states') as oauth_states;
+
+select proname, pg_get_function_identity_arguments(oid) as arguments,
+       prosecdef as security_definer
+from pg_proc
+where pronamespace = 'public'::regnamespace
+  and proname in ('today_v2_replace_plan_stable',
+                  'today_v2_replace_schedule',
+                  'today_v2_consume_google_state');
+
+select tablename, rowsecurity
+from pg_tables
+where schemaname = 'public'
+  and tablename in ('today_v2_schedule_blocks',
+                    'today_v2_google_connections',
+                    'today_v2_google_oauth_states');
+
+select conname, pg_get_constraintdef(oid)
+from pg_constraint
+where conrelid = 'public.today_v2_schedule_blocks'::regclass
+order by conname;
+
+select grantee, table_name, privilege_type
+from information_schema.role_table_grants
+where table_schema = 'public'
+  and table_name in ('today_v2_google_connections',
+                     'today_v2_google_oauth_states')
+  and grantee in ('anon', 'authenticated');
+```
+
+Expect all three tables and RPCs to exist, all three tables to have RLS enabled,
+schedule source exclusivity/time/ownership constraints and per-source date
+uniqueness, and **zero** browser-role grants on the Google tables. Validate RLS
+with two separate authenticated test accounts: direct foreign source UUIDs must
+fail, not merely disappear from SELECT results. The SQL Editor's service role
+does not simulate an authenticated browser.
+
+Then deploy the app/API with the scheduler flag still false, configure Google
+if wanted, and enable `VITE_ENABLE_TODAY_V2_SCHEDULER=true` in a subsequent
+build after staging QA. Missing optional schema must not disable the core
+review/Home workflow. Missing Google configuration leaves local scheduling
+available with an explanatory connection message. Roll back the UI by setting
+the scheduler switch false and rebuilding; leave the additive schema/data in
+place.
+
+### Stable source identity
+
+The scheduler uses a separate V2 stable-plan RPC rather than the old order-based
+plan reconciliation. An existing action is identified by its real fragment UUID,
+not its list position; client draft keys are never persisted as fragment foreign
+keys. Plan saving precedes schedule-reference saving, and the returned real rows
+provide the IDs for new fragments. Explicit editing preserves identity and its
+time; removing an unanswered action intentionally removes its schedule.
+Re-splitting matches only unchanged, unambiguous actions, not unrelated text at
+the same index. Answered-fragment overwrite protection remains in force.
+
+Habit sources come from active definitions scheduled on the **target** weekday
+(Sunday = 0 in storage; Monday first in display), not today's occurrences.
+Archival excludes future active scheduling while keeping response history.
+Absolute start/end timestamps are stored together with the planning date and
+IANA timezone. Cross-midnight blocks are explicit; nonexistent DST wall times
+are rejected and repeated wall times require an offset choice. Scheduling is an
+editable 30-minute estimate by default, snapped to 15 minutes.
+Each block belongs to its start date, even when it ends the following day;
+crossing midnight does not create a second commitment, habit or completion row.
+
+### Google Cloud manual setup
+
+This setup requires a Google Cloud project owner; an agent cannot finish the
+dashboard steps or verify production authorization without real credentials.
+
+1. Enable **Google Calendar API** in Google Cloud's API Library.
+2. Configure Google Auth Platform's branding, audience and consent screen.
+   For an external app in Testing, add each real-account QA user as a test user.
+   Review Google's sensitive-scope verification requirements before publishing;
+   do not assume Testing consent or refresh-token lifetime equals production.
+3. Create an OAuth client of type **Web application**, separate from any
+   Supabase Google login client. This connects a calendar to the already signed-in
+   Retaliate account, including email/password accounts; it does not change login.
+4. Register the exact authorized redirect URI:
+   - Development: `http://localhost:3000/api/google-calendar?action=callback`
+     when running Vercel's local API server on port 3000.
+   - Production: `https://YOUR_RETALIATE_HOST/api/google-calendar?action=callback`.
+     Replace `YOUR_RETALIATE_HOST` with the actual deployment's canonical host;
+     use exactly that URL for the environment variable too.
+   - Register previews separately if needed; do not accept arbitrary preview
+     hosts/return URLs dynamically. A Vite-only server on 5173 does not run the
+     Vercel API; do not register its URL unless an actual API proxy is configured.
+5. Authorized JavaScript origins, if configured, are `http://localhost:3000`
+   and `https://YOUR_RETALIATE_HOST`, without paths. They do not replace redirect
+   URI registration.
+6. Request only these two read-only permissions:
+   `https://www.googleapis.com/auth/calendar.events.readonly` and
+   `https://www.googleapis.com/auth/calendar.calendarlist.readonly`.
+   Do not add full Calendar, Google login or write scopes for this feature.
+
+Official references (check current Google policy during deployment):
+- [Calendar authorization scope reference](https://developers.google.com/workspace/calendar/api/auth)
+- [OAuth 2.0 web-server authorization flow](https://developers.google.com/identity/protocols/oauth2/web-server)
+- [OAuth policies](https://developers.google.com/identity/protocols/oauth2/policies)
+
+### Server environment and encryption
+
+Set these **server-only** variables in Vercel and the local API environment:
+
+| Variable | Value |
+| --- | --- |
+| `SUPABASE_URL` | Current project's Supabase URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | Backend-only service role credential |
+| `APP_ORIGIN` | Exact canonical app origin, e.g. `http://localhost:3000` |
+| `GOOGLE_CALENDAR_CLIENT_ID` | Dedicated Web OAuth client ID |
+| `GOOGLE_CALENDAR_CLIENT_SECRET` | Dedicated OAuth client secret |
+| `GOOGLE_CALENDAR_REDIRECT_URI` | Exact registered callback above |
+| `GOOGLE_CALENDAR_ENCRYPTION_KEY` | Base64-encoded, random 32-byte AES key |
+
+Generate the encryption key with `openssl rand -base64 32`. Store it in a secret
+manager/Vercel encrypted environment settings, never source control, frontend
+configuration, logs or screenshots. Preserve a secure backup: losing/changing
+the key makes saved credentials unreadable and requires reconnecting accounts.
+For rotation, use a controlled backend decrypt/re-encrypt migration; simply
+replacing the environment value is not transparent rotation. Separate production
+and development keys/credentials. **Never prefix any server secret with
+`VITE_`.**
+
+Access/refresh tokens and PKCE verifiers are encrypted in backend-only storage;
+OAuth state is short-lived and consumed once. The dedicated Calendar callback
+is not a Supabase login/password-reset callback. Browser requests use verified
+Retaliate bearer authentication; submitted account UUIDs are not authority.
+Reconnect preserves an existing refresh token if Google omits a new one.
+Disconnect removes stored credentials and attempts revocation without touching
+local schedules.
+Abandoned state is never accepted after expiry. Operators can periodically run
+`delete from public.today_v2_google_oauth_states where expires_at <= now();`
+as the backend/database owner to remove expired authorization rows. Browser
+accounts must never receive table grants to perform this maintenance.
+
+### Vercel constraints and event privacy
+
+The integration uses one `api/google-calendar.js` serverless function with a
+dedicated callback action. Ensure `/api/google-calendar` reaches the function
+instead of the SPA fallback, including the `action=callback` query. Deploy both
+API and frontend, not only static Vite output. Existing function memory/time
+limits apply; calendar count, pagination and retries must remain bounded.
+Some Vercel plans limit function count: the repository already has other API
+functions, so verify the deployed plan's allowance before adding this endpoint.
+
+Imports cover only the planner's bounded date window, expand recurring instances,
+handle cancellation/pagination and preserve exclusive all-day end dates. Events
+are muted read-only visibility, never commitments or completion evidence.
+Descriptions and attendees are not needed or retained. Imported data is never
+sent to AI services. Temporary browser-memory caching may become stale; refresh
+on demand/resume, not with continuous polling. Quota/revocation/network failures
+must leave the local planner usable and must not block nightly completion.
+
+### Acceptance and remaining manual QA
+
+Automated tests use mocked Google/Supabase integration; they are **not** evidence
+of live Google consent, deployment permissions, or production connectivity.
+Run the existing `npm run lint`, `npm test` and `npm run build` commands.
+The transactional database regression suite is
+`supabase/tests/today_v2_scheduling.sql`: run it with
+`psql -v ON_ERROR_STOP=1 -f supabase/tests/today_v2_scheduling.sql` against an
+isolated migrated staging database as its owner. Its two fixed test users and
+all assertions roll back; do not use a production database for fixture QA.
+Before rollout, use actual development and production test accounts to verify:
+
+- Desktop drag and keyboard/tap editing; phone touch hold/drag versus normal
+  scrolling, moving, unscheduling, visible parallel overlaps and deliberate
+  overlap approval.
+- Tomorrow-only habits, Sunday/Monday boundaries, unsaved action edits,
+  split → save → real IDs → schedule, reorder/edit/remove/re-split identity,
+  archive with historical evidence preserved.
+- Reload, interrupted/offline editing, visible failed saves, retry and completion
+  waiting for local schedule changes; next-day Home times and check-ins.
+- DST gap/repeated hours, timezone changes and cross-midnight blocks; Google
+  recurring/cancelled/all-day/transparent and day-boundary-overlapping events.
+- Email/password user connection without duplicate Retaliate accounts; two-user
+  source/token access denial, expired/replayed/wrong-browser OAuth state,
+  revoked authorization, refresh-token omission and disconnect.
+- Multiple selected calendars and pagination; quota/network failure and stale
+  display; core workflow with scheduler schema/configuration absent.
+
+Desktop/phone screenshots from a mocked fixture demonstrate layout only; real
+device and real-account QA remain required.
