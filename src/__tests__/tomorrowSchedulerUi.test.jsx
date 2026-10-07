@@ -139,6 +139,17 @@ describe('TomorrowScheduler UI', () => {
     expect(google.querySelector('[data-scheduler-drag-key]')).toBeNull();
   });
 
+  it('keeps short imported event details focusable and scrollable without making them draggable', async () => {
+    calendar.events = [{ id: 'brief', title: 'A detailed meeting title that needs more space', start: '2026-10-07T09:00:00Z', end: '2026-10-07T09:15:00Z' }];
+    await render();
+    const event = container.querySelector('[aria-label="Google events"]').firstElementChild;
+    expect(event.tabIndex).toBe(0);
+    expect(event.className).toContain('pointer-events-auto');
+    expect(event.style.overflow).toBe('auto');
+    expect(event.title).toContain('A detailed meeting title that needs more space · 09:00–09:15 · Google · read-only');
+    expect(event.querySelector('[data-scheduler-drag-key]')).toBeNull();
+  });
+
   it('tap editing opens a labeled focus-trapped dialog and saves a 30-minute estimate', async () => {
     await render();
     await click('Write a chapter');
