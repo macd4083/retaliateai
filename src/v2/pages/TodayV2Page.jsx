@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import AppShellV2 from '../../components/v2/AppShellV2';
 import { useAuth } from '../../lib/AuthContext';
 import { ENABLE_TODAY_V2_SCHEDULER } from '../../lib/featureFlags';
+import GoogleCalendarConnection from '../components/GoogleCalendarConnection';
 import TomorrowScheduler from '../components/TomorrowScheduler';
 import {
   getTodayV2BooleanAnswer,
@@ -162,6 +163,7 @@ export default function TodayV2Page() {
   const [manualActionInput, setManualActionInput] = useState('');
   const [habitEditorValue, setHabitEditorValue] = useState(null);
   const [menuOpenHabitId, setMenuOpenHabitId] = useState(null);
+  const [googleEvents, setGoogleEvents] = useState([]);
   const {
     loading,
     error,
@@ -368,6 +370,16 @@ export default function TodayV2Page() {
           )}
         </section>
 
+        {ENABLE_TODAY_V2_SCHEDULER && (
+          <GoogleCalendarConnection
+            userId={user?.id}
+            localDate={state.tomorrowLocalDate}
+            timezone={state.timezoneName}
+            includeNextDay
+            onEvents={setGoogleEvents}
+          />
+        )}
+
         <section className="relative space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
           {!readOnly && (
             <button
@@ -572,6 +584,7 @@ export default function TodayV2Page() {
             readOnly={readOnly}
             saveStatus={scheduleSaveStatus}
             saveError={scheduleError}
+            googleEvents={googleEvents}
             onUpdate={updateSchedule}
             onUnschedule={unschedule}
             onRetry={load}
