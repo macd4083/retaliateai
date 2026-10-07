@@ -257,6 +257,39 @@ timeout root cause. Serial workers reduce resource contention; job/step limits
 make a recurrence fail visibly rather than hang indefinitely. CI still runs
 full coverage, SQL upgrade assertions, and repeated repair application.
 
+Final post-patch CI-equivalent results (Node 22.23.3, wall times; not a remote
+Vercel deployment):
+
+| Command / sequence | Exit | Wall time | Output |
+| --- | --- | --- | --- |
+| `npm ci` | 0 | 18.58s | Clean install; same existing 58 audit advisories |
+| `npm run test:scheduler` | 0 | 12.36s | 9 files, 237 tests passed |
+| `npm run test:ci` | 0 | 25.28s | 21 files, 451 tests passed |
+| `npm run lint` | 0 | 4.55s | No lint errors |
+| `npm run build` | 0 | 7.99s | Vite/PWA build successful; non-fatal chunk warning |
+| Disposable PostgreSQL 16: consolidated SQL, repair ×2, release guard ×2, three SQL regression scripts | 0 | 2.55s | Three fixture rollbacks, no leftover users |
+
+The additive patch also passed standalone repeat-application and SQL regressions
+(1.99s), and an injected final-statement failure rolled back every new guard
+function. Consolidated SQL repeated twice plus SQL regressions passed (2.17s).
+Six completion/mutation concurrency checks waited and rejected completed writes;
+concurrent snapshot ensure/response committed without deadlock. Existing
+`20261008` migration bytes are unchanged. The SQL contract test enforces the
+consolidated file's exact migration concatenation, including the new patch.
+
+### Review/security evidence limitation
+
+An independent read-only code review found no significant issues, including the
+final additive SQL guards and snapshot lock ordering. The automated review
+service could not run because `model claude-sonnet-4.6 not found in registry`.
+The required combined validation tool completed CodeQL's Actions analysis with
+zero alerts, but reported `Analysis timed out before every language completed`.
+**This is not a completed all-language security scan.** Do not disable checks or
+treat the partial result as a pass. Before release, the maintainer must obtain
+the complete JavaScript/all-language CodeQL report in an available validation
+environment and attach it to the PR. The platform tool warned that retrying the
+same sandbox scan would not complete; it was not repeatedly retried.
+
 ## Endpoint and real-account/device QA (owner must record results)
 
 Use an authorized Google test account and disposable V2 data. For each unchecked
@@ -286,5 +319,5 @@ unperformed on real accounts/devices by the agent.**
 
 Owner release sign-off requires: exact Vercel failure diagnosis/config diff,
 successful deployment evidence, SQL verification output, Google dashboard
-confirmation, and results for every applicable QA row. A failed row blocks
+confirmation, complete security scan, and results for every applicable QA row. A failed row blocks
 release; attach its exact reproduction and next action rather than “should work”.
