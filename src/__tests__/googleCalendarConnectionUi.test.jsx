@@ -98,6 +98,38 @@ describe('GoogleCalendarConnection UI contract', () => {
     expect(container.textContent).not.toContain('Showing cached calendar events');
     expect(events.mock.calls.at(-1)[0]).toEqual([]);
   });
+  it('clears cached overlays and offers reconnect when selection saving discovers revoked consent', async () => {
+    await render();
+    const original = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation((url, options) => url.includes('action=select')
+      ? response({ error: 'Calendar consent expired', code: 'reconnect_required' }, 401) : original(url, options));
+    await click('Apply calendars');
+    expect(container.textContent).toContain('Reconnect Google Calendar');
+    expect(container.textContent).toContain('Calendar consent expired');
+    expect(container.textContent).not.toContain('Showing cached calendar events');
+    expect(events.mock.calls.at(-1)[0]).toEqual([]);
+    expect([...container.querySelectorAll('button')].find((button) => button.textContent === 'Reconnect Google Calendar').disabled).toBe(false);
+  });
+  it('clears cached overlays when another browser disconnects before calendar refresh', async () => {
+    await render();
+    const original = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation((url, options) => url.includes('action=calendars')
+      ? response({ error: 'Connect Google Calendar first.', code: 'not_connected' }, 409) : original(url, options));
+    await click('Refresh');
+    expect(events.mock.calls.at(-1)[0]).toEqual([]);
+    expect(container.textContent).not.toContain('Showing cached calendar events');
+    expect(container.textContent).toContain('Connect Google Calendar first.');
+    expect(container.textContent).not.toContain('Choose calendars');
+  });
+  it('does not leave old overlays visible when the session disappears before selection saving', async () => {
+    await render();
+    auth.getSession.mockResolvedValue({ data: { session: null } });
+    await click('Apply calendars');
+    expect(events.mock.calls.at(-1)[0]).toEqual([]);
+    expect(container.textContent).toContain('Please sign in again');
+    expect(container.textContent).not.toContain('Choose calendars');
+    expect(container.textContent).not.toContain('Showing cached calendar events');
+  });
 
   it('uses the exact connection label and disables it when configuration is unavailable', async () => {
     fetchMock.mockImplementation(() => response({ connected: false, configured: false, schemaAvailable: false, message: 'Google Calendar is not configured.' }));
@@ -298,6 +330,26 @@ describe('GoogleCalendarConnection UI contract', () => {
     expect(container.textContent).toContain('do not assume the remaining time is free');
     expect(container.textContent).toContain('Unavailable calendar (removed)');
     expect(container.querySelectorAll('input')).toHaveLength(2);
+  });
+  it('allows removing the last unavailable calendar and saving an explicit empty selection', async () => {
+    let selected = ['removed'];
+    fetchMock.mockImplementation((url, options) => {
+      if (url.includes('action=status')) return response({ connected: true, configured: true, schemaAvailable: true, selectedCalendarIds: selected });
+      if (url.includes('action=calendars')) return response({ calendars: [], selectedCalendarIds: selected });
+      if (url.includes('action=select')) {
+        selected = JSON.parse(options.body).calendarIds;
+        return response({ selectedCalendarIds: selected });
+      }
+      return selected.length ? response({ error: 'Calendar no longer exists', code: 'google_unavailable' }, 502) : response({ events: [] });
+    });
+    await render();
+    expect(container.textContent).toContain('Unavailable calendar (removed)');
+    await act(async () => container.querySelector('input').click());
+    await click('Apply calendars');
+    expect(selected).toEqual([]);
+    expect(container.textContent).toContain('No calendars selected. Nothing is imported');
+    expect(container.textContent).not.toContain('Unavailable calendar (removed)');
+    expect(events.mock.calls.at(-1)[0]).toEqual([]);
   });
   it('imports saved selections even when calendar choices cannot be loaded', async () => {
     const original = fetchMock.getMockImplementation();

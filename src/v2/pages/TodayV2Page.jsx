@@ -239,8 +239,8 @@ export default function TodayV2Page() {
   const onCompleteReview = async () => {
     if (readOnly) return;
     try {
-      await completeReview();
-      navigate('/home');
+      const savedReview = await completeReview();
+      if (savedReview?.completed_at) navigate('/home');
     } catch (saveError) {
       window.alert(saveError?.message || 'Could not complete tonight\'s review.');
     }

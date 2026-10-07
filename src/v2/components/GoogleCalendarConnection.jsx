@@ -35,6 +35,7 @@ async function calendarRequest(action, body, params = {}, userId) {
   if (!response.ok) {
     const error = new Error(payload.error?.message || payload.error || 'Google Calendar is temporarily unavailable.');
     error.reconnect = payload.code === 'reconnect_required';
+    error.disconnected = payload.code === 'not_connected';
     throw error;
   }
   return payload;
@@ -58,6 +59,12 @@ export default function GoogleCalendarConnection({ userId, localDate = null, tim
   const context = React.useRef(cacheKey);
   context.current = cacheKey;
   const request = React.useCallback((action, body, params) => calendarRequest(action, body, params, userId), [userId]);
+  const clearFailedAuthorization = React.useCallback((failure) => {
+    if (!failure.signedOut && !failure.reconnect && !failure.disconnected) return false;
+    invalidateCalendarCache(userId, failure.reconnect ? 'reconnect' : 'disconnect');
+    setError(failure.message);
+    return true;
+  }, [userId]);
 
   const refresh = React.useCallback(async () => {
     if (!userId) return;
@@ -97,7 +104,7 @@ export default function GoogleCalendarConnection({ userId, localDate = null, tim
           if (missing.length) availabilityWarning = `${missing.length} selected calendar(s) are missing from the available list. Availability may be incomplete.`;
         } catch (failure) {
           if (!isCurrent()) return;
-          if (failure.reconnect || failure.signedOut) throw failure;
+          if (failure.reconnect || failure.signedOut || failure.disconnected) throw failure;
           setCalendars([]);
           availabilityWarning = 'Calendar choices could not be loaded. Saved selections are unchanged; retry to manage them.';
         }
@@ -124,16 +131,7 @@ export default function GoogleCalendarConnection({ userId, localDate = null, tim
       setStale(false);
     } catch (failure) {
       if (!isCurrent()) return;
-      if (failure.signedOut) {
-        invalidateCalendarCache(userId, 'disconnect');
-        setError(failure.message);
-        return;
-      }
-      if (failure.reconnect) {
-        invalidateCalendarCache(userId, 'reconnect');
-        setError(failure.message);
-        return;
-      }
+      if (clearFailedAuthorization(failure)) return;
       setError(failure.message);
       setReconnect(Boolean(failure.reconnect));
       setStale(memoryCache.has(cacheKey));
@@ -141,7 +139,7 @@ export default function GoogleCalendarConnection({ userId, localDate = null, tim
     } finally {
       if (generation === refreshGeneration.current) setBusy(false);
     }
-  }, [userId, localDate, timezone, settings, includeNextDay, cacheKey, request]);
+  }, [userId, localDate, timezone, settings, includeNextDay, cacheKey, request, clearFailedAuthorization]);
 
   React.useEffect(() => {
     if (cacheOwner !== userId) {
@@ -212,6 +210,7 @@ export default function GoogleCalendarConnection({ userId, localDate = null, tim
       window.location.assign(destination.href);
     } catch (failure) {
       if (!isCurrent()) return;
+      if (clearFailedAuthorization(failure)) return;
       setError(failure.message);
       setBusy(false);
     }
@@ -228,6 +227,7 @@ export default function GoogleCalendarConnection({ userId, localDate = null, tim
       invalidateCalendarCache(userId, 'selection');
     } catch (failure) {
       if (!isCurrent()) return;
+      if (clearFailedAuthorization(failure)) return;
       setError(failure.message);
       setBusy(false);
     }
@@ -242,6 +242,7 @@ export default function GoogleCalendarConnection({ userId, localDate = null, tim
       invalidateCalendarCache(userId, 'disconnect');
     } catch (failure) {
       if (!isCurrent()) return;
+      if (clearFailedAuthorization(failure)) return;
       setError(failure.message);
     } finally {
       if (isCurrent()) setBusy(false);
@@ -264,7 +265,7 @@ export default function GoogleCalendarConnection({ userId, localDate = null, tim
       </div>
       <p className="text-xs text-zinc-500">Your local plan stays in Retaliate. Connecting or disconnecting does not change it.</p>
       {status?.connected && status.configured !== false && status.schemaAvailable !== false && <p className="text-xs text-zinc-400">{status.selectedCalendarIds?.length ? `${status.selectedCalendarIds.length} calendar(s) saved for import. Apply changes to save your selection.` : 'No calendars selected. Nothing is imported; choose calendars and apply to show availability.'}</p>}
-      {status?.connected && status.configured !== false && status.schemaAvailable !== false && (calendars.length > 0 || selected.length > 0) && (
+      {status?.connected && status.configured !== false && status.schemaAvailable !== false && (calendars.length > 0 || selected.length > 0 || status.selectedCalendarIds?.length > 0) && (
         <details>
           <summary className="cursor-pointer text-xs text-zinc-300">Choose calendars ({selected.length})</summary>
           <fieldset className="mt-2 space-y-2">

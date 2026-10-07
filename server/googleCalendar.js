@@ -193,7 +193,13 @@ export function createGoogleCalendarHandler({ env = process.env, supabase, fetch
 
   async function access(userId, row, config, deadline, force = false) {
     if (!row) fail(409, 'not_connected', 'Connect Google Calendar first.');
-    const previous = decrypt(row.tokens_encrypted, config.key, `tokens:${userId}`);
+    let previous;
+    try {
+      previous = decrypt(row.tokens_encrypted, config.key, `tokens:${userId}`);
+    } catch {
+      fail(401, 'reconnect_required', 'Stored Google Calendar credentials could not be read. Reconnect your calendar.');
+    }
+    if (!previous || typeof previous !== 'object') fail(401, 'reconnect_required', 'Reconnect Google Calendar.');
     if (!force && previous.access_token && previous.expires_at > now() + 60000) return previous.access_token;
     if (!previous.refresh_token) fail(401, 'reconnect_required', 'Reconnect Google Calendar.');
     try {
@@ -207,6 +213,7 @@ export function createGoogleCalendarHandler({ env = process.env, supabase, fetch
       row.tokens_encrypted = encrypted;
       return tokens.access_token;
     } catch (error) {
+      if (error.code === 'consent_required') error = new CalendarError(401, 'reconnect_required', error.message);
       if (error.code === 'reconnect_required') storage(await database().from(CONNECTIONS).delete().eq('user_id', userId).eq('tokens_encrypted', row.tokens_encrypted));
       throw error;
     }
@@ -317,7 +324,9 @@ export function createGoogleCalendarHandler({ env = process.env, supabase, fetch
         const pending = storage(await database().from(STATES).select('*').eq('state_hash', stateHash).maybeSingle());
         if (!pending || !Number.isFinite(Date.parse(pending.expires_at)) || Date.parse(pending.expires_at) <= now()) fail(400, 'invalid_state', 'Calendar authorization expired. Try connecting again.');
         const binding = decrypt(pending.verifier_encrypted, config.key, `state:${stateHash}`);
-        if (!equal(binding.browser_hash, hash(nonce))) fail(400, 'invalid_state', 'Calendar authorization did not originate in this browser.');
+        if (!binding || typeof binding.verifier !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(binding.verifier) ||
+          typeof binding.browser_hash !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(binding.browser_hash) ||
+          !equal(binding.browser_hash, hash(nonce))) fail(400, 'invalid_state', 'Calendar authorization did not originate in this browser.');
         const returnPath = pending.return_path === '/settings' ? '/settings' : '/today';
         callbackReturn = `${config.origin}${returnPath}`;
         callbackStateHash = stateHash;
@@ -406,7 +415,10 @@ export function createGoogleCalendarHandler({ env = process.env, supabase, fetch
           const available = new Set((await calendars(userId, row, config, deadline)).map((calendar) => calendar.id));
           if (ids.some((id) => !available.has(id))) fail(400, 'invalid_selection', 'Select only calendars in your Google calendar list.');
         }
-        storage(await database().from(CONNECTIONS).update({ selected_calendar_ids: ids, updated_at: new Date(now()).toISOString() }).eq('user_id', userId));
+        const saved = storage(await database().from(CONNECTIONS).update({
+          selected_calendar_ids: ids, updated_at: new Date(now()).toISOString(),
+        }).eq('user_id', userId).select('user_id').maybeSingle());
+        if (!saved) fail(409, 'not_connected', 'Connect Google Calendar first.');
         return res.status(200).json({ selectedCalendarIds: ids });
       }
       const range = eventRange(req.query?.timeMin, req.query?.timeMax);

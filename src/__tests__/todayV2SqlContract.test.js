@@ -9,6 +9,7 @@ const migrationPath = path.join(repositoryRoot, 'supabase/migrations/20260928_to
 const featureMigrationPath = path.join(repositoryRoot, 'supabase/migrations/20261006_today_v2_controllable_and_first_five.sql');
 const schedulingMigrationPath = path.join(repositoryRoot, 'supabase/migrations/20261007_today_v2_scheduling.sql');
 const lockMigrationPath = path.join(repositoryRoot, 'supabase/migrations/20261008_today_v2_schedule_review_lock.sql');
+const releaseGuardPath = path.join(repositoryRoot, 'supabase/migrations/20261009_today_v2_completion_release_guard.sql');
 const consolidatedSqlPath = path.join(repositoryRoot, 'supabase/sql/today_v2_isolated_workflow.sql');
 const todayV2ServicePath = path.join(repositoryRoot, 'src/v2/services/todayReview.js');
 
@@ -19,12 +20,13 @@ describe('TodayV2 SQL contract', () => {
     const featureMigration = fs.readFileSync(featureMigrationPath, 'utf8');
     const schedulingMigration = fs.readFileSync(schedulingMigrationPath, 'utf8');
     const lockMigration = fs.readFileSync(lockMigrationPath, 'utf8');
+    const releaseGuard = fs.readFileSync(releaseGuardPath, 'utf8');
 
     expect(consolidatedSql.startsWith(initialMigration)).toBe(true);
     expect(consolidatedSql.slice(initialMigration.length).trim()).toBe(
-      `${featureMigration.trim()}\n\n${schedulingMigration.trim()}\n\n${lockMigration.trim()}`
+      `${featureMigration.trim()}\n\n${schedulingMigration.trim()}\n\n${lockMigration.trim()}\n\n${releaseGuard.trim()}`
     );
-    expect(consolidatedSql.endsWith(lockMigration)).toBe(true);
+    expect(consolidatedSql.endsWith(releaseGuard)).toBe(true);
   });
 
   it('serializes all schedule and plan mutations against their owned source review while allowing outcome-only writes', () => {
