@@ -44,6 +44,7 @@ function NumericHabitResponseInput({ occurrence, onSave, disabled = false }) {
   }, [occurrence.id, occurrence.numeric_response]);
 
   const commit = () => {
+    if (disabled) return;
     onSave(draftValue === '' ? null : Number(draftValue));
   };
 
@@ -64,7 +65,7 @@ function NumericHabitResponseInput({ occurrence, onSave, disabled = false }) {
   );
 }
 
-function HabitEditorModal({ value, onClose, onSave }) {
+function HabitEditorModal({ value, onClose, onSave, disabled = false }) {
   const [draft, setDraft] = useState(value);
 
   const toggleWeekday = (dayIndex) => {
@@ -86,6 +87,7 @@ function HabitEditorModal({ value, onClose, onSave }) {
         </div>
 
         <input
+          disabled={disabled}
           value={draft.name}
           onChange={(event) => setDraft((previous) => ({ ...previous, name: event.target.value }))}
           placeholder="Habit name"
@@ -95,6 +97,7 @@ function HabitEditorModal({ value, onClose, onSave }) {
         <div className="grid grid-cols-2 gap-2">
           <button
             type="button"
+            disabled={disabled}
             onClick={() => setDraft((previous) => ({ ...previous, response_type: TODAY_V2_RESPONSE_TYPES.BOOLEAN, unit: '' }))}
             className={`rounded-lg border px-3 py-2 text-sm ${draft.response_type === TODAY_V2_RESPONSE_TYPES.BOOLEAN ? 'border-red-500 bg-red-600/10 text-white' : 'border-zinc-700 text-zinc-400'}`}
           >
@@ -102,6 +105,7 @@ function HabitEditorModal({ value, onClose, onSave }) {
           </button>
           <button
             type="button"
+            disabled={disabled}
             onClick={() => setDraft((previous) => ({ ...previous, response_type: TODAY_V2_RESPONSE_TYPES.NUMBER }))}
             className={`rounded-lg border px-3 py-2 text-sm ${draft.response_type === TODAY_V2_RESPONSE_TYPES.NUMBER ? 'border-red-500 bg-red-600/10 text-white' : 'border-zinc-700 text-zinc-400'}`}
           >
@@ -111,6 +115,7 @@ function HabitEditorModal({ value, onClose, onSave }) {
 
         {draft.response_type === TODAY_V2_RESPONSE_TYPES.NUMBER && (
           <input
+            disabled={disabled}
             value={draft.unit}
             onChange={(event) => setDraft((previous) => ({ ...previous, unit: event.target.value }))}
             placeholder="Unit (hours, minutes, etc.)"
@@ -127,6 +132,7 @@ function HabitEditorModal({ value, onClose, onSave }) {
                 <button
                   key={weekdayIndex}
                   type="button"
+                  disabled={disabled}
                   onClick={() => toggleWeekday(weekdayIndex)}
                   className={`rounded-md border px-1 py-2 text-xs ${active ? 'border-red-500 bg-red-600/20 text-white' : 'border-zinc-700 text-zinc-400'}`}
                 >
@@ -140,7 +146,7 @@ function HabitEditorModal({ value, onClose, onSave }) {
         <button
           type="button"
           onClick={() => onSave(draft)}
-          disabled={!draft.name.trim() || draft.schedule_weekdays.length === 0}
+          disabled={disabled || !draft.name.trim() || draft.schedule_weekdays.length === 0}
           className="w-full rounded-lg bg-red-600 py-2 text-sm font-semibold disabled:opacity-50"
         >
           Save Habit
@@ -204,7 +210,7 @@ export default function TodayV2Page() {
     createEmptyHabitDefinition,
   } = useTodayV2State(user?.id);
 
-  const readOnly = isCompleted;
+  const readOnly = isCompleted || completionSaving;
 
   const onAddManualAction = async () => {
     if (!manualActionInput.trim() || readOnly) return;
@@ -213,6 +219,7 @@ export default function TodayV2Page() {
   };
 
   const onSaveHabit = async (habitDraft) => {
+    if (readOnly) return;
     try {
       await saveHabitDefinition(habitDraft);
       setHabitEditorValue(null);
@@ -223,12 +230,14 @@ export default function TodayV2Page() {
   };
 
   const onDeleteHabit = async (habitId) => {
+    if (readOnly) return;
     if (!window.confirm('Delete this habit? Its history will be kept.')) return;
     await archiveHabitDefinition(habitId);
     setMenuOpenHabitId(null);
   };
 
   const onCompleteReview = async () => {
+    if (readOnly) return;
     try {
       await completeReview();
       navigate('/home');
@@ -238,6 +247,7 @@ export default function TodayV2Page() {
   };
 
   const onReopenReview = async () => {
+    if (completionSaving) return;
     try {
       await reopenReview();
     } catch (saveError) {
@@ -291,7 +301,7 @@ export default function TodayV2Page() {
           </section>
         )}
 
-        {readOnly && (
+        {isCompleted && (
           <section className="rounded-2xl border border-emerald-700/60 bg-emerald-950/20 p-4 text-sm text-emerald-100">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -301,6 +311,7 @@ export default function TodayV2Page() {
               <button
                 type="button"
                 onClick={onReopenReview}
+                disabled={completionSaving}
                 className="rounded-lg border border-emerald-600 px-3 py-2 text-sm font-semibold text-emerald-100"
               >
                 Edit
@@ -459,6 +470,7 @@ export default function TodayV2Page() {
           <textarea
             value={desiredDirection}
             readOnly={readOnly}
+            interactionDisabled={completionSaving}
             placeholder={state.previousDesiredDirection || ''}
             onChange={(event) => setDesiredDirection(event.target.value)}
             onBlur={() => { if (!readOnly) void saveDesiredDirection(); }}
@@ -502,7 +514,7 @@ export default function TodayV2Page() {
                     onChange={(event) => editTomorrowAction(index, event.target.value)}
                     className="flex-1 bg-transparent outline-none read-only:cursor-not-allowed read-only:opacity-70"
                   />
-                  {!readOnly && (
+                  {!isCompleted && (
                     <button
                       type="button"
                       onClick={() => removeTomorrowAction(index)}
@@ -604,6 +616,7 @@ export default function TodayV2Page() {
       {habitEditorValue && (
         <HabitEditorModal
           value={habitEditorValue}
+          disabled={readOnly}
           onClose={() => setHabitEditorValue(null)}
           onSave={onSaveHabit}
         />
