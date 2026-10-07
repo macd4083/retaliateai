@@ -92,6 +92,32 @@ before that evidence exists.
 - Node runtime parity, serial regression scripts, bounded CI steps, and explicit
   API/SPA/crypto/timeout regressions harden repeatable deployment validation.
 
+## Recovered Review & Plan integration
+
+The calendar work from merged PRs #359–361 and #365 is already in the live V2
+code path; it does not need copying from a legacy page. Previously, an unset
+`VITE_ENABLE_TODAY_V2_SCHEDULER` silently hid both calendar components and disabled
+schedule loading. The scheduler now defaults on; only the exact value `false`
+disables it as an emergency rollback. Remove an existing `false` override or set
+`true`, then rebuild/redeploy (Vite variables are build-time).
+
+- `/today` (**Review & Plan**) renders `GoogleCalendarConnection` beside the
+  highest-ROI actions prompt and `TomorrowScheduler` after **6.2 Start focus**.
+- `src/v2/today/useTodayV2State.js` connects actions/habits, stable fragment IDs,
+  autosaved schedules, offline drafts, and completed-review edit locks.
+- `src/v2/services/scheduling.js` loads/saves owned blocks; `/home` shows the
+  persisted schedule times, and `/settings` manages the Google connection.
+- `api/google-calendar.js` delegates to `server/googleCalendar.js` for authenticated,
+  read-only Google availability. Google is optional for local scheduling.
+- The five SQL files listed below (or the consolidated SQL alternative) provide
+  the database setup, including Google credentials storage. Missing schema now
+  displays an actionable setup message on Review & Plan rather than vanishing.
+
+The legacy journal widget and `functions/getCalendarEvents` are not the V2
+integration and must not replace the authenticated API. Default visibility does
+not provision hosted SQL, Google credentials, or confirm a successful deployment;
+the owner checks below still apply.
+
 ## Google Cloud owner setup
 
 1. In the intended Google Cloud project enable **Google Calendar API**. No Gmail,
@@ -141,7 +167,7 @@ without quotes or whitespace, then redeploy. Never print secret values in logs.
 | `SUPABASE_SERVICE_ROLE_KEY` | Same project's privileged service role key | Server-only secret |
 | `VITE_SUPABASE_URL` | Same project's public Supabase URL | Browser build-time |
 | `VITE_SUPABASE_ANON_KEY` | Same project's public anon key, **never** service role | Browser build-time |
-| `VITE_ENABLE_TODAY_V2_SCHEDULER` | Exact lowercase `true` to enable scheduler | Browser build-time |
+| `VITE_ENABLE_TODAY_V2_SCHEDULER` | Optional; defaults enabled, exact lowercase `false` disables scheduler | Browser build-time |
 | `PUBLIC_APP_ORIGIN` | Same public origin for existing email/billing links; not a substitute for `APP_ORIGIN` | Server-only |
 
 Generate the encryption value privately with

@@ -14,7 +14,7 @@
     "typecheck": "tsc -p ./jsconfig.json",
     "test": "vitest run",
     "test:ci": "vitest run --maxWorkers=1 --no-file-parallelism",
-    "test:scheduler": "vitest run --maxWorkers=1 --no-file-parallelism src/__tests__/schedulerDeployment.test.js src/__tests__/todayV2SchedulerFlag.test.js src/__tests__/todayV2Scheduling.test.js src/__tests__/todayV2SchedulingService.test.js src/__tests__/tomorrowSchedulerUi.test.jsx src/__tests__/schedulerHomeUi.test.jsx src/__tests__/useTodayV2State.test.jsx src/__tests__/googleCalendar.test.js src/__tests__/googleCalendarConnectionUi.test.jsx",
+    "test:scheduler": "vitest run --maxWorkers=1 --no-file-parallelism src/__tests__/schedulerDeployment.test.js src/__tests__/todayV2SchedulerFlag.test.js src/__tests__/todayCalendarIntegration.test.jsx src/__tests__/todayV2Scheduling.test.js src/__tests__/todayV2SchedulingService.test.js src/__tests__/tomorrowSchedulerUi.test.jsx src/__tests__/schedulerHomeUi.test.jsx src/__tests__/useTodayV2State.test.jsx src/__tests__/googleCalendar.test.js src/__tests__/googleCalendarConnectionUi.test.jsx",
     "preview": "vite preview"
   },
   "dependencies": {
