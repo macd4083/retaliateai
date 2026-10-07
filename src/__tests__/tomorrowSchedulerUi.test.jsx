@@ -22,7 +22,7 @@ describe('TomorrowScheduler UI', () => {
   let update;
   const items = [{ id: 'action-1', key: 'action-1', type: 'action', label: 'Write a chapter' }, { id: 'habit-1', key: 'habit-1', type: 'habit', label: 'Read' }];
   const render = async (props = {}) => {
-    await act(async () => root.render(<TomorrowScheduler localDate="2026-10-07" timezone="UTC" items={items} googleEvents={calendar.events} onUpdate={update} onUnschedule={vi.fn()} {...props} />));
+    await act(async () => root.render(<TomorrowScheduler userId="user" localDate="2026-10-07" timezone="UTC" items={items} googleEvents={calendar.events} onUpdate={update} onUnschedule={vi.fn()} {...props} />));
   };
   const click = async (text) => {
     const button = Array.from(document.querySelectorAll('button')).find((node) => node.textContent.includes(text));

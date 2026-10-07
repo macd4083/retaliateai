@@ -50,7 +50,7 @@ function DraggableItem({ item, onEdit, disabled, style = undefined, compact = fa
 }
 
 export default function TomorrowScheduler({
-  localDate, timezone = 'UTC', items = [], blocks = [], contextBlocks = [], googleEvents = [], available = true, readOnly = false, completionSaving = false,
+  userId, localDate, timezone = 'UTC', items = [], blocks = [], contextBlocks = [], googleEvents = [], available = true, readOnly = false, completionSaving = false,
   saveStatus, saveError, onUpdate, onUnschedule, onRetry, resolveTime = resolveScheduleTime,
 }) {
   const sensors = useSensors(useSensor(MousePenPointerSensor, { activationConstraint: { distance: 8 } }), useSensor(TouchSensor, { activationConstraint: { delay: 300, tolerance: 8 } }));
