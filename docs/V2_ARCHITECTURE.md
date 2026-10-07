@@ -41,10 +41,13 @@ Today V2 uses the public-prefix fallback so no extra Supabase API schema configu
 - `public.today_v2_commitment_fragments`
 - `public.today_v2_habit_definitions`
 - `public.today_v2_habit_occurrences`
+- `public.today_v2_schedule_blocks`
+- `public.today_v2_habit_schedule_overrides`
 
 ### Today V2 RPCs/functions
 - `public.today_v2_seed_default_habits_for_user(p_user_id uuid)`
 - `public.today_v2_ensure_habit_occurrences_for_date(p_local_date date, p_timezone_name text)`
+- `public.today_v2_seed_habit_schedules(p_start_local_date date, p_end_local_date date, p_timezone_name text)`
 - `public.today_v2_replace_plan_for_date(...)`
 - `public.today_v2_touch_updated_at()`
 
@@ -104,6 +107,27 @@ Append-safe fragment rows for follow-through:
 ### `today_v2_habit_definitions`
 Per-user habit definitions with stable UUIDs, response type, optional unit, weekday schedule, display order, and archive state.
 
+Habit editing includes a compact weekly calendar. Day headers select recurrence
+days; the calendar snaps placement to 15-minute increments, while time and
+duration fields support exact minute values. `schedule_times` stores each
+weekday's local time, duration, and earlier/later daylight-saving occurrence.
+`planning_mode` distinguishes habits offered for manual daily planning from
+habits automatically placed at those recurring times. A daily time adjustment
+does not change the recurring definition.
+
+Deploy `supabase/migrations/20261010_today_v2_habit_recurrence.sql` after the
+existing scheduling migrations through
+`20261009_today_v2_completion_release_guard.sql` before using recurring times.
+The complete SQL Editor installation file also includes this migration.
+
+Automatic times are materialized into the same daily schedule used by `/home`.
+Per-day overrides preserve dragged, edited, or unscheduled occurrences across
+reloads without changing the weekly rule. Recurrence skips nonexistent DST
+times and uses the configured earlier/later occurrence for repeated times.
+Missing automatic occurrences can appear on an open target day even after the
+previous review is completed; existing completed-source plans and completed
+target days remain unchanged.
+
 ### `today_v2_habit_occurrences`
 Materialized daily habit checklist rows with immutable snapshots:
 - local date + timezone name
@@ -162,6 +186,13 @@ Scheduling is V2-only and never changes a commitment's completion state. There
 is no Calendar navigation tab, Google event writing, AI scheduling, or legacy
 journal integration. `/today` and `/home` use the same
 `today_v2_schedule_blocks` dataset.
+
+The planning timeline is taller on both mobile and desktop. Cards can be
+dragged onto the pointer's time, snapped to the nearest 15 minutes, including
+over existing events. On touch screens, long-press the drag handle to preserve
+normal page scrolling. Clicking a card opens exact-time editing; overlapping
+placements still require explicit confirmation. Workflow action and start-focus
+labels update as the answers are edited, without refreshing the page.
 
 ### SQL → verification → deploy
 
@@ -277,8 +308,10 @@ Habit sources come from active definitions scheduled on the **target** weekday
 Archival excludes future active scheduling while keeping response history.
 Absolute start/end timestamps are stored together with the planning date and
 IANA timezone. Cross-midnight blocks are explicit; nonexistent DST wall times
-are rejected and repeated wall times require an offset choice. Scheduling is an
-editable 30-minute estimate by default, snapped to 15 minutes.
+are rejected and repeated wall times require an offset choice. Scheduling uses
+an editable 30-minute estimate by default (or the habit's weekday duration).
+Dragging snaps starts to 15 minutes; exact-time editing accepts any minute and
+durations from 1 to 1440 minutes.
 Each block belongs to its start date, even when it ends the following day;
 crossing midnight does not create a second commitment, habit or completion row.
 Its source review owns editability, not the target day's checklist. Timeline

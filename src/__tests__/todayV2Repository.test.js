@@ -21,6 +21,8 @@ import {
   setFollowThroughCompletion,
   seedDefaultHabits,
   updateControllableFocus,
+  upsertHabitDefinition,
+  ensureTodayV2AutomaticHabitSchedules,
 } from '../v2/services/todayReview';
 import {
   TODAY_V2_FORBIDDEN_PERSISTENCE_TOKENS,
@@ -295,8 +297,95 @@ describe('TodayV2 repository', () => {
       response_type: 'boolean',
       unit: '',
       schedule_weekdays: [0, 1, 2, 3, 4, 5, 6],
+      planning_mode: 'manual',
+      schedule_times: {},
       display_order: 2,
     });
+  });
+
+  it('persists validated recurrence settings with owned habit updates', async () => {
+      const tracker = {};
+      supabaseMock.from.mockImplementation(() => createThenableBuilder({ error: null }, tracker));
+      await upsertHabitDefinition('user-1', {
+        id: 'habit-1', name: 'Read', response_type: 'boolean', schedule_weekdays: [2],
+        planning_mode: 'automatic',
+        schedule_times: { 2: { time: '09:07', duration_minutes: 43, occurrence: 'later' } },
+      });
+      expect(tracker.update).toMatchObject({
+        user_id: 'user-1', planning_mode: 'automatic',
+        schedule_times: { 2: { time: '09:07', duration_minutes: 43, occurrence: 'later' } },
+      });
+      expect(tracker.eq).toContainEqual(['user_id', 'user-1']);
+      await expect(upsertHabitDefinition('user-1', {
+        name: 'Read', schedule_weekdays: [2], planning_mode: 'automatic', schedule_times: {},
+      })).rejects.toThrow(/every selected/);
+    });
+
+  it('requests authorized server recurrence seeding and tolerates an undeployed RPC', async () => {
+      supabaseMock.rpc.mockResolvedValueOnce({ error: null });
+      await ensureTodayV2AutomaticHabitSchedules('2026-09-28', '2026-09-29', 'America/New_York');
+      expect(supabaseMock.rpc).toHaveBeenCalledWith('today_v2_seed_habit_schedules', {
+        p_start_local_date: '2026-09-28', p_end_local_date: '2026-09-29', p_timezone_name: 'America/New_York',
+      });
+      supabaseMock.rpc.mockResolvedValueOnce({ error: { code: 'PGRST202' } });
+      await expect(ensureTodayV2AutomaticHabitSchedules('2026-09-28', '2026-09-29', 'UTC'))
+        .resolves.toMatchObject({ code: 'PGRST202' });
+  });
+
+  it('loads the legacy workflow when recurrence columns are undeployed and reports a migration diagnostic', async () => {
+    const definitions = [{ id: 'habit-1', name: 'Read', schedule_weekdays: [2], is_archived: false }];
+    let definitionReads = 0;
+    supabaseMock.rpc.mockResolvedValue({ error: null });
+    supabaseMock.from.mockImplementation((table) => {
+      if (table === TODAY_V2_TABLES.HABIT_DEFINITIONS) {
+        definitionReads += 1;
+        return createThenableBuilder(definitionReads === 1
+          ? { error: { code: 'PGRST204', message: 'Missing planning_mode column' } }
+          : { data: definitions, error: null });
+      }
+      return createThenableBuilder({
+        data: table === TODAY_V2_TABLES.DAILY_REVIEWS
+          ? { id: 'review-1', local_date: '2026-09-28', desired_direction: '', completed_at: null }
+          : [],
+        error: null,
+      });
+    });
+    const loaded = await loadTodayReviewState('user-1', { timezoneName: 'UTC' });
+    expect(loaded.habitDefinitions).toEqual(definitions);
+    expect(loaded.recurrenceDiagnostic).toMatchObject({ code: 'HABIT_RECURRENCE_SCHEMA_MISSING' });
+    expect(definitionReads).toBe(2);
+    expect(supabaseMock.rpc.mock.calls.some(([rpc]) => rpc === 'today_v2_seed_habit_schedules')).toBe(false);
+  });
+
+  it.each([null, 'habit-1'])('saves legacy manual habits without recurrence columns (id %s)', async (id) => {
+    const trackers = [];
+    supabaseMock.from.mockImplementation(() => {
+      const tracker = {};
+      trackers.push(tracker);
+      return createThenableBuilder(trackers.length === 1
+        ? { error: { code: 'PGRST204', message: 'Missing schedule_times column' } }
+        : { data: { id: 'habit-1' }, error: null }, tracker);
+    });
+    await expect(upsertHabitDefinition('user-1', {
+      id, name: 'Read', response_type: 'boolean', schedule_weekdays: [2], planning_mode: 'manual', schedule_times: {},
+    })).resolves.toBe('habit-1');
+    const legacy = trackers[1][id ? 'update' : 'insert'];
+    expect(legacy).toMatchObject({ user_id: 'user-1', name: 'Read', schedule_weekdays: [2] });
+    expect(legacy).not.toHaveProperty('planning_mode');
+    expect(legacy).not.toHaveProperty('schedule_times');
+  });
+
+  it.each(['manual', 'automatic'])('never silently drops configured %s recurrence on an old installation', async (planning_mode) => {
+    supabaseMock.from.mockImplementation(() => createThenableBuilder({
+      error: { code: '42703', message: 'Missing schedule_times column' },
+    }));
+    await expect(upsertHabitDefinition('user-1', {
+      id: 'habit-1', name: 'Read', response_type: 'boolean', schedule_weekdays: [2], planning_mode,
+      schedule_times: { 2: { time: '09:07', duration_minutes: 43, occurrence: 'later' } },
+    })).rejects.toMatchObject({
+      code: 'HABIT_RECURRENCE_SCHEMA_MISSING', message: expect.stringContaining('20261010'),
+    });
+    expect(supabaseMock.from).toHaveBeenCalledTimes(1);
   });
 
   it('persists completion state updates with the matching answered_at behavior', async () => {

@@ -1,7 +1,7 @@
 import React from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { DndContext, DragOverlay, PointerSensor, TouchSensor, pointerWithin, useDraggable, useDroppable, useSensor, useSensors } from '@dnd-kit/core';
-import { clipScheduleBlocksToDate, getScheduleDateBounds, getScheduleDayOffset, layoutScheduleBlocks, zonedLocalTimeToTimestamp } from '../today/scheduling';
+import { clipScheduleBlocksToDate, getScheduleDateBounds, getScheduleDayOffset, layoutScheduleBlocks, snapScheduleMinutes, zonedLocalTimeToTimestamp } from '../today/scheduling';
 
 const fieldClass = 'w-full rounded-lg border border-zinc-600 bg-zinc-950 px-3 py-2 text-sm text-white';
 const buttonClass = 'rounded-lg border border-zinc-600 px-3 py-2 text-sm hover:border-zinc-400 disabled:opacity-50';
@@ -16,7 +16,7 @@ class MousePenPointerSensor extends PointerSensor {
 }
 
 function resolveScheduleTime(localDate, time, timezone, occurrence, duration) {
-  if (!Number.isInteger(duration) || duration < 15 || duration > 1440 || duration % 15 !== 0) throw new Error('Choose a duration in 15-minute steps, up to 24 hours.');
+  if (!Number.isInteger(duration) || duration < 1 || duration > 1440) throw new Error('Choose a duration from 1 minute to 24 hours.');
   const earlier = zonedLocalTimeToTimestamp(localDate, time, timezone, 'earlier');
   const later = zonedLocalTimeToTimestamp(localDate, time, timezone, 'later');
   const starts_at = occurrence === 'later' ? later : earlier;
@@ -38,7 +38,7 @@ function DraggableItem({ item, onEdit, disabled, style = undefined, compact = fa
   const key = itemKey(item);
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, isDragging } = useDraggable({ id: key, data: { item }, disabled });
   return (
-    <div ref={setNodeRef} style={style} className={`flex gap-1 rounded-lg border ${item.type === 'habit' ? 'border-emerald-700/70 bg-emerald-950/40' : 'border-red-800/60 bg-zinc-900'} ${compact ? 'h-full overflow-hidden p-1' : 'p-2'} text-xs ${isDragging ? 'opacity-40' : ''}`}>
+    <div ref={setNodeRef} onPointerDown={disabled ? undefined : (event) => { if (!event.target.closest('[data-scheduler-drag-key]')) listeners?.onPointerDown?.(event); }} style={style} className={`flex gap-1 rounded-lg border ${item.type === 'habit' ? 'border-emerald-700/70 bg-emerald-950/40' : 'border-red-800/60 bg-zinc-900'} ${compact ? 'h-full overflow-hidden p-1' : 'p-2'} text-xs ${isDragging ? 'opacity-40' : ''}`}>
       {!disabled && <button type="button" ref={setActivatorNodeRef} {...attributes} {...listeners} data-scheduler-drag-key={key} aria-label={`Drag ${item.label}; press Enter to edit time`} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onEdit(item); } }} style={{ touchAction: 'none' }} className="shrink-0 rounded px-1 text-zinc-400 hover:text-white">⠿</button>}
       <button type="button" data-scheduler-edit-key={key} disabled={disabled} aria-label={`${item.label} · ${item.type === 'habit' ? 'Habit' : 'Commitment'}${timeDescription ? ` · ${timeDescription}` : ''}${disabled ? '' : ' · Edit time'}`} title={`${item.label}${timeDescription ? ` · ${timeDescription}` : ''}`} onClick={() => onEdit(item)} className={`min-w-0 flex-1 text-left text-zinc-100 ${compact ? 'min-h-0 overflow-hidden' : ''}`}>
         <span className={`font-medium ${compact ? short ? 'block truncate text-[10px] leading-3' : 'line-clamp-2 break-words leading-[14px]' : 'block break-words'}`}>{compact && <span aria-hidden="true">{item.type === 'habit' ? '↻ ' : '◆ '}</span>}{item.label}</span>
@@ -88,6 +88,17 @@ export default function TomorrowScheduler({
     const timestamp = new Date(dayStart + index * 15 * 60000).toISOString();
     return { timestamp, minute: index * 15, ...localParts(timestamp, timezone) };
   }), [dayStart, dayMinutes, timezone]);
+  const detectTimeSlot = React.useCallback((args) => {
+    const viewport = timeline.current;
+    const pointer = args.pointerCoordinates;
+    if (!viewport || !pointer) return pointerWithin(args);
+    const rect = viewport.getBoundingClientRect();
+    if (pointer.x < rect.left + 52 || pointer.x >= rect.right || pointer.y < rect.top || pointer.y >= rect.bottom) return [];
+    const minute = Math.min(dayMinutes - 15, Math.max(0, snapScheduleMinutes((pointer.y - rect.top + viewport.scrollTop) / 2.4)));
+    const timestamp = new Date(dayStart + minute * 60000).toISOString();
+    const target = args.droppableContainers.find((entry) => entry.id === `slot:${timestamp}` && !entry.disabled);
+    return target ? [{ id: target.id }] : [];
+  }, [dayMinutes, dayStart]);
   const visibleBlocks = clipScheduleBlocksToDate(blocks, dayBounds).map((block) => ({
     ...block, read_only_context: block.read_only_context || block.continued || Boolean(block.target_local_date && block.target_local_date < localDate),
   }));
@@ -134,10 +145,10 @@ export default function TomorrowScheduler({
     focusItemKey.current = itemKey(item);
     const existing = editableBlocks.find((block) => blockKey(block) === itemKey(item));
     const chosenStart = timestamp || existing?.starts_at;
-    const chosenTime = chosenStart ? localParts(chosenStart, timezone).time : '09:00';
+    const chosenTime = chosenStart ? localParts(chosenStart, timezone).time : item.preferred_time || '09:00';
     setTime(chosenTime);
-    setDuration(existing ? (Date.parse(existing.ends_at) - Date.parse(existing.starts_at)) / 60000 : 30);
-    setOccurrence(chosenStart ? Date.parse(chosenStart) === Date.parse(zonedLocalTimeToTimestamp(localDate, chosenTime, timezone, 'later')) ? 'later' : 'earlier' : '');
+    setDuration(existing ? (Date.parse(existing.ends_at) - Date.parse(existing.starts_at)) / 60000 : item.duration_minutes || 30);
+    setOccurrence(chosenStart ? Date.parse(chosenStart) === Date.parse(zonedLocalTimeToTimestamp(localDate, chosenTime, timezone, 'later')) ? 'later' : 'earlier' : item.occurrence || '');
     setConfirmOverlap(false);
     setDialogError('');
     editingGeneration.current = generation;
@@ -188,7 +199,7 @@ export default function TomorrowScheduler({
     if (!item || !timestamp || Date.parse(timestamp) < dayStart || Date.parse(timestamp) >= dayEnd) return;
     try {
       const existing = editableBlocks.find((block) => blockKey(block) === itemKey(item));
-      const minutes = existing ? (Date.parse(existing.ends_at) - Date.parse(existing.starts_at)) / 60000 : 30;
+      const minutes = existing ? (Date.parse(existing.ends_at) - Date.parse(existing.starts_at)) / 60000 : item.duration_minutes || 30;
       const next = { starts_at: timestamp, ends_at: new Date(Date.parse(timestamp) + minutes * 60000).toISOString() };
       writePending.current = generation;
       const committed = await commit(item, next);
@@ -222,12 +233,12 @@ export default function TomorrowScheduler({
       </div>
       {!timelineAvailable ? <div role="status" className="space-y-2 rounded-xl bg-amber-950/30 p-3 text-sm text-amber-200">{dayBounds.error && <><p>Timeline unavailable for this date or timezone. Your review is still available.</p><p>{dayBounds.error}</p></>}{availabilityError && <p>{availabilityError}</p>}{saveError ? <><p>{typeof saveError === 'string' ? saveError : saveError.message}</p><p>Your local schedule changes are preserved. Retry scheduling before completing your review.</p></> : !dayBounds.error && <p>Scheduling is currently unavailable. You can still save your actions and complete your review. Retry after database setup or connectivity is restored.</p>}{onRetry && <button type="button" onClick={onRetry} className={buttonClass}>Retry scheduling</button>}</div> : <>
         <div role="status" aria-live="polite" className="text-xs text-zinc-400">{saveError ? <span className="text-amber-300">{typeof saveError === 'string' ? saveError : saveError.message}</span> : saveStatus === 'saving' ? 'Saving schedule…' : saveStatus === 'saved' ? 'Schedule saved' : saveStatus === 'offline' ? 'Schedule pending sync — reconnect to save.' : saveStatus === 'error' ? 'Schedule could not sync. Your review is still available.' : 'Schedule changes save automatically.'}</div>
-        <DndContext sensors={sensors} collisionDetection={pointerWithin} onDragStart={({ active: dragged }) => { if (!interaction.current.locked && generation === interaction.current.generation && writePending.current !== generation) { dragGeneration.current = generation; setActive(dragged.data.current.item); } }} onDragCancel={() => { dragGeneration.current = null; setActive(null); }} onDragEnd={drop}>
+        <DndContext sensors={sensors} collisionDetection={detectTimeSlot} onDragStart={({ active: dragged }) => { if (!interaction.current.locked && generation === interaction.current.generation && writePending.current !== generation) { dragGeneration.current = generation; setActive(dragged.data.current.item); } }} onDragCancel={() => { dragGeneration.current = null; setActive(null); }} onDragEnd={drop}>
           <div className="grid gap-4 md:grid-cols-[minmax(160px,1fr)_minmax(0,3fr)]">
             <aside aria-label="Unscheduled items" className="space-y-2">
               <h4 className="text-sm font-medium text-zinc-300">Unscheduled ({unscheduled.length})</h4>
               <p className="text-xs text-zinc-400">ROI action, starting task · Habits due tomorrow</p>
-              <p className="text-xs text-zinc-500">Default estimate: 30 minutes. Use the drag handle; the rest of the page scrolls normally.</p>
+              <p className="text-xs text-zinc-500">Drag a card onto a time to snap to 15 minutes. On touch screens, hold its handle. Click a card to set an exact time.</p>
               <div className="flex gap-2 overflow-x-auto pb-2 md:flex-col md:overflow-x-visible">
                 {unscheduled.map((item) => <div key={itemKey(item)} className="min-w-[160px] md:min-w-0"><DraggableItem item={item} onEdit={edit} disabled={locked || saving} /></div>)}
               </div>
@@ -236,7 +247,7 @@ export default function TomorrowScheduler({
             <div className="min-w-0">
               {allDay.length > 0 && <div aria-label="All-day Google events" className="mb-2 space-y-1 rounded-lg border border-zinc-700 p-2"><p className="text-xs text-zinc-400">All day · Google (read-only)</p>{allDay.map((event) => <p key={event.id} className="text-xs text-zinc-500">{event.summary || event.title || 'Busy'}{event.ends_at || event.end ? ` · until ${event.ends_at || event.end?.date || event.end} (exclusive)` : ''}{event.transparency === 'transparent' ? ' · Free · non-blocking' : ''}</p>)}</div>}
               <div className="mb-2 grid grid-cols-[52px_1fr] gap-1 text-[10px] text-zinc-400"><span>Time</span><span>Your plan{googleLanes.length > 0 && ' · Google events are read-only'}</span></div>
-              <div ref={timeline} tabIndex={0} aria-label={`${dayMinutes / 60}-hour timeline for ${localDate}, ${timezone}`} className="h-[480px] overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-950">
+              <div ref={timeline} tabIndex={0} aria-label={`${dayMinutes / 60}-hour timeline for ${localDate}, ${timezone}`} className="h-[760px] md:h-[960px] overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-950">
                 <div className="relative grid grid-cols-[52px_1fr]" style={{ height: dayMinutes * 2.4 }}>
                   <div className="relative">{slots.filter((slot) => slot.minute % 60 === 0).map((slot) => <span key={slot.timestamp} className="absolute left-1 text-[10px] text-zinc-500" style={{ top: slot.minute * 2.4 }}><span className="block">{slot.time}</span><span className="block text-[8px]">{slot.offset}</span></span>)}</div>
                   <div className="relative border-l border-zinc-700">
@@ -268,8 +279,8 @@ export default function TomorrowScheduler({
             <Dialog.Title className="font-semibold">Choose a time</Dialog.Title>
             <Dialog.Description className="text-sm text-zinc-400">{editing?.label} · {localDate} · {timezone}</Dialog.Description>
             <form onSubmit={save} className="space-y-4">
-              <label className="block space-y-1 text-sm">Start time<input required type="time" step="900" value={time} onChange={(event) => { setTime(event.target.value); setOccurrence(''); setConfirmOverlap(false); }} className={fieldClass} /></label>
-              <label className="block space-y-1 text-sm">Duration estimate (minutes)<input required type="number" min="15" max="1440" step="15" value={duration} onChange={(event) => { setDuration(Number(event.target.value)); setConfirmOverlap(false); }} className={fieldClass} /></label>
+              <label className="block space-y-1 text-sm">Start time<input required type="time" step="60" value={time} onChange={(event) => { setTime(event.target.value); setOccurrence(''); setConfirmOverlap(false); }} className={fieldClass} /></label>
+              <label className="block space-y-1 text-sm">Duration estimate (minutes)<input required type="number" min="1" max="1440" step="1" value={duration} onChange={(event) => { setDuration(Number(event.target.value)); setConfirmOverlap(false); }} className={fieldClass} /></label>
               {proposal?.ambiguous && <label className="block space-y-1 text-sm">This time occurs twice (daylight saving)<select required value={occurrence} onChange={(event) => { setOccurrence(event.target.value); setConfirmOverlap(false); }} className={fieldClass}>{!occurrence && <option value="" disabled>Choose an occurrence</option>}<option value="earlier">Earlier occurrence</option><option value="later">Later occurrence</option></select></label>}
               {proposal && <p className="text-xs text-zinc-400">{timeLabel(proposal)} · elapsed duration estimate</p>}
               {overlaps.length > 0 && <div className="space-y-2 rounded-lg border border-amber-700 p-3 text-sm text-amber-200"><p>This overlaps your plan or a busy Google event.</p><label className="flex gap-2"><input type="checkbox" checked={confirmOverlap} onChange={(event) => setConfirmOverlap(event.target.checked)} />Keep this overlap intentionally</label></div>}

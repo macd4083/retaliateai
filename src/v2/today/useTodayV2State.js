@@ -13,7 +13,9 @@ import {
   normalizeTodayV2Text,
   normalizeTodayV2ActionStarts,
   isTodayV2HabitScheduledForDate,
+  reconcileTodayV2InputActions,
 } from './model';
+import { getHabitScheduleForDate } from './recurrence';
 import { ENABLE_TODAY_V2_SCHEDULER } from '../../lib/featureFlags';
 import { createActionIdentity, reconcileActionIdentities, normalizeScheduleBlock } from './scheduling';
 import { replaceSchedule, isMissingScheduleSchema } from '../services/scheduling';
@@ -220,13 +222,6 @@ export function useTodayV2State(userId) {
     setControllableFocusState(value);
   }, [canEdit]);
 
-  const setTomorrowInput = React.useCallback((value) => {
-    if (!canEdit()) return;
-    tomorrowInputRef.current = value;
-    planRevisionRef.current += 1;
-    setTomorrowInputState(value);
-  }, [canEdit]);
-
   const applyActions = React.useCallback((items) => {
     if (!canEdit()) return;
     identitiesRef.current = items;
@@ -243,17 +238,33 @@ export function useTodayV2State(userId) {
     }
   }, [canEdit]);
 
+  const setTomorrowInput = React.useCallback((value) => {
+    if (!canEdit()) return;
+    const previous = identitiesRef.current;
+    const next = reconcileTodayV2InputActions(tomorrowInputRef.current, value, previous, createActionIdentity);
+    const starts = String(firstFiveMinutesRef.current || '').split(/\r?\n/);
+    const startsByKey = new Map(previous.map((item, index) => [item.key, starts[index] || '']));
+    const nextStarts = next.map((item) => startsByKey.get(item.key) || '');
+    while (nextStarts.length && !nextStarts.at(-1)) nextStarts.pop();
+    firstFiveMinutesRef.current = nextStarts.join('\n');
+    setFirstFiveMinutesState(firstFiveMinutesRef.current);
+    tomorrowInputRef.current = value;
+    setTomorrowInputState(value);
+    applyActions(next);
+  }, [applyActions, canEdit]);
+
   const setTomorrowActions = React.useCallback((value) => {
     if (!canEdit()) return;
     setCustomTomorrowActions(true);
     const texts = typeof value === 'function' ? value(tomorrowActionsRef.current) : value;
-    applyActions(reconcileActionIdentities(identitiesRef.current, texts, { allowSingleEdit: true }));
+    applyActions(reconcileActionIdentities(identitiesRef.current, texts, { allowSingleEdit: true })
+      .map((item) => ({ ...item, explicitEdit: true })));
   }, [applyActions, canEdit]);
 
   const editTomorrowAction = React.useCallback((index, text) => {
     if (!canEdit()) return;
     setCustomTomorrowActions(true);
-    applyActions(identitiesRef.current.map((item, itemIndex) => itemIndex === index ? { ...item, text } : item));
+    applyActions(identitiesRef.current.map((item, itemIndex) => itemIndex === index ? { ...item, text, explicitEdit: true } : item));
   }, [applyActions, canEdit]);
 
   const removeTomorrowAction = React.useCallback((index) => {
@@ -319,14 +330,15 @@ export function useTodayV2State(userId) {
         && draftIdentities.every((item, index) => normalizeTodayV2Text(item.text) === normalizeTodayV2Text(nextTomorrowActions[index]))
         ? draftIdentities
         : savedIdentities.map((saved) => ({
-          ...saved, key: draftIdentities.find((item) => item.persistedId === saved.persistedId)?.key || saved.key,
+          ...draftIdentities.find((item) => item.persistedId === saved.persistedId), ...saved,
+          key: draftIdentities.find((item) => item.persistedId === saved.persistedId)?.key || saved.key,
         }));
       const identityCandidates = (identityBase.length === nextTomorrowActions.length
         && identityBase.every((item, index) => normalizeTodayV2Text(item.text) === normalizeTodayV2Text(nextTomorrowActions[index]))
         ? identityBase
         : reconcileActionIdentities(identityBase, nextTomorrowActions));
       const assignedIds = new Set();
-      const nextIdentities = identityCandidates.map((item) => {
+      const validatedIdentities = identityCandidates.map((item) => {
         const validId = item.persistedId && savedIdentities.some((saved) => saved.persistedId === item.persistedId)
           && !assignedIds.has(item.persistedId) ? item.persistedId : null;
         if (validId) assignedIds.add(validId);
@@ -338,6 +350,10 @@ export function useTodayV2State(userId) {
         assignedIds.add(matches[0].persistedId);
         return { ...item, persistedId: matches[0].persistedId };
       });
+      const annotatedIdentities = reconcileTodayV2InputActions(
+        nextTomorrowInput, nextTomorrowInput, validatedIdentities, createActionIdentity
+      );
+      const nextIdentities = validatedIdentities.map((item) => annotatedIdentities.find((candidate) => candidate.key === item.key) || item);
       identitiesRef.current = nextIdentities;
       setActionIdentities(nextIdentities);
       const sourceKeys = new Map(nextIdentities.filter((item) => item.persistedId).map((item) => [item.persistedId, item.key]));
@@ -394,14 +410,6 @@ export function useTodayV2State(userId) {
     load();
     return () => { loadGenerationRef.current += 1; };
   }, [load]);
-
-  React.useEffect(() => {
-    if (customTomorrowActions) return;
-    const texts = buildTodayV2CommitmentDrafts(tomorrowInput).map((draft) => draft.normalizedFragmentText);
-    if (texts.join('\n') !== tomorrowActionsRef.current.join('\n')) {
-      applyActions(reconcileActionIdentities(identitiesRef.current, texts));
-    }
-  }, [applyActions, customTomorrowActions, tomorrowInput]);
 
   React.useEffect(() => {
     if (!userId || loadedUserRef.current !== userId || !state?.todayLocalDate) return;
@@ -669,7 +677,16 @@ export function useTodayV2State(userId) {
     })).filter((item) => normalizeTodayV2Text(item.text)),
     ...(state?.habitDefinitions || [])
       .filter((habit) => isTodayV2HabitScheduledForDate(habit, state.tomorrowLocalDate))
-      .map((habit) => ({ id: `habit:${habit.id}`, key: `habit:${habit.id}`, type: 'habit', label: habit.name, source_id: habit.id })),
+      .map((habit) => {
+        const defaults = getHabitScheduleForDate(habit, state.tomorrowLocalDate);
+        return {
+          id: `habit:${habit.id}`, key: `habit:${habit.id}`, type: 'habit', label: habit.name, source_id: habit.id,
+          habit, planning_mode: habit.planning_mode || 'manual',
+          preferred_time: defaults?.time,
+          duration_minutes: defaults?.duration_minutes || 30,
+          occurrence: defaults?.occurrence || 'earlier',
+        };
+      }),
   ], [actionIdentities, firstFiveMinutes, state?.habitDefinitions, state?.tomorrowLocalDate]);
 
   const updateSchedule = React.useCallback((itemKey, times) => {
@@ -897,7 +914,8 @@ export function useTodayV2State(userId) {
     setCustomTomorrowActions(false);
     setTomorrowPlanError(null);
     applyActions(reconcileActionIdentities(identitiesRef.current,
-      buildTodayV2CommitmentDrafts(tomorrowInputRef.current).map((draft) => draft.normalizedFragmentText)));
+      buildTodayV2CommitmentDrafts(tomorrowInputRef.current).map((draft) => draft.normalizedFragmentText))
+      .map((item) => ({ ...item, inputText: item.text, explicitEdit: false })));
   }, [applyActions, canEdit]);
 
   const saveTomorrowPlan = React.useCallback(async () => flushTomorrowPlan(), [flushTomorrowPlan]);
@@ -922,17 +940,47 @@ export function useTodayV2State(userId) {
 
   const saveDesiredDirection = React.useCallback(async () => flushDesiredDirection(), [flushDesiredDirection]);
 
+  const refreshHabits = React.useCallback(async (isCurrent) => {
+    const context = stateRef.current;
+    const next = await loadTodayReviewState(userId);
+    if (!isCurrent() || next.todayLocalDate !== context.todayLocalDate) return;
+    const baseline = (stateRef.current.tomorrowSchedules || [])
+      .filter((block) => block.target_local_date === next.tomorrowLocalDate);
+    const signature = (block) => block ? `${Date.parse(block.starts_at)}|${Date.parse(block.ends_at)}` : null;
+    const local = scheduleRef.current;
+    const validHabits = new Set((next.habitDefinitions || [])
+      .filter((habit) => isTodayV2HabitScheduledForDate(habit, next.tomorrowLocalDate)).map((habit) => habit.id));
+    const remoteHabits = (next.tomorrowSchedules || [])
+      .filter((block) => block.source_type === 'habit' && block.target_local_date === next.tomorrowLocalDate);
+    const merged = local.filter((block) => block.source_type !== 'habit');
+    for (const id of validHabits) {
+      const oldBlock = baseline.find((block) => block.source_type === 'habit' && block.source_id === id);
+      const localBlock = local.find((block) => block.source_type === 'habit' && block.source_id === id);
+      const remoteBlock = remoteHabits.find((block) => block.source_id === id);
+      const chosen = signature(localBlock) !== signature(oldBlock) ? localBlock : remoteBlock;
+      if (chosen) merged.push({ ...chosen, source_key: `habit:${id}` });
+    }
+    scheduleRef.current = merged;
+    setScheduleBlocks(merged);
+    const nextState = {
+      ...stateRef.current, habitDefinitions: next.habitDefinitions, habitOccurrences: next.habitOccurrences,
+      tomorrowSchedules: next.tomorrowSchedules, todaySchedules: next.todaySchedules,
+    };
+    stateRef.current = nextState;
+    setState(nextState);
+  }, [userId]);
+
   const saveHabitDefinition = React.useCallback((habitDraft) => trackWrite(`habit:${habitDraft.id || 'new'}`, async (isCurrent) => {
     if (!userId) return null;
     const id = await upsertHabitDefinition(userId, habitDraft);
-    if (isCurrent()) await load();
+    if (isCurrent()) await refreshHabits(isCurrent);
     return id;
-  }), [load, trackWrite, userId]);
+  }), [refreshHabits, trackWrite, userId]);
 
   const archiveHabitDefinition = React.useCallback((habitId) => trackWrite(`habit:${habitId}`, async (isCurrent) => {
     await archiveHabit(userId, habitId);
-    if (isCurrent()) await load();
-  }), [load, trackWrite, userId]);
+    if (isCurrent()) await refreshHabits(isCurrent);
+  }), [refreshHabits, trackWrite, userId]);
 
   const saveHabitResponse = React.useCallback((occurrence, value) => trackWrite(`occurrence:${occurrence.id}`, async (isCurrent) => {
     const reviewId = stateRef.current?.review?.id;
