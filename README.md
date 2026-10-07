@@ -11,7 +11,7 @@ actions and the first five minutes, and track follow-through.
 | Generic Open app, signed-in landing, default login/signup/confirmation/onboarding | `/app` |
 | `/app` | Authentication and onboarding first; V2 completion resolver sends incomplete/unavailable completion metadata to `/today`, completed reviews to `/home` |
 | Old `/reflection` bookmarks | Compatibility redirect to `/app` |
-| Historical AI dialogue | `/legacy/reflection`, authenticated; code and legacy tables retained |
+| Old `/legacy/reflection` bookmarks | Compatibility redirect to `/app`; no retired coaching UI |
 | Today navigation and live checklist | `/home` |
 | Review & Plan navigation and explicit nightly links | `/today`; completed reviews retain reopen/edit behavior |
 | Progress navigation | `/insights`; existing reporting retained, V2 data migration is separate work |
@@ -33,18 +33,20 @@ authentication-only, not Calendar OAuth.
 
 ### Deliberately retained legacy references
 
-`/legacy/reflection`, its AI coach, guest records and signup transfer remain.
-Legacy reflection tables, historical Insights queries, admin session tooling,
+The legacy coaching UI and its `reflection-coach`, `goals`, and
+`synthesize-insights` API endpoints are retired, along with their end-to-end
+reflection simulator. `/legacy/reflection` redirects to `/app`.
+Guest records and signup transfer, legacy reflection tables and migrations,
+historical Insights queries, admin session tooling,
 and isolated admin dialogue demos are not migrated or deleted. `/reflection`
 survives as a compatibility input (route/auth/old notification handling) and
 the explicit PWA manifest identity, not a normal navigation or launch
 destination. The manifest ID preserves the previous implicit app identity
 while the start URL changes. This does not rebuild Progress.
 
-`VITE_ENABLE_TODAY_V2=false` is a documented emergency rollback: rebuild and
-redeploy to send generic `/app` entry to `/legacy/reflection`. Explicit `/today`
-and `/home` and structured navigation stay available. Restore `true` and
-redeploy to return generic entry to the V2 resolver. See
+`VITE_ENABLE_TODAY_V2` is retired and has no effect: all generic entry and
+legacy bookmarks use the V2 resolver. The independent
+`VITE_ENABLE_TODAY_V2_SCHEDULER` switch remains available. See
 [architecture boundaries](docs/V2_ARCHITECTURE.md).
 
 ## Manual verification
@@ -52,11 +54,12 @@ redeploy to return generic entry to the V2 resolver. See
 Use test accounts and a preview deployment; do not trigger real email delivery
 for automated tests.
 
-1. Signed out, open `/app` and `/reflection`: login, finish onboarding if needed,
+1. Signed out, open `/app`, `/reflection`, and `/legacy/reflection`: login, finish onboarding if needed,
    then arrive at `/today`. Complete a review and reopen `/app`: arrive at
    `/home`. Open `/today` explicitly and verify reopen/edit still works.
    With optional completion metadata unavailable, `/app` must fall back to
-   `/today`. Open `/legacy/reflection` explicitly and verify historical data.
+   `/today`. Legacy bookmarks must use this same resolver even if an old
+   `VITE_ENABLE_TODAY_V2=false` environment setting remains.
 2. Verify drawer labels and titles: Today, Review & Plan, Progress, Settings.
    Admin links should be separate. Check landing signup CTAs and old campaign
    links: signup is required, never a new AI dialogue.
@@ -93,6 +96,9 @@ For the scheduler/Google Calendar release, use the
 Production domain intent is `https://retaliateai.com`, evidenced by the canonical
 metadata, sitemap and existing Stripe redirects, not verified live dashboard
 state. No production settings or database changes have been applied by this PR.
+The repository now contains 10 deployable JavaScript API functions, below the
+12-function Vercel Hobby limit. Successful Hobby deployment remains unverified;
+a local Vite build does not verify Vercel packaging or project configuration.
 
 - **Vercel environment:** set `PUBLIC_APP_ORIGIN=https://retaliateai.com` for
   production; use the preview origin for isolated test deployments. Server-side

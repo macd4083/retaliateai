@@ -7,6 +7,28 @@ import { describe, expect, it, vi } from 'vitest';
 const root = fileURLToPath(new URL('../..', import.meta.url));
 
 describe('scheduler deployment boundaries', () => {
+  it('retires legacy coaching endpoints and stays within the Hobby function budget', () => {
+    const apiFiles = [];
+    const visit = (directory) => {
+      for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+        const filename = path.join(directory, entry.name);
+        if (entry.isDirectory()) visit(filename);
+        else if (entry.name.endsWith('.js')) apiFiles.push(path.relative(root, filename));
+      }
+    };
+    visit(path.join(root, 'api'));
+    for (const endpoint of ['reflection-coach', 'goals', 'synthesize-insights']) {
+      expect(fs.existsSync(path.join(root, 'api', `${endpoint}.js`))).toBe(false);
+    }
+    expect(apiFiles.length).toBeLessThanOrEqual(12);
+    expect(apiFiles).toEqual(expect.arrayContaining([
+      'api/google-calendar.js', 'api/commitment-stats.js', 'api/admin.js',
+      'api/stripe.js', 'api/stripe-webhook.js', 'api/feedback.js',
+    ]));
+    expect(fs.existsSync(path.join(root, 'src/pages/ReflectionV2.jsx'))).toBe(false);
+    expect(fs.existsSync(path.join(root, 'scripts/simulate-reflection.js'))).toBe(false);
+  });
+
   it('provides the serverless Node crypto and abort timeout APIs', async () => {
     const { createHash, randomBytes } = await import('node:crypto');
     expect(createHash('sha256').update(randomBytes(32)).digest()).toHaveLength(32);

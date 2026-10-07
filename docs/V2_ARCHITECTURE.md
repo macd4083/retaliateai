@@ -1,11 +1,11 @@
 # Today V2 Architecture Boundaries
 
-## Explicit route and feature switch
-- `src/lib/featureFlags.js` is the single source of truth for `ENABLE_TODAY_V2`.
+## Explicit routes and scheduler feature switch
+- `src/lib/featureFlags.js` retains only the independent `ENABLE_TODAY_V2_SCHEDULER` switch.
 - `/app` is the authenticated generic entry point. It uses the existing V2 completion resolver: incomplete or unavailable completion metadata goes to `/today`; completed reviews go to `/home`.
-- `/reflection` is a compatibility redirect to `/app`. Historical users can bookmark `/legacy/reflection`, which retains the AI dialogue and legacy persistence.
+- `/reflection` and `/legacy/reflection` are compatibility redirects to `/app`. The legacy coaching page and its endpoints are retired.
 - Explicit `/today` always opens the structured nightly workflow, including its completed-review reopen/edit behavior; `/home` always opens the live checklist.
-- Emergency rollback: set `VITE_ENABLE_TODAY_V2=false` and rebuild/redeploy. This changes only generic `/app` entry to `/legacy/reflection`; explicit V2 routes and user navigation remain available. Restore `true` to return generic entry to V2.
+- `VITE_ENABLE_TODAY_V2` is retired and ignored. Generic entry cannot roll back to the removed AI dialogue; legacy bookmarks always use the live V2 resolver.
 - User navigation is Today (`/home`), Review & Plan (`/today`), Progress (`/insights`), Settings (`/settings`). Administration remains separate.
 - Progress currently uses the existing Insights implementation. Migrating its reporting data to V2 is separate work; this change does not merge legacy and V2 histories.
 
@@ -26,10 +26,11 @@
 - `src/lib/commitmentFragments.js`
   - Legacy-compatible wrapper that now reuses the neutral splitter
 
-### Legacy-only persistence modules
-- `src/pages/ReflectionV2.jsx`
+### Retained legacy persistence and reporting
 - `src/lib/supabase/reflection.js`
 - Legacy tables such as `reflection_sessions`, `reflection_messages`, `follow_up_queue`, `growth_markers`, and `goal_commitment_log`
+- Progress, commitment statistics, administration and guest signup transfer still use historical data. All database history and migrations remain untouched.
+- `src/pages/ReflectionV2.jsx`, the `reflection-coach`, `goals`, and `synthesize-insights` API endpoints, and their end-to-end simulator are removed; unrelated legacy helpers are retained.
 
 ## Persistence boundary
 Today V2 uses the public-prefix fallback so no extra Supabase API schema configuration is required.
@@ -63,11 +64,11 @@ These generic objects are replaced by the isolated Today V2 schema and should no
 3. `useTodayV2State` delegates all persistence to `src/v2/services/todayReview.js`.
 4. The DAL reads/writes only `today_v2_*` tables and `today_v2_*` RPCs.
 5. Commitment splitting happens in `src/shared/commitmentFragmentation.js`, then the resulting fragments are saved through `today_v2_replace_plan_for_date`.
-6. `/legacy/reflection` keeps using `reflection_sessions` and related legacy objects without any shared writes.
+6. `/legacy/reflection` redirects to `/app`; historical reporting still reads legacy objects without merging them into V2.
 
 ## Schema/data-flow diagram (text)
 ```text
-/app (ENABLE_TODAY_V2=true)
+/app
   -> completion resolver -> /home or /today
   /today
     -> TodayV2Page
@@ -77,12 +78,11 @@ These generic objects are replaced by the isolated Today V2 schema and should no
           -> today_v2_ensure_habit_occurrences_for_date()
           -> today_v2_* tables only
 
-/reflection -> /app (compatibility)
+/reflection, /legacy/reflection -> /app (compatibility)
 
-/legacy/reflection (also /app rollback target when flag=false)
-  -> ReflectionV2
-    -> legacy reflectionHelpers
-      -> reflection_sessions + legacy tables only
+Progress / historical reporting
+  -> legacy reflectionHelpers
+    -> reflection_sessions + legacy tables only
 ```
 
 ## Table responsibilities
@@ -154,7 +154,7 @@ History rules:
 1. Run `supabase/sql/today_v2_isolated_workflow.sql` in Supabase SQL Editor.
 2. Wait for `notify pgrst, 'reload schema';` to refresh the schema cache.
 3. Deploy the app code using the new Today V2 client modules.
-4. Open `/today` with `ENABLE_TODAY_V2=true` and verify habits can still be added manually even if default seeding is unavailable.
+4. Open `/today` and verify habits can still be added manually even if default seeding is unavailable.
 
 ## Optional next-day scheduling and Google Calendar
 
@@ -379,10 +379,11 @@ Use a supported Vercel Node runtime with native `fetch` and
 `AbortSignal.timeout` (Node 20 or newer). For local OAuth/API QA, use the Vercel
 CLI's `vercel dev --listen 3000` with the server variables above; `npm run dev`
 alone serves the frontend, not the Calendar API.
-Do not remove/consolidate working functions based on a suspected plan limit.
-Investigate function-count/plan constraints only if the actual deployment log
-identifies them; a successful Vite build alone does not establish deployment
-success.
+Retiring the three obsolete coaching endpoints leaves 10 deployable JavaScript
+API functions, below Vercel Hobby's 12-function limit. Working Calendar, billing,
+feedback, statistics and administration endpoints remain. Successful Hobby
+deployment is unverified; a successful Vite build alone does not establish
+deployment success or diagnose the earlier failed deployments.
 
 Imports cover only the planner's bounded date window, expand recurring instances,
 handle cancellation/pagination and preserve exclusive all-day end dates. Events

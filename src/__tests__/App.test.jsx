@@ -10,11 +10,9 @@ const mocks = vi.hoisted(() => ({
   auth: { user: { id: 'user-1' }, loading: false },
   profile: { onboarding_completed: true },
   routeTarget: vi.fn(),
-  enabled: true,
 }));
 
 vi.mock('../lib/AuthContext', () => ({ useAuth: () => mocks.auth }));
-vi.mock('../lib/featureFlags', () => ({ get ENABLE_TODAY_V2() { return mocks.enabled; } }));
 vi.mock('../lib/usePageTracking', () => ({ usePageTracking: vi.fn() }));
 vi.mock('../lib/analytics', () => ({ stopAnalytics: vi.fn() }));
 vi.mock('../v2/services/todayReview', () => ({ getTodayV2RouteTarget: mocks.routeTarget }));
@@ -23,7 +21,6 @@ vi.mock('../lib/supabase/client', () => ({
     select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: mocks.profile, error: null }) }) }),
   }) },
 }));
-vi.mock('../pages/ReflectionV2', () => ({ default: () => <div>Legacy Reflection</div> }));
 vi.mock('../v2/pages/TodayV2Page', () => ({ default: () => <div>Structured Today</div> }));
 vi.mock('../v2/pages/HomeV2Page', () => ({ default: () => <div>Structured Home</div> }));
 vi.mock('../pages/OnboardingV2', () => ({
@@ -77,7 +74,6 @@ describe('shouldShowTrialExpiredModal', () => {
     beforeEach(() => {
       mocks.auth = { user: { id: 'user-1' }, loading: false };
       mocks.profile = { onboarding_completed: true };
-      mocks.enabled = true;
       mocks.routeTarget.mockReset().mockResolvedValue('/today');
     });
 
@@ -85,6 +81,7 @@ describe('shouldShowTrialExpiredModal', () => {
       if (root) await act(async () => root.unmount());
       container?.remove();
       router?.dispose();
+      vi.unstubAllEnvs();
     });
 
     async function render(path) {
@@ -95,16 +92,16 @@ describe('shouldShowTrialExpiredModal', () => {
       await act(async () => root.render(<RouterProvider router={router} />));
     }
 
-    it.each(['/app', '/reflection', '/unknown'])('routes %s to Today for incomplete reviews', async (path) => {
+    it.each(['/app', '/reflection', '/legacy/reflection', '/unknown'])('routes %s to Today for incomplete reviews', async (path) => {
       await render(path);
       expect(router.state.location.pathname).toBe('/today');
       expect(container.textContent).toBe('Structured Today');
       expect(mocks.routeTarget).toHaveBeenCalledWith('user-1');
     });
 
-    it('routes completed reviews to Home', async () => {
+    it.each(['/app', '/reflection', '/legacy/reflection'])('routes %s to Home for completed reviews', async (path) => {
       mocks.routeTarget.mockResolvedValue('/home');
-      await render('/app');
+      await render(path);
       expect(router.state.location.pathname).toBe('/home');
       expect(container.textContent).toBe('Structured Home');
     });
@@ -115,20 +112,25 @@ describe('shouldShowTrialExpiredModal', () => {
       expect(router.state.location.pathname).toBe('/today');
     });
 
-    it.each(['/app', '/reflection', '/unknown'])('rolls %s back to the explicit legacy route without a loop', async (path) => {
-      mocks.enabled = false;
+    it.each(
+      ['true', 'false'].flatMap((flag) =>
+        ['/app', '/reflection', '/legacy/reflection', '/unknown'].flatMap((path) =>
+          ['/today', '/home'].map((target) => [flag, path, target])
+        )
+      )
+    )('ignores retired flag %s when resolving %s to %s', async (flag, path, target) => {
+      vi.stubEnv('VITE_ENABLE_TODAY_V2', flag);
+      mocks.routeTarget.mockResolvedValue(target);
       await render(path);
-      expect(router.state.location.pathname).toBe('/legacy/reflection');
-      expect(container.textContent).toBe('Legacy Reflection');
-      expect(mocks.routeTarget).not.toHaveBeenCalled();
+      expect(router.state.location.pathname).toBe(target);
+      expect(container.textContent).toBe(target === '/today' ? 'Structured Today' : 'Structured Home');
+      expect(mocks.routeTarget).toHaveBeenCalledWith('user-1');
     });
 
     it.each([
       ['/today', 'Structured Today'],
       ['/home', 'Structured Home'],
-      ['/legacy/reflection', 'Legacy Reflection'],
-    ])('keeps explicit %s stable during rollback', async (path, text) => {
-      mocks.enabled = false;
+    ])('keeps explicit %s stable', async (path, text) => {
       await render(path);
       expect(router.state.location.pathname).toBe(path);
       expect(container.textContent).toBe(text);
@@ -140,6 +142,14 @@ describe('shouldShowTrialExpiredModal', () => {
       await render('/today?source=reminder#review');
       expect(router.state.location.pathname).toBe('/login');
       expect(new URLSearchParams(router.state.location.search).get('next')).toBe('/today?source=reminder#review');
+    });
+
+    it('requires login through legacy bookmarks', async () => {
+      mocks.auth.user = null;
+      await render('/legacy/reflection');
+      expect(router.state.location.pathname).toBe('/login');
+      expect(new URLSearchParams(router.state.location.search).get('next')).toBe('/app');
+      expect(mocks.routeTarget).not.toHaveBeenCalled();
     });
 
     it.each(['/auth/reset-password', '/auth/callback'])('keeps %s public for recovery and confirmation', async (path) => {
@@ -158,22 +168,19 @@ describe('shouldShowTrialExpiredModal', () => {
       expect(router.state.location.pathname).toBe('/today');
     });
 
-    it.each([
-      ['/today', 'Structured Today'],
-      ['/legacy/reflection', 'Legacy Reflection'],
-    ])('preserves the anonymous guest onboarding bypass on %s', async (path, text) => {
+    it.each(['/today', '/legacy/reflection'])('preserves the anonymous guest onboarding bypass on %s', async (path) => {
       mocks.auth.user = { id: 'guest-1', is_anonymous: true };
       mocks.profile = { onboarding_completed: false };
       await render(path);
-      expect(router.state.location.pathname).toBe(path);
-      expect(container.textContent).toBe(text);
+      expect(router.state.location.pathname).toBe('/today');
+      expect(container.textContent).toBe('Structured Today');
     });
 
-    it('keeps the legacy route accessible to guest campaign profiles after account transfer', async () => {
+    it('redirects legacy bookmarks for guest campaign profiles after account transfer', async () => {
       mocks.profile = { onboarding_completed: false, is_guest_campaign_user: true };
       await render('/legacy/reflection');
-      expect(router.state.location.pathname).toBe('/legacy/reflection');
-      expect(container.textContent).toBe('Legacy Reflection');
+      expect(router.state.location.pathname).toBe('/today');
+      expect(container.textContent).toBe('Structured Today');
     });
   });
 

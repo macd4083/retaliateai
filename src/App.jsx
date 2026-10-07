@@ -2,7 +2,6 @@ import React from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 
 // ── Legacy + V2 pages ───────────────────────────────────────────────────────
-import ReflectionLegacyPage from './pages/ReflectionV2';
 import InsightsV2 from './pages/InsightsV2';
 import SettingsV2 from './pages/SettingsV2';
 import OnboardingV2 from './pages/OnboardingV2';
@@ -27,7 +26,6 @@ import { useAuth } from './lib/AuthContext';
 import { supabase } from './lib/supabase/client';
 import { usePageTracking } from './lib/usePageTracking';
 import { stopAnalytics } from './lib/analytics';
-import { ENABLE_TODAY_V2 } from './lib/featureFlags';
 import { getTodayV2RouteTarget } from './v2/services/todayReview';
 import {
   isAnonymousGuestUser,
@@ -124,13 +122,6 @@ function TodayV2DefaultRedirect() {
 
   React.useEffect(() => {
     let cancelled = false;
-
-    if (!ENABLE_TODAY_V2) {
-      setTarget('/legacy/reflection');
-      return () => {
-        cancelled = true;
-      };
-    }
 
     async function resolveTarget() {
       try {
@@ -289,17 +280,8 @@ export default function App() {
       {/* Post-session conversion page — public (guest arrives here after first session) */}
       <Route path="/post-session/next-steps" element={<PostSessionNextSteps />} />
 
-      {/* Legacy route (kept unchanged) */}
-      <Route
-        path="/legacy/reflection"
-        element={
-          <AuthGuardV2>
-            <ReflectionLegacyPage />
-          </AuthGuardV2>
-        }
-      />
-
       {/* Compatibility links now enter the structured app. */}
+      <Route path="/legacy/reflection" element={<Navigate to="/app" replace />} />
       <Route path="/reflection" element={<Navigate to="/app" replace />} />
       <Route
         path="/app"

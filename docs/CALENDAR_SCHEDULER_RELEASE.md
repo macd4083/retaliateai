@@ -54,11 +54,15 @@ command above and attach the required artifact. Then compare these settings:
 | Install / Build / Output | `npm ci` / `npm run build` / `dist` |
 | Node.js | 22.x; repository `engines` now matches CI |
 | Functions | Confirm `api/google-calendar.js` and its server import are bundled |
-| Function allowance | Repository has 13 API entrypoints; check the account's function limit if packaging fails |
+| Function allowance | Repository now has 10 deployable JavaScript API functions, below Hobby's 12-function limit; verify packaging in deployment logs |
 | Environment target | Production and Preview each need their own matching origins/redirects |
 
-The function allowance is a **hypothesis**, not a diagnosed failure. Do not delete
-unrelated endpoints or upgrade a plan without the actual error. Missing Google
+The obsolete `reflection-coach`, `goals`, and `synthesize-insights` endpoints and
+their coaching UI/simulator are retired. No working Calendar, billing, feedback,
+statistics or administration endpoint was removed. Successful Hobby deployment
+remains **unverified**, and the earlier failed deployment's root cause remains
+undiagnosed. Do not delete unrelated endpoints or upgrade a plan without the
+actual error. Missing Google
 configuration yields runtime unavailability, not a Vite build failure. Missing
 `VITE_SUPABASE_*` causes a browser startup error at `src/lib/supabase/client.js:6-7`,
 not an established explanation for the Vercel deployment status.
@@ -138,7 +142,6 @@ without quotes or whitespace, then redeploy. Never print secret values in logs.
 | `VITE_SUPABASE_URL` | Same project's public Supabase URL | Browser build-time |
 | `VITE_SUPABASE_ANON_KEY` | Same project's public anon key, **never** service role | Browser build-time |
 | `VITE_ENABLE_TODAY_V2_SCHEDULER` | Exact lowercase `true` to enable scheduler | Browser build-time |
-| `VITE_ENABLE_TODAY_V2` | Keep `true` for generic V2 entry | Browser build-time |
 | `PUBLIC_APP_ORIGIN` | Same public origin for existing email/billing links; not a substitute for `APP_ORIGIN` | Server-only |
 
 Generate the encryption value privately with
@@ -187,6 +190,10 @@ If the application deployment needs rollback, restore the previous Vercel
 deployment and disable the scheduler feature flag. This patch adds no schema
 changes to reverse; do not drop or manually roll back the existing scheduler
 migrations.
+The separate `VITE_ENABLE_TODAY_V2` entry flag is retired and ignored.
+`/reflection` and `/legacy/reflection` redirect to `/app`; there is no coaching
+UI rollback in the current code. Historical reflection data and migrations are
+preserved.
 
 Copy/paste verification SQL (read-only):
 
@@ -316,7 +323,7 @@ unperformed on real accounts/devices by the agent.**
 
 | Done | Action | Expected outcome |
 | --- | --- | --- |
-| [ ] | Open `/today`, `/home`, `/settings` directly and reload | SPA loads correct authenticated route, not 404; legacy `/legacy/reflection` remains isolated |
+| [ ] | Open `/today`, `/home`, `/settings` directly and reload; open `/legacy/reflection` | SPA loads correct authenticated route, not 404; legacy bookmark redirects through `/app` to V2 even with the retired entry flag set to false |
 | [ ] | GET `/api/google-calendar?action=status` signed out | HTTP 401 JSON `unauthorized`, `Cache-Control: no-store`; never index.html or a browser asset |
 | [ ] | In signed-in app inspect status with valid session | Configured/schemaAvailable true after setup; no secret/token fields. Missing config/schema gives diagnostic, not broken review flow |
 | [ ] | Connect from Settings and from Review & Plan | Google consent requests only two readonly scopes; successful callback returns to initiating allowlisted route |
