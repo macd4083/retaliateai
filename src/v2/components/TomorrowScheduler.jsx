@@ -1,7 +1,6 @@
 import React from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { DndContext, DragOverlay, PointerSensor, TouchSensor, useDraggable, useDroppable, useSensor, useSensors } from '@dnd-kit/core';
-import GoogleCalendarConnection from './GoogleCalendarConnection';
 import { clipScheduleBlocksToDate, getScheduleDateBounds, getScheduleDayOffset, layoutScheduleBlocks, zonedLocalTimeToTimestamp } from '../today/scheduling';
 
 const fieldClass = 'w-full rounded-lg border border-zinc-600 bg-zinc-950 px-3 py-2 text-sm text-white';
@@ -51,7 +50,7 @@ function DraggableItem({ item, onEdit, disabled, style = undefined, compact = fa
 }
 
 export default function TomorrowScheduler({
-  userId, localDate, timezone = 'UTC', items = [], blocks = [], contextBlocks = [], available = true, readOnly = false, completionSaving = false,
+  userId, localDate, timezone = 'UTC', items = [], blocks = [], contextBlocks = [], googleEvents = [], available = true, readOnly = false, completionSaving = false,
   saveStatus, saveError, onUpdate, onUnschedule, onRetry, resolveTime = resolveScheduleTime,
 }) {
   const sensors = useSensors(useSensor(MousePenPointerSensor, { activationConstraint: { distance: 8 } }), useSensor(TouchSensor, { activationConstraint: { delay: 300, tolerance: 8 } }));
@@ -63,7 +62,6 @@ export default function TomorrowScheduler({
   const [confirmOverlap, setConfirmOverlap] = React.useState(false);
   const [dialogError, setDialogError] = React.useState('');
   const [saving, setSaving] = React.useState(false);
-  const [googleEvents, setGoogleEvents] = React.useState([]);
   const timeline = React.useRef(null);
   const schedulerRoot = React.useRef(null);
   const focusReturn = React.useRef(null);
@@ -219,7 +217,6 @@ export default function TomorrowScheduler({
         <p className="mt-2 text-xs text-zinc-400">{localDate} · {timezone} · Times are optional</p>
       </div>
       {!timelineAvailable ? <div role="status" className="space-y-2 rounded-xl bg-amber-950/30 p-3 text-sm text-amber-200">{dayBounds.error && <><p>Timeline unavailable for this date or timezone. Your review is still available.</p><p>{dayBounds.error}</p></>}{saveError ? <><p>{typeof saveError === 'string' ? saveError : saveError.message}</p><p>Your local schedule changes are preserved. Retry scheduling before completing your review.</p></> : !dayBounds.error && <p>Scheduling is not available yet. You can still save your actions and complete your review. Try again after scheduling has been enabled for your account.</p>}{onRetry && <button type="button" onClick={onRetry} className={buttonClass}>Retry scheduling</button>}</div> : <>
-        <GoogleCalendarConnection userId={userId} localDate={localDate} timezone={timezone} includeNextDay onEvents={setGoogleEvents} />
         <div role="status" aria-live="polite" className="text-xs text-zinc-400">{saveError ? <span className="text-amber-300">{typeof saveError === 'string' ? saveError : saveError.message}</span> : saveStatus === 'saving' ? 'Saving schedule…' : saveStatus === 'saved' ? 'Schedule saved' : saveStatus === 'offline' ? 'Schedule pending sync — reconnect to save.' : saveStatus === 'error' ? 'Schedule could not sync. Your review is still available.' : 'Schedule changes save automatically.'}</div>
         <DndContext sensors={sensors} onDragStart={({ active: dragged }) => { if (!interaction.current.locked && generation === interaction.current.generation && writePending.current !== generation) { dragGeneration.current = generation; setActive(dragged.data.current.item); } }} onDragCancel={() => { dragGeneration.current = null; setActive(null); }} onDragEnd={drop}>
           <div className="grid gap-4 md:grid-cols-[minmax(160px,1fr)_minmax(0,3fr)]">
