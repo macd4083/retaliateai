@@ -1,5 +1,7 @@
 import { supabase } from '../../lib/supabase/client';
 import { ENABLE_TODAY_V2_SCHEDULER } from '../../lib/featureFlags';
+import { addDaysToLocalDate } from '../today/model';
+import { getScheduleDateBounds } from '../today/scheduling';
 
 export function isMissingScheduleSchema(error) {
   return ['42P01', '42883', 'PGRST202', 'PGRST205'].includes(error?.code)
@@ -14,18 +16,25 @@ export function normalizeSavedSchedule(row) {
   };
 }
 
-export async function loadSchedules(userId, todayLocalDate, tomorrowLocalDate) {
+export async function loadSchedules(userId, todayLocalDate, tomorrowLocalDate, timezoneName = 'UTC') {
   if (!ENABLE_TODAY_V2_SCHEDULER) {
     return { todaySchedules: [], tomorrowSchedules: [], scheduleAvailable: false, scheduleDiagnostic: null };
   }
   try {
     const { data, error } = await supabase.from('today_v2_schedule_blocks').select('*')
-      .eq('user_id', userId).gte('target_local_date', todayLocalDate).lte('target_local_date', tomorrowLocalDate);
+      .eq('user_id', userId).gte('target_local_date', addDaysToLocalDate(todayLocalDate, -2)).lte('target_local_date', tomorrowLocalDate);
     if (error) throw error;
     const rows = (data || []).map(normalizeSavedSchedule);
+    const schedulesForDate = (localDate) => {
+      const bounds = getScheduleDateBounds(localDate, timezoneName);
+      return rows.filter((row) => row.target_local_date === localDate
+        || (row.target_local_date < localDate
+          && Date.parse(row.starts_at) < Date.parse(bounds.ends_at)
+          && Date.parse(row.ends_at) > Date.parse(bounds.starts_at)));
+    };
     return {
-      todaySchedules: rows.filter((row) => row.target_local_date === todayLocalDate),
-      tomorrowSchedules: rows.filter((row) => row.target_local_date === tomorrowLocalDate),
+      todaySchedules: schedulesForDate(todayLocalDate),
+      tomorrowSchedules: schedulesForDate(tomorrowLocalDate),
       scheduleAvailable: true,
       scheduleDiagnostic: null,
     };

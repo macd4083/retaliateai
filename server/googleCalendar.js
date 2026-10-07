@@ -115,8 +115,8 @@ export function eventRange(timeMin, timeMax) {
   }
   const start = Date.parse(timeMin);
   const end = Date.parse(timeMax);
-  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start || end - start > 48 * 60 * 60 * 1000) {
-    fail(400, 'invalid_range', 'Event range must be positive and no longer than 48 hours.');
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start || end - start > 49 * 60 * 60 * 1000) {
+    fail(400, 'invalid_range', 'Event range must be positive and no longer than 49 hours.');
   }
   return { timeMin: new Date(start).toISOString(), timeMax: new Date(end).toISOString() };
 }
@@ -263,6 +263,8 @@ export function createGoogleCalendarHandler({ env = process.env, supabase, fetch
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Referrer-Policy', 'no-referrer');
     const action = req.query?.action || req.body?.action;
+    let callbackReturn;
+    let callbackStateHash;
     try {
       if (!Object.hasOwn(METHODS, action)) fail(400, 'invalid_action', 'Unknown Google Calendar action.');
       if (req.method !== METHODS[action]) {
@@ -280,6 +282,11 @@ export function createGoogleCalendarHandler({ env = process.env, supabase, fetch
         userId = data.user.id;
       }
       if (action === 'disconnect') {
+        if (req.headers?.origin && env.APP_ORIGIN) {
+          let origin;
+          try { origin = new URL(env.APP_ORIGIN).origin; } catch { /* Local deletion remains available without Google configuration. */ }
+          if (origin && req.headers.origin !== origin) fail(403, 'invalid_origin', 'Request origin is not allowed.');
+        }
         // State locks serialize against OAuth finalization before reading or deleting its saved connection.
         storage(await database().from(STATES).delete().eq('user_id', userId));
         const row = await connection(userId);
@@ -312,13 +319,15 @@ export function createGoogleCalendarHandler({ env = process.env, supabase, fetch
         const binding = decrypt(pending.verifier_encrypted, config.key, `state:${stateHash}`);
         if (!equal(binding.browser_hash, hash(nonce))) fail(400, 'invalid_state', 'Calendar authorization did not originate in this browser.');
         const returnPath = pending.return_path === '/settings' ? '/settings' : '/today';
+        callbackReturn = `${config.origin}${returnPath}`;
+        callbackStateHash = stateHash;
         const invalidCode = typeof req.query?.code !== 'string' || !req.query.code || req.query.code.length > 4096;
         if (req.query?.error || invalidCode) {
           const consumed = storage(await database().rpc('today_v2_consume_google_state', { p_state_hash: stateHash }));
           const saved = Array.isArray(consumed) ? consumed[0] : consumed;
           if (!saved || saved.user_id !== pending.user_id || saved.verifier_encrypted !== pending.verifier_encrypted ||
             !Number.isFinite(Date.parse(saved.expires_at)) || Date.parse(saved.expires_at) <= now()) fail(400, 'invalid_state', 'Calendar authorization was already used or expired.');
-          if (req.query?.error) return res.redirect(303, `${config.origin}${returnPath}?googleCalendar=denied`);
+          if (req.query?.error) return res.redirect(303, `${callbackReturn}?googleCalendar=${req.query.error === 'access_denied' ? 'denied' : 'error'}`);
           fail(400, 'invalid_callback', 'Google authorization code is missing.');
         }
         const previous = await connection(pending.user_id);
@@ -403,16 +412,34 @@ export function createGoogleCalendarHandler({ env = process.env, supabase, fetch
       const range = eventRange(req.query?.timeMin, req.query?.timeMax);
       if (!row) fail(409, 'not_connected', 'Connect Google Calendar first.');
       const selected = row.selected_calendar_ids || [];
-      if (!Array.isArray(selected) || selected.length > MAX_CALENDARS || selected.some((id) => typeof id !== 'string' || !id)) fail(400, 'invalid_selection', 'Select up to 10 calendars again.');
+      if (!Array.isArray(selected) || selected.length > MAX_CALENDARS || selected.some((id) => typeof id !== 'string' || !id || id.length > 1024) ||
+        new Set(selected).size !== selected.length) fail(400, 'invalid_selection', 'Select up to 10 calendars again.');
       const events = [];
+      const unavailableCalendars = [];
+      let completed = 0;
+      let firstFailure;
       for (const id of selected) {
-        const items = await paginated(`calendars/${encodeURIComponent(id)}/events`, { ...range, singleEvents: 'true', showDeleted: 'true',
-          fields: 'nextPageToken,items(id,recurringEventId,originalStartTime,start,end,summary,status,transparency)' }, userId, row, config, deadline);
-        events.push(...items.map((event) => normalizeEvent(event, id)).filter(Boolean));
+        try {
+          const items = await paginated(`calendars/${encodeURIComponent(id)}/events`, { ...range, singleEvents: 'true', showDeleted: 'true',
+            fields: 'nextPageToken,items(id,recurringEventId,originalStartTime,start,end,summary,status,transparency)' }, userId, row, config, deadline);
+          events.push(...items.map((event) => normalizeEvent(event, id)).filter(Boolean));
+          completed += 1;
+        } catch (error) {
+          if (!(error instanceof CalendarError) || ['reconnect_required', 'storage_unavailable', 'not_connected'].includes(error.code)) throw error;
+          firstFailure ||= error;
+          unavailableCalendars.push({ calendarId: id, code: error.code });
+        }
       }
-      return res.status(200).json({ events: [...new Map(events.map((event) => [event.id, event])).values()], ...range });
+      if (firstFailure && !completed) throw firstFailure;
+      return res.status(200).json({ events: [...new Map(events.map((event) => [event.id, event])).values()],
+        selectedCalendarIds: selected, partial: unavailableCalendars.length > 0, unavailableCalendars, ...range });
     } catch (error) {
       const safe = error instanceof CalendarError ? error : new CalendarError(500, 'internal_error', 'Google Calendar request could not be completed.');
+      if (callbackReturn) {
+        try { storage(await database().rpc('today_v2_consume_google_state', { p_state_hash: callbackStateHash })); }
+        catch { /* An unavailable database must not expose OAuth errors or credentials in the browser. */ }
+        return res.redirect(303, `${callbackReturn}?googleCalendar=error`);
+      }
       return res.status(safe.status).json({ error: safe.message, code: safe.code });
     }
   };

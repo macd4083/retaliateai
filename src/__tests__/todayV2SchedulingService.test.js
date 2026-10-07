@@ -44,6 +44,39 @@ describe('optional schedule repository', () => {
     expect((await loadSchedules('user', '2026-09-28', '2026-09-29')).scheduleAvailable).toBe(false);
     expect(mocks.from).not.toHaveBeenCalled();
   });
+  it('includes prior-target carryover only while it intersects the next local date', async () => {
+    const query = builder({ data: [
+      { id: 'previous-carry', target_local_date: '2026-09-27', starts_at: '2026-09-28T06:30:00Z', ends_at: '2026-09-28T07:30:00Z' },
+      { id: 'previous-ended', target_local_date: '2026-09-27', starts_at: '2026-09-28T06:30:00Z', ends_at: '2026-09-28T07:00:00Z' },
+      { id: 'today-carry', target_local_date: '2026-09-28', starts_at: '2026-09-29T06:30:00Z', ends_at: '2026-09-29T07:30:00Z' },
+      { id: 'tomorrow', target_local_date: '2026-09-29', ends_at: '2026-09-29T12:00:00Z' },
+    ], error: null });
+    mocks.from.mockReturnValue(query);
+    const state = await loadSchedules('user', '2026-09-28', '2026-09-29', 'America/Los_Angeles');
+    expect(query.gte).toHaveBeenCalledWith('target_local_date', '2026-09-26');
+    expect(state.todaySchedules.map((row) => row.id)).toEqual(['previous-carry', 'today-carry']);
+    expect(state.tomorrowSchedules.map((row) => row.id)).toEqual(['today-carry', 'tomorrow']);
+  });
+  it('includes 24-hour spring-forward carryover from two target dates earlier', async () => {
+    const query = builder({ data: [
+      { id: 'two-days-back', target_local_date: '2026-03-07',
+        starts_at: '2026-03-08T04:45:00Z', ends_at: '2026-03-09T04:45:00Z' },
+      { id: 'one-day-back', target_local_date: '2026-03-08',
+        starts_at: '2026-03-09T03:30:00Z', ends_at: '2026-03-09T04:30:00Z' },
+      { id: 'ended-at-midnight', target_local_date: '2026-03-07',
+        starts_at: '2026-03-08T04:00:00Z', ends_at: '2026-03-09T04:00:00Z' },
+      { id: 'today', target_local_date: '2026-03-09',
+        starts_at: '2026-03-10T03:30:00Z', ends_at: '2026-03-10T04:30:00Z' },
+    ], error: null });
+    mocks.from.mockReturnValue(query);
+    const state = await loadSchedules('user', '2026-03-09', '2026-03-10', 'America/New_York');
+    expect(query.gte).toHaveBeenCalledWith('target_local_date', '2026-03-07');
+    expect(state.todaySchedules.map((row) => row.id)).toEqual(['two-days-back', 'one-day-back', 'today']);
+    expect(state.tomorrowSchedules.map((row) => row.id)).toEqual(['today']);
+
+    const previousDay = await loadSchedules('user', '2026-03-08', '2026-03-09', 'America/New_York');
+    expect(previousDay.tomorrowSchedules.map((row) => row.id)).toEqual(['two-days-back', 'one-day-back', 'today']);
+  });
   it('keeps review and Home loading functional when schedule schema is missing', async () => {
     mocks.from.mockImplementation((table) => builder(table === 'today_v2_schedule_blocks'
       ? { data: null, error: { code: '42P01', message: 'relation does not exist' } }
@@ -60,6 +93,27 @@ describe('optional schedule repository', () => {
       return query;
     });
     expect((await loadTodayV2HomeState('user')).scheduleAvailable).toBe(false);
+  });
+  it('separates civil-day Home schedules from the prior 4AM review checklist before the boundary', async () => {
+    const rows = [
+      { id: 'carryover', target_local_date: '2026-09-28', ends_at: '2026-09-29T00:30:00Z',
+        starts_at: '2026-09-28T23:30:00Z', commitment_fragment_id: 'previous-action' },
+      { id: 'civil-day', target_local_date: '2026-09-29', ends_at: '2026-09-29T12:00:00Z',
+        starts_at: '2026-09-29T11:00:00Z', habit_definition_id: 'habit' },
+    ];
+    mocks.from.mockImplementation((table) => {
+      const query = builder({ data: table === 'today_v2_schedule_blocks' ? rows : [], error: null });
+      query.single.mockResolvedValue({ data: { id: 'prior-review', local_date: '2026-09-28' }, error: null });
+      return query;
+    });
+    const state = await loadTodayV2HomeState('user', {
+      now: new Date('2026-09-29T01:00:00Z'), timezoneName: 'UTC', dayBoundaryHour: 4,
+    });
+    expect(state.todayLocalDate).toBe('2026-09-28');
+    expect(state.civilScheduleLocalDate).toBe('2026-09-29');
+    expect(state.civilSchedules.map((row) => row.id)).toEqual(['carryover', 'civil-day']);
+    expect(state.todaySchedules.map((row) => row.id)).toEqual(['carryover']);
+    expect(state.review.id).toBe('prior-review');
   });
   it('sends persisted UUIDs or null, never client keys, to stable replacement', async () => {
     const id = '8cfde77d-dcaa-4c7c-a409-f9ef5e70e321';

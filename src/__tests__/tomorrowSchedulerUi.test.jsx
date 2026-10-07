@@ -3,10 +3,19 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as scheduling from '../v2/today/scheduling';
 
-const calendar = vi.hoisted(() => ({ events: [] }));
+const calendar = vi.hoisted(() => ({ events: [], includeNextDay: false }));
+const dnd = vi.hoisted(() => ({ handlers: null }));
+vi.mock('@dnd-kit/core', async (importOriginal) => {
+  const actual = /** @type {typeof import('@dnd-kit/core')} */ (await importOriginal());
+  return {
+    ...actual,
+    DndContext: (props) => { dnd.handlers = props; return <actual.DndContext {...props} />; },
+  };
+});
 vi.mock('../v2/components/GoogleCalendarConnection', () => ({
-  default: ({ onEvents }) => {
-    React.useEffect(() => onEvents(calendar.events), [onEvents]);
+  default: ({ onEvents, includeNextDay }) => {
+    calendar.includeNextDay = includeNextDay;
+    React.useEffect(() => onEvents(calendar.events), [onEvents, calendar.events]);
     return <div>Google connection</div>;
   },
 }));
@@ -23,13 +32,24 @@ describe('TomorrowScheduler UI', () => {
     await act(async () => root.render(<TomorrowScheduler userId="user" localDate="2026-10-07" timezone="UTC" items={items} onUpdate={update} onUnschedule={vi.fn()} {...props} />));
   };
   const click = async (text) => {
-    const button = [...document.querySelectorAll('button')].find((node) => node.textContent.includes(text));
+    const button = Array.from(document.querySelectorAll('button')).find((node) => node.textContent.includes(text));
     expect(button).toBeTruthy();
     await act(async () => button.click());
   };
+  const changeInput = async (input, value) => {
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  };
+  const getInput = (selector) => /** @type {HTMLInputElement} */ (document.querySelector(selector));
+  const getSelect = (selector) => /** @type {HTMLSelectElement} */ (document.querySelector(selector));
 
   beforeEach(() => {
     calendar.events = [];
+    calendar.includeNextDay = false;
+    dnd.handlers = null;
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -89,7 +109,7 @@ describe('TomorrowScheduler UI', () => {
     const dialog = document.querySelector('[role="dialog"]');
     expect(dialog).toBeTruthy();
     expect(dialog.textContent).toContain('Duration estimate (minutes)');
-    expect(dialog.querySelector('input[type="time"]').step).toBe('900');
+    expect(getInput('[role="dialog"] input[type="time"]').step).toBe('900');
     await act(async () => dialog.querySelector('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
     expect(update).toHaveBeenCalledWith('action-1', { starts_at: '2026-10-07T09:00:00.000Z', ends_at: '2026-10-07T09:30:00.000Z' });
     expect(document.querySelector('[role="dialog"]')).toBeNull();
@@ -99,7 +119,7 @@ describe('TomorrowScheduler UI', () => {
     await render({ blocks: [{ source_key: 'habit-1', starts_at: '2026-10-07T09:00:00Z', ends_at: '2026-10-07T09:30:00Z' }] });
     await click('Write a chapter');
     expect(document.querySelector('[role="dialog"]').textContent).toContain('Keep this overlap intentionally');
-    expect([...document.querySelectorAll('button')].find((node) => node.textContent === 'Save time').disabled).toBe(true);
+    expect(Array.from(document.querySelectorAll('button')).find((node) => node.textContent === 'Save time').disabled).toBe(true);
     await act(async () => document.querySelector('[role="dialog"] input[type="checkbox"]').click());
     await act(async () => document.querySelector('[role="dialog"] form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
     expect(update).toHaveBeenCalledTimes(1);
@@ -108,9 +128,34 @@ describe('TomorrowScheduler UI', () => {
   it('offers earlier/later choices for a repeated DST time', async () => {
     await render({ localDate: '2026-11-01', timezone: 'America/New_York', blocks: [{ source_key: 'action-1', starts_at: '2026-11-01T05:30:00Z', ends_at: '2026-11-01T05:45:00Z' }] });
     await click('Write a chapter');
-    const select = document.querySelector('[role="dialog"] select');
+    const select = getSelect('[role="dialog"] select');
     expect(select).toBeTruthy();
-    expect([...select.options].map((option) => option.value)).toEqual(['earlier', 'later']);
+    expect(Array.from(select.options).map((option) => option.value)).toEqual(['earlier', 'later']);
+  });
+
+  it('requires an explicit occurrence after changing to a repeated DST wall time', async () => {
+    await render({ localDate: '2026-11-01', timezone: 'America/New_York' });
+    await click('Write a chapter');
+    await changeInput(document.querySelector('[role="dialog"] input[type="time"]'), '01:30');
+    const select = getSelect('[role="dialog"] select');
+    expect(select.value).toBe('');
+    expect(Array.from(document.querySelectorAll('button')).find((node) => node.textContent === 'Save time').disabled).toBe(true);
+    await act(async () => document.querySelector('[role="dialog"] form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    expect(update).not.toHaveBeenCalled();
+    await act(async () => { select.value = 'later'; select.dispatchEvent(new Event('change', { bubbles: true })); });
+    await act(async () => document.querySelector('[role="dialog"] form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    expect(update).toHaveBeenCalledWith('action-1', { starts_at: '2026-11-01T06:30:00.000Z', ends_at: '2026-11-01T07:00:00.000Z' });
+  });
+
+  it('explains a nonexistent DST start time and preserves elapsed duration across the gap', async () => {
+    await render({ localDate: '2026-03-08', timezone: 'America/New_York', blocks: [{ source_key: 'action-1', starts_at: '2026-03-08T06:45:00Z', ends_at: '2026-03-08T07:15:00Z' }] });
+    await click('Write a chapter');
+    expect(getInput('[role="dialog"] input[type="number"]').value).toBe('30');
+    await changeInput(document.querySelector('[role="dialog"] input[type="time"]'), '02:30');
+    expect(document.querySelector('[role="alert"]').textContent).toContain('Choose a time before or after the clock change');
+    await changeInput(document.querySelector('[role="dialog"] input[type="time"]'), '01:45');
+    await act(async () => document.querySelector('[role="dialog"] form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    expect(update).toHaveBeenCalledWith('action-1', { starts_at: '2026-03-08T06:45:00.000Z', ends_at: '2026-03-08T07:15:00.000Z' });
   });
 
   it('renders 25 elapsed hours with separate timestamp slots and positions for repeated wall times', async () => {
@@ -146,7 +191,7 @@ describe('TomorrowScheduler UI', () => {
   it('preserves the later DST occurrence when editing an existing block', async () => {
     await render({ localDate: '2026-11-01', timezone: 'America/New_York', blocks: [{ source_key: 'action-1', starts_at: '2026-11-01T06:30:00Z', ends_at: '2026-11-01T06:45:00Z' }] });
     await click('Write a chapter');
-    expect(document.querySelector('[role="dialog"] select').value).toBe('later');
+    expect(getSelect('[role="dialog"] select').value).toBe('later');
     await act(async () => document.querySelector('[role="dialog"] form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
     expect(update).toHaveBeenCalledWith('action-1', { starts_at: '2026-11-01T06:30:00.000Z', ends_at: '2026-11-01T06:45:00.000Z' });
   });
@@ -158,7 +203,7 @@ describe('TomorrowScheduler UI', () => {
     expect(container.querySelector('[aria-label="All-day Google events"]').textContent).toContain('2026-10-08 (exclusive)');
     await click('Write a chapter');
     expect(document.querySelector('[role="dialog"] input[type="checkbox"]')).toBeNull();
-    expect([...document.querySelectorAll('button')].find((node) => node.textContent === 'Save time').disabled).toBe(false);
+    expect(Array.from(document.querySelectorAll('button')).find((node) => node.textContent === 'Save time').disabled).toBe(false);
   });
 
   it('requires intentional confirmation for a busy all-day Google event', async () => {
@@ -178,7 +223,176 @@ describe('TomorrowScheduler UI', () => {
 
   it('exposes recoverable offline synchronization status', async () => {
     await render({ saveStatus: 'offline' });
-    expect(container.textContent).toContain('Schedule saved on this device — reconnect to sync.');
+    expect(container.textContent).toContain('Schedule pending sync — reconnect to save.');
+    expect(container.textContent).not.toContain('Schedule saved on this device');
+  });
+
+  it.each(['readOnly', 'completionSaving', 'available'])('cancels an open editor and rejects its late submit when %s locks scheduling', async (property) => {
+    await render();
+    await click('Write a chapter');
+    const form = document.querySelector('[role="dialog"] form');
+    await render({ [property]: property === 'available' ? false : true });
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    await act(async () => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    expect(update).not.toHaveBeenCalled();
+    if (property !== 'available') {
+      expect(container.querySelector('[data-scheduler-edit-key="action-1"]').disabled).toBe(true);
+      expect(container.querySelector('[data-scheduler-drag-key]')).toBeNull();
+    }
+    await render();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    await click('Write a chapter');
+    expect(document.querySelector('[role="dialog"]')).toBeTruthy();
+  });
+
+  it('rejects a late drag after a completion lock, including after it is released', async () => {
+    await render();
+    const dragged = { data: { current: { item: items[0] } } };
+    const over = { data: { current: { timestamp: '2026-10-07T09:00:00.000Z' } } };
+    const lateDrop = dnd.handlers.onDragEnd;
+    await act(async () => dnd.handlers.onDragStart({ active: dragged }));
+    await render({ completionSaving: true });
+    await act(async () => lateDrop({ active: dragged, over }));
+    await render();
+    await act(async () => dnd.handlers.onDragEnd({ active: dragged, over }));
+    expect(update).not.toHaveBeenCalled();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it.each(['day change', 'completion lock'])('isolates in-flight write state after a %s', async (change) => {
+    let finishOld;
+    let failNew;
+    update.mockImplementationOnce(() => new Promise((resolve) => { finishOld = resolve; }))
+      .mockImplementationOnce(() => new Promise((_resolve, reject) => { failNew = reject; }));
+    await render();
+    await click('Write a chapter');
+    await act(async () => document.querySelector('[role="dialog"] form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    expect(document.querySelector('[role="dialog"]').textContent).toContain('Saving…');
+    const nextProps = change === 'day change' ? { localDate: '2026-10-08' } : {};
+    if (change === 'completion lock') await render({ completionSaving: true });
+    await render(nextProps);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(container.querySelector('[data-scheduler-edit-key="action-1"]').disabled).toBe(false);
+    await click('Write a chapter');
+    await act(async () => document.querySelector('[role="dialog"] form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    expect(update).toHaveBeenCalledTimes(2);
+    await act(async () => finishOld());
+    expect(document.querySelector('[role="dialog"]').textContent).toContain('Saving…');
+    expect(Array.from(document.querySelectorAll('button')).find((node) => node.textContent === 'Saving…').disabled).toBe(true);
+    await act(async () => document.querySelector('[role="dialog"] form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    expect(update).toHaveBeenCalledTimes(2);
+    await act(async () => failNew(new Error('New-context write failed')));
+    expect(document.querySelector('[role="dialog"]').textContent).toContain('New-context write failed');
+    expect(Array.from(document.querySelectorAll('button')).find((node) => node.textContent === 'Save time').disabled).toBe(false);
+  });
+
+  it('preserves the exact elapsed duration when dragging a midnight block', async () => {
+    await render({ blocks: [{ source_key: 'action-1', starts_at: '2026-10-07T23:45:00Z', ends_at: '2026-10-08T00:15:00Z' }] });
+    const dragged = { data: { current: { item: items[0] } } };
+    await act(async () => dnd.handlers.onDragStart({ active: dragged }));
+    await act(async () => dnd.handlers.onDragEnd({ active: dragged, over: { data: { current: { timestamp: '2026-10-07T23:30:00.000Z' } } } }));
+    expect(update).toHaveBeenCalledWith('action-1', { starts_at: '2026-10-07T23:30:00.000Z', ends_at: '2026-10-08T00:00:00.000Z' });
+  });
+
+  it('restores tap focus even when touch activation did not focus the trigger', async () => {
+    await render();
+    const trigger = container.querySelector('[data-scheduler-edit-key="action-1"]');
+    expect(document.activeElement).not.toBe(trigger);
+    await act(async () => trigger.click());
+    expect(document.querySelector('[role="dialog"]').contains(document.activeElement)).toBe(true);
+    await click('Cancel');
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('keeps touch scrolling off only the long-press drag handle and supports Escape focus return', async () => {
+    await render();
+    const handle = container.querySelector('[data-scheduler-drag-key="action-1"]');
+    const trigger = container.querySelector('[data-scheduler-edit-key="action-1"]');
+    expect(handle.style.touchAction).toBe('none');
+    expect(trigger.style.touchAction).not.toBe('none');
+    expect(dnd.handlers.sensors.find(({ sensor }) => sensor.name === 'TouchSensor').options.activationConstraint).toEqual({ delay: 300, tolerance: 8 });
+    handle.focus();
+    await act(async () => handle.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true })));
+    expect(document.querySelector('[role="dialog"]')).toBeTruthy();
+    await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(handle);
+  });
+
+  it('renders carryover supplied in loaded blocks read-only without suppressing the new day habit', async () => {
+    await render({ blocks: [
+      { id: 'old-habit', source_key: 'habit-1', target_local_date: '2026-10-06', label: 'Read yesterday', starts_at: '2026-10-06T23:45:00Z', ends_at: '2026-10-07T00:15:00Z' },
+      { source_key: 'action-1', starts_at: '2026-10-08T09:00:00Z', ends_at: '2026-10-08T09:30:00Z' },
+    ] });
+    const old = container.querySelector('[data-context-schedule-id="old-habit"]');
+    expect(old.querySelector('button')).toBeNull();
+    expect(old.textContent).toContain('Continued from previous day');
+    expect(old.style.top).toBe('0px');
+    expect(old.style.height).toBe('36px');
+    expect(container.textContent).toContain('Unscheduled (2)');
+    expect(container.querySelector('[data-schedule-key="action-1"]')).toBeNull();
+  });
+
+  it('does not exclude carryover of the same habit identity from overlap checks', async () => {
+    await render({ blocks: [
+      { id: 'old-habit', source_key: 'habit-1', target_local_date: '2026-10-06', starts_at: '2026-10-06T23:45:00Z', ends_at: '2026-10-07T00:30:00Z' },
+      { id: 'new-habit', source_key: 'habit-1', target_local_date: '2026-10-07', starts_at: '2026-10-07T00:15:00Z', ends_at: '2026-10-07T00:45:00Z' },
+    ] });
+    await click('Read');
+    expect(getInput('[role="dialog"] input[type="time"]').value).toBe('00:15');
+    expect(document.querySelector('[role="dialog"] input[type="checkbox"]')).toBeTruthy();
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('filters out-of-day Google blocks and clips its carryover without widening lanes', async () => {
+    calendar.events = [
+      { id: 'old', title: 'Past meeting', start: '2026-10-06T22:00:00Z', end: '2026-10-07T00:00:00Z' },
+      { id: 'carry', title: 'Night shift', start: '2026-10-06T23:30:00Z', end: '2026-10-07T00:30:00Z' },
+      { id: 'future', title: 'Next meeting', start: '2026-10-08T00:00:00Z', end: '2026-10-08T01:00:00Z' },
+      { id: 'all-day-past', title: 'Past holiday', start: '2026-10-06', end: '2026-10-07', allDay: true },
+    ];
+    await render();
+    const google = container.querySelector('[aria-label="Google events"]');
+    expect(google.textContent).toContain('Night shift');
+    expect(google.textContent).not.toContain('Past meeting');
+    expect(google.textContent).not.toContain('Next meeting');
+    expect(google.firstElementChild.style.height).toBe('72px');
+    expect(google.firstElementChild.style.width).toBe('100%');
+    expect(container.textContent).not.toContain('Past holiday');
+  });
+
+  it('only blocks an overnight proposal for the actual all-day Google date interval', async () => {
+    calendar.events = [{ id: 'all-day', title: 'Away today', start: '2026-10-07', end: '2026-10-08', allDay: true }];
+    await render({ blocks: [{ source_key: 'action-1', starts_at: '2026-10-07T23:45:00Z', ends_at: '2026-10-08T00:15:00Z' }] });
+    await click('Write a chapter');
+    expect(document.querySelector('[role="dialog"] input[type="checkbox"]')).toBeTruthy();
+    await click('Cancel');
+    calendar.events = [{ id: 'all-day', title: 'Away yesterday', start: '2026-10-06', end: '2026-10-07', allDay: true }];
+    await render();
+    await click('Write a chapter');
+    expect(document.querySelector('[role="dialog"] input[type="checkbox"]')).toBeNull();
+    await click('Cancel');
+    calendar.events = [{ id: 'all-day', title: 'Away tomorrow', start: '2026-10-08', end: '2026-10-09', allDay: true }];
+    await render({ blocks: [{ source_key: 'action-1', starts_at: '2026-10-07T23:45:00Z', ends_at: '2026-10-08T00:15:00Z' }] });
+    expect(container.textContent).not.toContain('Away tomorrow');
+    await click('Write a chapter');
+    expect(document.querySelector('[role="dialog"] input[type="checkbox"]')).toBeTruthy();
+  });
+
+  it('detects next-day Google overlap for an overnight proposal but allows touching boundaries', async () => {
+    calendar.events = [{ id: 'next', title: 'Next-day call', start: '2026-10-08T00:00:00Z', end: '2026-10-08T00:30:00Z' }];
+    const blocks = [{ source_key: 'action-1', starts_at: '2026-10-07T23:45:00Z', ends_at: '2026-10-08T00:15:00Z' }];
+    await render({ blocks });
+    expect(calendar.includeNextDay).toBe(true);
+    await click('Write a chapter');
+    expect(document.querySelector('[role="dialog"] input[type="checkbox"]')).toBeTruthy();
+    await click('Cancel');
+    calendar.events = [{ id: 'next', title: 'Next-day call', start: '2026-10-08T00:15:00Z', end: '2026-10-08T00:30:00Z' }];
+    await render({ blocks });
+    await click('Write a chapter');
+    expect(document.querySelector('[role="dialog"] input[type="checkbox"]')).toBeNull();
   });
 
   it('allows keyboard handle editing and restores focus when canceled', async () => {
@@ -208,7 +422,25 @@ describe('TomorrowScheduler UI', () => {
     expect(container.textContent).toContain('23:45–00:15 (+1 day)');
     expect(container.querySelector('[data-schedule-key="action-1"]').style.height).toBe('36px');
     await click('Write a chapter');
-    expect(document.querySelector('[role="dialog"] input[type="number"]').value).toBe('30');
+    expect(getInput('[role="dialog"] input[type="number"]').value).toBe('30');
+  });
+
+  it('labels a 24-elapsed-hour spring-forward block +2 days and clips its second-date carryover', async () => {
+    const block = { id: 'long-dst-block', source_key: 'action-1', target_local_date: '2026-03-07', label: 'Write a chapter', starts_at: '2026-03-08T04:45:00Z', ends_at: '2026-03-09T04:45:00Z' };
+    await render({ localDate: '2026-03-07', timezone: 'America/New_York', blocks: [block] });
+    expect(container.textContent).toContain('(+2 days)');
+    expect(container.textContent).not.toContain('(+1 day)');
+    await click('Write a chapter');
+    expect(getInput('[role="dialog"] input[type="number"]').value).toBe('1440');
+    await act(async () => document.querySelector('[role="dialog"] form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    expect(update).toHaveBeenCalledWith('action-1', { starts_at: '2026-03-08T04:45:00.000Z', ends_at: '2026-03-09T04:45:00.000Z' });
+    await render({ localDate: '2026-03-09', timezone: 'America/New_York', blocks: [block] });
+    const context = container.querySelector('[data-context-schedule-id="long-dst-block"]');
+    expect(context.textContent).toContain('(+2 days)');
+    expect(context.textContent).toContain('Previous-day · 2026-03-07 · read-only');
+    expect(context.style.height).toBe('108px');
+    expect(context.style.top).toBe('0px');
+    expect(context.querySelector('button')).toBeNull();
   });
 
   it('shows previous-day carryover read-only and warns against scheduling through it', async () => {

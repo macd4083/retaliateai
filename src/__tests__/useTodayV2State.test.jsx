@@ -245,6 +245,51 @@ describe('useTodayV2State', () => {
     expect(serviceMocks.loadTodayReviewState).toHaveBeenCalledTimes(2);
   });
 
+  it('preserves dirty previous-day drafts through a failed rollover and replaces them only after success', async () => {
+    vi.setSystemTime(new Date('2026-09-29T03:55:00.000Z'));
+    await renderHook();
+    await act(async () => {
+      latest.setDesiredDirection('Builder');
+      latest.setControllableFocus('Protect the first block');
+      latest.setTomorrowInput('Write');
+      latest.setFirstFiveMinutes('Open the outline');
+    });
+    const oldKey = 'today-v2-draft:user-1:2026-09-28';
+    const oldDraft = JSON.parse(window.localStorage.getItem(oldKey));
+    let rejectLoad;
+    serviceMocks.loadTodayReviewState.mockImplementationOnce(() => new Promise((_, reject) => { rejectLoad = reject; }));
+    vi.setSystemTime(new Date('2026-09-29T04:05:00.000Z'));
+    await act(async () => { window.dispatchEvent(new Event('focus')); });
+    expect(latest.state.todayLocalDate).toBe('2026-09-28');
+    expect(latest.tomorrowInput).toBe('Write');
+    expect(JSON.parse(window.localStorage.getItem(oldKey))).toEqual(oldDraft);
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await act(async () => { rejectLoad(new Error('next day unavailable')); });
+      expect(latest.loading).toBe(false);
+      expect(latest.error.message).toBe('next day unavailable');
+      expect(latest.state.todayLocalDate).toBe('2026-09-28');
+      expect(latest.desiredDirection).toBe('Builder');
+      expect(latest.controllableFocus).toBe('Protect the first block');
+      expect(latest.tomorrowActions).toEqual(['Write']);
+      expect(latest.firstFiveMinutes).toBe('Open the outline');
+      expect(JSON.parse(window.localStorage.getItem(oldKey))).toEqual(oldDraft);
+
+      serviceMocks.loadTodayReviewState.mockResolvedValueOnce(makeState({
+        todayLocalDate: '2026-09-29', tomorrowLocalDate: '2026-09-30',
+      }));
+      await act(async () => { window.dispatchEvent(new Event('focus')); });
+      expect(latest.state.todayLocalDate).toBe('2026-09-29');
+      expect(latest.desiredDirection).toBe('');
+      expect(latest.controllableFocus).toBe('');
+      expect(latest.tomorrowActions).toEqual([]);
+      expect(latest.firstFiveMinutes).toBe('');
+      expect(JSON.parse(window.localStorage.getItem(oldKey))).toEqual(oldDraft);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
   it('keeps schedules with edited and reordered identities and removes only deleted schedules', async () => {
     serviceMocks.loadTodayReviewState.mockResolvedValue({ ...makeState(), scheduleAvailable: true });
     await renderHook();
@@ -500,5 +545,324 @@ describe('useTodayV2State', () => {
     expect(scheduleMocks.replaceSchedule).toHaveBeenCalledTimes(2);
     expect(latest.scheduleBlocks[0].starts_at).toBe('2026-09-29T12:00:00.000Z');
     expect(latest.scheduleSaveStatus).toBe('saved');
+  });
+
+  it('waits for checklist writes and synchronously freezes every edit during completion', async () => {
+    const initial = { ...makeState(), scheduleAvailable: true,
+      tomorrowFragments: [{ id: '38a3ee64-78ac-4b31-9cd4-df3d93407ce1', fragment_text: 'Write' }],
+      followThroughItems: [{ id: 'today-fragment', completion_state: 'unanswered' }] };
+    serviceMocks.loadTodayReviewState.mockResolvedValue(initial);
+    serviceMocks.completeTodayV2Review.mockResolvedValue({ ...initial.review, completed_at: '2026-09-28T23:00:00Z' });
+    await renderHook();
+    let resolveWrite;
+    serviceMocks.setFollowThroughCompletion.mockImplementationOnce(() => new Promise((resolve) => { resolveWrite = resolve; }));
+    let write;
+    let complete;
+    const key = latest.tomorrowActionKeys[0];
+    await act(async () => {
+      write = latest.saveCommitmentCompletion('today-fragment', 'kept');
+      complete = latest.completeReview();
+      latest.editTomorrowAction(0, 'Changed');
+      latest.removeTomorrowAction(0);
+      latest.setTomorrowActions(['Changed']);
+      latest.setTomorrowInput('Changed');
+      latest.splitTomorrowActions();
+      latest.setDesiredDirection('Changed');
+      latest.setControllableFocus('Changed');
+      latest.setFirstFiveMinutes('Changed');
+      latest.updateSchedule(key, { starts_at: '2026-09-29T10:00:00Z' });
+      latest.unschedule(key);
+      await expect(latest.saveHabitResponse({ id: 'occurrence' }, true)).rejects.toThrow(/Reopen/);
+      expect(await latest.completeReview()).toBeNull();
+    });
+    expect(serviceMocks.completeTodayV2Review).not.toHaveBeenCalled();
+    expect(latest.tomorrowActions).toEqual(['Write']);
+    expect(latest.scheduleBlocks).toEqual([]);
+    expect(latest.desiredDirection).toBe('');
+    await act(async () => {
+      resolveWrite({ id: 'today-fragment', completion_state: 'kept' });
+      await write;
+      await complete;
+    });
+    expect(serviceMocks.completeTodayV2Review).toHaveBeenCalledTimes(1);
+    expect(latest.state.followThroughItems[0].completion_state).toBe('kept');
+    await act(async () => {
+      latest.editTomorrowAction(0, 'Still locked');
+      await expect(latest.addManualFollowThrough('Blocked')).rejects.toThrow(/Reopen/);
+    });
+    expect(latest.tomorrowActions).toEqual(['Write']);
+    serviceMocks.reopenTodayV2Review.mockResolvedValue(initial.review);
+    await act(async () => {
+      await latest.reopenReview();
+      latest.editTomorrowAction(0, 'Unlocked');
+    });
+    expect(latest.tomorrowActions).toEqual(['Unlocked']);
+  });
+
+  it('does not complete after a failed checklist save, and permits an explicit successful retry', async () => {
+    await renderHook();
+    serviceMocks.upsertHabitLog.mockRejectedValueOnce(new Error('habit save failed'));
+    await act(async () => {
+      await expect(latest.saveHabitResponse({ id: 'occurrence', snapshot_response_type: 'boolean' }, true)).rejects.toThrow('habit save failed');
+      await expect(latest.completeReview()).rejects.toThrow('habit save failed');
+    });
+    expect(serviceMocks.completeTodayV2Review).not.toHaveBeenCalled();
+    serviceMocks.upsertHabitLog.mockResolvedValue({ id: 'occurrence', boolean_response: true });
+    serviceMocks.completeTodayV2Review.mockResolvedValue({ completed_at: '2026-09-28T23:00:00Z' });
+    await act(async () => {
+      await latest.saveHabitResponse({ id: 'occurrence', snapshot_response_type: 'boolean' }, true);
+      await latest.completeReview();
+    });
+    expect(serviceMocks.completeTodayV2Review).toHaveBeenCalledTimes(1);
+  });
+
+  it('serializes repeated checklist edits and waits for the newest value before completion', async () => {
+    serviceMocks.loadTodayReviewState.mockResolvedValue({
+      ...makeState(), followThroughItems: [{ id: 'fragment', completion_state: 'unanswered' }],
+    });
+    await renderHook();
+    let resolveFirst;
+    serviceMocks.setFollowThroughCompletion.mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; }));
+    serviceMocks.setFollowThroughCompletion.mockImplementationOnce(async () => ({ id: 'fragment', completion_state: 'missed' }));
+    serviceMocks.completeTodayV2Review.mockResolvedValue({ completed_at: '2026-09-28T23:00:00Z' });
+    let first;
+    let second;
+    let complete;
+    await act(async () => {
+      first = latest.saveCommitmentCompletion('fragment', 'kept');
+      second = latest.saveCommitmentCompletion('fragment', 'missed');
+      complete = latest.completeReview();
+    });
+    expect(serviceMocks.setFollowThroughCompletion).toHaveBeenCalledTimes(1);
+    expect(serviceMocks.completeTodayV2Review).not.toHaveBeenCalled();
+    await act(async () => {
+      resolveFirst({ id: 'fragment', completion_state: 'kept' });
+      await first;
+      await second;
+      await complete;
+    });
+    expect(serviceMocks.setFollowThroughCompletion.mock.calls.map((call) => call[1])).toEqual(['kept', 'missed']);
+    expect(latest.state.followThroughItems[0].completion_state).toBe('missed');
+  });
+
+  it('rejects offline dirty direction and focus flushes without completing', async () => {
+    await renderHook();
+    await act(async () => {
+      latest.setDesiredDirection('Builder');
+      latest.setControllableFocus('Focus');
+    });
+    Object.defineProperty(navigator, 'onLine', { configurable: true, value: false });
+    try {
+      await act(async () => { await expect(latest.completeReview()).rejects.toThrow(/Offline/); });
+      expect(serviceMocks.completeTodayV2Review).not.toHaveBeenCalled();
+      expect(JSON.parse(window.localStorage.getItem('today-v2-draft:user-1:2026-09-28'))).toMatchObject({
+        desiredDirection: 'Builder', desiredDirectionNeedsSync: true, controllableFocusNeedsSync: true,
+      });
+    } finally {
+      Object.defineProperty(navigator, 'onLine', { configurable: true, value: true });
+    }
+  });
+
+  it('drains newer focus edits and ignores a stale direction response from a different review', async () => {
+    await renderHook();
+    let resolveFocus;
+    serviceMocks.updateControllableFocus.mockImplementationOnce(() => new Promise((resolve) => { resolveFocus = resolve; }));
+    await act(async () => { latest.setControllableFocus('First'); });
+    let first;
+    await act(async () => { first = latest.flushAll(); });
+    await act(async () => { latest.setControllableFocus('Second'); });
+    let drained;
+    await act(async () => { drained = latest.flushAll(); });
+    await act(async () => { resolveFocus(); await first; await drained; });
+    expect(serviceMocks.updateControllableFocus.mock.calls.map((call) => call[1])).toEqual(['First', 'Second']);
+    expect(latest.state.review.controllable_focus).toBe('Second');
+
+    let resolveDirection;
+    serviceMocks.updateDesiredDirection.mockImplementationOnce(() => new Promise((resolve) => { resolveDirection = resolve; }));
+    await act(async () => { latest.setDesiredDirection('Old day'); });
+    let pending;
+    await act(async () => { pending = latest.saveDesiredDirection(); });
+    serviceMocks.loadTodayReviewState.mockResolvedValue(makeState({ todayLocalDate: '2026-09-29', tomorrowLocalDate: '2026-09-30' }));
+    await act(async () => { await latest.load(); });
+    await act(async () => { resolveDirection(); await pending; });
+    expect(latest.state.review.id).toBe('review-2026-09-29');
+    expect(latest.state.review.desired_direction).toBe('');
+  });
+
+  it('keeps dirty focus edits when an older reload resolves and excludes carryover from editable schedules', async () => {
+    serviceMocks.loadTodayReviewState.mockResolvedValue({
+      ...makeState(), scheduleAvailable: true,
+      habitDefinitions: [{ id: 'habit', name: 'Habit', schedule_weekdays: [2] }],
+      tomorrowSchedules: [{ source_type: 'habit', source_id: 'habit', target_local_date: '2026-09-28',
+        starts_at: '2026-09-28T23:30:00Z', ends_at: '2026-09-29T00:30:00Z' }],
+    });
+    await renderHook();
+    expect(latest.scheduleBlocks).toEqual([]);
+    let resolveLoad;
+    serviceMocks.loadTodayReviewState.mockImplementationOnce(() => new Promise((resolve) => { resolveLoad = resolve; }));
+    let loading;
+    await act(async () => { loading = latest.load(); });
+    await act(async () => { latest.setControllableFocus('Newer local draft'); });
+    await act(async () => { resolveLoad(makeState()); await loading; });
+    expect(latest.controllableFocus).toBe('Newer local draft');
+  });
+
+  it('does not leak drafts or apply an old save response after the authenticated user changes', async () => {
+    await renderHook();
+    let resolveSave;
+    serviceMocks.updateDesiredDirection.mockImplementationOnce(() => new Promise((resolve) => { resolveSave = resolve; }));
+    await act(async () => { latest.setDesiredDirection('First user draft'); });
+    let pending;
+    await act(async () => { pending = latest.saveDesiredDirection(); });
+    const second = makeState();
+    second.review = { ...second.review, id: 'review-user-2', desired_direction: 'Second user saved direction' };
+    serviceMocks.loadTodayReviewState.mockResolvedValue(second);
+    await act(async () => {
+      root.render(<HookProbe userId="user-2" onRender={(value) => { latest = value; }} />);
+    });
+    await act(async () => { resolveSave(); await pending; });
+    expect(latest.state.review.id).toBe('review-user-2');
+    expect(latest.desiredDirection).toBe('Second user saved direction');
+    expect(latest.state.review.desired_direction).toBe('Second user saved direction');
+    expect(JSON.parse(window.localStorage.getItem('today-v2-draft:user-2:2026-09-28')).desiredDirection).toBe('Second user saved direction');
+  });
+
+  it('ignores old direction/focus failures and finally handlers while new-day saves remain pending', async () => {
+    await renderHook();
+    let rejectDirection;
+    let rejectFocus;
+    let resolveDirection;
+    let resolveFocus;
+    serviceMocks.updateDesiredDirection
+      .mockImplementationOnce(() => new Promise((_, reject) => { rejectDirection = reject; }))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveDirection = resolve; }));
+    serviceMocks.updateControllableFocus
+      .mockImplementationOnce(() => new Promise((_, reject) => { rejectFocus = reject; }))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveFocus = resolve; }));
+    await act(async () => {
+      latest.setDesiredDirection('Old direction');
+      latest.setControllableFocus('Old focus');
+    });
+    let oldPending;
+    await act(async () => { oldPending = latest.flushAll(); void oldPending.catch(() => {}); });
+    serviceMocks.loadTodayReviewState.mockResolvedValue(makeState({
+      todayLocalDate: '2026-09-29', tomorrowLocalDate: '2026-09-30',
+    }));
+    await act(async () => { await latest.load(); });
+    let newPending;
+    await act(async () => {
+      latest.setDesiredDirection('New direction');
+      latest.setControllableFocus('New focus');
+      newPending = latest.flushAll();
+    });
+    expect(serviceMocks.updateDesiredDirection).toHaveBeenCalledTimes(2);
+    expect(serviceMocks.updateControllableFocus).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      rejectDirection(new Error('Old direction failure'));
+      rejectFocus(new Error('Old focus failure'));
+      await expect(oldPending).rejects.toThrow('Old direction failure');
+    });
+    expect(latest.desiredDirectionSaveStatus).toBe('saving');
+    expect(latest.controllableFocusSaveStatus).toBe('saving');
+    let repeated;
+    await act(async () => { repeated = latest.flushAll(); });
+    expect(serviceMocks.updateDesiredDirection).toHaveBeenCalledTimes(2);
+    expect(serviceMocks.updateControllableFocus).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      resolveDirection();
+      resolveFocus();
+      await newPending;
+      await repeated;
+    });
+    expect(latest.state.review.desired_direction).toBe('New direction');
+    expect(latest.state.review.controllable_focus).toBe('New focus');
+  });
+
+  it('does not let an older queued plan flush save drafts from the new review context', async () => {
+    await renderHook();
+    await act(async () => { latest.setTomorrowActions(['Old action']); });
+    let resolveOld;
+    serviceMocks.replaceTomorrowActions.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve; }));
+    let first;
+    let queued;
+    await act(async () => { first = latest.saveTomorrowPlan(); queued = latest.saveTomorrowPlan(); });
+    serviceMocks.loadTodayReviewState.mockResolvedValue(makeState({
+      todayLocalDate: '2026-09-29', tomorrowLocalDate: '2026-09-30',
+    }));
+    await act(async () => { await latest.load(); latest.setTomorrowActions(['New action']); });
+    await act(async () => {
+      resolveOld({ rawPlanText: '', savedFragments: [{ id: 'old-fragment', fragment_text: 'Old action' }] });
+      await first;
+      await queued;
+    });
+    expect(serviceMocks.replaceTomorrowActions).toHaveBeenCalledTimes(1);
+    expect(latest.tomorrowActions).toEqual(['New action']);
+    expect(latest.state.tomorrowFragments).toEqual([]);
+    expect(JSON.parse(window.localStorage.getItem('today-v2-draft:user-1:2026-09-29')).tomorrowPlanNeedsSync).toBe(true);
+  });
+
+  it('does not apply or unlock an older completion after reloading the same review ID', async () => {
+    await renderHook();
+    let resolveOld;
+    let resolveCurrent;
+    serviceMocks.completeTodayV2Review
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve; }))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveCurrent = resolve; }));
+    let oldPending;
+    await act(async () => { oldPending = latest.completeReview(); });
+    await act(async () => { await latest.load(); });
+    let currentPending;
+    await act(async () => { currentPending = latest.completeReview(); });
+    expect(serviceMocks.completeTodayV2Review).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      resolveOld({ completed_at: 'old-completion' });
+      await oldPending;
+    });
+    expect(latest.completionSaving).toBe(true);
+    expect(latest.state.review.completed_at).toBeNull();
+    await act(async () => {
+      resolveCurrent({ completed_at: 'current-completion' });
+      await currentPending;
+    });
+    expect(latest.completionSaving).toBe(false);
+    expect(latest.state.review.completed_at).toBe('current-completion');
+  });
+
+  it('ignores an old reopen response after the same review ID is reloaded', async () => {
+    const completed = makeState();
+    completed.review.completed_at = 'current-completion';
+    completed.routeTarget = '/home';
+    serviceMocks.loadTodayReviewState.mockResolvedValue(completed);
+    await renderHook();
+    let resolveReopen;
+    serviceMocks.reopenTodayV2Review.mockImplementationOnce(() => new Promise((resolve) => { resolveReopen = resolve; }));
+    let pending;
+    await act(async () => { pending = latest.reopenReview(); });
+    await act(async () => { await latest.load(); });
+    await act(async () => {
+      resolveReopen({ completed_at: null });
+      await pending;
+    });
+    expect(latest.isCompleted).toBe(true);
+    expect(latest.state.routeTarget).toBe('/home');
+  });
+
+  it('retains actual UUIDs through explicit edit/remove/resplit rather than substituting client keys', async () => {
+    const firstId = '38a3ee64-78ac-4b31-9cd4-df3d93407ce1';
+    const secondId = '64bbfe20-0226-4c24-9f5c-7c1f8d27e885';
+    serviceMocks.loadTodayReviewState.mockResolvedValue({
+      ...makeState(), scheduleAvailable: true, tomorrowPlanInput: 'Write and Walk',
+      tomorrowFragments: [{ id: firstId, fragment_text: 'Write' }, { id: secondId, fragment_text: 'Walk' }],
+    });
+    serviceMocks.replaceTomorrowActions.mockImplementation(async ({ rawPlanText, actionTexts, fragmentIds }) => ({
+      rawPlanText, savedFragments: actionTexts.map((text, index) => ({ id: fragmentIds[index], fragment_text: text })),
+    }));
+    await renderHook();
+    await act(async () => { latest.editTomorrowAction(0, 'Write more'); await latest.saveTomorrowPlan(); });
+    expect(serviceMocks.replaceTomorrowActions.mock.calls[0][0].fragmentIds).toEqual([firstId, secondId]);
+    await act(async () => { latest.removeTomorrowAction(0); await latest.saveTomorrowPlan(); });
+    expect(serviceMocks.replaceTomorrowActions.mock.calls[1][0].fragmentIds).toEqual([secondId]);
+    await act(async () => { latest.setTomorrowInput('Walk'); latest.splitTomorrowActions(); await latest.saveTomorrowPlan(); });
+    expect(serviceMocks.replaceTomorrowActions.mock.calls[2][0].fragmentIds).toEqual([secondId]);
   });
 });

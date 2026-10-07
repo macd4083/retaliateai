@@ -99,6 +99,14 @@ export function useTodayV2State(userId) {
   const schedulePromiseRef = React.useRef(null);
   const planRevisionRef = React.useRef(0);
   const loadGenerationRef = React.useRef(0);
+  const editRevisionRef = React.useRef(0);
+  const completionSavingRef = React.useRef(false);
+  const completionOperationRef = React.useRef(null);
+  const pendingWritesRef = React.useRef(new Set());
+  const writeErrorsRef = React.useRef(new Map());
+  const loadedUserRef = React.useRef(null);
+  const currentUserRef = React.useRef(userId);
+  currentUserRef.current = userId;
 
   const stateRef = React.useRef(null);
   const desiredDirectionRef = React.useRef('');
@@ -119,6 +127,33 @@ export function useTodayV2State(userId) {
   tomorrowInputRef.current = tomorrowInput;
   tomorrowActionsRef.current = tomorrowActions;
   firstFiveMinutesRef.current = firstFiveMinutes;
+
+  const canEdit = React.useCallback(() => loadedUserRef.current === currentUserRef.current
+    && Boolean(stateRef.current) && !completionSavingRef.current && !stateRef.current.review?.completed_at, []);
+  const trackWrite = React.useCallback((key, operation) => {
+    if (!canEdit()) return Promise.reject(new Error('Reopen the review before editing'));
+    const reviewId = stateRef.current.review.id;
+    const ownerId = currentUserRef.current;
+    const generation = loadGenerationRef.current;
+    const entry = { key, reviewId, ownerId, generation, promise: null };
+    const previousWrite = [...pendingWritesRef.current].reverse()
+      .find((pending) => pending.key === key && pending.reviewId === reviewId && pending.ownerId === ownerId);
+    const promise = Promise.resolve(previousWrite?.promise).catch(() => {}).then(() => {
+      if (generation !== loadGenerationRef.current || stateRef.current?.review?.id !== reviewId || currentUserRef.current !== ownerId) {
+        throw new Error('Review changed before saving; retry the edit');
+      }
+      return operation();
+    }).then((result) => {
+      if (generation === loadGenerationRef.current && stateRef.current?.review?.id === reviewId && currentUserRef.current === ownerId) writeErrorsRef.current.delete(key);
+      return result;
+    }, (writeError) => {
+      if (generation === loadGenerationRef.current && stateRef.current?.review?.id === reviewId && currentUserRef.current === ownerId) writeErrorsRef.current.set(key, writeError);
+      throw writeError;
+    }).finally(() => pendingWritesRef.current.delete(entry));
+    entry.promise = promise;
+    pendingWritesRef.current.add(entry);
+    return promise;
+  }, [canEdit]);
 
   const visibleHabits = React.useMemo(
     () => state?.habitOccurrences || [],
@@ -168,20 +203,28 @@ export function useTodayV2State(userId) {
   }), [controllableFocus, firstFiveMinutes, state?.followThroughItems, state?.habitOccurrences, tomorrowActions]);
 
   const setDesiredDirection = React.useCallback((value) => {
+    if (!canEdit()) return;
+    desiredDirectionRef.current = value;
+    editRevisionRef.current += 1;
     setDesiredDirectionState(value);
-  }, []);
+  }, [canEdit]);
 
   const setControllableFocus = React.useCallback((value) => {
+    if (!canEdit()) return;
+    controllableFocusRef.current = value;
+    editRevisionRef.current += 1;
     setControllableFocusState(value);
-  }, []);
+  }, [canEdit]);
 
   const setTomorrowInput = React.useCallback((value) => {
+    if (!canEdit()) return;
     tomorrowInputRef.current = value;
     planRevisionRef.current += 1;
     setTomorrowInputState(value);
-  }, []);
+  }, [canEdit]);
 
   const applyActions = React.useCallback((items) => {
+    if (!canEdit()) return;
     identitiesRef.current = items;
     tomorrowActionsRef.current = items.map((item) => item.text);
     planRevisionRef.current += 1;
@@ -194,34 +237,39 @@ export function useTodayV2State(userId) {
       scheduleRevisionRef.current += 1;
       setScheduleBlocks(pruned);
     }
-  }, []);
+  }, [canEdit]);
 
   const setTomorrowActions = React.useCallback((value) => {
+    if (!canEdit()) return;
     setCustomTomorrowActions(true);
     const texts = typeof value === 'function' ? value(tomorrowActionsRef.current) : value;
     applyActions(reconcileActionIdentities(identitiesRef.current, texts, { allowSingleEdit: true }));
-  }, [applyActions]);
+  }, [applyActions, canEdit]);
 
   const editTomorrowAction = React.useCallback((index, text) => {
+    if (!canEdit()) return;
     setCustomTomorrowActions(true);
     applyActions(identitiesRef.current.map((item, itemIndex) => itemIndex === index ? { ...item, text } : item));
-  }, [applyActions]);
+  }, [applyActions, canEdit]);
 
   const removeTomorrowAction = React.useCallback((index) => {
+    if (!canEdit()) return;
     setCustomTomorrowActions(true);
     applyActions(identitiesRef.current.filter((_, itemIndex) => itemIndex !== index));
-  }, [applyActions]);
+  }, [applyActions, canEdit]);
 
   const setFirstFiveMinutes = React.useCallback((value) => {
+    if (!canEdit()) return;
     firstFiveMinutesRef.current = value;
     planRevisionRef.current += 1;
     setFirstFiveMinutesState(value);
-  }, []);
+  }, [canEdit]);
 
   const load = React.useCallback(async () => {
     const generation = ++loadGenerationRef.current;
     const revision = planRevisionRef.current;
     const scheduleRevision = scheduleRevisionRef.current;
+    const editRevision = editRevisionRef.current;
     if (!userId) {
       setLoading(false);
       setState(null);
@@ -234,7 +282,7 @@ export function useTodayV2State(userId) {
     try {
       const next = await loadTodayReviewState(userId);
       if (generation !== loadGenerationRef.current || revision !== planRevisionRef.current
-        || scheduleRevision !== scheduleRevisionRef.current) return;
+        || scheduleRevision !== scheduleRevisionRef.current || editRevision !== editRevisionRef.current) return;
       const draft = readDraft(userId, next.todayLocalDate);
       const nextDesiredDirection = draft && (draft.desiredDirectionNeedsSync || !normalizeTodayV2Text(next.review?.desired_direction))
         ? String(draft.desiredDirection || '')
@@ -287,7 +335,7 @@ export function useTodayV2State(userId) {
       const sourceKeys = new Map(nextIdentities.filter((item) => item.persistedId).map((item) => [item.persistedId, item.key]));
       const nextSchedules = draft?.scheduleNeedsSync && Array.isArray(draft.scheduleBlocks)
         ? draft.scheduleBlocks
-        : (next.tomorrowSchedules || []).map((row) => ({
+        : (next.tomorrowSchedules || []).filter((row) => !row.target_local_date || row.target_local_date === next.tomorrowLocalDate).map((row) => ({
           ...row, source_key: row.source_type === 'habit' ? `habit:${row.source_id}` : sourceKeys.get(row.source_id),
         }));
       const validKeys = new Set([...nextIdentities.map((item) => item.key),
@@ -299,7 +347,19 @@ export function useTodayV2State(userId) {
       setScheduleSaveStatus(draft?.scheduleNeedsSync ? 'offline' : 'saved');
       setScheduleError(null);
 
+      writeErrorsRef.current.clear();
+      desiredDirectionSavingRef.current = false;
+      controllableFocusSavingRef.current = false;
+      tomorrowPlanSavingRef.current = false;
+      desiredDirectionSavePromiseRef.current = Promise.resolve();
+      controllableFocusSavePromiseRef.current = Promise.resolve();
+      tomorrowPlanSavePromiseRef.current = Promise.resolve();
+      schedulePromiseRef.current = null;
+      completionSavingRef.current = false;
+      completionOperationRef.current = null;
+      setCompletionSaving(false);
       stateRef.current = next;
+      loadedUserRef.current = userId;
       setState(next);
       setSeedDiagnostic(next.seedDiagnostic || null);
       setDesiredDirectionState(nextDesiredDirection);
@@ -314,10 +374,11 @@ export function useTodayV2State(userId) {
       setFirstFiveMinutesSaveStatus(draft?.tomorrowPlanNeedsSync ? 'offline' : 'saved');
       setTomorrowPlanError(null);
     } catch (loadError) {
+      if (generation !== loadGenerationRef.current) return;
       console.error('[TodayV2] load failed:', loadError);
       setError(loadError);
     } finally {
-      setLoading(false);
+      if (generation === loadGenerationRef.current) setLoading(false);
     }
   }, [userId]);
 
@@ -335,7 +396,7 @@ export function useTodayV2State(userId) {
   }, [applyActions, customTomorrowActions, tomorrowInput]);
 
   React.useEffect(() => {
-    if (!userId || !state?.todayLocalDate) return;
+    if (!userId || loadedUserRef.current !== userId || !state?.todayLocalDate) return;
 
     writeDraft(userId, state.todayLocalDate, {
       desiredDirection,
@@ -355,28 +416,40 @@ export function useTodayV2State(userId) {
   }, [tomorrowActions, customTomorrowActions, actionIdentities, scheduleBlocks, scheduleSaveStatus, controllableFocus, controllableFocusDirty, desiredDirection, desiredDirectionDirty, firstFiveMinutes, normalizedTomorrowActions, state?.todayLocalDate, tomorrowInput, tomorrowPlanDirty, userId]);
 
   const flushDesiredDirection = React.useCallback(async () => {
+    if (loadedUserRef.current !== currentUserRef.current) return;
     const reviewId = stateRef.current?.review?.id;
     if (!reviewId) return;
+    if (stateRef.current.review.completed_at) return;
+    if (desiredDirectionSavingRef.current) {
+      const waitingGeneration = loadGenerationRef.current;
+      const waitingOwnerId = currentUserRef.current;
+      await desiredDirectionSavePromiseRef.current;
+      if (waitingGeneration !== loadGenerationRef.current || waitingOwnerId !== currentUserRef.current) return;
+      return flushDesiredDirection();
+    }
     if (!normalizeTodayV2Text(desiredDirectionRef.current) && !normalizeTodayV2Text(stateRef.current?.review?.desired_direction || '')) {
       setDesiredDirectionSaveStatus('saved');
       return;
     }
-    if (!desiredDirectionDirty && !readDraft(userId, stateRef.current?.todayLocalDate)?.desiredDirectionNeedsSync) {
+    if (normalizeTodayV2Text(desiredDirectionRef.current) === normalizeTodayV2Text(stateRef.current.review.desired_direction)) {
       setDesiredDirectionSaveStatus('saved');
       return;
     }
-    if (desiredDirectionSavingRef.current) return desiredDirectionSavePromiseRef.current;
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
       setDesiredDirectionSaveStatus('offline');
-      return;
+      throw new Error('Offline – will retry');
     }
 
     desiredDirectionSavingRef.current = true;
     setDesiredDirectionSaveStatus('saving');
     const nextDirection = desiredDirectionRef.current;
+    const generation = loadGenerationRef.current;
+    const ownerId = currentUserRef.current;
 
-    desiredDirectionSavePromiseRef.current = updateDesiredDirection(reviewId, nextDirection)
+    const savePromise = updateDesiredDirection(reviewId, nextDirection)
       .then(() => {
+        if (generation !== loadGenerationRef.current || currentUserRef.current !== ownerId || stateRef.current?.review?.id !== reviewId) return;
+        stateRef.current = { ...stateRef.current, review: { ...stateRef.current.review, desired_direction: normalizeTodayV2Text(nextDirection) } };
         setState((previous) => previous ? {
           ...previous,
           review: {
@@ -384,38 +457,53 @@ export function useTodayV2State(userId) {
             desired_direction: normalizeTodayV2Text(nextDirection),
           },
         } : previous);
-        setDesiredDirectionSaveStatus('saved');
+        if (nextDirection === desiredDirectionRef.current) setDesiredDirectionSaveStatus('saved');
       })
       .catch((saveError) => {
-        setDesiredDirectionSaveStatus(isOfflineLikeError(saveError) ? 'offline' : 'error');
+        if (generation === loadGenerationRef.current && currentUserRef.current === ownerId) {
+          setDesiredDirectionSaveStatus(isOfflineLikeError(saveError) ? 'offline' : 'error');
+        }
         throw saveError;
       })
       .finally(() => {
-        desiredDirectionSavingRef.current = false;
+        if (desiredDirectionSavePromiseRef.current === savePromise) desiredDirectionSavingRef.current = false;
       });
 
-    return desiredDirectionSavePromiseRef.current;
-  }, [desiredDirectionDirty, userId]);
+    desiredDirectionSavePromiseRef.current = savePromise;
+    return savePromise;
+  }, []);
 
   const flushControllableFocus = React.useCallback(async () => {
+    if (loadedUserRef.current !== currentUserRef.current) return;
     const reviewId = stateRef.current?.review?.id;
     if (!reviewId) return;
-    if (!controllableFocusDirty && !readDraft(userId, stateRef.current?.todayLocalDate)?.controllableFocusNeedsSync) {
+    if (stateRef.current.review.completed_at) return;
+    if (controllableFocusSavingRef.current) {
+      const waitingGeneration = loadGenerationRef.current;
+      const waitingOwnerId = currentUserRef.current;
+      await controllableFocusSavePromiseRef.current;
+      if (waitingGeneration !== loadGenerationRef.current || waitingOwnerId !== currentUserRef.current) return;
+      return flushControllableFocus();
+    }
+    if (normalizeTodayV2Text(controllableFocusRef.current) === normalizeTodayV2Text(stateRef.current.review.controllable_focus)) {
       setControllableFocusSaveStatus('saved');
       return;
     }
-    if (controllableFocusSavingRef.current) return controllableFocusSavePromiseRef.current;
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
       setControllableFocusSaveStatus('offline');
-      return;
+      throw new Error('Offline – will retry');
     }
 
     controllableFocusSavingRef.current = true;
     setControllableFocusSaveStatus('saving');
     const nextFocus = controllableFocusRef.current;
+    const generation = loadGenerationRef.current;
+    const ownerId = currentUserRef.current;
 
-    controllableFocusSavePromiseRef.current = updateControllableFocus(reviewId, nextFocus)
+    const savePromise = updateControllableFocus(reviewId, nextFocus)
       .then(() => {
+        if (generation !== loadGenerationRef.current || currentUserRef.current !== ownerId || stateRef.current?.review?.id !== reviewId) return;
+        stateRef.current = { ...stateRef.current, review: { ...stateRef.current.review, controllable_focus: normalizeTodayV2Text(nextFocus) || null } };
         setState((previous) => previous ? {
           ...previous,
           review: {
@@ -423,22 +511,27 @@ export function useTodayV2State(userId) {
             controllable_focus: normalizeTodayV2Text(nextFocus) || null,
           },
         } : previous);
-        setControllableFocusSaveStatus('saved');
+        if (nextFocus === controllableFocusRef.current) setControllableFocusSaveStatus('saved');
       })
       .catch((saveError) => {
-        setControllableFocusSaveStatus(isOfflineLikeError(saveError) ? 'offline' : 'error');
+        if (generation === loadGenerationRef.current && currentUserRef.current === ownerId) {
+          setControllableFocusSaveStatus(isOfflineLikeError(saveError) ? 'offline' : 'error');
+        }
         throw saveError;
       })
       .finally(() => {
-        controllableFocusSavingRef.current = false;
+        if (controllableFocusSavePromiseRef.current === savePromise) controllableFocusSavingRef.current = false;
       });
 
-    return controllableFocusSavePromiseRef.current;
-  }, [controllableFocusDirty, userId]);
+    controllableFocusSavePromiseRef.current = savePromise;
+    return savePromise;
+  }, []);
 
   const flushTomorrowPlan = React.useCallback(async () => {
+    if (loadedUserRef.current !== currentUserRef.current) return;
     const currentState = stateRef.current;
     if (!currentState) return;
+    if (currentState.review.completed_at) return;
     if (identitiesRef.current.some((item) => !normalizeTodayV2Text(item.text))) {
       const message = 'Finish editing empty actions or remove them before saving the plan.';
       setTomorrowPlanError(message);
@@ -458,7 +551,10 @@ export function useTodayV2State(userId) {
       return;
     }
     if (tomorrowPlanSavingRef.current) {
+      const waitingGeneration = loadGenerationRef.current;
+      const waitingOwnerId = currentUserRef.current;
       await tomorrowPlanSavePromiseRef.current;
+      if (waitingGeneration !== loadGenerationRef.current || waitingOwnerId !== currentUserRef.current) return;
       return flushTomorrowPlan();
     }
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
@@ -478,8 +574,9 @@ export function useTodayV2State(userId) {
     const snapshot = identitiesRef.current.filter((item) => normalizeTodayV2Text(item.text));
     const revision = planRevisionRef.current;
     const generation = loadGenerationRef.current;
+    const ownerId = currentUserRef.current;
 
-    tomorrowPlanSavePromiseRef.current = replaceTomorrowActions({
+    const savePromise = replaceTomorrowActions({
       targetLocalDate: currentState.tomorrowLocalDate,
       sourceLocalDate: currentState.todayLocalDate,
       timezoneName: currentState.timezoneName,
@@ -492,11 +589,11 @@ export function useTodayV2State(userId) {
       explicitActions: true,
     })
       .then((savedPlan) => {
-        if (generation !== loadGenerationRef.current) return;
+        if (generation !== loadGenerationRef.current || currentUserRef.current !== ownerId) return;
         const savedRows = savedPlan.savedFragments || [];
         const savedIds = new Map(snapshot.map((item, index) => [item.key, savedRows[index]?.id || null]));
         identitiesRef.current = identitiesRef.current.map((item) => ({
-          ...item, persistedId: savedIds.get(item.key) || null,
+          ...item, persistedId: savedIds.has(item.key) ? savedIds.get(item.key) : item.persistedId,
         }));
         setActionIdentities(identitiesRef.current);
         const nextState = {
@@ -533,6 +630,7 @@ export function useTodayV2State(userId) {
         }
       })
       .catch(async (saveError) => {
+        if (generation !== loadGenerationRef.current || currentUserRef.current !== ownerId) throw saveError;
         const message = String(saveError?.message || saveError?.details || '');
         const isOverwriteError = /cannot overwrite answered fragments/i.test(message);
         setTomorrowPlanSaveStatus(isOfflineLikeError(saveError) ? 'offline' : 'error');
@@ -544,11 +642,12 @@ export function useTodayV2State(userId) {
         throw saveError;
       })
       .finally(() => {
-        tomorrowPlanSavingRef.current = false;
+        if (tomorrowPlanSavePromiseRef.current === savePromise) tomorrowPlanSavingRef.current = false;
       });
 
-    await tomorrowPlanSavePromiseRef.current;
-    if (generation === loadGenerationRef.current && revision !== planRevisionRef.current) {
+    tomorrowPlanSavePromiseRef.current = savePromise;
+    await savePromise;
+    if (generation === loadGenerationRef.current && currentUserRef.current === ownerId && revision !== planRevisionRef.current) {
       return flushTomorrowPlan();
     }
   }, [load, userId]);
@@ -564,6 +663,7 @@ export function useTodayV2State(userId) {
   ], [actionIdentities, state?.habitDefinitions, state?.tomorrowLocalDate]);
 
   const updateSchedule = React.useCallback((itemKey, times) => {
+    if (!canEdit()) return;
     const item = schedulerItems.find((candidate) => candidate.id === itemKey);
     if (!item) throw new Error('Unknown schedule item');
     const block = normalizeScheduleBlock({
@@ -575,17 +675,20 @@ export function useTodayV2State(userId) {
     setScheduleBlocks(next);
     setScheduleSaveStatus('idle');
     setScheduleError(null);
-  }, [schedulerItems]);
+  }, [canEdit, schedulerItems]);
 
   const unschedule = React.useCallback((itemKey) => {
+    if (!canEdit()) return;
     scheduleRef.current = scheduleRef.current.filter((row) => row.source_key !== itemKey);
     scheduleRevisionRef.current += 1;
     setScheduleBlocks(scheduleRef.current);
     setScheduleSaveStatus('idle');
     setScheduleError(null);
-  }, []);
+  }, [canEdit]);
 
   const flushSchedule = React.useCallback(async () => {
+    if (loadedUserRef.current !== currentUserRef.current) return;
+    if (stateRef.current?.review?.completed_at) return;
     const requireAvailability = () => {
       if (ENABLE_TODAY_V2_SCHEDULER && stateRef.current?.scheduleAvailable) return true;
       if (scheduleSavedRevisionRef.current !== scheduleRevisionRef.current) {
@@ -599,16 +702,18 @@ export function useTodayV2State(userId) {
     if (!requireAvailability()) return;
     if (schedulePromiseRef.current) return schedulePromiseRef.current;
     const generation = loadGenerationRef.current;
-    schedulePromiseRef.current = (async () => {
+    const ownerId = currentUserRef.current;
+    const savePromise = (async () => {
       // Drain in-flight edits before mapping client keys to real persisted sources.
       let planRevision;
       do {
         planRevision = planRevisionRef.current;
         await flushTomorrowPlan();
+        if (generation !== loadGenerationRef.current || currentUserRef.current !== ownerId) return;
       } while (planRevision !== planRevisionRef.current);
       if (!requireAvailability()) return;
       while (scheduleSavedRevisionRef.current !== scheduleRevisionRef.current) {
-        if (generation !== loadGenerationRef.current) return;
+        if (generation !== loadGenerationRef.current || currentUserRef.current !== ownerId) return;
         const currentState = stateRef.current;
         const revision = scheduleRevisionRef.current;
         const snapshot = scheduleRef.current;
@@ -622,7 +727,7 @@ export function useTodayV2State(userId) {
         const rows = await replaceSchedule({
           targetLocalDate: currentState.tomorrowLocalDate, timezoneName: currentState.timezoneName, blocks,
         });
-        if (generation !== loadGenerationRef.current) return;
+        if (generation !== loadGenerationRef.current || currentUserRef.current !== ownerId) return;
         scheduleSavedRevisionRef.current = revision;
         if (revision === scheduleRevisionRef.current) {
           scheduleRef.current = snapshot.map((block) => ({
@@ -640,6 +745,7 @@ export function useTodayV2State(userId) {
       setScheduleSaveStatus('saved');
       setScheduleError(null);
     })().catch((saveError) => {
+      if (generation !== loadGenerationRef.current || currentUserRef.current !== ownerId) throw saveError;
       setScheduleSaveStatus(isOfflineLikeError(saveError) ? 'offline' : 'error');
       setScheduleError(saveError);
       if (isMissingScheduleSchema(saveError)) {
@@ -647,16 +753,33 @@ export function useTodayV2State(userId) {
           scheduleDiagnostic: { code: saveError.code, message: saveError.message } } : previous);
       }
       throw saveError;
-    }).finally(() => { schedulePromiseRef.current = null; });
-    return schedulePromiseRef.current;
+    }).finally(() => {
+      if (schedulePromiseRef.current === savePromise) schedulePromiseRef.current = null;
+    });
+    schedulePromiseRef.current = savePromise;
+    return savePromise;
   }, [flushTomorrowPlan]);
 
   const flushAll = React.useCallback(async () => {
+    const generation = loadGenerationRef.current;
+    const ownerId = currentUserRef.current;
+    const requireCurrentContext = () => {
+      if (generation !== loadGenerationRef.current || ownerId !== currentUserRef.current) {
+        throw new Error('Review changed while saving; retry the save');
+      }
+    };
+    await Promise.all([...pendingWritesRef.current]
+      .filter((entry) => entry.generation === loadGenerationRef.current
+        && entry.reviewId === stateRef.current?.review?.id && entry.ownerId === currentUserRef.current)
+      .map((entry) => entry.promise));
+    requireCurrentContext();
+    if (writeErrorsRef.current.size) throw writeErrorsRef.current.values().next().value;
     const results = await Promise.allSettled([flushDesiredDirection(), flushControllableFocus(), flushTomorrowPlan()]);
     const rejected = results.find((result) => result.status === 'rejected');
     if (rejected?.status === 'rejected') {
       throw rejected.reason;
     }
+    requireCurrentContext();
     await flushSchedule();
     return results;
   }, [flushControllableFocus, flushDesiredDirection, flushTomorrowPlan, flushSchedule]);
@@ -675,17 +798,6 @@ export function useTodayV2State(userId) {
     const nextDateContext = getTodayV2DateContext({ dayBoundaryHour: currentState.dayBoundaryHour });
     if (nextDateContext.todayLocalDate === currentState.todayLocalDate) return;
 
-    setDesiredDirectionState('');
-    setControllableFocusState('');
-    setTomorrowInputState('');
-    setTomorrowActionsState([]);
-    setFirstFiveMinutesState('');
-    setCustomTomorrowActions(false);
-    setDesiredDirectionSaveStatus('idle');
-    setControllableFocusSaveStatus('idle');
-    setTomorrowPlanSaveStatus('idle');
-    setFirstFiveMinutesSaveStatus('idle');
-    setTomorrowPlanError(null);
     await load();
   }, [load]);
 
@@ -746,7 +858,7 @@ export function useTodayV2State(userId) {
     if (!state || !desiredDirectionDirty) return undefined;
     setDesiredDirectionSaveStatus('saving');
     const timeoutId = window.setTimeout(() => {
-      void flushDesiredDirection();
+      void flushDesiredDirection().catch(() => {});
     }, 800);
     return () => window.clearTimeout(timeoutId);
   }, [desiredDirectionDirty, flushDesiredDirection, state]);
@@ -755,7 +867,7 @@ export function useTodayV2State(userId) {
     if (!state || !controllableFocusDirty) return undefined;
     setControllableFocusSaveStatus('saving');
     const timeoutId = window.setTimeout(() => {
-      void flushControllableFocus();
+      void flushControllableFocus().catch(() => {});
     }, 800);
     return () => window.clearTimeout(timeoutId);
   }, [controllableFocusDirty, flushControllableFocus, state]);
@@ -771,19 +883,21 @@ export function useTodayV2State(userId) {
   }, [flushTomorrowPlan, state, tomorrowPlanDirty]);
 
   const splitTomorrowActions = React.useCallback(() => {
+    if (!canEdit()) return;
     setCustomTomorrowActions(false);
     setTomorrowPlanError(null);
     applyActions(reconcileActionIdentities(identitiesRef.current,
-      buildTodayV2CommitmentDrafts(tomorrowInput).map((draft) => draft.normalizedFragmentText)));
-  }, [applyActions, tomorrowInput]);
+      buildTodayV2CommitmentDrafts(tomorrowInputRef.current).map((draft) => draft.normalizedFragmentText)));
+  }, [applyActions, canEdit]);
 
   const saveTomorrowPlan = React.useCallback(async () => flushTomorrowPlan(), [flushTomorrowPlan]);
 
-  const saveCommitmentCompletion = React.useCallback(async (fragmentId, completionState) => {
+  const saveCommitmentCompletion = React.useCallback((fragmentId, completionState) => trackWrite(`fragment:${fragmentId}`, async () => {
+    const reviewId = stateRef.current?.review?.id;
     const nextState = completionState || TODAY_V2_COMMITMENT_STATES.UNANSWERED;
     const savedRow = await setFollowThroughCompletion(fragmentId, nextState);
     setState((previous) => {
-      if (!previous) return previous;
+      if (!previous || previous.review.id !== reviewId) return previous;
       return {
         ...previous,
         followThroughItems: previous.followThroughItems.map((item) => (
@@ -793,26 +907,27 @@ export function useTodayV2State(userId) {
         )),
       };
     });
-  }, []);
+  }), [trackWrite]);
 
   const saveDesiredDirection = React.useCallback(async () => flushDesiredDirection(), [flushDesiredDirection]);
 
-  const saveHabitDefinition = React.useCallback(async (habitDraft) => {
+  const saveHabitDefinition = React.useCallback((habitDraft) => trackWrite(`habit:${habitDraft.id || 'new'}`, async () => {
     if (!userId) return null;
     const id = await upsertHabitDefinition(userId, habitDraft);
     await load();
     return id;
-  }, [load, userId]);
+  }), [load, trackWrite, userId]);
 
-  const archiveHabitDefinition = React.useCallback(async (habitId) => {
+  const archiveHabitDefinition = React.useCallback((habitId) => trackWrite(`habit:${habitId}`, async () => {
     await archiveHabit(userId, habitId);
     await load();
-  }, [load, userId]);
+  }), [load, trackWrite, userId]);
 
-  const saveHabitResponse = React.useCallback(async (occurrence, value) => {
+  const saveHabitResponse = React.useCallback((occurrence, value) => trackWrite(`occurrence:${occurrence.id}`, async () => {
+    const reviewId = stateRef.current?.review?.id;
     const savedOccurrence = await upsertHabitLog(occurrence.id, occurrence.snapshot_response_type, value);
     setState((previous) => {
-      if (!previous) return previous;
+      if (!previous || previous.review.id !== reviewId) return previous;
       return {
         ...previous,
         habitOccurrences: previous.habitOccurrences.map((item) => (
@@ -822,9 +937,9 @@ export function useTodayV2State(userId) {
         )),
       };
     });
-  }, []);
+  }), [trackWrite]);
 
-  const addManualFollowThrough = React.useCallback(async (actionText) => {
+  const addManualFollowThrough = React.useCallback((actionText) => trackWrite('manual', async () => {
     if (!state || !userId) return null;
     const nextFragmentOrder = state.followThroughItems.reduce(
       (maxOrder, item) => Math.max(maxOrder, Number(item.fragment_order ?? -1)),
@@ -840,7 +955,7 @@ export function useTodayV2State(userId) {
     );
 
     setState((previous) => {
-      if (!previous) return previous;
+      if (!previous || previous.review.id !== state.review.id) return previous;
       return {
         ...previous,
         followThroughItems: [...previous.followThroughItems, created],
@@ -848,15 +963,26 @@ export function useTodayV2State(userId) {
     });
 
     return created;
-  }, [state, userId]);
+  }), [state, trackWrite, userId]);
 
   const completeReview = React.useCallback(async () => {
-    if (!state?.review?.id) return null;
+    if (!stateRef.current?.review?.id || !canEdit()) return null;
+    const reviewId = stateRef.current.review.id;
+    const generation = loadGenerationRef.current;
+    const ownerId = currentUserRef.current;
+    const operation = Symbol('completion');
+    completionOperationRef.current = operation;
+    completionSavingRef.current = true;
     setCompletionSaving(true);
     try {
       await flushAll();
-      const savedReview = await completeTodayV2Review(state.review.id);
-      setState((previous) => previous ? {
+      if (generation !== loadGenerationRef.current || currentUserRef.current !== ownerId || stateRef.current?.review?.id !== reviewId) {
+        throw new Error('Review changed while saving; retry completion');
+      }
+      const savedReview = await completeTodayV2Review(reviewId);
+      if (generation !== loadGenerationRef.current || currentUserRef.current !== ownerId || stateRef.current?.review?.id !== reviewId) return savedReview;
+      stateRef.current = { ...stateRef.current, review: { ...stateRef.current.review, ...savedReview } };
+      setState((previous) => previous?.review?.id === reviewId ? {
         ...previous,
         review: {
           ...previous.review,
@@ -866,14 +992,23 @@ export function useTodayV2State(userId) {
       } : previous);
       return savedReview;
     } finally {
-      setCompletionSaving(false);
+      if (completionOperationRef.current === operation) {
+        completionOperationRef.current = null;
+        completionSavingRef.current = false;
+        setCompletionSaving(false);
+      }
     }
-  }, [flushAll, state?.review?.id]);
+  }, [canEdit, flushAll]);
 
   const reopenReview = React.useCallback(async () => {
-    if (!state?.review?.id) return null;
-    const savedReview = await reopenTodayV2Review(state.review.id);
-    setState((previous) => previous ? {
+    if (!stateRef.current?.review?.id || completionSavingRef.current) return null;
+    const reviewId = stateRef.current.review.id;
+    const generation = loadGenerationRef.current;
+    const ownerId = currentUserRef.current;
+    const savedReview = await reopenTodayV2Review(reviewId);
+    if (generation !== loadGenerationRef.current || currentUserRef.current !== ownerId || stateRef.current?.review?.id !== reviewId) return savedReview;
+    stateRef.current = { ...stateRef.current, review: { ...stateRef.current.review, ...savedReview } };
+    setState((previous) => previous?.review?.id === reviewId ? {
       ...previous,
       review: {
         ...previous.review,
@@ -882,7 +1017,7 @@ export function useTodayV2State(userId) {
       routeTarget: '/today',
     } : previous);
     return savedReview;
-  }, [state?.review?.id]);
+  }, []);
 
   return {
     loading,
