@@ -139,6 +139,88 @@ describe('TomorrowScheduler UI', () => {
     expect(google.querySelector('[data-scheduler-drag-key]')).toBeNull();
   });
 
+  it.each(items)('returns a scheduled $type to the dark tray without deleting it', async (item) => {
+    const unschedule = vi.fn();
+    const props = { onUnschedule: unschedule, items: [item], blocks: [{
+      source_key: item.key, starts_at: '2026-10-07T09:00:00Z', ends_at: '2026-10-07T09:30:00Z',
+    }] };
+    await render(props);
+    const tray = container.querySelector('[aria-label="Unscheduled items"]');
+    expect(tray.className).toContain('bg-zinc-950');
+    expect(tray.className).toContain('rounded-3xl');
+    expect(tray.textContent).toContain('Everything has a time.');
+    const dragged = { data: { current: { item } } };
+    await act(async () => dnd.handlers.onDragStart({ active: dragged }));
+    await act(async () => dnd.handlers.onDragEnd({ active: dragged, over: { id: 'unscheduled-tray' } }));
+    expect(unschedule).toHaveBeenCalledExactlyOnceWith(item.key);
+    expect(update).not.toHaveBeenCalled();
+    await render({ ...props, blocks: [] });
+    expect(tray.textContent).toContain(item.label);
+    expect(tray.querySelector(`[data-scheduler-drag-key="${item.key}"]`)).not.toBeNull();
+    expect(container.querySelector(`[data-schedule-key="${item.key}"]`)).toBeNull();
+  });
+
+  it('detects the tray outside the timeline and ignores disabled tray targets', async () => {
+    await render();
+    const target = { id: 'unscheduled-tray', disabled: false };
+    const args = {
+      pointerCoordinates: { x: 50, y: 50 },
+      droppableContainers: [target],
+      droppableRects: new Map([[target.id, { left: 0, right: 100, top: 0, bottom: 100 }]]),
+    };
+    expect(dnd.handlers.collisionDetection(args).map((hit) => hit.id)).toEqual([target.id]);
+    expect(dnd.handlers.collisionDetection({ ...args, pointerCoordinates: { x: 150, y: 50 } })).toEqual([]);
+    expect(dnd.handlers.collisionDetection({ ...args, droppableContainers: [{ ...target, disabled: true }] })).toEqual([]);
+  });
+
+  it('does not unschedule an unscheduled or missing item, or a cancelled drag', async () => {
+    const unschedule = vi.fn();
+    await render({ onUnschedule: unschedule });
+    for (const item of [items[0], { key: 'missing', label: 'Missing' }]) {
+      const dragged = { data: { current: { item } } };
+      await act(async () => dnd.handlers.onDragStart({ active: dragged }));
+      await act(async () => dnd.handlers.onDragEnd({ active: dragged, over: { id: 'unscheduled-tray' } }));
+    }
+    await render({ onUnschedule: unschedule, blocks: [{
+      source_key: 'action-1', starts_at: '2026-10-07T09:00:00Z', ends_at: '2026-10-07T09:30:00Z',
+    }] });
+    const dragged = { data: { current: { item: items[0] } } };
+    await act(async () => dnd.handlers.onDragStart({ active: dragged }));
+    await act(async () => dnd.handlers.onDragCancel());
+    await act(async () => dnd.handlers.onDragEnd({ active: dragged, over: { id: 'unscheduled-tray' } }));
+    expect(unschedule).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it.each(['readOnly', 'completionSaving', 'available', 'localDate'])('rejects a late tray drop after %s changes', async (property) => {
+    const unschedule = vi.fn();
+    const props = { onUnschedule: unschedule, blocks: [{
+      source_key: 'action-1', starts_at: '2026-10-07T09:00:00Z', ends_at: '2026-10-07T09:30:00Z',
+    }] };
+    await render(props);
+    const dragged = { data: { current: { item: items[0] } } };
+    const lateDrop = dnd.handlers.onDragEnd;
+    await act(async () => dnd.handlers.onDragStart({ active: dragged }));
+    await render({ ...props, [property]: property === 'localDate' ? '2026-10-08' : property !== 'available' });
+    await act(async () => lateDrop({ active: dragged, over: { id: 'unscheduled-tray' } }));
+    await render(props);
+    await act(async () => dnd.handlers.onDragEnd({ active: dragged, over: { id: 'unscheduled-tray' } }));
+    expect(unschedule).not.toHaveBeenCalled();
+  });
+
+  it('keeps the block and exposes an error when returning to the tray fails', async () => {
+    const unschedule = vi.fn().mockRejectedValue(new Error('Could not unschedule'));
+    await render({ onUnschedule: unschedule, blocks: [{
+      source_key: 'action-1', starts_at: '2026-10-07T09:00:00Z', ends_at: '2026-10-07T09:30:00Z',
+    }] });
+    const dragged = { data: { current: { item: items[0] } } };
+    await act(async () => dnd.handlers.onDragStart({ active: dragged }));
+    await act(async () => dnd.handlers.onDragEnd({ active: dragged, over: { id: 'unscheduled-tray' } }));
+    expect(container.querySelector('[data-schedule-key="action-1"]')).not.toBeNull();
+    expect(document.querySelector('[role="alert"]').textContent).toContain('Could not unschedule');
+    expect(Array.from(document.querySelectorAll('button')).find((node) => node.textContent === 'Unschedule').disabled).toBe(false);
+  });
+
   it('keeps short imported event details focusable and scrollable without making them draggable', async () => {
     calendar.events = [{ id: 'brief', title: 'A detailed meeting title that needs more space', start: '2026-10-07T09:00:00Z', end: '2026-10-07T09:15:00Z' }];
     await render();

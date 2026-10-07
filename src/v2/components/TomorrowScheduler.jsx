@@ -7,6 +7,7 @@ const fieldClass = 'w-full rounded-lg border border-zinc-600 bg-zinc-950 px-3 py
 const buttonClass = 'rounded-lg border border-zinc-600 px-3 py-2 text-sm hover:border-zinc-400 disabled:opacity-50';
 const itemKey = (item) => item.key || item.item_key || item.id;
 const blockKey = (block) => block.source_key || block.item_key || block.key;
+const unscheduledTrayId = 'unscheduled-tray';
 
 class MousePenPointerSensor extends PointerSensor {
   static activators = PointerSensor.activators.map((activator) => ({
@@ -32,6 +33,15 @@ function localParts(value, timezone) {
 function Slot({ minute, timestamp, disabled }) {
   const { setNodeRef, isOver } = useDroppable({ id: `slot:${timestamp}`, data: { minute, timestamp }, disabled });
   return <div ref={setNodeRef} data-slot-timestamp={timestamp} aria-hidden="true" className={`h-9 border-t ${minute % 60 === 0 ? 'border-zinc-600/60' : 'border-zinc-800/60'} ${isOver ? 'bg-red-500/25' : ''}`} />;
+}
+
+function UnscheduledTray({ disabled, children }) {
+  const { setNodeRef, isOver } = useDroppable({ id: unscheduledTrayId, disabled });
+  return (
+    <aside ref={setNodeRef} aria-label="Unscheduled items" className={`min-h-40 space-y-2 self-start rounded-3xl border bg-zinc-950 p-4 ${isOver ? 'border-red-500 ring-2 ring-red-500/40' : 'border-zinc-700'}`}>
+      {children}
+    </aside>
+  );
 }
 
 function DraggableItem({ item, onEdit, disabled, style = undefined, compact = false, short = false, timeDescription = '', children = null }) {
@@ -89,6 +99,11 @@ export default function TomorrowScheduler({
     return { timestamp, minute: index * 15, ...localParts(timestamp, timezone) };
   }), [dayStart, dayMinutes, timezone]);
   const detectTimeSlot = React.useCallback((args) => {
+    const trayTargets = args.droppableContainers.filter((entry) => entry.id === unscheduledTrayId && !entry.disabled);
+    if (trayTargets.length) {
+      const trayHits = pointerWithin({ ...args, droppableContainers: trayTargets });
+      if (trayHits.length) return trayHits;
+    }
     const viewport = timeline.current;
     const pointer = args.pointerCoordinates;
     if (!viewport || !pointer) return pointerWithin(args);
@@ -195,9 +210,17 @@ export default function TomorrowScheduler({
     if (interaction.current.locked || generation !== interaction.current.generation || dragGeneration.current !== generation || writePending.current === generation) return;
     dragGeneration.current = null;
     const item = dragged.data.current?.item;
-    const timestamp = over?.data.current?.timestamp;
-    if (!item || !timestamp || Date.parse(timestamp) < dayStart || Date.parse(timestamp) >= dayEnd) return;
+    const timestamp = over?.data?.current?.timestamp;
+    if (!item || !items.some((candidate) => itemKey(candidate) === itemKey(item))) return;
+    const returningToTray = over?.id === unscheduledTrayId;
+    if (returningToTray ? !scheduledKeys.has(itemKey(item)) : !timestamp || Date.parse(timestamp) < dayStart || Date.parse(timestamp) >= dayEnd) return;
     try {
+      if (returningToTray) {
+        writePending.current = generation;
+        setSaving(true);
+        await onUnschedule(itemKey(item));
+        return;
+      }
       const existing = editableBlocks.find((block) => blockKey(block) === itemKey(item));
       const minutes = existing ? (Date.parse(existing.ends_at) - Date.parse(existing.starts_at)) / 60000 : item.duration_minutes || 30;
       const next = { starts_at: timestamp, ends_at: new Date(Date.parse(timestamp) + minutes * 60000).toISOString() };
@@ -208,7 +231,7 @@ export default function TomorrowScheduler({
     } catch (failure) {
       if (generation === interaction.current.generation) writePending.current = null;
       if (generation === interaction.current.generation && !interaction.current.locked) { edit(item, timestamp); setDialogError(failure.message); }
-    } finally { if (generation === interaction.current.generation) writePending.current = null; }
+    } finally { if (generation === interaction.current.generation) { writePending.current = null; setSaving(false); } }
   };
 
   const blockPosition = (block, count) => {
@@ -235,15 +258,15 @@ export default function TomorrowScheduler({
         <div role="status" aria-live="polite" className="text-xs text-zinc-400">{saveError ? <span className="text-amber-300">{typeof saveError === 'string' ? saveError : saveError.message}</span> : saveStatus === 'saving' ? 'Saving schedule…' : saveStatus === 'saved' ? 'Schedule saved' : saveStatus === 'offline' ? 'Schedule pending sync — reconnect to save.' : saveStatus === 'error' ? 'Schedule could not sync. Your review is still available.' : 'Schedule changes save automatically.'}</div>
         <DndContext sensors={sensors} collisionDetection={detectTimeSlot} onDragStart={({ active: dragged }) => { if (!interaction.current.locked && generation === interaction.current.generation && writePending.current !== generation) { dragGeneration.current = generation; setActive(dragged.data.current.item); } }} onDragCancel={() => { dragGeneration.current = null; setActive(null); }} onDragEnd={drop}>
           <div className="grid gap-4 md:grid-cols-[minmax(160px,1fr)_minmax(0,3fr)]">
-            <aside aria-label="Unscheduled items" className="space-y-2">
+            <UnscheduledTray disabled={locked || saving}>
               <h4 className="text-sm font-medium text-zinc-300">Unscheduled ({unscheduled.length})</h4>
               <p className="text-xs text-zinc-400">ROI action, starting task · Habits due tomorrow</p>
-              <p className="text-xs text-zinc-500">Drag a card onto a time to snap to 15 minutes. On touch screens, hold its handle. Click a card to set an exact time.</p>
+              <p className="text-xs text-zinc-500">Drag a card onto a time to snap to 15 minutes, or back here to unschedule it. On touch screens, hold its handle. Click a card to set an exact time.</p>
               <div className="flex gap-2 overflow-x-auto pb-2 md:flex-col md:overflow-x-visible">
                 {unscheduled.map((item) => <div key={itemKey(item)} className="min-w-[160px] md:min-w-0"><DraggableItem item={item} onEdit={edit} disabled={locked || saving} /></div>)}
               </div>
               {!unscheduled.length && <p className="text-xs text-zinc-500">{readOnly ? 'No unscheduled items.' : items.length ? 'Everything has a time.' : 'Save an action or add a habit to begin.'}</p>}
-            </aside>
+            </UnscheduledTray>
             <div className="min-w-0">
               {allDay.length > 0 && <div aria-label="All-day Google events" className="mb-2 space-y-1 rounded-lg border border-zinc-700 p-2"><p className="text-xs text-zinc-400">All day · Google (read-only)</p>{allDay.map((event) => <p key={event.id} className="text-xs text-zinc-500">{event.summary || event.title || 'Busy'}{event.ends_at || event.end ? ` · until ${event.ends_at || event.end?.date || event.end} (exclusive)` : ''}{event.transparency === 'transparent' ? ' · Free · non-blocking' : ''}</p>)}</div>}
               <div className="mb-2 grid grid-cols-[52px_1fr] gap-1 text-[10px] text-zinc-400"><span>Time</span><span>Your plan{googleLanes.length > 0 && ' · Google events are read-only'}</span></div>
