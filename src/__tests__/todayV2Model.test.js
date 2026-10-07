@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   buildTodayV2CommitmentDrafts,
+  buildTodayV2ActionLabel,
   buildTodayV2HabitResponsePatch,
   buildTodayV2HomeMetrics,
   buildTodayV2OccurrenceSnapshots,
@@ -13,10 +14,25 @@ import {
   getTodayV2DefaultPath,
   getTodayV2MsUntilNextBoundary,
   getTodayV2WeekdayDisplayOrder,
+  normalizeTodayV2ActionStarts,
 } from '../v2/today/model';
 import { TODAY_V2_COMMITMENT_STATES, TODAY_V2_RESPONSE_TYPES } from '../v2/today/types';
 
 describe('TodayV2 model helpers', () => {
+  it('builds concise action-and-start labels with a fallback for missing starts', () => {
+    expect(buildTodayV2ActionLabel(' Write notes ', ' Open the outline ')).toBe('Write notes, Open the outline');
+    expect(buildTodayV2ActionLabel('Read')).toBe('Read');
+    const label = buildTodayV2ActionLabel('Write '.repeat(25), 'Open '.repeat(25));
+    expect(label).toContain('…, ');
+    expect(label.length).toBeLessThanOrEqual(162);
+  });
+
+  it('normalizes start descriptions without losing blank positional lines', () => {
+    expect(normalizeTodayV2ActionStarts('\r\n  Open  notes \r\n\r\n Put on shoes '))
+      .toBe('\nOpen notes\n\nPut on shoes');
+    expect(normalizeTodayV2ActionStarts(' \n ')).toBe('');
+  });
+
   beforeEach(() => {
     vi.useFakeTimers();
   });

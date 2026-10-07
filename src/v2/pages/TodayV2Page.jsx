@@ -169,8 +169,6 @@ export default function TodayV2Page() {
     seedDiagnostic,
     desiredDirection,
     setDesiredDirection,
-    controllableFocus,
-    setControllableFocus,
     tomorrowInput,
     setTomorrowInput,
     tomorrowActions,
@@ -202,7 +200,6 @@ export default function TodayV2Page() {
     completionGate,
     completionSaving,
     desiredDirectionSaveLabel,
-    controllableFocusSaveLabel,
     tomorrowPlanSaveLabel,
     firstFiveMinutesSaveLabel,
     tomorrowPlanError,
@@ -211,6 +208,7 @@ export default function TodayV2Page() {
   } = useTodayV2State(user?.id);
 
   const readOnly = isCompleted || completionSaving;
+  const savedDesiredDirection = state?.review?.desired_direction || state?.previousDesiredDirection || '';
 
   const onAddManualAction = async () => {
     if (!manualActionInput.trim() || readOnly) return;
@@ -470,30 +468,32 @@ export default function TodayV2Page() {
           <textarea
             value={desiredDirection}
             readOnly={readOnly}
-            interactionDisabled={completionSaving}
+            disabled={completionSaving}
             placeholder={state.previousDesiredDirection || ''}
             onChange={(event) => setDesiredDirection(event.target.value)}
             onBlur={() => { if (!readOnly) void saveDesiredDirection(); }}
             className="min-h-24 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm read-only:cursor-not-allowed read-only:opacity-70"
           />
-          <p className="text-xs text-zinc-500">{desiredDirectionSaveLabel}</p>
+          <div className="flex items-center gap-3">
+            <p className="text-xs text-zinc-500">{desiredDirectionSaveLabel}</p>
+            <button
+              type="button"
+              disabled={readOnly || !savedDesiredDirection}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                setDesiredDirection(savedDesiredDirection);
+                void saveDesiredDirection();
+              }}
+              className="rounded-lg border border-zinc-700 px-3 py-1 text-xs text-zinc-300 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Autofill
+            </button>
+          </div>
         </section>
 
         <section className="space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
-          <h3 className="font-semibold">5.2 Right effort and non-attachment</h3>
-          <p className="text-xs text-zinc-500">What is directly under your control that will influence your chances of success tomorrow?</p>
-          <textarea
-            value={controllableFocus}
-            readOnly={readOnly}
-            onChange={(event) => setControllableFocus(event.target.value)}
-            className="min-h-24 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm read-only:cursor-not-allowed read-only:opacity-70"
-          />
-          <p className="text-xs text-zinc-500">{controllableFocusSaveLabel}</p>
-        </section>
-
-        <section className="space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
-          <h3 className="font-semibold">6.1 Highest-ROI Actions</h3>
-          <p className="text-xs text-zinc-500">What measured task can I commit to tomorrow that will improve me the most?</p>
+          <h3 className="font-semibold">6.1 Identity Alignment</h3>
+          <p className="text-xs text-zinc-500">What actions will align me the most with who I&apos;m becoming?</p>
           <textarea
             value={tomorrowInput}
             readOnly={readOnly}
@@ -538,8 +538,8 @@ export default function TodayV2Page() {
 
         <section className="space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
           <h3 className="font-semibold">6.2 Start focus</h3>
-          <p className="text-xs text-zinc-500">What do the first five minutes of starting to work on this commitment look like?</p>
-          <p className="text-xs text-zinc-500">Describe only how you&apos;ll begin — not how much you&apos;ll get done.</p>
+          <p className="text-xs text-zinc-500">What will the start of each action look like?</p>
+          <p className="text-xs text-zinc-500">List each start on a separate line, in the same order as your actions.</p>
           <textarea
             value={firstFiveMinutes}
             readOnly={readOnly}
@@ -603,9 +603,6 @@ export default function TodayV2Page() {
           )}
           {completionGate.unansweredHabitsCount > 0 && (
             <p className="text-xs text-zinc-500">Soft warning: {completionGate.unansweredHabitsCount} habit {completionGate.unansweredHabitsCount === 1 ? 'is' : 'are'} still unanswered.</p>
-          )}
-          {completionGate.hasSoftControllableFocusWarning && (
-            <p className="text-xs text-zinc-500">Soft reminder: 5.2 is empty.</p>
           )}
           {completionGate.hasSoftFirstFiveMinutesWarning && (
             <p className="text-xs text-zinc-500">Soft reminder: 6.2 is empty.</p>

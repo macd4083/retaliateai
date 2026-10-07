@@ -164,6 +164,77 @@ describe('useTodayV2State', () => {
     }));
   });
 
+  it('replaces the saved direction on every edit without using autofill', async () => {
+    await renderHook();
+    for (const direction of ['Builder', 'Patient builder']) {
+      await act(async () => { latest.setDesiredDirection(direction); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(801); });
+      expect(serviceMocks.updateDesiredDirection).toHaveBeenLastCalledWith('review-2026-09-28', direction);
+      expect(latest.state.review.desired_direction).toBe(direction);
+    }
+    await act(async () => { await latest.load(); });
+    expect(latest.desiredDirection).toBe('Patient builder');
+  });
+
+  it('pairs calendar labels with each start and preserves line-only edits when saving', async () => {
+    await renderHook();
+    await act(async () => {
+      latest.setTomorrowActions(['Write', 'Run', 'Read']);
+      latest.setFirstFiveMinutes('Open notes\nPut on shoes');
+    });
+    expect(latest.schedulerItems.map((item) => item.label)).toEqual([
+      'Write, Open notes', 'Run, Put on shoes', 'Read',
+    ]);
+    const keys = latest.tomorrowActionKeys;
+    await act(async () => { await latest.saveTomorrowPlan(); });
+    expect(latest.state.firstFiveMinutes).toBe('Open notes\nPut on shoes');
+    await act(async () => { latest.setFirstFiveMinutes('Open notes Put on shoes'); });
+    await act(async () => { await latest.saveTomorrowPlan(); });
+    expect(serviceMocks.replaceTomorrowActions).toHaveBeenCalledTimes(2);
+    expect(latest.tomorrowActionKeys).toEqual(keys);
+    await act(async () => { latest.setFirstFiveMinutes('\nPut on shoes\nOpen book'); });
+    expect(latest.schedulerItems.map((item) => item.label)).toEqual([
+      'Write', 'Run, Put on shoes', 'Read, Open book',
+    ]);
+    await act(async () => { latest.removeTomorrowAction(0); });
+    expect(latest.schedulerItems.map((item) => item.label)).toEqual([
+      'Run, Put on shoes', 'Read, Open book',
+    ]);
+  });
+
+  it('autofills the stored direction beside Saved and shows the new planning prompts', async () => {
+    serviceMocks.loadTodayReviewState.mockResolvedValue({
+      ...makeState(), previousDesiredDirection: 'Patient builder',
+    });
+    await act(async () => { root.render(<TodayV2Page />); });
+    const button = [...container.querySelectorAll('button')].find((node) => node.textContent === 'Autofill');
+    expect(button.disabled).toBe(false);
+    expect(button.previousElementSibling.textContent).toContain('Saved');
+    expect(container.querySelector('textarea').value).toBe('');
+    await act(async () => { button.click(); });
+    expect(container.querySelector('textarea').value).toBe('Patient builder');
+    expect(serviceMocks.updateDesiredDirection).toHaveBeenCalledWith('review-2026-09-28', 'Patient builder');
+    expect(container.textContent).toContain('6.1 Identity Alignment');
+    expect(container.textContent).toContain("What actions will align me the most with who I'm becoming?");
+    expect(container.textContent).toContain('What will the start of each action look like?');
+    expect(container.textContent).not.toContain('5.2');
+    expect(container.textContent).not.toContain('Highest-ROI');
+  });
+
+  it('disables autofill when there is no saved direction or the review is locked', async () => {
+    await act(async () => { root.render(<TodayV2Page />); });
+    expect([...container.querySelectorAll('button')].find((node) => node.textContent === 'Autofill').disabled).toBe(true);
+    serviceMocks.loadTodayReviewState.mockResolvedValue({
+      ...makeState(), previousDesiredDirection: 'Builder',
+      review: { ...makeState().review, completed_at: '2026-09-28T22:00:00Z' },
+    });
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    await act(async () => { root.render(<TodayV2Page />); });
+    expect([...container.querySelectorAll('button')].find((node) => node.textContent === 'Autofill').disabled).toBe(true);
+    expect(serviceMocks.updateDesiredDirection).not.toHaveBeenCalled();
+  });
+
   it('flushes pending autosaves when the page becomes hidden', async () => {
     await renderHook();
 

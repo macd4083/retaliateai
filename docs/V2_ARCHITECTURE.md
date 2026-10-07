@@ -88,9 +88,11 @@ These generic objects are replaced by the isolated Today V2 schema and should no
 ## Table responsibilities
 ### `today_v2_daily_reviews`
 One row per user and local date for V2 review metadata and the `Who am I actively becoming?` response.
+Desired Direction edits autosave and replace that day's response, whether typed manually or populated with Autofill. Autofill uses the current saved response, falling back to the latest nonempty prior review; it does not overwrite a new day's answer automatically. The retired 5.2 question is no longer displayed, but its historical data remains intact.
 
 ### `today_v2_plan_inputs`
 Raw plan input for a target local date. Stores the paragraph before fragmentation, with source date, target date, timezone, and parser version.
+Identity Alignment captures tomorrow's actions. The `first_five_minutes` field stores each action's start on a separate line, in action order. Calendar drag items display a concise `action, start` label, falling back to the action alone when its start is missing; blank lines preserve positional alignment.
 
 ### `today_v2_commitment_fragments`
 Append-safe fragment rows for follow-through:
