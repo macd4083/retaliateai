@@ -95,6 +95,61 @@ describe('TomorrowScheduler UI', () => {
     expect(container.textContent).toContain('Give your actions a place in the day. Scheduling is optional.');
   });
 
+  it('uses the full native day calendar without an empty Google column', async () => {
+    await render();
+    expect(container.querySelector('[aria-label="Google events"]')).toBeNull();
+    expect(container.querySelector('.grid-cols-\\[52px_1fr_1fr\\]')).toBeNull();
+    expect(container.querySelector('[data-slot-timestamp]').parentElement.parentElement.className).toContain('grid-cols-[52px_1fr]');
+    expect(container.textContent).toContain('Your calendar works without connecting Google');
+  });
+
+  it.each([
+    { id: 'action-1', key: 'action-1', type: 'action', label: 'Write a chapter, Open notes' },
+    { id: 'habit-1', key: 'habit-1', type: 'habit', label: 'Read' },
+  ])('drags $type from the side list without Google authorization', async (item) => {
+    await render({ items: [item] });
+    const tray = container.querySelector('[aria-label="Unscheduled items"]');
+    expect(tray.textContent).toContain(item.label);
+    expect(tray.querySelector(`[data-scheduler-drag-key="${item.key}"]`)).not.toBeNull();
+    const dragged = { data: { current: { item } } };
+    await act(async () => dnd.handlers.onDragStart({ active: dragged }));
+    await act(async () => dnd.handlers.onDragEnd({
+      active: dragged, over: { data: { current: { timestamp: '2026-10-07T10:15:00.000Z' } } },
+    }));
+    expect(update).toHaveBeenCalledWith(item.key, {
+      starts_at: '2026-10-07T10:15:00.000Z', ends_at: '2026-10-07T10:45:00.000Z',
+    });
+    await render({ items: [item], blocks: [{
+      source_key: item.key, starts_at: '2026-10-07T10:15:00Z', ends_at: '2026-10-07T10:45:00Z',
+    }] });
+    expect(container.querySelector(`[data-schedule-key="${item.key}"]`).textContent).toContain(item.label);
+    expect(container.querySelector('[aria-label="Unscheduled items"]').textContent).not.toContain(item.label);
+  });
+
+  it('lays out imported busy events beside overlapping local blocks in the same day grid', async () => {
+    calendar.events = [{ id: 'meeting', title: 'Team meeting', start: '2026-10-07T09:00:00Z', end: '2026-10-07T10:00:00Z' }];
+    await render({ blocks: [{ source_key: 'action-1', starts_at: '2026-10-07T09:15:00Z', ends_at: '2026-10-07T09:45:00Z' }] });
+    const local = container.querySelector('[data-schedule-key="action-1"]');
+    const google = container.querySelector('[aria-label="Google events"]');
+    expect(local.parentElement.parentElement).toBe(google.parentElement);
+    expect(local.style.width).toBe('50%');
+    expect(google.firstElementChild.style.width).toBe('50%');
+    expect(local.style.left).not.toBe(google.firstElementChild.style.left);
+    expect(google.textContent).toContain('Google · read-only');
+    expect(google.querySelector('[data-scheduler-drag-key]')).toBeNull();
+  });
+
+  it('keeps short imported event details focusable and scrollable without making them draggable', async () => {
+    calendar.events = [{ id: 'brief', title: 'A detailed meeting title that needs more space', start: '2026-10-07T09:00:00Z', end: '2026-10-07T09:15:00Z' }];
+    await render();
+    const event = container.querySelector('[aria-label="Google events"]').firstElementChild;
+    expect(event.tabIndex).toBe(0);
+    expect(event.className).toContain('pointer-events-auto');
+    expect(event.style.overflow).toBe('auto');
+    expect(event.title).toContain('A detailed meeting title that needs more space · 09:00–09:15 · Google · read-only');
+    expect(event.querySelector('[data-scheduler-drag-key]')).toBeNull();
+  });
+
   it('tap editing opens a labeled focus-trapped dialog and saves a 30-minute estimate', async () => {
     await render();
     await click('Write a chapter');

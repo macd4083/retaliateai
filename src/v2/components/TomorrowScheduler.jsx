@@ -1,6 +1,6 @@
 import React from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
-import { DndContext, DragOverlay, PointerSensor, TouchSensor, useDraggable, useDroppable, useSensor, useSensors } from '@dnd-kit/core';
+import { DndContext, DragOverlay, PointerSensor, TouchSensor, pointerWithin, useDraggable, useDroppable, useSensor, useSensors } from '@dnd-kit/core';
 import { clipScheduleBlocksToDate, getScheduleDateBounds, getScheduleDayOffset, layoutScheduleBlocks, zonedLocalTimeToTimestamp } from '../today/scheduling';
 
 const fieldClass = 'w-full rounded-lg border border-zinc-600 bg-zinc-950 px-3 py-2 text-sm text-white';
@@ -99,13 +99,16 @@ export default function TomorrowScheduler({
     && !visibleBlocks.some((existing) => (block.id && existing.id === block.id) || (blockKey(block) && blockKey(existing) === blockKey(block) && existing.starts_at === block.starts_at)))
     .map((block) => ({ ...block, read_only_context: true }));
   const sortedBlocks = [...visibleBlocks, ...carryoverBlocks].sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at));
-  const localLanes = layoutScheduleBlocks(sortedBlocks);
-  const laneCount = Math.max(1, ...localLanes.map((block) => block.lane + 1));
   const timedGoogle = googleEvents.filter((event) => !event.all_day && !event.allDay && !(event.start?.date)).map((event) => ({
     ...event, starts_at: event.starts_at || event.start?.dateTime || event.start, ends_at: event.ends_at || event.end?.dateTime || event.end,
   })).filter((event) => event.starts_at && event.ends_at).sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at));
-  const googleLanes = layoutScheduleBlocks(clipScheduleBlocksToDate(timedGoogle, dayBounds));
-  const googleLaneCount = Math.max(1, ...googleLanes.map((block) => block.lane + 1));
+  const lanes = layoutScheduleBlocks([
+    ...sortedBlocks,
+    ...clipScheduleBlocksToDate(timedGoogle, dayBounds).map((event) => ({ ...event, imported: true })),
+  ]);
+  const localLanes = lanes.filter((block) => !block.imported);
+  const googleLanes = lanes.filter((block) => block.imported);
+  const laneCount = Math.max(1, ...lanes.map((block) => block.lane + 1));
   const allDayEvents = googleEvents.filter((event) => event.all_day || event.allDay || event.start?.date);
   const allDay = allDayEvents.filter((event) => (event.start?.date || event.start || event.starts_at) <= localDate && (event.end?.date || event.end || event.ends_at) > localDate);
 
@@ -214,14 +217,16 @@ export default function TomorrowScheduler({
       <div>
         <h3 id="tomorrow-scheduler-title" className="font-semibold text-white">Schedule tomorrow</h3>
         <p className="mt-1 text-sm text-zinc-400">Give your actions a place in the day. Scheduling is optional.</p>
+        <p className="mt-1 text-xs text-zinc-400">Your calendar works without connecting Google. Drag actions and habits from the list into your day; Google only imports existing events to help you plan around them.</p>
         <p className="mt-2 text-xs text-zinc-400">{localDate} · {timezone} · Times are optional</p>
       </div>
       {!timelineAvailable ? <div role="status" className="space-y-2 rounded-xl bg-amber-950/30 p-3 text-sm text-amber-200">{dayBounds.error && <><p>Timeline unavailable for this date or timezone. Your review is still available.</p><p>{dayBounds.error}</p></>}{availabilityError && <p>{availabilityError}</p>}{saveError ? <><p>{typeof saveError === 'string' ? saveError : saveError.message}</p><p>Your local schedule changes are preserved. Retry scheduling before completing your review.</p></> : !dayBounds.error && <p>Scheduling is currently unavailable. You can still save your actions and complete your review. Retry after database setup or connectivity is restored.</p>}{onRetry && <button type="button" onClick={onRetry} className={buttonClass}>Retry scheduling</button>}</div> : <>
         <div role="status" aria-live="polite" className="text-xs text-zinc-400">{saveError ? <span className="text-amber-300">{typeof saveError === 'string' ? saveError : saveError.message}</span> : saveStatus === 'saving' ? 'Saving schedule…' : saveStatus === 'saved' ? 'Schedule saved' : saveStatus === 'offline' ? 'Schedule pending sync — reconnect to save.' : saveStatus === 'error' ? 'Schedule could not sync. Your review is still available.' : 'Schedule changes save automatically.'}</div>
-        <DndContext sensors={sensors} onDragStart={({ active: dragged }) => { if (!interaction.current.locked && generation === interaction.current.generation && writePending.current !== generation) { dragGeneration.current = generation; setActive(dragged.data.current.item); } }} onDragCancel={() => { dragGeneration.current = null; setActive(null); }} onDragEnd={drop}>
+        <DndContext sensors={sensors} collisionDetection={pointerWithin} onDragStart={({ active: dragged }) => { if (!interaction.current.locked && generation === interaction.current.generation && writePending.current !== generation) { dragGeneration.current = generation; setActive(dragged.data.current.item); } }} onDragCancel={() => { dragGeneration.current = null; setActive(null); }} onDragEnd={drop}>
           <div className="grid gap-4 md:grid-cols-[minmax(160px,1fr)_minmax(0,3fr)]">
             <aside aria-label="Unscheduled items" className="space-y-2">
               <h4 className="text-sm font-medium text-zinc-300">Unscheduled ({unscheduled.length})</h4>
+              <p className="text-xs text-zinc-400">ROI action, starting task · Habits due tomorrow</p>
               <p className="text-xs text-zinc-500">Default estimate: 30 minutes. Use the drag handle; the rest of the page scrolls normally.</p>
               <div className="flex gap-2 overflow-x-auto pb-2 md:flex-col md:overflow-x-visible">
                 {unscheduled.map((item) => <div key={itemKey(item)} className="min-w-[160px] md:min-w-0"><DraggableItem item={item} onEdit={edit} disabled={locked || saving} /></div>)}
@@ -230,9 +235,9 @@ export default function TomorrowScheduler({
             </aside>
             <div className="min-w-0">
               {allDay.length > 0 && <div aria-label="All-day Google events" className="mb-2 space-y-1 rounded-lg border border-zinc-700 p-2"><p className="text-xs text-zinc-400">All day · Google (read-only)</p>{allDay.map((event) => <p key={event.id} className="text-xs text-zinc-500">{event.summary || event.title || 'Busy'}{event.ends_at || event.end ? ` · until ${event.ends_at || event.end?.date || event.end} (exclusive)` : ''}{event.transparency === 'transparent' ? ' · Free · non-blocking' : ''}</p>)}</div>}
-              <div className="mb-2 grid grid-cols-[52px_1fr_1fr] gap-1 text-[10px] text-zinc-400"><span>Time</span><span>Your plan</span><span>Google · read-only</span></div>
+              <div className="mb-2 grid grid-cols-[52px_1fr] gap-1 text-[10px] text-zinc-400"><span>Time</span><span>Your plan{googleLanes.length > 0 && ' · Google events are read-only'}</span></div>
               <div ref={timeline} tabIndex={0} aria-label={`${dayMinutes / 60}-hour timeline for ${localDate}, ${timezone}`} className="h-[480px] overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-950">
-                <div className="relative grid grid-cols-[52px_1fr_1fr]" style={{ height: dayMinutes * 2.4 }}>
+                <div className="relative grid grid-cols-[52px_1fr]" style={{ height: dayMinutes * 2.4 }}>
                   <div className="relative">{slots.filter((slot) => slot.minute % 60 === 0).map((slot) => <span key={slot.timestamp} className="absolute left-1 text-[10px] text-zinc-500" style={{ top: slot.minute * 2.4 }}><span className="block">{slot.time}</span><span className="block text-[8px]">{slot.offset}</span></span>)}</div>
                   <div className="relative border-l border-zinc-700">
                     {slots.map((slot) => <Slot key={slot.timestamp} minute={slot.minute} timestamp={slot.timestamp} disabled={locked || saving} />)}
@@ -242,8 +247,8 @@ export default function TomorrowScheduler({
                       if (!item && readOnly) return <div key={block.id || blockKey(block)} data-schedule-key={blockKey(block)} style={blockPosition(block, laneCount)} className="pointer-events-auto rounded-lg border border-zinc-700 bg-zinc-800/60 p-2 text-xs text-zinc-300"><span className="block break-words font-medium">{block.label || (block.source_type === 'habit' || block.habit_definition_id ? 'Scheduled habit' : 'Scheduled commitment')}</span><span className="mt-1 block">{timeLabel(block)}</span><span className="mt-1 block text-[10px] text-zinc-400">Preserved plan · read-only</span></div>;
                       return item ? <div key={block.id || blockKey(block)} data-schedule-key={blockKey(block)} className="pointer-events-auto" style={blockPosition(block, laneCount)}><DraggableItem item={item} onEdit={edit} disabled={locked || saving} compact short={blockPosition(block, laneCount).height <= 36} timeDescription={timeLabel(block)}><span className={`block truncate text-[10px] leading-3 ${item.type === 'habit' ? 'text-emerald-200' : 'text-red-200'}`}>{timeLabel(block)}</span></DraggableItem></div> : null;
                     })}</div>
+                    {googleLanes.length > 0 && <div className="pointer-events-none absolute inset-0" aria-label="Google events">{googleLanes.map((event) => <div key={event.id} tabIndex={0} title={`${event.summary || event.title || 'Busy'} · ${timeLabel(event)} · Google · read-only${event.transparency === 'transparent' ? ' · Free · non-blocking' : ''}`} style={blockPosition(event, laneCount)} className="pointer-events-auto rounded border border-zinc-700 bg-zinc-800/80 p-1 text-[10px] text-zinc-400"><span className="block break-words">{event.summary || event.title || 'Busy'}</span><span>{timeLabel(event)}</span><span className="block">Google · read-only</span>{event.transparency === 'transparent' && <span className="block">Free · non-blocking</span>}</div>)}</div>}
                   </div>
-                  <div className="relative border-l border-zinc-700" aria-label="Google events">{googleLanes.map((event) => <div key={event.id} style={blockPosition(event, googleLaneCount)} className="rounded border border-zinc-700 bg-zinc-800/60 p-1 text-[10px] text-zinc-400"><span className="block break-words">{event.summary || event.title || 'Busy'}</span><span>{timeLabel(event)}</span>{event.transparency === 'transparent' && <span className="block">Free · non-blocking</span>}</div>)}</div>
                 </div>
               </div>
             </div>
