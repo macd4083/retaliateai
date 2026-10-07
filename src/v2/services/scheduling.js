@@ -22,16 +22,19 @@ export async function loadSchedules(userId, todayLocalDate, tomorrowLocalDate, t
   }
   try {
     const { data, error } = await supabase.from('today_v2_schedule_blocks').select('*')
-      .eq('user_id', userId).gte('target_local_date', addDaysToLocalDate(todayLocalDate, -1)).lte('target_local_date', tomorrowLocalDate);
+      .eq('user_id', userId).gte('target_local_date', addDaysToLocalDate(todayLocalDate, -2)).lte('target_local_date', tomorrowLocalDate);
     if (error) throw error;
     const rows = (data || []).map(normalizeSavedSchedule);
+    const schedulesForDate = (localDate) => {
+      const bounds = getScheduleDateBounds(localDate, timezoneName);
+      return rows.filter((row) => row.target_local_date === localDate
+        || (row.target_local_date < localDate
+          && Date.parse(row.starts_at) < Date.parse(bounds.ends_at)
+          && Date.parse(row.ends_at) > Date.parse(bounds.starts_at)));
+    };
     return {
-      todaySchedules: rows.filter((row) => row.target_local_date === todayLocalDate
-        || (row.target_local_date === addDaysToLocalDate(todayLocalDate, -1)
-          && Date.parse(row.ends_at) > Date.parse(getScheduleDateBounds(todayLocalDate, timezoneName).starts_at))),
-      tomorrowSchedules: rows.filter((row) => row.target_local_date === tomorrowLocalDate
-        || (row.target_local_date === todayLocalDate
-          && Date.parse(row.ends_at) > Date.parse(getScheduleDateBounds(tomorrowLocalDate, timezoneName).starts_at))),
+      todaySchedules: schedulesForDate(todayLocalDate),
+      tomorrowSchedules: schedulesForDate(tomorrowLocalDate),
       scheduleAvailable: true,
       scheduleDiagnostic: null,
     };

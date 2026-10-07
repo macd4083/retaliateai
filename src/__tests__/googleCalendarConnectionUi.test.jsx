@@ -204,7 +204,7 @@ describe('GoogleCalendarConnection UI contract', () => {
       const original = fetchMock.getMockImplementation();
       fetchMock.mockImplementation((url, options) => url.includes('action=calendars')
         ? response({ error: 'Authorization revoked', code: 'reconnect_required' }, 401) : original(url, options));
-      await act(async () => [...settingsContainer.querySelectorAll('button')].find((button) => button.textContent === 'Refresh').click());
+      await act(async () => Array.from(settingsContainer.querySelectorAll('button')).find((button) => button.textContent === 'Refresh').click());
       expect(events.mock.calls.at(-1)[0]).toEqual([]);
       expect(container.textContent).toContain('Reconnect Google Calendar');
       expect(container.textContent).not.toContain('Showing cached calendar events');
@@ -264,7 +264,7 @@ describe('GoogleCalendarConnection UI contract', () => {
     });
     await render();
     expect(container.textContent).toContain('Choose calendars (2)');
-    expect([...container.querySelectorAll('input')].every((input) => input.checked)).toBe(true);
+    expect(Array.from(container.querySelectorAll('input')).every((input) => input.checked)).toBe(true);
     fetchMock.mockImplementation((url) => {
       if (url.includes('action=status')) return response({ connected: true, configured: true, schemaAvailable: true, selectedCalendarIds: [] });
       if (url.includes('action=calendars')) return response({ calendars: [{ id: 'primary', name: 'Personal' }], selectedCalendarIds: [] });
@@ -279,7 +279,7 @@ describe('GoogleCalendarConnection UI contract', () => {
     const original = fetchMock.getMockImplementation();
     fetchMock.mockImplementation(() => response({ error: 'Storage unavailable' }, 503));
     await render();
-    const connect = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Connect Google Calendar');
+    const connect = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Connect Google Calendar');
     expect(connect.disabled).toBe(true);
     expect(container.textContent).toContain('Retry');
     fetchMock.mockImplementation(original);
@@ -361,7 +361,7 @@ describe('GoogleCalendarConnection UI contract', () => {
       });
       await click('Refresh');
       await act(async () => settingsContainer.querySelector('input').click());
-      await act(async () => [...settingsContainer.querySelectorAll('button')].find((button) => button.textContent === 'Apply calendars').click());
+      await act(async () => Array.from(settingsContainer.querySelectorAll('button')).find((button) => button.textContent === 'Apply calendars').click());
       expect(events.mock.calls.at(-1)[0]).toEqual([]);
       await act(async () => resolveOld(await response({ events: [{ id: 'old-selection', title: 'Old selection' }] })));
       expect(events.mock.calls.at(-1)[0]).toEqual([]);

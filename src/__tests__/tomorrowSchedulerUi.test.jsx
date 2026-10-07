@@ -6,7 +6,7 @@ import * as scheduling from '../v2/today/scheduling';
 const calendar = vi.hoisted(() => ({ events: [], includeNextDay: false }));
 const dnd = vi.hoisted(() => ({ handlers: null }));
 vi.mock('@dnd-kit/core', async (importOriginal) => {
-  const actual = await importOriginal();
+  const actual = /** @type {typeof import('@dnd-kit/core')} */ (await importOriginal());
   return {
     ...actual,
     DndContext: (props) => { dnd.handlers = props; return <actual.DndContext {...props} />; },
@@ -32,7 +32,7 @@ describe('TomorrowScheduler UI', () => {
     await act(async () => root.render(<TomorrowScheduler userId="user" localDate="2026-10-07" timezone="UTC" items={items} onUpdate={update} onUnschedule={vi.fn()} {...props} />));
   };
   const click = async (text) => {
-    const button = [...document.querySelectorAll('button')].find((node) => node.textContent.includes(text));
+    const button = Array.from(document.querySelectorAll('button')).find((node) => node.textContent.includes(text));
     expect(button).toBeTruthy();
     await act(async () => button.click());
   };
@@ -43,6 +43,8 @@ describe('TomorrowScheduler UI', () => {
       input.dispatchEvent(new Event('change', { bubbles: true }));
     });
   };
+  const getInput = (selector) => /** @type {HTMLInputElement} */ (document.querySelector(selector));
+  const getSelect = (selector) => /** @type {HTMLSelectElement} */ (document.querySelector(selector));
 
   beforeEach(() => {
     calendar.events = [];
@@ -107,7 +109,7 @@ describe('TomorrowScheduler UI', () => {
     const dialog = document.querySelector('[role="dialog"]');
     expect(dialog).toBeTruthy();
     expect(dialog.textContent).toContain('Duration estimate (minutes)');
-    expect(dialog.querySelector('input[type="time"]').step).toBe('900');
+    expect(getInput('[role="dialog"] input[type="time"]').step).toBe('900');
     await act(async () => dialog.querySelector('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
     expect(update).toHaveBeenCalledWith('action-1', { starts_at: '2026-10-07T09:00:00.000Z', ends_at: '2026-10-07T09:30:00.000Z' });
     expect(document.querySelector('[role="dialog"]')).toBeNull();
@@ -117,7 +119,7 @@ describe('TomorrowScheduler UI', () => {
     await render({ blocks: [{ source_key: 'habit-1', starts_at: '2026-10-07T09:00:00Z', ends_at: '2026-10-07T09:30:00Z' }] });
     await click('Write a chapter');
     expect(document.querySelector('[role="dialog"]').textContent).toContain('Keep this overlap intentionally');
-    expect([...document.querySelectorAll('button')].find((node) => node.textContent === 'Save time').disabled).toBe(true);
+    expect(Array.from(document.querySelectorAll('button')).find((node) => node.textContent === 'Save time').disabled).toBe(true);
     await act(async () => document.querySelector('[role="dialog"] input[type="checkbox"]').click());
     await act(async () => document.querySelector('[role="dialog"] form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
     expect(update).toHaveBeenCalledTimes(1);
@@ -126,18 +128,18 @@ describe('TomorrowScheduler UI', () => {
   it('offers earlier/later choices for a repeated DST time', async () => {
     await render({ localDate: '2026-11-01', timezone: 'America/New_York', blocks: [{ source_key: 'action-1', starts_at: '2026-11-01T05:30:00Z', ends_at: '2026-11-01T05:45:00Z' }] });
     await click('Write a chapter');
-    const select = document.querySelector('[role="dialog"] select');
+    const select = getSelect('[role="dialog"] select');
     expect(select).toBeTruthy();
-    expect([...select.options].map((option) => option.value)).toEqual(['earlier', 'later']);
+    expect(Array.from(select.options).map((option) => option.value)).toEqual(['earlier', 'later']);
   });
 
   it('requires an explicit occurrence after changing to a repeated DST wall time', async () => {
     await render({ localDate: '2026-11-01', timezone: 'America/New_York' });
     await click('Write a chapter');
     await changeInput(document.querySelector('[role="dialog"] input[type="time"]'), '01:30');
-    const select = document.querySelector('[role="dialog"] select');
+    const select = getSelect('[role="dialog"] select');
     expect(select.value).toBe('');
-    expect([...document.querySelectorAll('button')].find((node) => node.textContent === 'Save time').disabled).toBe(true);
+    expect(Array.from(document.querySelectorAll('button')).find((node) => node.textContent === 'Save time').disabled).toBe(true);
     await act(async () => document.querySelector('[role="dialog"] form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
     expect(update).not.toHaveBeenCalled();
     await act(async () => { select.value = 'later'; select.dispatchEvent(new Event('change', { bubbles: true })); });
@@ -148,7 +150,7 @@ describe('TomorrowScheduler UI', () => {
   it('explains a nonexistent DST start time and preserves elapsed duration across the gap', async () => {
     await render({ localDate: '2026-03-08', timezone: 'America/New_York', blocks: [{ source_key: 'action-1', starts_at: '2026-03-08T06:45:00Z', ends_at: '2026-03-08T07:15:00Z' }] });
     await click('Write a chapter');
-    expect(document.querySelector('[role="dialog"] input[type="number"]').value).toBe('30');
+    expect(getInput('[role="dialog"] input[type="number"]').value).toBe('30');
     await changeInput(document.querySelector('[role="dialog"] input[type="time"]'), '02:30');
     expect(document.querySelector('[role="alert"]').textContent).toContain('Choose a time before or after the clock change');
     await changeInput(document.querySelector('[role="dialog"] input[type="time"]'), '01:45');
@@ -189,7 +191,7 @@ describe('TomorrowScheduler UI', () => {
   it('preserves the later DST occurrence when editing an existing block', async () => {
     await render({ localDate: '2026-11-01', timezone: 'America/New_York', blocks: [{ source_key: 'action-1', starts_at: '2026-11-01T06:30:00Z', ends_at: '2026-11-01T06:45:00Z' }] });
     await click('Write a chapter');
-    expect(document.querySelector('[role="dialog"] select').value).toBe('later');
+    expect(getSelect('[role="dialog"] select').value).toBe('later');
     await act(async () => document.querySelector('[role="dialog"] form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
     expect(update).toHaveBeenCalledWith('action-1', { starts_at: '2026-11-01T06:30:00.000Z', ends_at: '2026-11-01T06:45:00.000Z' });
   });
@@ -201,7 +203,7 @@ describe('TomorrowScheduler UI', () => {
     expect(container.querySelector('[aria-label="All-day Google events"]').textContent).toContain('2026-10-08 (exclusive)');
     await click('Write a chapter');
     expect(document.querySelector('[role="dialog"] input[type="checkbox"]')).toBeNull();
-    expect([...document.querySelectorAll('button')].find((node) => node.textContent === 'Save time').disabled).toBe(false);
+    expect(Array.from(document.querySelectorAll('button')).find((node) => node.textContent === 'Save time').disabled).toBe(false);
   });
 
   it('requires intentional confirmation for a busy all-day Google event', async () => {
@@ -276,12 +278,12 @@ describe('TomorrowScheduler UI', () => {
     expect(update).toHaveBeenCalledTimes(2);
     await act(async () => finishOld());
     expect(document.querySelector('[role="dialog"]').textContent).toContain('Saving…');
-    expect([...document.querySelectorAll('button')].find((node) => node.textContent === 'Saving…').disabled).toBe(true);
+    expect(Array.from(document.querySelectorAll('button')).find((node) => node.textContent === 'Saving…').disabled).toBe(true);
     await act(async () => document.querySelector('[role="dialog"] form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
     expect(update).toHaveBeenCalledTimes(2);
     await act(async () => failNew(new Error('New-context write failed')));
     expect(document.querySelector('[role="dialog"]').textContent).toContain('New-context write failed');
-    expect([...document.querySelectorAll('button')].find((node) => node.textContent === 'Save time').disabled).toBe(false);
+    expect(Array.from(document.querySelectorAll('button')).find((node) => node.textContent === 'Save time').disabled).toBe(false);
   });
 
   it('preserves the exact elapsed duration when dragging a midnight block', async () => {
@@ -339,7 +341,7 @@ describe('TomorrowScheduler UI', () => {
       { id: 'new-habit', source_key: 'habit-1', target_local_date: '2026-10-07', starts_at: '2026-10-07T00:15:00Z', ends_at: '2026-10-07T00:45:00Z' },
     ] });
     await click('Read');
-    expect(document.querySelector('[role="dialog"] input[type="time"]').value).toBe('00:15');
+    expect(getInput('[role="dialog"] input[type="time"]').value).toBe('00:15');
     expect(document.querySelector('[role="dialog"] input[type="checkbox"]')).toBeTruthy();
     expect(update).not.toHaveBeenCalled();
   });
@@ -420,7 +422,7 @@ describe('TomorrowScheduler UI', () => {
     expect(container.textContent).toContain('23:45–00:15 (+1 day)');
     expect(container.querySelector('[data-schedule-key="action-1"]').style.height).toBe('36px');
     await click('Write a chapter');
-    expect(document.querySelector('[role="dialog"] input[type="number"]').value).toBe('30');
+    expect(getInput('[role="dialog"] input[type="number"]').value).toBe('30');
   });
 
   it('labels a 24-elapsed-hour spring-forward block +2 days and clips its second-date carryover', async () => {
@@ -429,7 +431,7 @@ describe('TomorrowScheduler UI', () => {
     expect(container.textContent).toContain('(+2 days)');
     expect(container.textContent).not.toContain('(+1 day)');
     await click('Write a chapter');
-    expect(document.querySelector('[role="dialog"] input[type="number"]').value).toBe('1440');
+    expect(getInput('[role="dialog"] input[type="number"]').value).toBe('1440');
     await act(async () => document.querySelector('[role="dialog"] form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
     expect(update).toHaveBeenCalledWith('action-1', { starts_at: '2026-03-08T04:45:00.000Z', ends_at: '2026-03-09T04:45:00.000Z' });
     await render({ localDate: '2026-03-09', timezone: 'America/New_York', blocks: [block] });

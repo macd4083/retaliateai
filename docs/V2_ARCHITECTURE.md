@@ -397,8 +397,9 @@ of live Google consent, deployment permissions, or production connectivity.
 Run the existing `npm run lint`, `npm test` and `npm run build` commands.
 The transactional database regression suites are
 `supabase/tests/today_v2_scheduling.sql` and
-`supabase/tests/today_v2_schedule_review_lock.sql`: run them with
-`psql -v ON_ERROR_STOP=1 -f supabase/tests/today_v2_scheduling.sql -f supabase/tests/today_v2_schedule_review_lock.sql` against an
+`supabase/tests/today_v2_schedule_review_lock.sql`, plus the rollback-only upgrade
+test `supabase/tests/today_v2_schedule_review_upgrade.sql`: run them with
+`psql -v ON_ERROR_STOP=1 -f supabase/tests/today_v2_scheduling.sql -f supabase/tests/today_v2_schedule_review_lock.sql -f supabase/tests/today_v2_schedule_review_upgrade.sql` against an
 isolated migrated staging database as its owner. Its two fixed test users and
 all assertions roll back; do not use a production database for fixture QA.
 Before rollout, use actual development and production test accounts to verify:
@@ -442,6 +443,15 @@ no failed job log for the prior agent run (it was cancelled). **Deployment root
 cause remains unestablished.** No endpoint removal, plan upgrade or deployment
 success is claimed.
 
+The first repair checkpoint (`1e673937c7d03cb155a8c09782f37282a3f93856`)
+also received a failed Vercel status at 2026-10-07 01:58 UTC:
+`dpl_93WXHyZiuCSJtLftppjbt8KHCCZR`
+([deployment](https://vercel.com/matt-macdonalds-projects/retaliateai/93WXHyZiuCSJtLftppjbt8KHCCZR)).
+Its exact failing command/error is likewise not exposed by the status. The new
+[Scheduler validation run](https://github.com/macd4083/retaliateai/actions/runs/37559663134)
+is `action_required`, with zero jobs/logs; it is not a test failure or a successful
+CI run. Owner approval is required.
+
 Local Node 22.23.3 / npm 10.9.9: clean `npm ci` exited 0 (32 seconds);
 separate `npm run build` exited 0 (Vite 6.47 seconds plus PWA generation).
 Lockfile installation is consistent. Warnings include existing bundle size,
@@ -465,6 +475,35 @@ Baseline V2 → Calendar migration upgrade and the transactional scheduling/OAut
 SQL suite exited 0. This establishes PostgreSQL behavior, not full hosted
 Supabase/PostgREST or live Google integration.
 
+To reproduce the common review lock, use **two separate `psql` sessions against
+a disposable migrated database only**. In session A, set up a temporary fixture:
+
+```sql
+insert into auth.users(id) values ('00000000-0000-4000-8000-000000000991');
+insert into public.today_v2_daily_reviews(user_id, local_date, timezone_name)
+values ('00000000-0000-4000-8000-000000000991', '2099-07-01', 'UTC');
+begin;
+update public.today_v2_daily_reviews set completed_at = now()
+where user_id = '00000000-0000-4000-8000-000000000991' and local_date = '2099-07-01';
+```
+
+In session B:
+
+```sql
+select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-000000000991', false);
+select public.today_v2_replace_schedule('2099-07-02', 'UTC', '[]'::jsonb);
+```
+
+B must wait, not succeed while A holds the review row. Run `commit;` in A:
+B must then reject with `Source review is completed; reopen it before editing`.
+Reopen in A (`update ... set completed_at = null` with the same user/date
+predicate). For the reverse ordering, A begins a transaction, sets the same JWT
+subject and calls the schedule RPC; B's completion UPDATE must wait until A
+commits. Finally, as database owner, remove only this disposable fixture:
+`delete from auth.users where id = '00000000-0000-4000-8000-000000000991';`.
+The automated rollback suites separately exercise action/habit mutations,
+direct DML denial, ownership, reopen, and next-day outcome permissions.
+
 The repair session's Playwright service failed with `Transport closed`; **no new
 browser/device screenshots, drag/reload or 390px QA were verified in this
 session**. Linked screenshots above belong to the prior implementation.
@@ -474,15 +513,25 @@ session**. Linked screenshots above belong to the prior implementation.
 | `npm ci` | 32s | 0 | Clean local installation |
 | `npm run build` (before repair) | Vite 6.47s + PWA | 0 | Local build, not Vercel deployment |
 | `npm run test -- src/__tests__/schedulerDeployment.test.js` | 0.89s | 0; 3 tests | API import/JSON, rewrite and browser isolation regressions |
+| `npm test -- src/__tests__/googleCalendar.test.js` | Vitest 0.886s; ~1s wall | 0; 69 tests | Mocked backend/OAuth/security regressions |
+| `npm test -- src/__tests__/googleCalendarConnectionUi.test.jsx` | Vitest 2.34s; ~3s wall | 0; 33 tests | Mocked picker, selection, account/date races and recovery |
+| `npm test -- src/__tests__/todayV2Scheduling.test.js` | 2.317s | 0; 12 tests | Civil dates, midnight/DST and stable identity model |
+| `npm test -- src/__tests__/tomorrowSchedulerUi.test.jsx` | 4.615s | 0; 40 tests | jsdom editor, drag callbacks, locks and carryover |
+| `npm test -- src/__tests__/schedulerHomeUi.test.jsx` | 2.688s | 0; 11 tests | jsdom Home carryover/civil-date/checklist separation |
 | `npm run lint` (initial snapshot) | 10.29s | 0 | Local lint |
 | `npm run typecheck` (untouched starting branch archive) | 11.61s | 2; 232 diagnostics | Pre-existing baseline |
 | Baseline V2/Calendar migrations + `supabase/tests/today_v2_scheduling.sql` | Not timed | 0 | Disposable PostgreSQL 16, transactional/RLS/OAuth tests |
+| Real concurrent PostgreSQL completion/schedule sessions | 6.847s | 0; expected blocked writes then rejections/success | Actual `Lock` waits and `pg_blocking_pids`, not mocks |
 | Vercel deployment `dpl_GdW1ekMrPjDEdUUgQBMPYZzdfFr1` | Unknown | Failed status; exact error inaccessible | Not locally reproduced; owner logs required |
+| Repair checkpoint Vercel `dpl_93WXHyZiuCSJtLftppjbt8KHCCZR` | Unknown | Failed status; exact error inaccessible | Deployment still unresolved |
+| GitHub Scheduler validation run `37559663134` | N/A | `action_required`; zero jobs | Owner approval required; no CI pass claimed |
 | Browser QA in this repair session | N/A | Tool unavailable | Unverified, no new screenshots |
 
 Owner actions, in order:
 
-1. Open the failed deployment's build logs (or run the inspect command above
+1. Approve the new Scheduler validation workflow in GitHub Actions. Open the
+   latest failed deployment's build logs (or run
+   `npx vercel inspect dpl_93WXHyZiuCSJtLftppjbt8KHCCZR --logs`
    while authenticated to the correct Vercel team). Record the first failed
    command, exact error, Node version and referenced file/line. Check project
    root, install/build command and environment scope against this repository.

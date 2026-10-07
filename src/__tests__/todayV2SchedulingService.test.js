@@ -46,16 +46,36 @@ describe('optional schedule repository', () => {
   });
   it('includes prior-target carryover only while it intersects the next local date', async () => {
     const query = builder({ data: [
-      { id: 'previous-carry', target_local_date: '2026-09-27', ends_at: '2026-09-28T07:30:00Z' },
-      { id: 'previous-ended', target_local_date: '2026-09-27', ends_at: '2026-09-28T07:00:00Z' },
-      { id: 'today-carry', target_local_date: '2026-09-28', ends_at: '2026-09-29T07:30:00Z' },
+      { id: 'previous-carry', target_local_date: '2026-09-27', starts_at: '2026-09-28T06:30:00Z', ends_at: '2026-09-28T07:30:00Z' },
+      { id: 'previous-ended', target_local_date: '2026-09-27', starts_at: '2026-09-28T06:30:00Z', ends_at: '2026-09-28T07:00:00Z' },
+      { id: 'today-carry', target_local_date: '2026-09-28', starts_at: '2026-09-29T06:30:00Z', ends_at: '2026-09-29T07:30:00Z' },
       { id: 'tomorrow', target_local_date: '2026-09-29', ends_at: '2026-09-29T12:00:00Z' },
     ], error: null });
     mocks.from.mockReturnValue(query);
     const state = await loadSchedules('user', '2026-09-28', '2026-09-29', 'America/Los_Angeles');
-    expect(query.gte).toHaveBeenCalledWith('target_local_date', '2026-09-27');
+    expect(query.gte).toHaveBeenCalledWith('target_local_date', '2026-09-26');
     expect(state.todaySchedules.map((row) => row.id)).toEqual(['previous-carry', 'today-carry']);
     expect(state.tomorrowSchedules.map((row) => row.id)).toEqual(['today-carry', 'tomorrow']);
+  });
+  it('includes 24-hour spring-forward carryover from two target dates earlier', async () => {
+    const query = builder({ data: [
+      { id: 'two-days-back', target_local_date: '2026-03-07',
+        starts_at: '2026-03-08T04:45:00Z', ends_at: '2026-03-09T04:45:00Z' },
+      { id: 'one-day-back', target_local_date: '2026-03-08',
+        starts_at: '2026-03-09T03:30:00Z', ends_at: '2026-03-09T04:30:00Z' },
+      { id: 'ended-at-midnight', target_local_date: '2026-03-07',
+        starts_at: '2026-03-08T04:00:00Z', ends_at: '2026-03-09T04:00:00Z' },
+      { id: 'today', target_local_date: '2026-03-09',
+        starts_at: '2026-03-10T03:30:00Z', ends_at: '2026-03-10T04:30:00Z' },
+    ], error: null });
+    mocks.from.mockReturnValue(query);
+    const state = await loadSchedules('user', '2026-03-09', '2026-03-10', 'America/New_York');
+    expect(query.gte).toHaveBeenCalledWith('target_local_date', '2026-03-07');
+    expect(state.todaySchedules.map((row) => row.id)).toEqual(['two-days-back', 'one-day-back', 'today']);
+    expect(state.tomorrowSchedules.map((row) => row.id)).toEqual(['today']);
+
+    const previousDay = await loadSchedules('user', '2026-03-08', '2026-03-09', 'America/New_York');
+    expect(previousDay.tomorrowSchedules.map((row) => row.id)).toEqual(['two-days-back', 'one-day-back', 'today']);
   });
   it('keeps review and Home loading functional when schedule schema is missing', async () => {
     mocks.from.mockImplementation((table) => builder(table === 'today_v2_schedule_blocks'

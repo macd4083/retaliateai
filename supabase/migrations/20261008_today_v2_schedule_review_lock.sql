@@ -9,13 +9,23 @@ select distinct b.user_id, coalesce(f.source_local_date, b.target_local_date - 1
 from public.today_v2_schedule_blocks b
 left join public.today_v2_commitment_fragments f on f.id = b.commitment_fragment_id
 on conflict (user_id, local_date) do nothing;
-update public.today_v2_schedule_blocks b set source_review_id = r.id
-from public.today_v2_daily_reviews r
-where r.user_id = b.user_id
-  and r.local_date = coalesce(
-    (select f.source_local_date from public.today_v2_commitment_fragments f where f.id = b.commitment_fragment_id),
-    b.target_local_date - 1)
-  and b.source_review_id is null;
+-- Backfill provenance without revalidating historical habit definitions or changing
+-- their schedule timestamps. Trigger changes and the update roll back together.
+do $$
+begin
+  alter table public.today_v2_schedule_blocks disable trigger today_v2_schedule_validate;
+  alter table public.today_v2_schedule_blocks disable trigger today_v2_schedule_set_updated_at;
+  update public.today_v2_schedule_blocks b set source_review_id = r.id
+  from public.today_v2_daily_reviews r
+  where r.user_id = b.user_id
+    and r.local_date = coalesce(
+      (select f.source_local_date from public.today_v2_commitment_fragments f where f.id = b.commitment_fragment_id),
+      b.target_local_date - 1)
+    and b.source_review_id is null;
+  alter table public.today_v2_schedule_blocks enable trigger today_v2_schedule_validate;
+  alter table public.today_v2_schedule_blocks enable trigger today_v2_schedule_set_updated_at;
+end;
+$$;
 alter table public.today_v2_schedule_blocks alter column source_review_id set not null;
 do $$
 begin

@@ -19,7 +19,7 @@ function invalidateCalendarCache(userId, reason) {
 async function calendarRequest(action, body, params = {}, userId) {
   const { data } = await supabase.auth.getSession();
   if (!data?.session?.access_token || (data.session.user?.id && data.session.user.id !== userId)) {
-    const error = new Error('Please sign in again to connect your calendar.');
+    const error = /** @type {Error & { signedOut?: boolean }} */ (new Error('Please sign in again to connect your calendar.'));
     error.signedOut = true;
     throw error;
   }
@@ -40,7 +40,7 @@ async function calendarRequest(action, body, params = {}, userId) {
   return payload;
 }
 
-export default function GoogleCalendarConnection({ userId, localDate, timezone = 'UTC', onEvents, settings = false, includeNextDay = false }) {
+export default function GoogleCalendarConnection({ userId, localDate = null, timezone = 'UTC', onEvents = null, settings = false, includeNextDay = false }) {
   const callbackResult = new URLSearchParams(window.location.search).get('googleCalendar');
   const [status, setStatus] = React.useState(null);
   const [calendars, setCalendars] = React.useState([]);
@@ -166,7 +166,8 @@ export default function GoogleCalendarConnection({ userId, localDate, timezone =
     document.addEventListener('visibilitychange', resume);
     window.addEventListener('focus', resume);
     window.addEventListener('pageshow', resume);
-    const changed = ({ detail }) => {
+    const changed = (event) => {
+      const { detail } = /** @type {CustomEvent<{ userId: string, reason: string }>} */ (event);
       if (detail.userId !== userId) return;
       refreshGeneration.current += 1;
       eventsCallback.current?.([]);
