@@ -1,6 +1,7 @@
 import { supabase } from '../../lib/supabase/client';
 import { ENABLE_TODAY_V2_SCHEDULER } from '../../lib/featureFlags';
 import { loadSchedules, isMissingScheduleSchema } from './scheduling';
+import { normalizeHabitRecurrence } from '../today/recurrence';
 import {
   addDaysToLocalDate,
   buildTodayV2DraftStorageKey,
@@ -70,6 +71,28 @@ export async function ensureTodayV2HabitOccurrences(localDate, timezoneName) {
   if (error) throw error;
 }
 
+export async function ensureTodayV2AutomaticHabitSchedules(startLocalDate, endLocalDate, timezoneName) {
+  const { error } = await supabase.rpc('today_v2_seed_habit_schedules', {
+    p_start_local_date: startLocalDate,
+    p_end_local_date: endLocalDate,
+    p_timezone_name: timezoneName,
+  });
+  if (error && !isMissingScheduleSchema(error)) throw error;
+  return error ? { code: error.code, message: 'Automatic habit scheduling needs the recurrence migration.' } : null;
+}
+
+async function loadHabitDefinitions(userId) {
+  const fields = 'id, seed_key, name, response_type, unit, schedule_weekdays, display_order, is_archived, archived_at, created_at, updated_at';
+  const query = (selection) => supabase.from(TODAY_V2_TABLES.HABIT_DEFINITIONS)
+    .select(selection).eq('user_id', userId)
+    .order('display_order', { ascending: true }).order('created_at', { ascending: true });
+  const result = await query(`${fields}, planning_mode, schedule_times`);
+  if (['42703', 'PGRST204'].includes(result.error?.code)) {
+    return { ...await query(fields), recurrenceAvailable: false };
+  }
+  return { ...result, recurrenceAvailable: true };
+}
+
 export async function loadTodayReviewState(userId, options = {}) {
   const dateContext = getTodayV2DateContext(options);
   const seedResult = await seedDefaultHabits(userId);
@@ -125,12 +148,7 @@ export async function loadTodayReviewState(userId, options = {}) {
       .eq('user_id', userId)
       .eq('target_local_date', dateContext.tomorrowLocalDate)
       .order('fragment_order', { ascending: true }),
-    supabase
-      .from(TODAY_V2_TABLES.HABIT_DEFINITIONS)
-      .select('id, seed_key, name, response_type, unit, schedule_weekdays, display_order, is_archived, archived_at, created_at, updated_at')
-      .eq('user_id', userId)
-      .order('display_order', { ascending: true })
-      .order('created_at', { ascending: true }),
+    loadHabitDefinitions(userId),
     supabase
       .from(TODAY_V2_TABLES.HABIT_OCCURRENCES)
       .select('id, habit_definition_id, local_date, timezone_name, scheduled_weekday, snapshot_name, snapshot_response_type, snapshot_unit, snapshot_display_order, boolean_response, numeric_response, answered_at, created_at, updated_at')
@@ -148,6 +166,11 @@ export async function loadTodayReviewState(userId, options = {}) {
   if (habitDefinitionsResult.error) throw habitDefinitionsResult.error;
   if (habitOccurrencesResult.error) throw habitOccurrencesResult.error;
 
+  const recurrenceDiagnostic = ENABLE_TODAY_V2_SCHEDULER && habitDefinitionsResult.recurrenceAvailable
+    ? await ensureTodayV2AutomaticHabitSchedules(
+      dateContext.todayLocalDate, dateContext.tomorrowLocalDate, dateContext.timezoneName
+    ) : null;
+
   return {
     ...dateContext,
     ...await loadSchedules(userId, dateContext.todayLocalDate, dateContext.tomorrowLocalDate, dateContext.timezoneName),
@@ -155,6 +178,9 @@ export async function loadTodayReviewState(userId, options = {}) {
     routeTarget: getTodayV2DefaultPath(review),
     draftStorageKey: buildTodayV2DraftStorageKey(userId, dateContext.todayLocalDate),
     seedDiagnostic: seedResult.diagnostic,
+    recurrenceDiagnostic: recurrenceDiagnostic || (habitDefinitionsResult.recurrenceAvailable ? null : {
+      code: 'HABIT_RECURRENCE_SCHEMA_MISSING', message: 'Automatic habit scheduling needs the recurrence migration.',
+    }),
     followThroughItems: todayFragmentsResult.data || [],
     tomorrowPlanInput: tomorrowPlanInputResult.data?.raw_plan_text || '',
     tomorrowPlanMeta: tomorrowPlanInputResult.data || null,
@@ -269,6 +295,7 @@ export async function upsertHabitDefinition(userId, habit) {
     response_type: habit.response_type,
     unit: habit.response_type === 'number' ? String(habit.unit || '').trim() || null : null,
     schedule_weekdays: validateTodayV2Weekdays(habit.schedule_weekdays),
+    ...normalizeHabitRecurrence(habit),
     display_order: Number.isInteger(habit.display_order) ? habit.display_order : 0,
     is_archived: false,
     archived_at: null,
@@ -445,6 +472,8 @@ export function buildEmptyHabitDefinition(existingHabits = []) {
     response_type: 'boolean',
     unit: '',
     schedule_weekdays: [0, 1, 2, 3, 4, 5, 6],
+    planning_mode: 'manual',
+    schedule_times: {},
     display_order: existingHabits.length,
   };
 }

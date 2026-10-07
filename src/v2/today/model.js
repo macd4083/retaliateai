@@ -48,22 +48,20 @@ export function addDaysToLocalDate(localDate, offsetDays) {
     return formatTodayV2LocalDate(fallback);
   }
 
-  const next = new Date(year, month - 1, day);
-  next.setDate(next.getDate() + offsetDays);
-  return formatTodayV2LocalDate(next);
+  const next = new Date(Date.UTC(year, month - 1, day + offsetDays));
+  return next.toISOString().slice(0, 10);
 }
 
 export function getTodayV2DateContext(options = {}) {
   const now = options.now instanceof Date ? new Date(options.now) : new Date();
   const boundaryHour = coerceTodayV2BoundaryHour(options.dayBoundaryHour) ?? getTodayV2DayBoundaryHour();
   const timezoneName = options.timezoneName || getTodayV2TimezoneName();
-  const reviewAnchor = new Date(now);
-
-  if (reviewAnchor.getHours() < boundaryHour) {
-    reviewAnchor.setDate(reviewAnchor.getDate() - 1);
-  }
-
-  const todayLocalDate = formatTodayV2LocalDate(reviewAnchor);
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezoneName, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', hourCycle: 'h23',
+  }).formatToParts(now).map((part) => [part.type, part.value]));
+  const civilDate = `${parts.year}-${parts.month}-${parts.day}`;
+  const todayLocalDate = Number(parts.hour) < boundaryHour ? addDaysToLocalDate(civilDate, -1) : civilDate;
 
   return {
     timezoneName,
@@ -98,7 +96,7 @@ export function getTodayV2WeekdayIndex(localDate) {
     .map((value) => Number(value));
 
   if (!year || !month || !day) return new Date().getDay();
-  return new Date(year, month - 1, day).getDay();
+  return new Date(Date.UTC(year, month - 1, day)).getUTCDay();
 }
 
 export function validateTodayV2Weekdays(weekdays) {
@@ -156,6 +154,69 @@ export function coerceTodayV2EditableFragments(rawPlanText, editableFragments) {
 
   if (normalized.length > 0) return normalized;
   return buildTodayV2CommitmentDrafts(rawPlanText).map((draft) => draft.normalizedFragmentText);
+}
+
+// Input owns generated rows, while an explicit edit owns its text. Missing rows
+// represent explicit deletions and must not reappear when more input is typed.
+export function reconcileTodayV2InputActions(previousInput, nextInput, previousItems, createIdentity) {
+  const before = buildTodayV2CommitmentDrafts(previousInput).map((item) => item.normalizedFragmentText);
+  const after = buildTodayV2CommitmentDrafts(nextInput).map((item) => item.normalizedFragmentText);
+  const sources = new Map();
+  const used = new Set();
+  before.forEach((text, index) => {
+    const match = previousItems.find((item) => !used.has(item.key)
+      && normalizeTodayV2Text(item.inputText ?? item.text) === text);
+    if (match) {
+      sources.set(index, match);
+      used.add(match.key);
+    }
+  });
+  // Older persisted plans do not have input provenance. Infer only when all
+  // remaining rows and sources align, rather than stealing a deleted row.
+  const remainingSources = before.map((_, index) => index).filter((index) => !sources.has(index));
+  const remainingItems = previousItems.filter((item) => !used.has(item.key) && item.inputText == null);
+  if (remainingSources.length === remainingItems.length) {
+    remainingSources.forEach((index, offset) => {
+      sources.set(index, remainingItems[offset]);
+      used.add(remainingItems[offset].key);
+    });
+  }
+  const claimed = new Set();
+  const matches = after.map((text) => {
+    const index = before.findIndex((candidate, offset) => candidate === text && !claimed.has(offset));
+    if (index !== -1) claimed.add(index);
+    return index;
+  });
+  const changedBefore = before.map((_, index) => index).filter((index) => !claimed.has(index));
+  const changedAfter = matches.map((value, index) => value === -1 ? index : -1).filter((index) => index !== -1);
+  if (changedBefore.length === 1 && changedAfter.length === 1 && before.length === after.length) {
+    const oldText = before[changedBefore[0]];
+    const newText = after[changedAfter[0]];
+    if (newText.startsWith(oldText) || oldText.startsWith(newText) || sources.get(changedBefore[0])?.explicitEdit) {
+      matches[changedAfter[0]] = changedBefore[0];
+    }
+  }
+  const retained = new Set();
+  const next = [];
+  after.forEach((text, index) => {
+    const sourceIndex = matches[index];
+    if (sourceIndex === -1) {
+      next.push({ ...createIdentity(text), inputText: text });
+      return;
+    }
+    const item = sources.get(sourceIndex);
+    if (!item) return;
+    retained.add(item.key);
+    const edited = item.explicitEdit || normalizeTodayV2Text(item.text) !== before[sourceIndex];
+    next.push({ ...item, text: edited ? item.text : text, inputText: text, explicitEdit: edited });
+  });
+  previousItems.forEach((item, index) => {
+    if (retained.has(item.key) || (used.has(item.key) && !item.explicitEdit)) return;
+    const earlierKeys = new Set(previousItems.slice(0, index).map((previous) => previous.key));
+    const previousIndex = next.findLastIndex((candidate) => earlierKeys.has(candidate.key));
+    next.splice(previousIndex + 1, 0, item);
+  });
+  return next;
 }
 
 export function isTodayV2HabitScheduledForDate(habitDefinition, localDate) {

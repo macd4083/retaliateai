@@ -1,15 +1,16 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import * as Dialog from '@radix-ui/react-dialog';
 import AppShellV2 from '../../components/v2/AppShellV2';
 import { useAuth } from '../../lib/AuthContext';
 import { ENABLE_TODAY_V2_SCHEDULER } from '../../lib/featureFlags';
 import GoogleCalendarConnection from '../components/GoogleCalendarConnection';
 import TomorrowScheduler from '../components/TomorrowScheduler';
+import HabitWeekPlanner from '../components/HabitWeekPlanner';
 import { isMissingScheduleSchema } from '../services/scheduling';
 import {
   getTodayV2BooleanAnswer,
   getTodayV2CommitmentStateLabel,
-  getTodayV2WeekdayDisplayOrder,
 } from '../today/model';
 import { useTodayV2State } from '../today/useTodayV2State';
 import {
@@ -67,8 +68,45 @@ function NumericHabitResponseInput({ occurrence, onSave, disabled = false }) {
   );
 }
 
-function HabitEditorModal({ value, onClose, onSave, disabled = false }) {
-  const [draft, setDraft] = useState(value);
+export function HabitEditorModal({ value, onClose, onSave, disabled = false }) {
+  const [draft, setDraft] = useState(() => ({
+    ...value,
+    name: value.name || '',
+    unit: value.unit || '',
+    response_type: value.response_type || TODAY_V2_RESPONSE_TYPES.BOOLEAN,
+    schedule_weekdays: Array.isArray(value.schedule_weekdays) ? value.schedule_weekdays : [0, 1, 2, 3, 4, 5, 6],
+    planning_mode: value.planning_mode === 'automatic' ? 'automatic' : 'manual',
+    schedule_times: Object.fromEntries(Array.from({ length: 7 }, (_, day) => [day, {
+      time: value.schedule_times?.[day]?.time || '',
+      duration_minutes: value.schedule_times?.[day]?.duration_minutes ?? 30,
+      occurrence: value.schedule_times?.[day]?.occurrence === 'later' ? 'later' : 'earlier',
+    }])),
+  }));
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const locked = disabled || saving;
+  const isValidEntry = (entry) => /^([01]\d|2[0-3]):[0-5]\d$/.test(entry.time)
+    && Number.isInteger(entry.duration_minutes) && entry.duration_minutes >= 1 && entry.duration_minutes <= 1440;
+  const invalidSchedule = draft.schedule_weekdays.some((day) => {
+    const entry = draft.schedule_times[day];
+    return !Number.isInteger(entry.duration_minutes) || entry.duration_minutes < 1 || entry.duration_minutes > 1440
+      || ((draft.planning_mode === 'automatic' || entry.time !== '') && !isValidEntry(entry));
+  });
+  const save = async () => {
+    if (locked || invalidSchedule || !draft.name.trim() || !draft.schedule_weekdays.length) return;
+    setSaving(true);
+    setSaveError('');
+    try {
+      await onSave({
+        ...draft,
+        schedule_times: Object.fromEntries(Object.entries(draft.schedule_times).filter(([, entry]) => isValidEntry(entry))),
+      });
+    } catch (failure) {
+      setSaveError(failure?.message || 'Could not save habit.');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const toggleWeekday = (dayIndex) => {
     setDraft((previous) => {
@@ -81,15 +119,19 @@ function HabitEditorModal({ value, onClose, onSave, disabled = false }) {
   };
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-4">
-      <div role="dialog" aria-modal="true" aria-labelledby="habit-editor-title" className="w-full max-w-md space-y-4 rounded-2xl border border-zinc-700 bg-zinc-900 p-4">
+    <Dialog.Root open onOpenChange={(open) => { if (!open && !saving) onClose(); }}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/70" />
+        <Dialog.Content onEscapeKeyDown={(event) => { if (saving) event.preventDefault(); }} onPointerDownOutside={(event) => { if (saving) event.preventDefault(); }} className="fixed left-1/2 top-1/2 z-50 max-h-[90dvh] w-[calc(100%_-_2rem)] max-w-5xl -translate-x-1/2 -translate-y-1/2 space-y-4 overflow-y-auto rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-white">
         <div className="flex items-center justify-between">
-          <h3 id="habit-editor-title" className="font-semibold text-white">{draft.id ? 'Edit Habit' : 'Add Habit'}</h3>
-          <button type="button" aria-label="Close habit editor" onClick={onClose} className="text-zinc-400 hover:text-white">✕</button>
+          <Dialog.Title className="font-semibold text-white">{draft.id ? 'Edit Habit' : 'Add Habit'}</Dialog.Title>
+          <button type="button" disabled={saving} aria-label="Close habit editor" onClick={onClose} className="text-zinc-400 hover:text-white">✕</button>
         </div>
+        <Dialog.Description className="text-sm text-zinc-400">Set your habit, weekly days, and how it enters your calendar.</Dialog.Description>
 
         <input
-          disabled={disabled}
+          aria-label="Habit name"
+          disabled={locked}
           value={draft.name}
           onChange={(event) => setDraft((previous) => ({ ...previous, name: event.target.value }))}
           placeholder="Habit name"
@@ -99,7 +141,8 @@ function HabitEditorModal({ value, onClose, onSave, disabled = false }) {
         <div className="grid grid-cols-2 gap-2">
           <button
             type="button"
-            disabled={disabled}
+            disabled={locked}
+            aria-pressed={draft.response_type === TODAY_V2_RESPONSE_TYPES.BOOLEAN}
             onClick={() => setDraft((previous) => ({ ...previous, response_type: TODAY_V2_RESPONSE_TYPES.BOOLEAN, unit: '' }))}
             className={`rounded-lg border px-3 py-2 text-sm ${draft.response_type === TODAY_V2_RESPONSE_TYPES.BOOLEAN ? 'border-red-500 bg-red-600/10 text-white' : 'border-zinc-700 text-zinc-400'}`}
           >
@@ -107,7 +150,8 @@ function HabitEditorModal({ value, onClose, onSave, disabled = false }) {
           </button>
           <button
             type="button"
-            disabled={disabled}
+            disabled={locked}
+            aria-pressed={draft.response_type === TODAY_V2_RESPONSE_TYPES.NUMBER}
             onClick={() => setDraft((previous) => ({ ...previous, response_type: TODAY_V2_RESPONSE_TYPES.NUMBER }))}
             className={`rounded-lg border px-3 py-2 text-sm ${draft.response_type === TODAY_V2_RESPONSE_TYPES.NUMBER ? 'border-red-500 bg-red-600/10 text-white' : 'border-zinc-700 text-zinc-400'}`}
           >
@@ -117,7 +161,8 @@ function HabitEditorModal({ value, onClose, onSave, disabled = false }) {
 
         {draft.response_type === TODAY_V2_RESPONSE_TYPES.NUMBER && (
           <input
-            disabled={disabled}
+            aria-label="Habit unit"
+            disabled={locked}
             value={draft.unit}
             onChange={(event) => setDraft((previous) => ({ ...previous, unit: event.target.value }))}
             placeholder="Unit (hours, minutes, etc.)"
@@ -125,36 +170,42 @@ function HabitEditorModal({ value, onClose, onSave, disabled = false }) {
           />
         )}
 
-        <div>
-          <p className="mb-2 text-xs text-zinc-400">Weekdays</p>
-          <div className="grid grid-cols-7 gap-1">
-            {getTodayV2WeekdayDisplayOrder().map(({ label, weekdayIndex }) => {
-              const active = draft.schedule_weekdays.includes(weekdayIndex);
-              return (
-                <button
-                  key={weekdayIndex}
-                  type="button"
-                  disabled={disabled}
-                  onClick={() => toggleWeekday(weekdayIndex)}
-                  className={`rounded-md border px-1 py-2 text-xs ${active ? 'border-red-500 bg-red-600/20 text-white' : 'border-zinc-700 text-zinc-400'}`}
-                >
-                  {label}
-                </button>
-              );
-            })}
-          </div>
-        </div>
+        <fieldset disabled={locked} className="space-y-2">
+          <legend className="mb-2 text-sm font-semibold">Calendar planning</legend>
+          <label className="flex items-start gap-2 text-sm">
+            <input type="radio" name="habit-planning-mode" value="manual" checked={draft.planning_mode === 'manual'} onChange={() => setDraft((previous) => ({ ...previous, planning_mode: 'manual' }))} />
+            <span>Manual<span className="block text-xs text-zinc-400">Available to plan in your daily workflow. Times are optional preferences, not automatic bookings.</span></span>
+          </label>
+          <label className="flex items-start gap-2 text-sm">
+            <input type="radio" name="habit-planning-mode" value="automatic" checked={draft.planning_mode === 'automatic'} onChange={() => setDraft((previous) => ({ ...previous, planning_mode: 'automatic' }))} />
+            <span>Automatic<span className="block text-xs text-zinc-400">Consistently preplanned on selected days at the prescribed times. Each selected day needs a time and duration.</span></span>
+          </label>
+        </fieldset>
+        <HabitWeekPlanner
+          name={draft.name}
+          weekdays={draft.schedule_weekdays}
+          times={draft.schedule_times}
+          disabled={locked}
+          onToggleDay={toggleWeekday}
+          onChangeTime={(day, changes) => setDraft((previous) => ({
+            ...previous,
+            schedule_times: { ...previous.schedule_times, [day]: { ...previous.schedule_times[day], ...changes } },
+          }))}
+        />
+        {invalidSchedule && <p role="alert" className="text-sm text-amber-300">Set a valid time and a whole-minute duration from 1 to 1440 for each timed day. Automatic planning requires a time on every selected day.</p>}
+        {saveError && <p role="alert" className="text-sm text-red-300">{saveError}</p>}
 
         <button
           type="button"
-          onClick={() => onSave(draft)}
-          disabled={disabled || !draft.name.trim() || draft.schedule_weekdays.length === 0}
+          onClick={save}
+          disabled={locked || invalidSchedule || !draft.name.trim() || draft.schedule_weekdays.length === 0}
           className="w-full rounded-lg bg-red-600 py-2 text-sm font-semibold disabled:opacity-50"
         >
-          Save Habit
+          {saving ? 'Saving…' : 'Save Habit'}
         </button>
-      </div>
-    </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
 
@@ -222,13 +273,9 @@ export default function TodayV2Page() {
 
   const onSaveHabit = async (habitDraft) => {
     if (readOnly) return;
-    try {
-      await saveHabitDefinition(habitDraft);
-      setHabitEditorValue(null);
-      setMenuOpenHabitId(null);
-    } catch (saveError) {
-      window.alert(saveError?.message || 'Could not save habit.');
-    }
+    await saveHabitDefinition(habitDraft);
+    setHabitEditorValue(null);
+    setMenuOpenHabitId(null);
   };
 
   const onDeleteHabit = async (habitId) => {

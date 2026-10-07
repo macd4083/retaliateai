@@ -21,6 +21,8 @@ import {
   setFollowThroughCompletion,
   seedDefaultHabits,
   updateControllableFocus,
+  upsertHabitDefinition,
+  ensureTodayV2AutomaticHabitSchedules,
 } from '../v2/services/todayReview';
 import {
   TODAY_V2_FORBIDDEN_PERSISTENCE_TOKENS,
@@ -295,8 +297,39 @@ describe('TodayV2 repository', () => {
       response_type: 'boolean',
       unit: '',
       schedule_weekdays: [0, 1, 2, 3, 4, 5, 6],
+      planning_mode: 'manual',
+      schedule_times: {},
       display_order: 2,
     });
+  });
+
+  it('persists validated recurrence settings with owned habit updates', async () => {
+      const tracker = {};
+      supabaseMock.from.mockImplementation(() => createThenableBuilder({ error: null }, tracker));
+      await upsertHabitDefinition('user-1', {
+        id: 'habit-1', name: 'Read', response_type: 'boolean', schedule_weekdays: [2],
+        planning_mode: 'automatic',
+        schedule_times: { 2: { time: '09:07', duration_minutes: 43, occurrence: 'later' } },
+      });
+      expect(tracker.update).toMatchObject({
+        user_id: 'user-1', planning_mode: 'automatic',
+        schedule_times: { 2: { time: '09:07', duration_minutes: 43, occurrence: 'later' } },
+      });
+      expect(tracker.eq).toContainEqual(['user_id', 'user-1']);
+      await expect(upsertHabitDefinition('user-1', {
+        name: 'Read', schedule_weekdays: [2], planning_mode: 'automatic', schedule_times: {},
+      })).rejects.toThrow(/every selected/);
+    });
+
+  it('requests authorized server recurrence seeding and tolerates an undeployed RPC', async () => {
+      supabaseMock.rpc.mockResolvedValueOnce({ error: null });
+      await ensureTodayV2AutomaticHabitSchedules('2026-09-28', '2026-09-29', 'America/New_York');
+      expect(supabaseMock.rpc).toHaveBeenCalledWith('today_v2_seed_habit_schedules', {
+        p_start_local_date: '2026-09-28', p_end_local_date: '2026-09-29', p_timezone_name: 'America/New_York',
+      });
+      supabaseMock.rpc.mockResolvedValueOnce({ error: { code: 'PGRST202' } });
+      await expect(ensureTodayV2AutomaticHabitSchedules('2026-09-28', '2026-09-29', 'UTC'))
+        .resolves.toMatchObject({ code: 'PGRST202' });
   });
 
   it('persists completion state updates with the matching answered_at behavior', async () => {

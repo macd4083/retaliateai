@@ -156,10 +156,47 @@ describe('TomorrowScheduler UI', () => {
     const dialog = document.querySelector('[role="dialog"]');
     expect(dialog).toBeTruthy();
     expect(dialog.textContent).toContain('Duration estimate (minutes)');
-    expect(getInput('[role="dialog"] input[type="time"]').step).toBe('900');
+    expect(getInput('[role="dialog"] input[type="time"]').step).toBe('60');
     await act(async () => dialog.querySelector('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
     expect(update).toHaveBeenCalledWith('action-1', { starts_at: '2026-10-07T09:00:00.000Z', ends_at: '2026-10-07T09:30:00.000Z' });
     expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('provides a taller timeline and snaps the pointer time after scrolling, even over an occupied block', async () => {
+    await render();
+    const timeline = container.querySelector('[aria-label^="24-hour timeline"]');
+    expect(timeline.className).toContain('h-[760px]');
+    expect(timeline.className).toContain('md:h-[960px]');
+    timeline.getBoundingClientRect = () => ({ left: 100, right: 600, top: 200, bottom: 960 });
+    timeline.scrollTop = 8 * 60 * 2.4;
+    const id = 'slot:2026-10-07T09:15:00.000Z';
+    const args = { pointerCoordinates: { x: 300, y: 200 + 70 * 2.4 }, droppableContainers: [{ id, disabled: false }] };
+    expect(dnd.handlers.collisionDetection(args)).toEqual([{ id }]);
+    expect(dnd.handlers.collisionDetection({ ...args, pointerCoordinates: { x: 120, y: 300 } })).toEqual([]);
+    expect(dnd.handlers.collisionDetection({ ...args, pointerCoordinates: { x: 300, y: 100 } })).toEqual([]);
+    expect(dnd.handlers.collisionDetection({ ...args, droppableContainers: [{ id, disabled: true }] })).toEqual([]);
+  });
+
+  it('saves an exact non-quarter-hour start and duration', async () => {
+    await render();
+    await click('Write a chapter');
+    await changeInput(getInput('[role="dialog"] input[type="time"]'), '09:07');
+    await changeInput(getInput('[role="dialog"] input[type="number"]'), '22');
+    await act(async () => document.querySelector('[role="dialog"] form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    expect(update).toHaveBeenCalledWith('action-1', { starts_at: '2026-10-07T09:07:00.000Z', ends_at: '2026-10-07T09:29:00.000Z' });
+  });
+
+  it('uses a habit weekday preference when editing and its duration when dropping', async () => {
+    const habit = { ...items[1], preferred_time: '07:13', duration_minutes: 22, occurrence: 'earlier' };
+    await render({ items: [habit] });
+    await click('Read');
+    expect(getInput('[role="dialog"] input[type="time"]').value).toBe('07:13');
+    expect(getInput('[role="dialog"] input[type="number"]').value).toBe('22');
+    await click('Cancel');
+    const dragged = { data: { current: { item: habit } } };
+    await act(async () => dnd.handlers.onDragStart({ active: dragged }));
+    await act(async () => dnd.handlers.onDragEnd({ active: dragged, over: { data: { current: { timestamp: '2026-10-07T10:15:00.000Z' } } } }));
+    expect(update).toHaveBeenCalledWith('habit-1', { starts_at: '2026-10-07T10:15:00.000Z', ends_at: '2026-10-07T10:37:00.000Z' });
   });
 
   it('requires explicit confirmation before saving an overlap', async () => {

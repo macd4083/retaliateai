@@ -153,11 +153,9 @@ describe('useTodayV2State', () => {
       vi.advanceTimersByTime(801);
       await Promise.resolve();
     });
-
     await waitForCondition(() => serviceMocks.updateDesiredDirection.mock.calls.length > 0, 'direction autosave');
     await waitForCondition(() => serviceMocks.updateControllableFocus.mock.calls.length > 0, 'controllable focus autosave');
     await waitForCondition(() => serviceMocks.replaceTomorrowActions.mock.calls.length > 0, 'plan autosave');
-
     expect(serviceMocks.updateDesiredDirection).toHaveBeenCalledWith('review-2026-09-28', 'Builder');
     expect(serviceMocks.updateControllableFocus).toHaveBeenCalledWith('review-2026-09-28', 'Protect the first work block');
     expect(serviceMocks.replaceTomorrowActions).toHaveBeenCalledWith(expect.objectContaining({
@@ -168,6 +166,69 @@ describe('useTodayV2State', () => {
       firstFiveMinutes: 'Open the outline and write one sentence',
     }));
   });
+
+  it('reconciles newly typed commitments after persisted explicit edits without refresh', async () => {
+      const initial = {
+        ...makeState(), scheduleAvailable: true, tomorrowPlanInput: 'Write and Walk',
+        firstFiveMinutes: 'Open outline\nPut on shoes',
+        tomorrowFragments: [
+          { id: 'write-id', fragment_text: 'Write a chapter' },
+          { id: 'walk-id', fragment_text: 'Walk' },
+        ],
+        tomorrowSchedules: [{ id: 'write-block', source_type: 'action', source_id: 'write-id',
+          starts_at: '2026-09-29T09:00:00Z', ends_at: '2026-09-29T09:30:00Z' }],
+      };
+      serviceMocks.loadTodayReviewState.mockResolvedValue(initial);
+      await renderHook();
+      const originalKey = latest.tomorrowActionIdentities?.[0]?.key || latest.schedulerItems[0].key;
+      await act(async () => { latest.setTomorrowInput('Write and Walk and Read'); });
+      expect(latest.tomorrowActions).toEqual(['Write a chapter', 'Walk', 'Read']);
+      expect(latest.schedulerItems[0]).toMatchObject({ key: originalKey, source_id: 'write-id' });
+      expect(latest.scheduleBlocks[0].source_key).toBe(originalKey);
+      expect(latest.firstFiveMinutes).toBe('Open outline\nPut on shoes');
+      await act(async () => { latest.setFirstFiveMinutes('Open outline now\nPut on shoes\nOpen book'); });
+      expect(latest.schedulerItems.map((item) => item.label)).toEqual([
+        'Write a chapter, Open outline now', 'Walk, Put on shoes', 'Read, Open book',
+      ]);
+    });
+
+  it('preserves explicit deletion, action drafts, starts, and schedule edits across habit refresh', async () => {
+      const initial = {
+        ...makeState(), scheduleAvailable: true, tomorrowPlanInput: 'Write and Walk',
+        tomorrowFragments: [{ id: 'write-id', fragment_text: 'Write' }, { id: 'walk-id', fragment_text: 'Walk' }],
+        habitDefinitions: [{ id: 'habit-id', name: 'Read', planning_mode: 'manual',
+          schedule_weekdays: [0, 1, 2, 3, 4, 5, 6] }],
+        tomorrowSchedules: [],
+      };
+      serviceMocks.loadTodayReviewState.mockResolvedValue(initial);
+      serviceMocks.upsertHabitDefinition.mockResolvedValue('habit-id');
+      await renderHook();
+      await act(async () => {
+        latest.editTomorrowAction(0, 'Draft chapter');
+        latest.removeTomorrowAction(1);
+        latest.setFirstFiveMinutes('Keep this draft start');
+        latest.updateSchedule('habit:habit-id', {
+          starts_at: '2026-09-29T10:07:00Z', ends_at: '2026-09-29T10:50:00Z',
+        });
+      });
+      serviceMocks.loadTodayReviewState.mockResolvedValue({
+        ...initial,
+        habitDefinitions: [{ ...initial.habitDefinitions[0], name: 'Read updated', planning_mode: 'automatic',
+          schedule_times: { 2: { time: '08:09', duration_minutes: 37, occurrence: 'later' } } }],
+        tomorrowSchedules: [{ source_type: 'habit', source_id: 'habit-id',
+          starts_at: '2026-09-29T08:09:00Z', ends_at: '2026-09-29T08:46:00Z' }],
+      });
+      await act(async () => { await latest.saveHabitDefinition({ id: 'habit-id', name: 'Read updated' }); });
+      expect(latest.tomorrowActions).toEqual(['Draft chapter']);
+      expect(latest.firstFiveMinutes).toBe('Keep this draft start');
+      expect(latest.scheduleBlocks[0].starts_at).toBe('2026-09-29T10:07:00.000Z');
+      expect(latest.schedulerItems.find((item) => item.type === 'habit')).toMatchObject({
+        label: 'Read updated', planning_mode: 'automatic', preferred_time: '08:09',
+        schedule_time: '08:09', duration_minutes: 37, occurrence: 'later',
+      });
+      await act(async () => { latest.setTomorrowInput('Write and Walk and Read'); });
+      expect(latest.tomorrowActions).toEqual(['Draft chapter', 'Read']);
+    });
 
   it('replaces the saved direction on every edit without using autofill', async () => {
     await renderHook();
@@ -1096,7 +1157,7 @@ describe('useTodayV2State', () => {
     };
     await act(async () => { container.querySelector('[aria-label="Habit options for Read"]').click(); });
     await clickButton('Edit');
-    let saveHabit = [...container.querySelectorAll('button')].find((node) => node.textContent === 'Save Habit');
+    let saveHabit = [...document.querySelectorAll('button')].find((node) => node.textContent === 'Save Habit');
     expect(saveHabit.disabled).toBe(false);
     await clickButton("Complete tonight's review");
     expect(serviceMocks.completeTodayV2Review).toHaveBeenCalledTimes(1);
@@ -1104,8 +1165,8 @@ describe('useTodayV2State', () => {
     await act(async () => { saveHabit.click(); });
     expect(serviceMocks.upsertHabitDefinition).not.toHaveBeenCalled();
     await act(async () => { resolveCompletion({ ...initial.review, completed_at: 'completed' }); });
-    saveHabit = [...container.querySelectorAll('button')].find((node) => node.textContent === 'Save Habit');
-    expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+    saveHabit = [...document.querySelectorAll('button')].find((node) => node.textContent === 'Save Habit');
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
     expect(saveHabit.disabled).toBe(true);
     await act(async () => { saveHabit.click(); });
     expect(serviceMocks.upsertHabitDefinition).not.toHaveBeenCalled();
