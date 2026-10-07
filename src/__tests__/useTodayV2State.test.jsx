@@ -30,7 +30,12 @@ vi.mock('../v2/services/todayReview', () => serviceMocks);
 vi.mock('../lib/AuthContext', () => ({ useAuth: () => ({ user: { id: pageMocks.userId } }) }));
 vi.mock('react-router-dom', () => ({ useNavigate: () => pageMocks.navigate }));
 vi.mock('../components/v2/AppShellV2', () => ({ default: ({ children }) => <div>{children}</div> }));
-vi.mock('../v2/components/GoogleCalendarConnection', () => ({ default: () => null }));
+vi.mock('../v2/components/GoogleCalendarConnection', () => ({
+  default: ({ localDate, includeNextDay, onEvents }) => {
+    React.useEffect(() => onEvents?.([{ id: 'calendar-event', title: 'Calendar event', start: '2026-09-29T09:00:00Z', end: '2026-09-29T09:30:00Z' }]), [onEvents]);
+    return <div data-calendar-local-date={localDate} data-calendar-next-day={String(includeNextDay)}>Google Calendar</div>;
+  },
+}));
 vi.mock('../lib/featureFlags', () => ({ ENABLE_TODAY_V2_SCHEDULER: true }));
 vi.mock('../v2/services/scheduling', () => ({
   replaceSchedule: scheduleMocks.replaceSchedule,
@@ -200,6 +205,19 @@ describe('useTodayV2State', () => {
     expect(latest.schedulerItems.map((item) => item.label)).toEqual([
       'Run, Put on shoes', 'Read, Open book',
     ]);
+  });
+
+  it('places calendar controls beside the ROI prompt and feeds its events to tomorrow scheduling', async () => {
+    serviceMocks.loadTodayReviewState.mockResolvedValue({ ...makeState(), scheduleAvailable: true });
+    await act(async () => { root.render(<TodayV2Page />); });
+    await waitForCondition(() => container.querySelector('[aria-label="Google events"]')?.textContent.includes('Calendar event'), 'calendar events in tomorrow schedule');
+    const followThrough = [...container.querySelectorAll('section')].find((section) => section.querySelector('h3')?.textContent === '1. Follow-Through');
+    const calendarConnection = container.querySelector('[data-calendar-local-date]');
+    expect(followThrough.textContent).toContain("What were today's highest-ROI actions?");
+    expect(followThrough.nextElementSibling).toBe(calendarConnection);
+    expect(calendarConnection.getAttribute('data-calendar-local-date')).toBe('2026-09-29');
+    expect(calendarConnection.getAttribute('data-calendar-next-day')).toBe('true');
+    expect(container.querySelector('[aria-label="Google events"]').textContent).toContain('Calendar event');
   });
 
   it('autofills the stored direction beside Saved and shows the new planning prompts', async () => {

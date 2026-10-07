@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as scheduling from '../v2/today/scheduling';
 
-const calendar = vi.hoisted(() => ({ events: [], includeNextDay: false }));
+const calendar = vi.hoisted(() => ({ events: [] }));
 const dnd = vi.hoisted(() => ({ handlers: null }));
 vi.mock('@dnd-kit/core', async (importOriginal) => {
   const actual = /** @type {typeof import('@dnd-kit/core')} */ (await importOriginal());
@@ -12,13 +12,6 @@ vi.mock('@dnd-kit/core', async (importOriginal) => {
     DndContext: (props) => { dnd.handlers = props; return <actual.DndContext {...props} />; },
   };
 });
-vi.mock('../v2/components/GoogleCalendarConnection', () => ({
-  default: ({ onEvents, includeNextDay }) => {
-    calendar.includeNextDay = includeNextDay;
-    React.useEffect(() => onEvents(calendar.events), [onEvents, calendar.events]);
-    return <div>Google connection</div>;
-  },
-}));
 import TomorrowScheduler from '../v2/components/TomorrowScheduler';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -29,7 +22,7 @@ describe('TomorrowScheduler UI', () => {
   let update;
   const items = [{ id: 'action-1', key: 'action-1', type: 'action', label: 'Write a chapter' }, { id: 'habit-1', key: 'habit-1', type: 'habit', label: 'Read' }];
   const render = async (props = {}) => {
-    await act(async () => root.render(<TomorrowScheduler userId="user" localDate="2026-10-07" timezone="UTC" items={items} onUpdate={update} onUnschedule={vi.fn()} {...props} />));
+    await act(async () => root.render(<TomorrowScheduler localDate="2026-10-07" timezone="UTC" items={items} googleEvents={calendar.events} onUpdate={update} onUnschedule={vi.fn()} {...props} />));
   };
   const click = async (text) => {
     const button = Array.from(document.querySelectorAll('button')).find((node) => node.textContent.includes(text));
@@ -48,7 +41,6 @@ describe('TomorrowScheduler UI', () => {
 
   beforeEach(() => {
     calendar.events = [];
-    calendar.includeNextDay = false;
     dnd.handlers = null;
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -385,7 +377,6 @@ describe('TomorrowScheduler UI', () => {
     calendar.events = [{ id: 'next', title: 'Next-day call', start: '2026-10-08T00:00:00Z', end: '2026-10-08T00:30:00Z' }];
     const blocks = [{ source_key: 'action-1', starts_at: '2026-10-07T23:45:00Z', ends_at: '2026-10-08T00:15:00Z' }];
     await render({ blocks });
-    expect(calendar.includeNextDay).toBe(true);
     await click('Write a chapter');
     expect(document.querySelector('[role="dialog"] input[type="checkbox"]')).toBeTruthy();
     await click('Cancel');
