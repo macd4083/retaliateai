@@ -1,12 +1,16 @@
 import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-const migrationPath = '/home/runner/work/retaliateai/retaliateai/supabase/migrations/20260928_today_v2_workflow.sql';
-const featureMigrationPath = '/home/runner/work/retaliateai/retaliateai/supabase/migrations/20261006_today_v2_controllable_and_first_five.sql';
-const schedulingMigrationPath = '/home/runner/work/retaliateai/retaliateai/supabase/migrations/20261007_today_v2_scheduling.sql';
-const consolidatedSqlPath = '/home/runner/work/retaliateai/retaliateai/supabase/sql/today_v2_isolated_workflow.sql';
-const todayV2ServicePath = '/home/runner/work/retaliateai/retaliateai/src/v2/services/todayReview.js';
+const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const migrationPath = path.join(repositoryRoot, 'supabase/migrations/20260928_today_v2_workflow.sql');
+const featureMigrationPath = path.join(repositoryRoot, 'supabase/migrations/20261006_today_v2_controllable_and_first_five.sql');
+const schedulingMigrationPath = path.join(repositoryRoot, 'supabase/migrations/20261007_today_v2_scheduling.sql');
+const lockMigrationPath = path.join(repositoryRoot, 'supabase/migrations/20261008_today_v2_schedule_review_lock.sql');
+const consolidatedSqlPath = path.join(repositoryRoot, 'supabase/sql/today_v2_isolated_workflow.sql');
+const todayV2ServicePath = path.join(repositoryRoot, 'src/v2/services/todayReview.js');
 
 describe('TodayV2 SQL contract', () => {
   it('keeps the migration and SQL editor copy in sync', () => {
@@ -14,12 +18,29 @@ describe('TodayV2 SQL contract', () => {
     const initialMigration = fs.readFileSync(migrationPath, 'utf8');
     const featureMigration = fs.readFileSync(featureMigrationPath, 'utf8');
     const schedulingMigration = fs.readFileSync(schedulingMigrationPath, 'utf8');
+    const lockMigration = fs.readFileSync(lockMigrationPath, 'utf8');
 
     expect(consolidatedSql.startsWith(initialMigration)).toBe(true);
     expect(consolidatedSql.slice(initialMigration.length).trim()).toBe(
-      `${featureMigration.trim()}\n\n${schedulingMigration.trim()}`
+      `${featureMigration.trim()}\n\n${schedulingMigration.trim()}\n\n${lockMigration.trim()}`
     );
-    expect(consolidatedSql.endsWith(schedulingMigration)).toBe(true);
+    expect(consolidatedSql.endsWith(lockMigration)).toBe(true);
+  });
+
+  it('serializes all schedule and plan mutations against their owned source review while allowing outcome-only writes', () => {
+    const sql = fs.readFileSync(lockMigrationPath, 'utf8');
+    expect(sql).toContain('foreign key (user_id, source_review_id)');
+    expect(sql).toContain('alter column source_review_id set not null');
+    expect(sql).toContain('where user_id = p_user_id and local_date = p_local_date for update');
+    expect(sql).toContain('if v_review.completed_at is not null then');
+    expect(sql).toContain("v_date := new.target_local_date - 1");
+    expect(sql).toContain('select source_local_date into strict v_date');
+    expect(sql).toContain('before insert or update or delete on public.today_v2_schedule_blocks');
+    expect(sql).toContain("array['completion_state','answered_at','updated_at']");
+    expect(sql).toContain('before insert or update or delete on public.today_v2_plan_inputs');
+    expect(sql).toContain('before insert or update or delete on public.today_v2_commitment_fragments');
+    expect(sql).toContain("to_regprocedure('public.today_v2_replace_plan_stable_unlocked");
+    expect(sql).toContain('revoke all on function public.today_v2_replace_plan_stable_unlocked');
   });
 
   it('defines owned source-linked schedule blocks with local-date and duration guards', () => {

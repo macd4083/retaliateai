@@ -35,6 +35,11 @@ function localParts(timestamp, timezoneName) {
 }
 
 export function zonedLocalTimeToTimestamp(localDate, localTime, timezoneName, disambiguation) {
+  try {
+    new Intl.DateTimeFormat('en', { timeZone: timezoneName }).format(0);
+  } catch {
+    throw new Error(`Timezone "${timezoneName}" is unavailable. Choose a valid IANA timezone, such as America/New_York or UTC.`);
+  }
   const wall = `${localDate}T${localTime.length === 5 ? `${localTime}:00` : localTime}`;
   const naive = Date.parse(`${wall}Z`);
   if (!Number.isFinite(naive) || new Date(naive).toISOString().slice(0, 19) !== wall) {
@@ -47,7 +52,7 @@ export function zonedLocalTimeToTimestamp(localDate, localTime, timezoneName, di
   }
   const candidates = [...offsets].map((offset) => naive - offset)
     .filter((instant) => localParts(instant, timezoneName) === wall).sort((a, b) => a - b);
-  if (!candidates.length) throw new Error('This local time does not exist (DST gap)');
+  if (!candidates.length) throw new Error('This local time does not exist (DST gap). Choose a time before or after the clock change.');
   if (candidates.length > 1 && !['earlier', 'later'].includes(disambiguation)) {
     throw new Error('Ambiguous local time: choose earlier or later');
   }
@@ -94,6 +99,32 @@ export function normalizeScheduleBlock(block) {
 export function scheduleBlocksOverlap(left, right) {
   return Date.parse(left.starts_at) < Date.parse(right.ends_at)
     && Date.parse(right.starts_at) < Date.parse(left.ends_at);
+}
+
+export function getScheduleLocalDate(timestamp, timezoneName) {
+  return localParts(timestamp, timezoneName).slice(0, 10);
+}
+
+export function getScheduleDayOffset(startsAt, endsAt, timezoneName) {
+  const civilMidnight = (timestamp) => Date.parse(`${getScheduleLocalDate(timestamp, timezoneName)}T00:00:00Z`);
+  return Math.round((civilMidnight(endsAt) - civilMidnight(startsAt)) / 86400000);
+}
+
+export function clipScheduleBlocksToDate(blocks, bounds) {
+  const start = Date.parse(bounds.starts_at);
+  const end = Date.parse(bounds.ends_at);
+  return blocks.filter((block) => {
+    const blockStart = Date.parse(block.starts_at);
+    const blockEnd = Date.parse(block.ends_at);
+    return Number.isFinite(blockStart) && Number.isFinite(blockEnd)
+      && blockEnd > blockStart && blockStart < end && blockEnd > start;
+  }).map((block) => ({
+    ...block,
+    visible_starts_at: new Date(Math.max(start, Date.parse(block.starts_at))).toISOString(),
+    visible_ends_at: new Date(Math.min(end, Date.parse(block.ends_at))).toISOString(),
+    continued: Date.parse(block.starts_at) < start,
+    continues: Date.parse(block.ends_at) > end,
+  }));
 }
 
 export function layoutScheduleBlocks(blocks) {

@@ -1,0 +1,66 @@
+name: Scheduler validation
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGHOST: localhost
+      PGPORT: 5432
+      PGUSER: postgres
+      PGDATABASE: postgres
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Bootstrap disposable Supabase auth fixtures
+        run: |
+          psql -v ON_ERROR_STOP=1 <<'SQL'
+          create role anon;
+          create role authenticated;
+          create role service_role bypassrls;
+          create schema auth;
+          create table auth.users(id uuid primary key);
+          create function auth.uid() returns uuid language sql stable as $$
+            select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid
+          $$;
+          grant usage on schema auth to authenticated, anon, service_role;
+          grant execute on function auth.uid() to authenticated, anon, service_role;
+          SQL
+      - name: Validate migration upgrade and idempotent repair
+        run: |
+          psql --single-transaction -v ON_ERROR_STOP=1 \
+            -f supabase/migrations/20260928_today_v2_workflow.sql \
+            -f supabase/migrations/20261006_today_v2_controllable_and_first_five.sql \
+            -f supabase/migrations/20261007_today_v2_scheduling.sql \
+            -f supabase/migrations/20261008_today_v2_schedule_review_lock.sql \
+            -f supabase/migrations/20261008_today_v2_schedule_review_lock.sql
+          psql -v ON_ERROR_STOP=1 \
+            -f supabase/tests/today_v2_scheduling.sql \
+            -f supabase/tests/today_v2_schedule_review_lock.sql
+      - run: npm run test -- src/__tests__/schedulerDeployment.test.js src/__tests__/todayV2Scheduling.test.js src/__tests__/todayV2SchedulingService.test.js src/__tests__/tomorrowSchedulerUi.test.jsx src/__tests__/schedulerHomeUi.test.jsx src/__tests__/useTodayV2State.test.jsx src/__tests__/googleCalendar.test.js src/__tests__/googleCalendarConnectionUi.test.jsx
+      - run: npm run lint
+      - run: npm run test
+      - run: npm run build

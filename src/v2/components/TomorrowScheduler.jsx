@@ -2,7 +2,7 @@ import React from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { DndContext, DragOverlay, PointerSensor, TouchSensor, useDraggable, useDroppable, useSensor, useSensors } from '@dnd-kit/core';
 import GoogleCalendarConnection from './GoogleCalendarConnection';
-import { getScheduleDateBounds, layoutScheduleBlocks, zonedLocalTimeToTimestamp } from '../today/scheduling';
+import { clipScheduleBlocksToDate, getScheduleDateBounds, getScheduleDayOffset, layoutScheduleBlocks, zonedLocalTimeToTimestamp } from '../today/scheduling';
 
 const fieldClass = 'w-full rounded-lg border border-zinc-600 bg-zinc-950 px-3 py-2 text-sm text-white';
 const buttonClass = 'rounded-lg border border-zinc-600 px-3 py-2 text-sm hover:border-zinc-400 disabled:opacity-50';
@@ -18,9 +18,9 @@ class MousePenPointerSensor extends PointerSensor {
 
 function resolveScheduleTime(localDate, time, timezone, occurrence, duration) {
   if (!Number.isInteger(duration) || duration < 15 || duration > 1440 || duration % 15 !== 0) throw new Error('Choose a duration in 15-minute steps, up to 24 hours.');
-  const starts_at = zonedLocalTimeToTimestamp(localDate, time, timezone, occurrence);
   const earlier = zonedLocalTimeToTimestamp(localDate, time, timezone, 'earlier');
   const later = zonedLocalTimeToTimestamp(localDate, time, timezone, 'later');
+  const starts_at = occurrence === 'later' ? later : earlier;
   return { starts_at, ends_at: new Date(Date.parse(starts_at) + duration * 60000).toISOString(), ambiguous: earlier !== later };
 }
 
@@ -35,7 +35,7 @@ function Slot({ minute, timestamp, disabled }) {
   return <div ref={setNodeRef} data-slot-timestamp={timestamp} aria-hidden="true" className={`h-9 border-t ${minute % 60 === 0 ? 'border-zinc-600/60' : 'border-zinc-800/60'} ${isOver ? 'bg-red-500/25' : ''}`} />;
 }
 
-function DraggableItem({ item, onEdit, disabled, style, compact = false, short = false, timeDescription, children }) {
+function DraggableItem({ item, onEdit, disabled, style = undefined, compact = false, short = false, timeDescription = '', children = null }) {
   const key = itemKey(item);
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, isDragging } = useDraggable({ id: key, data: { item }, disabled });
   return (
@@ -51,7 +51,7 @@ function DraggableItem({ item, onEdit, disabled, style, compact = false, short =
 }
 
 export default function TomorrowScheduler({
-  userId, localDate, timezone = 'UTC', items = [], blocks = [], contextBlocks = [], available = true, readOnly = false,
+  userId, localDate, timezone = 'UTC', items = [], blocks = [], contextBlocks = [], available = true, readOnly = false, completionSaving = false,
   saveStatus, saveError, onUpdate, onUnschedule, onRetry, resolveTime = resolveScheduleTime,
 }) {
   const sensors = useSensors(useSensor(MousePenPointerSensor, { activationConstraint: { distance: 8 } }), useSensor(TouchSensor, { activationConstraint: { delay: 300, tolerance: 8 } }));
@@ -68,6 +68,10 @@ export default function TomorrowScheduler({
   const schedulerRoot = React.useRef(null);
   const focusReturn = React.useRef(null);
   const focusItemKey = React.useRef(null);
+  const interaction = React.useRef({ scope: '', generation: 0, locked: true });
+  const dragGeneration = React.useRef(null);
+  const editingGeneration = React.useRef(null);
+  const writePending = React.useRef(null);
   const dayBounds = React.useMemo(() => {
     try { return { ...getScheduleDateBounds(localDate, timezone), error: null }; }
     catch (failure) { return { starts_at: null, ends_at: null, error: failure?.message || 'This date or timezone is unavailable.' }; }
@@ -76,54 +80,86 @@ export default function TomorrowScheduler({
   const dayEnd = Date.parse(dayBounds.ends_at);
   const dayMinutes = dayBounds.error ? 0 : (dayEnd - dayStart) / 60000;
   const timelineAvailable = available && !dayBounds.error;
+  const locked = readOnly || completionSaving || !timelineAvailable;
+  const scope = `${userId}:${localDate}:${timezone}:${locked}`;
+  if (interaction.current.scope !== scope) {
+    interaction.current = { scope, generation: interaction.current.generation + 1, locked };
+  }
+  const generation = interaction.current.generation;
   const slots = React.useMemo(() => Array.from({ length: Math.ceil(dayMinutes / 15) }, (_, index) => {
     const timestamp = new Date(dayStart + index * 15 * 60000).toISOString();
     return { timestamp, minute: index * 15, ...localParts(timestamp, timezone) };
   }), [dayStart, dayMinutes, timezone]);
-  const scheduledKeys = new Set(blocks.map(blockKey));
+  const visibleBlocks = clipScheduleBlocksToDate(blocks, dayBounds).map((block) => ({
+    ...block, read_only_context: block.read_only_context || block.continued || Boolean(block.target_local_date && block.target_local_date < localDate),
+  }));
+  const editableBlocks = visibleBlocks.filter((block) => !block.read_only_context);
+  const scheduledKeys = new Set(editableBlocks.map(blockKey));
   const unscheduled = items.filter((item) => !scheduledKeys.has(itemKey(item)));
   const itemMap = new Map(items.map((item) => [itemKey(item), item]));
-  const carryoverBlocks = contextBlocks.filter((block) => Date.parse(block.starts_at) < dayStart && Date.parse(block.ends_at) > dayStart).map((block) => ({ ...block, read_only_context: true }));
-  const sortedBlocks = [...blocks, ...carryoverBlocks].sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at));
+  const carryoverBlocks = clipScheduleBlocksToDate(contextBlocks, dayBounds).filter((block) => block.continued
+    && !visibleBlocks.some((existing) => (block.id && existing.id === block.id) || (blockKey(block) && blockKey(existing) === blockKey(block) && existing.starts_at === block.starts_at)))
+    .map((block) => ({ ...block, read_only_context: true }));
+  const sortedBlocks = [...visibleBlocks, ...carryoverBlocks].sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at));
   const localLanes = layoutScheduleBlocks(sortedBlocks);
   const laneCount = Math.max(1, ...localLanes.map((block) => block.lane + 1));
   const timedGoogle = googleEvents.filter((event) => !event.all_day && !event.allDay && !(event.start?.date)).map((event) => ({
     ...event, starts_at: event.starts_at || event.start?.dateTime || event.start, ends_at: event.ends_at || event.end?.dateTime || event.end,
   })).filter((event) => event.starts_at && event.ends_at).sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at));
-  const googleLanes = layoutScheduleBlocks(timedGoogle);
+  const googleLanes = layoutScheduleBlocks(clipScheduleBlocksToDate(timedGoogle, dayBounds));
   const googleLaneCount = Math.max(1, ...googleLanes.map((block) => block.lane + 1));
-  const allDay = googleEvents.filter((event) => event.all_day || event.allDay || event.start?.date);
+  const allDayEvents = googleEvents.filter((event) => event.all_day || event.allDay || event.start?.date);
+  const allDay = allDayEvents.filter((event) => (event.start?.date || event.start || event.starts_at) <= localDate && (event.end?.date || event.end || event.ends_at) > localDate);
 
   React.useEffect(() => {
     if (timeline.current) timeline.current.scrollTop = (slots.find((slot) => slot.time === '08:00')?.minute || 0) * 2.4;
   }, [slots, available]);
 
+  React.useEffect(() => {
+    setActive(null);
+    setEditing(null);
+    setConfirmOverlap(false);
+    setDialogError('');
+    setSaving(false);
+    writePending.current = null;
+    dragGeneration.current = null;
+    editingGeneration.current = null;
+  }, [scope]);
+
   const edit = (item, timestamp) => {
-    focusReturn.current = document.activeElement;
+    if (interaction.current.locked || generation !== interaction.current.generation || writePending.current === generation) return;
+    focusReturn.current = [...(schedulerRoot.current?.querySelectorAll('[data-scheduler-edit-key]') || [])].find((node) => node.getAttribute('data-scheduler-edit-key') === itemKey(item)) || document.activeElement;
+    if (schedulerRoot.current?.contains(document.activeElement) && document.activeElement !== document.body) focusReturn.current = document.activeElement;
     focusItemKey.current = itemKey(item);
-    const existing = blocks.find((block) => blockKey(block) === itemKey(item));
+    const existing = editableBlocks.find((block) => blockKey(block) === itemKey(item));
     const chosenStart = timestamp || existing?.starts_at;
     const chosenTime = chosenStart ? localParts(chosenStart, timezone).time : '09:00';
     setTime(chosenTime);
-    setDuration(existing ? Math.max(15, Math.round((new Date(existing.ends_at) - new Date(existing.starts_at)) / 60000)) : 30);
-    setOccurrence(chosenStart && Date.parse(chosenStart) === Date.parse(zonedLocalTimeToTimestamp(localDate, chosenTime, timezone, 'later')) ? 'later' : 'earlier');
+    setDuration(existing ? (Date.parse(existing.ends_at) - Date.parse(existing.starts_at)) / 60000 : 30);
+    setOccurrence(chosenStart ? Date.parse(chosenStart) === Date.parse(zonedLocalTimeToTimestamp(localDate, chosenTime, timezone, 'later')) ? 'later' : 'earlier' : '');
     setConfirmOverlap(false);
     setDialogError('');
+    editingGeneration.current = generation;
     setEditing(item);
   };
 
   let proposal = null;
   let timeError = '';
   try {
-    if (editing && resolveTime && !dayBounds.error) proposal = resolveTime(localDate, time, timezone, occurrence, Number(duration));
+    if (editing && resolveTime && !dayBounds.error) proposal = resolveTime(localDate, time, timezone, occurrence || 'earlier', Number(duration));
   } catch (failure) { timeError = failure.message; }
-  const busyAllDay = allDay.filter((event) => event.transparency !== 'transparent' && (event.start?.date || event.start || event.starts_at) <= localDate && (event.end?.date || event.end || event.ends_at) > localDate).map((event) => ({
-    starts_at: '0001-01-01T00:00:00Z', ends_at: '9999-12-31T00:00:00Z',
-  }));
-  const conflictBlocks = [...blocks, ...carryoverBlocks, ...timedGoogle.filter((event) => event.transparency !== 'transparent'), ...busyAllDay];
+  const busyAllDay = allDayEvents.filter((event) => event.transparency !== 'transparent').flatMap((event) => {
+    try {
+      const startDate = event.start?.date || event.start || event.starts_at;
+      const endDate = event.end?.date || event.end || event.ends_at;
+      return [{ starts_at: getScheduleDateBounds(startDate, timezone).starts_at, ends_at: getScheduleDateBounds(endDate, timezone).starts_at }];
+    } catch { return []; }
+  });
+  const conflictBlocks = [...blocks.map((block) => ({ ...block, read_only_context: block.read_only_context || Date.parse(block.starts_at) < dayStart || Boolean(block.target_local_date && block.target_local_date < localDate) })), ...carryoverBlocks, ...timedGoogle.filter((event) => event.transparency !== 'transparent'), ...busyAllDay];
   const overlaps = proposal?.starts_at ? conflictBlocks.filter((block) => (block.read_only_context || blockKey(block) !== itemKey(editing)) && new Date(block.starts_at) < new Date(proposal.ends_at) && new Date(block.ends_at) > new Date(proposal.starts_at)) : [];
 
   const commit = async (item, next, explicitOverlap = false) => {
+    if (interaction.current.locked || generation !== interaction.current.generation || !items.some((candidate) => itemKey(candidate) === itemKey(item))) return false;
     const collisions = conflictBlocks.some((block) => (block.read_only_context || blockKey(block) !== itemKey(item)) && new Date(block.starts_at) < new Date(next.ends_at) && new Date(block.ends_at) > new Date(next.starts_at));
     if (collisions && !explicitOverlap) return false;
     await onUpdate(itemKey(item), { starts_at: next.starts_at, ends_at: next.ends_at });
@@ -132,38 +168,47 @@ export default function TomorrowScheduler({
 
   const save = async (event) => {
     event.preventDefault();
-    if (!proposal || timeError || (overlaps.length && !confirmOverlap)) return;
+    if (interaction.current.locked || generation !== interaction.current.generation || editingGeneration.current !== generation || writePending.current === generation || !editing || !proposal || timeError || (proposal.ambiguous && !occurrence) || (overlaps.length && !confirmOverlap)) return;
+    writePending.current = generation;
     setSaving(true);
     setDialogError('');
     try {
-      await commit(editing, proposal, confirmOverlap);
-      setEditing(null);
-    } catch (failure) { setDialogError(failure.message || 'Could not save this time. Please try again.'); }
-    finally { setSaving(false); }
+      if (await commit(editing, proposal, confirmOverlap) && generation === interaction.current.generation) setEditing(null);
+    } catch (failure) { if (generation === interaction.current.generation) setDialogError(failure.message || 'Could not save this time. Please try again.'); }
+    finally { if (generation === interaction.current.generation) { writePending.current = null; setSaving(false); } }
   };
 
   const drop = async ({ active: dragged, over }) => {
     setActive(null);
+    if (interaction.current.locked || generation !== interaction.current.generation || dragGeneration.current !== generation || writePending.current === generation) return;
+    dragGeneration.current = null;
     const item = dragged.data.current?.item;
     const timestamp = over?.data.current?.timestamp;
-    if (!item || !timestamp) return;
+    if (!item || !timestamp || Date.parse(timestamp) < dayStart || Date.parse(timestamp) >= dayEnd) return;
     try {
-      const existing = blocks.find((block) => blockKey(block) === itemKey(item));
-      const minutes = existing ? Math.round((new Date(existing.ends_at) - new Date(existing.starts_at)) / 60000) : 30;
+      const existing = editableBlocks.find((block) => blockKey(block) === itemKey(item));
+      const minutes = existing ? (Date.parse(existing.ends_at) - Date.parse(existing.starts_at)) / 60000 : 30;
       const next = { starts_at: timestamp, ends_at: new Date(Date.parse(timestamp) + minutes * 60000).toISOString() };
-      if (!(await commit(item, next))) edit(item, timestamp);
-    } catch (failure) { edit(item, timestamp); setDialogError(failure.message); }
+      writePending.current = generation;
+      const committed = await commit(item, next);
+      if (generation === interaction.current.generation) writePending.current = null;
+      if (!committed) edit(item, timestamp);
+    } catch (failure) {
+      if (generation === interaction.current.generation) writePending.current = null;
+      if (generation === interaction.current.generation && !interaction.current.locked) { edit(item, timestamp); setDialogError(failure.message); }
+    } finally { if (generation === interaction.current.generation) writePending.current = null; }
   };
 
   const blockPosition = (block, count) => {
     const startMinute = (Math.max(dayStart, Date.parse(block.starts_at)) - dayStart) / 60000;
     const endMinute = (Math.min(dayEnd, Date.parse(block.ends_at)) - dayStart) / 60000;
-    return { position: 'absolute', top: startMinute * 2.4, height: Math.max(1, (endMinute - startMinute) * 2.4), left: `${block.lane / count * 100}%`, width: `${100 / count}%`, overflow: 'auto' };
+    return { position: /** @type {'absolute'} */ ('absolute'), top: startMinute * 2.4, height: Math.max(1, (endMinute - startMinute) * 2.4), left: `${block.lane / count * 100}%`, width: `${100 / count}%`, overflow: /** @type {'auto'} */ ('auto') };
   };
   const timeLabel = (block) => {
     const start = localParts(block.starts_at, timezone);
     const end = localParts(block.ends_at, timezone);
-    return `${start.time}–${end.time}${start.offset !== end.offset ? ` (${start.offset} → ${end.offset})` : dayMinutes !== 1440 ? ` (${start.offset})` : ''}${end.date !== start.date ? ' (+1 day)' : ''}`;
+    const dayOffset = getScheduleDayOffset(block.starts_at, block.ends_at, timezone);
+    return `${start.time}–${end.time}${start.offset !== end.offset ? ` (${start.offset} → ${end.offset})` : dayMinutes !== 1440 ? ` (${start.offset})` : ''}${dayOffset ? ` (+${dayOffset} day${dayOffset === 1 ? '' : 's'})` : ''}${block.continued ? ' · Continued from previous day' : ''}${block.continues ? ' · Continues tomorrow' : ''}`;
   };
 
   return (
@@ -174,15 +219,15 @@ export default function TomorrowScheduler({
         <p className="mt-2 text-xs text-zinc-400">{localDate} · {timezone} · Times are optional</p>
       </div>
       {!timelineAvailable ? <div role="status" className="space-y-2 rounded-xl bg-amber-950/30 p-3 text-sm text-amber-200">{dayBounds.error && <><p>Timeline unavailable for this date or timezone. Your review is still available.</p><p>{dayBounds.error}</p></>}{saveError ? <><p>{typeof saveError === 'string' ? saveError : saveError.message}</p><p>Your local schedule changes are preserved. Retry scheduling before completing your review.</p></> : !dayBounds.error && <p>Scheduling is not available yet. You can still save your actions and complete your review. Try again after scheduling has been enabled for your account.</p>}{onRetry && <button type="button" onClick={onRetry} className={buttonClass}>Retry scheduling</button>}</div> : <>
-        <GoogleCalendarConnection userId={userId} localDate={localDate} timezone={timezone} onEvents={setGoogleEvents} />
-        <div role="status" aria-live="polite" className="text-xs text-zinc-400">{saveError ? <span className="text-amber-300">{typeof saveError === 'string' ? saveError : saveError.message}</span> : saveStatus === 'saving' ? 'Saving schedule…' : saveStatus === 'saved' ? 'Schedule saved' : saveStatus === 'offline' ? 'Schedule saved on this device — reconnect to sync.' : saveStatus === 'error' ? 'Schedule could not sync. Your review is still available.' : 'Schedule changes save automatically.'}</div>
-        <DndContext sensors={sensors} onDragStart={({ active: dragged }) => setActive(dragged.data.current.item)} onDragCancel={() => setActive(null)} onDragEnd={drop}>
+        <GoogleCalendarConnection userId={userId} localDate={localDate} timezone={timezone} includeNextDay onEvents={setGoogleEvents} />
+        <div role="status" aria-live="polite" className="text-xs text-zinc-400">{saveError ? <span className="text-amber-300">{typeof saveError === 'string' ? saveError : saveError.message}</span> : saveStatus === 'saving' ? 'Saving schedule…' : saveStatus === 'saved' ? 'Schedule saved' : saveStatus === 'offline' ? 'Schedule pending sync — reconnect to save.' : saveStatus === 'error' ? 'Schedule could not sync. Your review is still available.' : 'Schedule changes save automatically.'}</div>
+        <DndContext sensors={sensors} onDragStart={({ active: dragged }) => { if (!interaction.current.locked && generation === interaction.current.generation && writePending.current !== generation) { dragGeneration.current = generation; setActive(dragged.data.current.item); } }} onDragCancel={() => { dragGeneration.current = null; setActive(null); }} onDragEnd={drop}>
           <div className="grid gap-4 md:grid-cols-[minmax(160px,1fr)_minmax(0,3fr)]">
             <aside aria-label="Unscheduled items" className="space-y-2">
               <h4 className="text-sm font-medium text-zinc-300">Unscheduled ({unscheduled.length})</h4>
               <p className="text-xs text-zinc-500">Default estimate: 30 minutes. Use the drag handle; the rest of the page scrolls normally.</p>
               <div className="flex gap-2 overflow-x-auto pb-2 md:flex-col md:overflow-x-visible">
-                {unscheduled.map((item) => <div key={itemKey(item)} className="min-w-[160px] md:min-w-0"><DraggableItem item={item} onEdit={edit} disabled={readOnly} /></div>)}
+                {unscheduled.map((item) => <div key={itemKey(item)} className="min-w-[160px] md:min-w-0"><DraggableItem item={item} onEdit={edit} disabled={locked || saving} /></div>)}
               </div>
               {!unscheduled.length && <p className="text-xs text-zinc-500">{readOnly ? 'No unscheduled items.' : items.length ? 'Everything has a time.' : 'Save an action or add a habit to begin.'}</p>}
             </aside>
@@ -193,12 +238,12 @@ export default function TomorrowScheduler({
                 <div className="relative grid grid-cols-[52px_1fr_1fr]" style={{ height: dayMinutes * 2.4 }}>
                   <div className="relative">{slots.filter((slot) => slot.minute % 60 === 0).map((slot) => <span key={slot.timestamp} className="absolute left-1 text-[10px] text-zinc-500" style={{ top: slot.minute * 2.4 }}><span className="block">{slot.time}</span><span className="block text-[8px]">{slot.offset}</span></span>)}</div>
                   <div className="relative border-l border-zinc-700">
-                    {slots.map((slot) => <Slot key={slot.timestamp} minute={slot.minute} timestamp={slot.timestamp} disabled={readOnly} />)}
+                    {slots.map((slot) => <Slot key={slot.timestamp} minute={slot.minute} timestamp={slot.timestamp} disabled={locked || saving} />)}
                     <div className="pointer-events-none absolute inset-0">{localLanes.map((block) => {
                       if (block.read_only_context) return <div key={`carryover:${block.id || block.source_id || block.starts_at}`} data-context-schedule-id={block.id} style={blockPosition(block, laneCount)} className="pointer-events-auto rounded-lg border border-indigo-800/60 bg-indigo-950/40 p-2 text-[10px] text-indigo-200"><span className="block break-words font-medium">{block.label || 'Previous-day plan'}</span><span className="mt-1 block">{timeLabel(block)}</span><span className="mt-1 block text-indigo-300">Previous-day · {block.target_local_date || localParts(block.starts_at, timezone).date} · read-only</span></div>;
                       const item = itemMap.get(blockKey(block));
                       if (!item && readOnly) return <div key={block.id || blockKey(block)} data-schedule-key={blockKey(block)} style={blockPosition(block, laneCount)} className="pointer-events-auto rounded-lg border border-zinc-700 bg-zinc-800/60 p-2 text-xs text-zinc-300"><span className="block break-words font-medium">{block.label || (block.source_type === 'habit' || block.habit_definition_id ? 'Scheduled habit' : 'Scheduled commitment')}</span><span className="mt-1 block">{timeLabel(block)}</span><span className="mt-1 block text-[10px] text-zinc-400">Preserved plan · read-only</span></div>;
-                      return item ? <div key={block.id || blockKey(block)} data-schedule-key={blockKey(block)} className="pointer-events-auto" style={blockPosition(block, laneCount)}><DraggableItem item={item} onEdit={edit} disabled={readOnly} compact short={blockPosition(block, laneCount).height <= 36} timeDescription={timeLabel(block)}><span className={`block truncate text-[10px] leading-3 ${item.type === 'habit' ? 'text-emerald-200' : 'text-red-200'}`}>{timeLabel(block)}</span></DraggableItem></div> : null;
+                      return item ? <div key={block.id || blockKey(block)} data-schedule-key={blockKey(block)} className="pointer-events-auto" style={blockPosition(block, laneCount)}><DraggableItem item={item} onEdit={edit} disabled={locked || saving} compact short={blockPosition(block, laneCount).height <= 36} timeDescription={timeLabel(block)}><span className={`block truncate text-[10px] leading-3 ${item.type === 'habit' ? 'text-emerald-200' : 'text-red-200'}`}>{timeLabel(block)}</span></DraggableItem></div> : null;
                     })}</div>
                   </div>
                   <div className="relative border-l border-zinc-700" aria-label="Google events">{googleLanes.map((event) => <div key={event.id} style={blockPosition(event, googleLaneCount)} className="rounded border border-zinc-700 bg-zinc-800/60 p-1 text-[10px] text-zinc-400"><span className="block break-words">{event.summary || event.title || 'Busy'}</span><span>{timeLabel(event)}</span>{event.transparency === 'transparent' && <span className="block">Free · non-blocking</span>}</div>)}</div>
@@ -209,27 +254,27 @@ export default function TomorrowScheduler({
           <DragOverlay>{active && <div className="max-w-56 rounded-lg border border-red-500 bg-zinc-900 p-3 text-sm text-white">{active.label}</div>}</DragOverlay>
         </DndContext>
       </>}
-      <Dialog.Root open={Boolean(editing) && !dayBounds.error} onOpenChange={(open) => { if (!open && !saving) setEditing(null); }}>
+      <Dialog.Root open={Boolean(editing) && editingGeneration.current === generation && !locked} onOpenChange={(open) => { if (!open && !saving) setEditing(null); }}>
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-50 bg-black/75" />
           <Dialog.Content onCloseAutoFocus={(event) => {
             event.preventDefault();
             const fallback = [...(schedulerRoot.current?.querySelectorAll('[data-scheduler-edit-key]') || [])].find((node) => node.getAttribute('data-scheduler-edit-key') === focusItemKey.current);
-            const target = focusReturn.current?.isConnected && focusReturn.current !== document.body ? focusReturn.current : fallback;
+            const target = focusReturn.current?.isConnected && !focusReturn.current.disabled && focusReturn.current !== document.body ? focusReturn.current : fallback?.disabled ? timeline.current : fallback || timeline.current;
             target?.focus();
           }} className="fixed left-1/2 top-1/2 z-50 max-h-[90dvh] w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 space-y-4 overflow-y-auto rounded-2xl border border-zinc-700 bg-zinc-900 p-5 text-white shadow-xl">
             <Dialog.Title className="font-semibold">Choose a time</Dialog.Title>
             <Dialog.Description className="text-sm text-zinc-400">{editing?.label} · {localDate} · {timezone}</Dialog.Description>
             <form onSubmit={save} className="space-y-4">
-              <label className="block space-y-1 text-sm">Start time<input required type="time" step="900" value={time} onChange={(event) => { setTime(event.target.value); setConfirmOverlap(false); }} className={fieldClass} /></label>
-              <label className="block space-y-1 text-sm">Duration estimate (minutes)<input required type="number" min="15" max="1440" step="15" value={duration} onChange={(event) => { setDuration(event.target.value); setConfirmOverlap(false); }} className={fieldClass} /></label>
-              {proposal?.ambiguous && <label className="block space-y-1 text-sm">This time occurs twice (daylight saving)<select value={occurrence} onChange={(event) => setOccurrence(event.target.value)} className={fieldClass}><option value="earlier">Earlier occurrence</option><option value="later">Later occurrence</option></select></label>}
+              <label className="block space-y-1 text-sm">Start time<input required type="time" step="900" value={time} onChange={(event) => { setTime(event.target.value); setOccurrence(''); setConfirmOverlap(false); }} className={fieldClass} /></label>
+              <label className="block space-y-1 text-sm">Duration estimate (minutes)<input required type="number" min="15" max="1440" step="15" value={duration} onChange={(event) => { setDuration(Number(event.target.value)); setConfirmOverlap(false); }} className={fieldClass} /></label>
+              {proposal?.ambiguous && <label className="block space-y-1 text-sm">This time occurs twice (daylight saving)<select required value={occurrence} onChange={(event) => { setOccurrence(event.target.value); setConfirmOverlap(false); }} className={fieldClass}>{!occurrence && <option value="" disabled>Choose an occurrence</option>}<option value="earlier">Earlier occurrence</option><option value="later">Later occurrence</option></select></label>}
               {proposal && <p className="text-xs text-zinc-400">{timeLabel(proposal)} · elapsed duration estimate</p>}
               {overlaps.length > 0 && <div className="space-y-2 rounded-lg border border-amber-700 p-3 text-sm text-amber-200"><p>This overlaps your plan or a busy Google event.</p><label className="flex gap-2"><input type="checkbox" checked={confirmOverlap} onChange={(event) => setConfirmOverlap(event.target.checked)} />Keep this overlap intentionally</label></div>}
               {(timeError || dialogError) && <p role="alert" className="text-sm text-amber-300">{timeError || dialogError}</p>}
               <div className="flex flex-wrap gap-2">
-                <button type="submit" disabled={saving || !proposal || Boolean(timeError) || (overlaps.length > 0 && !confirmOverlap)} className="rounded-lg bg-red-600 px-4 py-2 text-sm disabled:opacity-50">{saving ? 'Saving…' : 'Save time'}</button>
-                {editing && scheduledKeys.has(itemKey(editing)) && <button type="button" disabled={saving} className={buttonClass} onClick={async () => { setSaving(true); try { await onUnschedule(itemKey(editing)); setEditing(null); } catch (failure) { setDialogError(failure.message); } finally { setSaving(false); } }}>Unschedule</button>}
+                <button type="submit" disabled={locked || saving || !proposal || Boolean(timeError) || (proposal?.ambiguous && !occurrence) || (overlaps.length > 0 && !confirmOverlap)} className="rounded-lg bg-red-600 px-4 py-2 text-sm disabled:opacity-50">{saving ? 'Saving…' : 'Save time'}</button>
+                {editing && scheduledKeys.has(itemKey(editing)) && <button type="button" disabled={locked || saving} className={buttonClass} onClick={async () => { if (interaction.current.locked || generation !== interaction.current.generation || writePending.current === generation) return; writePending.current = generation; setSaving(true); try { await onUnschedule(itemKey(editing)); if (generation === interaction.current.generation) setEditing(null); } catch (failure) { if (generation === interaction.current.generation) setDialogError(failure.message); } finally { if (generation === interaction.current.generation) { writePending.current = null; setSaving(false); } } }}>Unschedule</button>}
                 <Dialog.Close asChild><button type="button" disabled={saving} className={buttonClass}>Cancel</button></Dialog.Close>
               </div>
             </form>

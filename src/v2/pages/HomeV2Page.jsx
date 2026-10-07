@@ -7,8 +7,10 @@ import { ENABLE_TODAY_V2_SCHEDULER } from '../../lib/featureFlags';
 import {
   getTodayV2CommitmentStateLabel,
   getTodayV2NextBoundaryDate,
+  addDaysToLocalDate,
 } from '../today/model';
 import { TODAY_V2_COMMITMENT_STATES } from '../today/types';
+import { clipScheduleBlocksToDate, getScheduleDateBounds, getScheduleDayOffset, getScheduleLocalDate } from '../today/scheduling';
 
 function SegmentedChoice({ value, options, onChange, disabled = false }) {
   return (
@@ -44,14 +46,18 @@ function formatBoundaryTime(dayBoundaryHour) {
   }).format(nextBoundary);
 }
 
-function ScheduleTime({ schedule, timezone }) {
+function ScheduleTime({ schedule, timezone, localDate }) {
   if (!schedule) return null;
-  const options = { timeZone: timezone || 'UTC', hour: 'numeric', minute: '2-digit' };
-  const dateOptions = { timeZone: timezone || 'UTC', year: 'numeric', month: '2-digit', day: '2-digit' };
-  const start = new Date(schedule.starts_at);
-  const end = new Date(schedule.ends_at);
-  const nextDay = new Intl.DateTimeFormat('en-CA', dateOptions).format(start) !== new Intl.DateTimeFormat('en-CA', dateOptions).format(end);
-  return <span className="mt-1 block text-xs text-red-300">{new Intl.DateTimeFormat(undefined, options).format(start)}–{new Intl.DateTimeFormat(undefined, options).format(end)}{nextDay ? ' (+1 day)' : ''}</span>;
+  try {
+    const visible = localDate ? clipScheduleBlocksToDate([schedule], getScheduleDateBounds(localDate, timezone || 'UTC'))[0] : schedule;
+    if (!visible) return null;
+    const options = { timeZone: timezone || 'UTC', hour: 'numeric', minute: '2-digit' };
+    const formatter = new Intl.DateTimeFormat(undefined, options);
+    const dayOffset = getScheduleDayOffset(schedule.starts_at, schedule.ends_at, timezone || 'UTC');
+    return <span className="mt-1 block text-xs text-red-300">{formatter.format(new Date(visible.visible_starts_at || visible.starts_at))}–{formatter.format(new Date(visible.visible_ends_at || visible.ends_at))}{dayOffset ? ` (+${dayOffset} day${dayOffset === 1 ? '' : 's'})` : ''}{visible.continued ? ' · Continued from previous day' : ''}{visible.continues ? ' · Continues tomorrow' : ''}</span>;
+  } catch {
+    return <span className="mt-1 block text-xs text-amber-300">Schedule time unavailable. Check your date and timezone settings.</span>;
+  }
 }
 
 function NumericHabitCheckIn({ occurrence, disabled, onSave }) {
@@ -155,6 +161,32 @@ export default function HomeV2Page() {
   const contractItems = homeState.review?.completed_at ? homeState.tomorrowFragments : [];
   const findSchedule = (schedules, sourceId) => ENABLE_TODAY_V2_SCHEDULER ? (schedules || []).find((schedule) => schedule.source_id === sourceId || schedule.commitment_fragment_id === sourceId || schedule.habit_definition_id === sourceId) : null;
   const todayHabits = homeState.habitOccurrences || [];
+  const todayDate = homeState.todayLocalDate;
+  const tomorrowDate = homeState.tomorrowLocalDate || (todayDate ? addDaysToLocalDate(todayDate, 1) : null);
+  let civilDate = todayDate;
+  try {
+    civilDate = homeState.civilScheduleLocalDate || getScheduleLocalDate(new Date(), homeState.timezoneName || 'UTC');
+  } catch { /* ScheduleTime exposes invalid timezone diagnostics without blocking check-ins. */ }
+  const visibleSchedules = (schedules, date) => {
+    if (!date) return schedules || [];
+    try { return clipScheduleBlocksToDate(schedules || [], getScheduleDateBounds(date, homeState.timezoneName || 'UTC')); }
+    catch { return schedules || []; }
+  };
+  const todayVisible = visibleSchedules(homeState.todaySchedules, todayDate);
+  const tomorrowVisible = visibleSchedules(homeState.tomorrowSchedules, tomorrowDate);
+  const civilDiffers = todayDate && civilDate > todayDate;
+  const civilVisible = civilDiffers ? visibleSchedules(homeState.civilSchedules || homeState.tomorrowSchedules, civilDate) : [];
+  const isCarryover = (schedule, date) => schedule.continued || schedule.read_only_context || Boolean(date && schedule.target_local_date && schedule.target_local_date < date);
+  const todaySchedules = todayVisible.filter((schedule) => !isCarryover(schedule, todayDate));
+  const tomorrowSchedules = tomorrowVisible.filter((schedule) => !isCarryover(schedule, tomorrowDate));
+  const carryover = (schedules, date, includeCurrent = false) => schedules.filter((schedule) => includeCurrent || isCarryover(schedule, date)).map((schedule) => {
+    const sourceId = schedule.source_id || schedule.commitment_fragment_id || schedule.habit_definition_id;
+    const source = [...homeState.followThroughItems, ...(homeState.tomorrowFragments || [])].find((item) => item.id === sourceId);
+    const habit = (homeState.habitDefinitions || []).find((item) => item.id === sourceId);
+    const snapshot = todayHabits.find((item) => item.habit_definition_id === sourceId || item.id === sourceId);
+    const label = schedule.label || source?.normalized_fragment_text || source?.fragment_text || habit?.name || snapshot?.snapshot_name || (isCarryover(schedule, date) ? 'Previous-day plan' : 'Calendar-day plan');
+    return <div key={schedule.id || `${sourceId}:${schedule.starts_at}`} data-carryover-schedule-id={isCarryover(schedule, date) ? schedule.id : undefined} className="mt-2 rounded-lg border border-indigo-800/60 p-2 text-sm text-zinc-300">{label}<ScheduleTime schedule={schedule} timezone={homeState.timezoneName} localDate={date} /><span className="block text-xs text-indigo-300">{isCarryover(schedule, date) ? 'Previous-day plan' : 'Calendar-day plan'} · read-only</span></div>;
+  });
 
   return (
     <AppShellV2 title="Today">
@@ -166,8 +198,16 @@ export default function HomeV2Page() {
           </p>
         </section>
 
+        {ENABLE_TODAY_V2_SCHEDULER && civilDiffers && <section aria-label="Current calendar day schedule" className="rounded-2xl border border-indigo-800/60 bg-zinc-900 p-4">
+          <h2 className="font-semibold text-white">Current calendar day schedule</h2>
+          <p className="mt-1 text-xs text-zinc-400">{civilDate} · {homeState.timezoneName} · Read-only schedule context</p>
+          <p className="mt-1 text-xs text-zinc-400">Your checklist still belongs to review day {todayDate}; calendar days change at midnight.</p>
+          {civilVisible.length ? carryover(civilVisible, civilDate, true) : <p className="mt-3 text-sm text-zinc-500">No schedule context loaded for this calendar day.</p>}
+        </section>}
+
         <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
           <h2 className="font-semibold text-white">Tomorrow you said you&apos;d prove it by:</h2>
+          {ENABLE_TODAY_V2_SCHEDULER && <p className="mt-1 text-xs text-zinc-400">Planning date {tomorrowDate} · {homeState.timezoneName}</p>}
           {homeState.review?.controllable_focus && (
             <p className="mt-3 text-sm text-zinc-300">
               <span className="font-medium text-white">Under your control:</span> {homeState.review.controllable_focus}
@@ -178,7 +218,7 @@ export default function HomeV2Page() {
               {contractItems.map((item) => (
                 <li key={item.id} className="rounded-xl border border-zinc-800 px-3 py-2 text-sm text-zinc-200">
                   {item.normalized_fragment_text || item.fragment_text}
-                  <ScheduleTime schedule={findSchedule(homeState.tomorrowSchedules, item.id)} timezone={homeState.timezoneName} />
+                  <ScheduleTime schedule={findSchedule(tomorrowSchedules, item.id)} timezone={homeState.timezoneName} localDate={tomorrowDate} />
                 </li>
               ))}
             </ul>
@@ -190,12 +230,13 @@ export default function HomeV2Page() {
               <span className="font-medium text-white">Start with:</span> {homeState.firstFiveMinutes}
             </p>
           )}
-          {ENABLE_TODAY_V2_SCHEDULER && homeState.review?.completed_at && (homeState.tomorrowSchedules || []).filter((schedule) => schedule.habit_definition_id || schedule.source_type === 'habit').map((schedule) => {
+          {ENABLE_TODAY_V2_SCHEDULER && homeState.review?.completed_at && tomorrowSchedules.filter((schedule) => schedule.habit_definition_id || schedule.source_type === 'habit').map((schedule) => {
             const sourceId = schedule.habit_definition_id || schedule.source_id;
             const habit = (homeState.habitDefinitions || []).find((candidate) => candidate.id === sourceId);
             const snapshot = todayHabits.find((candidate) => candidate.habit_definition_id === sourceId);
-            return <div key={schedule.id || sourceId} className="mt-2 rounded-lg border border-zinc-800 p-2 text-sm text-zinc-300">{habit?.name || snapshot?.snapshot_name || 'Scheduled habit'} · Habit<ScheduleTime schedule={schedule} timezone={homeState.timezoneName} /></div>;
+            return <div key={schedule.id || sourceId} className="mt-2 rounded-lg border border-zinc-800 p-2 text-sm text-zinc-300">{habit?.name || snapshot?.snapshot_name || 'Scheduled habit'} · Habit<ScheduleTime schedule={schedule} timezone={homeState.timezoneName} localDate={tomorrowDate} /></div>;
           })}
+          {ENABLE_TODAY_V2_SCHEDULER && homeState.review?.completed_at && carryover(tomorrowVisible, tomorrowDate)}
         </section>
 
         <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
@@ -207,6 +248,7 @@ export default function HomeV2Page() {
               </button>
             )}
           </div>
+          {ENABLE_TODAY_V2_SCHEDULER && <p className="mt-1 text-xs text-zinc-400">Review day {todayDate} · {homeState.timezoneName}</p>}
           {commitmentSaveError && <p className="mt-3 text-xs text-amber-300">{commitmentSaveError}</p>}
           {homeState.todayFirstFiveMinutes && (
             <p className="mt-3 text-sm text-zinc-300">
@@ -218,7 +260,7 @@ export default function HomeV2Page() {
               {homeState.followThroughItems.map((item) => (
                 <div key={item.id} className="rounded-xl border border-zinc-800 p-3">
                   <div className="flex items-start justify-between gap-3">
-                    <div><p className="text-sm text-zinc-200">{item.normalized_fragment_text || item.fragment_text}</p><ScheduleTime schedule={findSchedule(homeState.todaySchedules, item.id)} timezone={homeState.timezoneName} /></div>
+                    <div><p className="text-sm text-zinc-200">{item.normalized_fragment_text || item.fragment_text}</p><ScheduleTime schedule={findSchedule(todaySchedules, item.id)} timezone={homeState.timezoneName} localDate={todayDate} /></div>
                     <span className="text-xs text-zinc-500">{getTodayV2CommitmentStateLabel(item.completion_state)}</span>
                   </div>
                   <div className="mt-3 flex items-center gap-2">
@@ -238,16 +280,17 @@ export default function HomeV2Page() {
           ) : (
             <p className="mt-3 text-sm text-zinc-500">No live commitments yet for today.</p>
           )}
+          {ENABLE_TODAY_V2_SCHEDULER && carryover(todayVisible, todayDate)}
         </section>
 
         {ENABLE_TODAY_V2_SCHEDULER && (
           <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
             <h2 className="font-semibold text-white">Today&apos;s habits</h2>
-            <p className="mt-1 text-xs text-zinc-400">{homeState.todayLocalDate} · {homeState.timezoneName}</p>
+            <p className="mt-1 text-xs text-zinc-400">{homeState.todayLocalDate} · {homeState.timezoneName} · Review-day check-ins</p>
             {todayHabits.length ? <div className="mt-3 space-y-2">{todayHabits.map((habit) => (
               <div key={habit.id} className="space-y-2 rounded-xl border border-zinc-800 p-3">
                 <p className="text-sm text-zinc-200">{habit.snapshot_name}</p>
-                <ScheduleTime schedule={findSchedule(homeState.todaySchedules, habit.id) || findSchedule(homeState.todaySchedules, habit.habit_definition_id)} timezone={homeState.timezoneName} />
+                <ScheduleTime schedule={findSchedule(todaySchedules, habit.id) || findSchedule(todaySchedules, habit.habit_definition_id)} timezone={homeState.timezoneName} localDate={todayDate} />
                 {habit.snapshot_response_type === 'boolean' ? <div className="flex items-center gap-2"><SegmentedChoice disabled={actionsLocked} value={habit.answered_at ? habit.boolean_response ? 'yes' : 'no' : null} onChange={(value) => onSaveHabit(habit, value === null ? null : value === 'yes')} options={[{ value: 'yes', label: 'Yes', allowToggleOff: true }, { value: 'no', label: 'No', allowToggleOff: true }]} />{!actionsLocked && habit.answered_at && <button type="button" className="text-xs text-zinc-400" onClick={() => onSaveHabit(habit, null)}>Clear</button>}</div> : <NumericHabitCheckIn occurrence={habit} disabled={actionsLocked} onSave={(value) => onSaveHabit(habit, value)} />}
               </div>
             ))}</div> : <p className="mt-3 text-sm text-zinc-500">No habits scheduled for today.</p>}

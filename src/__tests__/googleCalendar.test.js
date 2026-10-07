@@ -286,10 +286,38 @@ describe('secure read-only Google Calendar backend', () => {
     expect(db.states.size).toBe(0);
     expect(fetchImpl).not.toHaveBeenCalled();
   });
+  it.each(['/today', '/settings'])('returns provider failures safely to %s and consumes state without leaking errors', async (path) => {
+    const { state, cookie } = await flow(path);
+    fetchImpl.mockResolvedValueOnce(googleResponse({ error: 'invalid_grant', error_description: 'secret-provider-message' }, 400));
+    const res = await call('callback', { query: { state, code: 'code' }, headers: { cookie } });
+    expect(res.statusCode).toBe(303);
+    expect(res.location).toBe(`https://example.test${path}?googleCalendar=error`);
+    expect(JSON.stringify(res)).not.toContain('secret-provider-message');
+    expect(db.states.size).toBe(0);
+    expect(db.connections.size).toBe(0);
+    expect((await call('callback', { query: { state, code: 'code' }, headers: { cookie } })).body.code).toBe('invalid_state');
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+  it('does not consume another browser state on a provider error callback', async () => {
+    const { state } = await flow();
+    const res = await call('callback', { query: { state, error: 'access_denied' }, headers: { cookie: '' } });
+    expect(res.body.code).toBe('invalid_state');
+    expect(db.states.has(hash(state))).toBe(true);
+    expect(db.rpc).not.toHaveBeenCalled();
+  });
+  it('rejects cross-origin disconnect without deleting tokens or locked OAuth state', async () => {
+    connected();
+    await flow();
+    const res = await call('disconnect', { headers: { origin: 'https://attacker.test' } });
+    expect(res.body.code).toBe('invalid_origin');
+    expect(db.connections.has(USER)).toBe(true);
+    expect(db.states.size).toBe(1);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
   it('atomically consumes malformed callbacks without attempting token exchange or finalization', async () => {
     const { state, cookie } = await flow();
     const res = await call('callback', { query: { state }, headers: { cookie } });
-    expect(res.body.code).toBe('invalid_callback');
+    expect(res.location).toBe('https://example.test/today?googleCalendar=error');
     expect(db.states.size).toBe(0);
     expect(db.rpc).toHaveBeenCalledWith('today_v2_consume_google_state', { p_state_hash: hash(state) });
     expect(fetchImpl).not.toHaveBeenCalled();
@@ -322,8 +350,8 @@ describe('secure read-only Google Calendar backend', () => {
     ]);
     releaseExchange(googleResponse({ access_token: 'late-access-value', refresh_token: 'late-refresh-value', expires_in: 3600 }));
     const res = await callback;
-    expect(res.statusCode).toBe(400);
-    expect(res.body.code).toBe('invalid_state');
+    expect(res.statusCode).toBe(303);
+    expect(res.location).toBe('https://example.test/today?googleCalendar=error');
     expect(db.connections.has(USER)).toBe(false);
     const revocations = fetchImpl.mock.calls.filter(([url]) => url === 'https://oauth2.googleapis.com/revoke');
     expect(revocations).toHaveLength(2);
@@ -337,7 +365,7 @@ describe('secure read-only Google Calendar backend', () => {
     });
     fetchImpl.mockResolvedValueOnce(googleResponse({}));
     const res = await call('callback', { query: { state, code: 'code' }, headers: { cookie } });
-    expect(res.body.code).toBe('invalid_state');
+    expect(res.location).toBe('https://example.test/today?googleCalendar=error');
     expect(db.connections.size).toBe(0);
     expect(fetchImpl.mock.calls[1][0]).toBe('https://oauth2.googleapis.com/revoke');
     expect(new URLSearchParams(fetchImpl.mock.calls[1][1].body).get('token')).toBe('expired-state-refresh-value');
@@ -348,7 +376,7 @@ describe('secure read-only Google Calendar backend', () => {
     db.rpc.mockResolvedValueOnce({ error: { message: 'Atomic finalization unavailable' } });
     fetchImpl.mockRejectedValueOnce(new Error('Revoke unavailable'));
     const res = await call('callback', { query: { state, code: 'code' }, headers: { cookie } });
-    expect(res.body.code).toBe('storage_unavailable');
+    expect(res.location).toBe('https://example.test/today?googleCalendar=error');
     expect(db.connections.size).toBe(0);
     expect(fetchImpl.mock.calls[1][0]).toBe('https://oauth2.googleapis.com/revoke');
   });
@@ -381,7 +409,7 @@ describe('secure read-only Google Calendar backend', () => {
     const { state, cookie } = await flow();
     tokenSuccess({ refresh_token: undefined });
     const res = await call('callback', { query: { state, code: 'code' }, headers: { cookie } });
-    expect(res.body.code).toBe('consent_required');
+    expect(res.location).toBe('https://example.test/today?googleCalendar=error');
     expect(db.connections.get(USER).tokens_encrypted).toBe('unreadable');
   });
   it('repairs unreadable credentials without preserving an unsafe stored selection', async () => {
@@ -397,11 +425,11 @@ describe('secure read-only Google Calendar backend', () => {
   it('rejects incomplete consent and missing refresh token for a first connection', async () => {
     const { state, cookie } = await flow();
     tokenSuccess({ scope: GOOGLE_CALENDAR_SCOPES[0] });
-    expect((await call('callback', { query: { state, code: 'code' }, headers: { cookie } })).body.code).toBe('consent_required');
+    expect((await call('callback', { query: { state, code: 'code' }, headers: { cookie } })).location).toBe('https://example.test/today?googleCalendar=error');
     expect(db.connections.size).toBe(0);
     const next = await flow();
     tokenSuccess({ refresh_token: undefined });
-    expect((await call('callback', { query: { state: next.state, code: 'code' }, headers: { cookie: next.cookie } })).body.code).toBe('consent_required');
+    expect((await call('callback', { query: { state: next.state, code: 'code' }, headers: { cookie: next.cookie } })).location).toBe('https://example.test/today?googleCalendar=error');
   });
   it('refreshes expired access tokens server-side while preserving refresh tokens', async () => {
     const old = connected({ expired: true });
@@ -478,9 +506,24 @@ describe('secure read-only Google Calendar backend', () => {
   });
   it('enforces a bounded explicit timezone date range', () => {
     expect(eventRange(range.timeMin, range.timeMax)).toEqual({ ...range, timeMin: '2026-10-06T00:00:00.000Z', timeMax: '2026-10-08T00:00:00.000Z' });
-    expect(() => eventRange(range.timeMin, '2026-10-08T00:00:01Z')).toThrow();
+    expect(eventRange(range.timeMin, '2026-10-08T01:00:00Z').timeMax).toBe('2026-10-08T01:00:00.000Z');
+    expect(() => eventRange(range.timeMin, '2026-10-08T01:00:01Z')).toThrow();
     expect(() => eventRange(range.timeMin, range.timeMin)).toThrow();
     expect(() => eventRange('2026-10-06', '2026-10-07')).toThrow();
+  });
+  it('supports a bounded 49-hour DST day plus next-day spillover range', async () => {
+    connected();
+    const spillover = { ...event, start: { dateTime: '2026-11-02T05:15:00Z' }, end: { dateTime: '2026-11-02T05:45:00Z' } };
+    fetchImpl.mockResolvedValueOnce(googleResponse({ items: [spillover] }));
+    const query = { timeMin: '2026-11-01T04:00:00Z', timeMax: '2026-11-03T05:00:00Z' };
+    const res = await call('events', { query });
+    expect(res.statusCode).toBe(200);
+    expect(res.body.events[0].start).toBe('2026-11-02T05:15:00Z');
+    const requested = new URL(fetchImpl.mock.calls[0][0]);
+    expect(requested.searchParams.get('timeMax')).toBe('2026-11-03T05:00:00.000Z');
+    fetchImpl.mockClear();
+    expect((await call('events', { query: { ...query, timeMax: '2026-11-03T05:00:01Z' } })).body.code).toBe('invalid_range');
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
   it('validates calendar selections against the Google list and caps them at 10', async () => {
     connected();
@@ -490,6 +533,45 @@ describe('secure read-only Google Calendar backend', () => {
     fetchImpl.mockResolvedValueOnce(googleResponse({ items: [{ id: 'primary', summary: 'Work' }] }));
     expect((await call('select', { body: { calendarIds: ['primary'], user_id: OTHER } })).body.selectedCalendarIds).toEqual(['primary']);
     expect((await call('select', { body: { calendarIds: [] } })).body.selectedCalendarIds).toEqual([]);
+  });
+  it.each([{ selected: [] }, { selected: ['primary', 'secondary'] }])('persists explicit empty or multiple selection on reconnect: %j', async ({ selected }) => {
+    connected({ selected });
+    const { state, cookie } = await flow();
+    tokenSuccess();
+    expect((await call('callback', { query: { state, code: 'code' }, headers: { cookie } })).statusCode).toBe(303);
+    expect(db.connections.get(USER).selected_calendar_ids).toEqual(selected);
+    expect((await call('status')).body.selectedCalendarIds).toEqual(selected);
+  });
+  it('does not import a default calendar for an explicit empty selection', async () => {
+    connected({ selected: [] });
+    const res = await call('events', { query: range });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({ events: [], selectedCalendarIds: [], partial: false, unavailableCalendars: [] });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+  it('returns healthy selected calendars while explicitly disclosing an unavailable one', async () => {
+    connected({ selected: ['removed', 'primary'] });
+    fetchImpl.mockResolvedValueOnce(googleResponse({ error: { message: 'private upstream details' } }, 404));
+    fetchImpl.mockResolvedValueOnce(googleResponse({ items: [event] }));
+    const res = await call('events', { query: range });
+    expect(res.statusCode).toBe(200);
+    expect(res.body.events).toHaveLength(1);
+    expect(res.body).toMatchObject({ partial: true, selectedCalendarIds: ['removed', 'primary'],
+      unavailableCalendars: [{ calendarId: 'removed', code: 'google_unavailable' }] });
+    expect(JSON.stringify(res.body)).not.toContain('private upstream details');
+    expect(db.connections.get(USER).selected_calendar_ids).toEqual(['removed', 'primary']);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+  it('discloses page-limited calendars without mixing truncated events into healthy availability', async () => {
+    connected({ selected: ['large', 'primary'] });
+    for (let index = 0; index < 5; index++) fetchImpl.mockResolvedValueOnce(googleResponse({ items: [{ ...event, id: 'truncated' }], nextPageToken: `page-${index}` }));
+    fetchImpl.mockResolvedValueOnce(googleResponse({ items: [event] }));
+    const res = await call('events', { query: range });
+    expect(res.statusCode).toBe(200);
+    expect(res.body.events).toHaveLength(1);
+    expect(res.body.events[0].calendarId).toBe('primary');
+    expect(res.body.unavailableCalendars).toEqual([{ calendarId: 'large', code: 'pagination_limit' }]);
+    expect(fetchImpl).toHaveBeenCalledTimes(6);
   });
   it('paginates lists and events and filters cancelled events on every page', async () => {
     connected();

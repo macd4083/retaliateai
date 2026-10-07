@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   createActionIdentity, reconcileActionIdentities, zonedLocalTimeToTimestamp,
-  getScheduleDateBounds, normalizeScheduleBlock, scheduleBlocksOverlap, layoutScheduleBlocks, snapScheduleMinutes,
+  clipScheduleBlocksToDate, getScheduleDateBounds, getScheduleDayOffset, getScheduleLocalDate, normalizeScheduleBlock, scheduleBlocksOverlap, layoutScheduleBlocks, snapScheduleMinutes,
 } from '../v2/today/scheduling';
 
 describe('scheduler identities', () => {
@@ -23,6 +23,39 @@ describe('scheduler identities', () => {
 });
 
 describe('zoned scheduling', () => {
+  it('explains how to recover from an unsupported timezone', () => {
+    expect(() => zonedLocalTimeToTimestamp('2026-10-07', '09:00', 'Unsupported/Nowhere')).toThrow(/Choose a valid IANA timezone/);
+  });
+  it('derives the civil date in the saved timezone rather than the machine timezone', () => {
+    const now = new Date('2026-10-08T03:00:00Z');
+    expect(getScheduleLocalDate(now, 'UTC')).toBe('2026-10-08');
+    expect(getScheduleLocalDate(now, 'America/New_York')).toBe('2026-10-07');
+  });
+  it('clips half-open day intersections without changing stored elapsed duration', () => {
+    const bounds = getScheduleDateBounds('2026-10-07', 'UTC');
+    const blocks = [
+      { id: 'carryover', starts_at: '2026-10-06T23:45:00Z', ends_at: '2026-10-07T00:15:00Z' },
+      { id: 'overnight', starts_at: '2026-10-07T23:45:00Z', ends_at: '2026-10-08T00:15:00Z' },
+      { id: 'past', starts_at: '2026-10-06T23:00:00Z', ends_at: bounds.starts_at },
+      { id: 'future', starts_at: bounds.ends_at, ends_at: '2026-10-08T01:00:00Z' },
+      { id: 'invalid', starts_at: 'invalid', ends_at: bounds.ends_at },
+      { id: 'empty', starts_at: bounds.starts_at, ends_at: bounds.starts_at },
+    ];
+    const visible = clipScheduleBlocksToDate(blocks, bounds);
+    expect(visible.map((block) => block.id)).toEqual(['carryover', 'overnight']);
+    expect(visible[0]).toMatchObject({ ...blocks[0], visible_starts_at: bounds.starts_at, continued: true, continues: false });
+    expect(visible[1]).toMatchObject({ ...blocks[1], visible_ends_at: bounds.ends_at, continued: false, continues: true });
+    expect((Date.parse(visible[1].ends_at) - Date.parse(visible[1].starts_at)) / 60000).toBe(30);
+    expect(blocks[0].visible_starts_at).toBeUndefined();
+  });
+  it('counts actual civil dates when 24 elapsed hours cross a spring-forward midnight', () => {
+    const starts_at = zonedLocalTimeToTimestamp('2026-03-07', '23:45', 'America/New_York');
+    const ends_at = new Date(Date.parse(starts_at) + 1440 * 60000).toISOString();
+    expect(ends_at).toBe('2026-03-09T04:45:00.000Z');
+    expect(getScheduleDayOffset(starts_at, ends_at, 'America/New_York')).toBe(2);
+    const carryover = clipScheduleBlocksToDate([{ starts_at, ends_at }], getScheduleDateBounds('2026-03-09', 'America/New_York'))[0];
+    expect(carryover).toMatchObject({ continued: true, continues: false, visible_starts_at: '2026-03-09T04:00:00.000Z', visible_ends_at: ends_at });
+  });
   it('rejects DST gaps and requires an explicit choice for repeated times', () => {
     expect(() => zonedLocalTimeToTimestamp('2026-03-08', '02:30', 'America/New_York')).toThrow(/gap/);
     expect(() => zonedLocalTimeToTimestamp('2026-11-01', '01:30', 'America/New_York')).toThrow(/Ambiguous/);

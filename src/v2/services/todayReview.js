@@ -149,7 +149,7 @@ export async function loadTodayReviewState(userId, options = {}) {
 
   return {
     ...dateContext,
-    ...await loadSchedules(userId, dateContext.todayLocalDate, dateContext.tomorrowLocalDate),
+    ...await loadSchedules(userId, dateContext.todayLocalDate, dateContext.tomorrowLocalDate, dateContext.timezoneName),
     review,
     routeTarget: getTodayV2DefaultPath(review),
     draftStorageKey: buildTodayV2DraftStorageKey(userId, dateContext.todayLocalDate),
@@ -168,6 +168,9 @@ export async function loadTodayReviewState(userId, options = {}) {
 
 export async function loadTodayV2HomeState(userId, options = {}) {
   const current = await loadTodayReviewState(userId, options);
+  const civilScheduleLocalDate = getTodayV2DateContext({
+    ...options, timezoneName: current.timezoneName, dayBoundaryHour: 0,
+  }).todayLocalDate;
   const last30Start = addDaysToLocalDate(current.todayLocalDate, -29);
   const last7Start = addDaysToLocalDate(current.todayLocalDate, -6);
 
@@ -201,6 +204,9 @@ export async function loadTodayV2HomeState(userId, options = {}) {
 
   return {
     ...current,
+    civilScheduleLocalDate,
+    civilSchedules: civilScheduleLocalDate === current.todayLocalDate
+      ? current.todaySchedules : current.tomorrowSchedules,
     latestDesiredDirection: getLatestTodayV2Identity(reviewHistory, current.review?.desired_direction || ''),
     metrics: buildTodayV2HomeMetrics({
       reviews: reviewHistory,
