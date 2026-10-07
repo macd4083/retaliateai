@@ -11,6 +11,7 @@ import {
   getTodayV2DateContext,
   getTodayV2DefaultPath,
   normalizeTodayV2Text,
+  normalizeTodayV2ActionStarts,
   validateTodayV2Weekdays,
 } from '../today/model';
 import {
@@ -405,7 +406,7 @@ export async function replaceTomorrowActions({
     p_timezone_name: timezoneName,
     p_raw_plan_text: normalizedRawText,
     p_fragment_texts: fragments,
-    p_first_five_minutes: String(firstFiveMinutes || '').trim() || null,
+    p_first_five_minutes: normalizeTodayV2ActionStarts(firstFiveMinutes) || null,
     ...(stable ? { p_fragment_ids: fragments.map((_, index) => (
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(fragmentIds[index] || '')
         ? fragmentIds[index] : null

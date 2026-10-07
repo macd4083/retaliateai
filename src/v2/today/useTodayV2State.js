@@ -4,12 +4,14 @@ import {
 } from './types';
 import {
   buildTodayV2CommitmentDrafts,
+  buildTodayV2ActionLabel,
   buildTodayV2DraftStorageKey,
   coerceTodayV2EditableFragments,
   getTodayV2CompletionGate,
   getTodayV2DateContext,
   getTodayV2MsUntilNextBoundary,
   normalizeTodayV2Text,
+  normalizeTodayV2ActionStarts,
   isTodayV2HabitScheduledForDate,
 } from './model';
 import { ENABLE_TODAY_V2_SCHEDULER } from '../../lib/featureFlags';
@@ -193,7 +195,7 @@ export function useTodayV2State(userId) {
       || normalizedTomorrowActions.join('\n') !== loadedTomorrowActions.join('\n')
       || JSON.stringify(actionIdentities.filter((item) => normalizeTodayV2Text(item.text)).map((item) => item.persistedId || null))
         !== JSON.stringify((state.tomorrowFragments || []).map((item) => item.id))
-      || normalizeTodayV2Text(firstFiveMinutes) !== normalizeTodayV2Text(state.firstFiveMinutes || '');
+      || normalizeTodayV2ActionStarts(firstFiveMinutes) !== normalizeTodayV2ActionStarts(state.firstFiveMinutes || '');
   }, [actionIdentities, firstFiveMinutes, loadedTomorrowActions, normalizedTomorrowActions, state, tomorrowInput]);
 
   const completionGate = React.useMemo(() => getTodayV2CompletionGate({
@@ -258,6 +260,10 @@ export function useTodayV2State(userId) {
     if (!canEdit()) return;
     setCustomTomorrowActions(true);
     applyActions(identitiesRef.current.filter((_, itemIndex) => itemIndex !== index));
+    const starts = normalizeTodayV2ActionStarts(firstFiveMinutesRef.current).split('\n');
+    const nextStarts = starts.filter((_, itemIndex) => itemIndex !== index).join('\n');
+    firstFiveMinutesRef.current = nextStarts;
+    setFirstFiveMinutesState(nextStarts);
   }, [applyActions, canEdit]);
 
   const setFirstFiveMinutes = React.useCallback((value) => {
@@ -545,7 +551,7 @@ export function useTodayV2State(userId) {
       || coerceTodayV2EditableFragments('', tomorrowActionsRef.current).join('\n') !== normalizeFragmentList(currentState.tomorrowFragments).join('\n')
       || JSON.stringify(identitiesRef.current.filter((item) => normalizeTodayV2Text(item.text)).map((item) => item.persistedId || null))
         !== JSON.stringify((currentState.tomorrowFragments || []).map((item) => item.id))
-      || normalizeTodayV2Text(firstFiveMinutesRef.current) !== normalizeTodayV2Text(currentState.firstFiveMinutes);
+      || normalizeTodayV2ActionStarts(firstFiveMinutesRef.current) !== normalizeTodayV2ActionStarts(currentState.firstFiveMinutes);
     if (!currentDirty) {
       setTomorrowPlanSaveStatus('saved');
       setFirstFiveMinutesSaveStatus('saved');
@@ -601,7 +607,7 @@ export function useTodayV2State(userId) {
         const nextState = {
           ...stateRef.current,
           tomorrowPlanInput: savedPlan.rawPlanText,
-          firstFiveMinutes: normalizeTodayV2Text(firstFiveMinutesValue),
+          firstFiveMinutes: normalizeTodayV2ActionStarts(firstFiveMinutesValue),
           tomorrowFragments: savedRows,
           ...(savedPlan.scheduleAvailable === false ? {
             scheduleAvailable: false, scheduleDiagnostic: savedPlan.scheduleDiagnostic,
@@ -611,11 +617,11 @@ export function useTodayV2State(userId) {
         setState((previous) => previous ? {
           ...previous,
           tomorrowPlanInput: savedPlan.rawPlanText,
-          firstFiveMinutes: normalizeTodayV2Text(firstFiveMinutesValue),
+          firstFiveMinutes: normalizeTodayV2ActionStarts(firstFiveMinutesValue),
           tomorrowPlanMeta: {
             ...(previous.tomorrowPlanMeta || {}),
             raw_plan_text: savedPlan.rawPlanText,
-            first_five_minutes: normalizeTodayV2Text(firstFiveMinutesValue) || null,
+            first_five_minutes: normalizeTodayV2ActionStarts(firstFiveMinutesValue) || null,
             target_local_date: previous.tomorrowLocalDate,
             source_local_date: previous.todayLocalDate,
             timezone_name: previous.timezoneName,
@@ -656,13 +662,15 @@ export function useTodayV2State(userId) {
 
   const scheduleAvailable = ENABLE_TODAY_V2_SCHEDULER && Boolean(state?.scheduleAvailable);
   const schedulerItems = React.useMemo(() => [
-    ...actionIdentities.filter((item) => normalizeTodayV2Text(item.text)).map((item) => ({
-      id: item.key, key: item.key, type: 'action', label: item.text, source_id: item.persistedId,
-    })),
+    ...actionIdentities.map((item, index) => ({
+      id: item.key, key: item.key, type: 'action',
+      label: buildTodayV2ActionLabel(item.text, normalizeTodayV2ActionStarts(firstFiveMinutes).split('\n')[index]),
+      source_id: item.persistedId, text: item.text,
+    })).filter((item) => normalizeTodayV2Text(item.text)),
     ...(state?.habitDefinitions || [])
       .filter((habit) => isTodayV2HabitScheduledForDate(habit, state.tomorrowLocalDate))
       .map((habit) => ({ id: `habit:${habit.id}`, key: `habit:${habit.id}`, type: 'habit', label: habit.name, source_id: habit.id })),
-  ], [actionIdentities, state?.habitDefinitions, state?.tomorrowLocalDate]);
+  ], [actionIdentities, firstFiveMinutes, state?.habitDefinitions, state?.tomorrowLocalDate]);
 
   const updateSchedule = React.useCallback((itemKey, times) => {
     if (!canEdit()) return;

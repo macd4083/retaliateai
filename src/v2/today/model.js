@@ -122,6 +122,23 @@ export function normalizeTodayV2Text(value) {
     .trim();
 }
 
+export function normalizeTodayV2ActionStarts(value) {
+  if (!String(value || '').trim()) return '';
+  return String(value || '').split(/\r?\n/)
+    .map((line) => normalizeTodayV2Text(line)).join('\n');
+}
+
+export function buildTodayV2ActionLabel(action, start = '') {
+  const shorten = (value) => {
+    const text = normalizeTodayV2Text(value);
+    if (text.length <= 80) return text;
+    const excerpt = text.slice(0, 77);
+    const lastSpace = excerpt.lastIndexOf(' ');
+    return `${lastSpace > 0 ? excerpt.slice(0, lastSpace) : excerpt}…`;
+  };
+  return [shorten(action), shorten(start)].filter(Boolean).join(', ');
+}
+
 export function buildTodayV2CommitmentDrafts(rawPlanText, parserVersion = TODAY_V2_PARSER_VERSION) {
   return splitCommitmentIntoTasks(rawPlanText).map((fragmentText, fragmentOrder) => ({
     fragmentText,
