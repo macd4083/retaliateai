@@ -5,6 +5,7 @@ import { useAuth } from '../../lib/AuthContext';
 import { ENABLE_TODAY_V2_SCHEDULER } from '../../lib/featureFlags';
 import GoogleCalendarConnection from '../components/GoogleCalendarConnection';
 import TomorrowScheduler from '../components/TomorrowScheduler';
+import { isMissingScheduleSchema } from '../services/scheduling';
 import {
   getTodayV2BooleanAnswer,
   getTodayV2CommitmentStateLabel,
@@ -182,6 +183,7 @@ export default function TodayV2Page() {
     scheduleSaveStatus,
     scheduleError,
     scheduleAvailable,
+    scheduleDiagnostic,
     updateSchedule,
     unschedule,
     firstFiveMinutes,
@@ -581,6 +583,9 @@ export default function TodayV2Page() {
               return { ...block, label: action ? action.normalized_fragment_text || action.fragment_text : habit?.snapshot_name || 'Previous-day plan' };
             })}
             available={scheduleAvailable}
+            availabilityError={isMissingScheduleSchema(scheduleDiagnostic)
+              ? 'Calendar database setup is incomplete. Apply the Today V2 scheduling migrations in order through 20261009_today_v2_completion_release_guard.sql, then retry scheduling.'
+              : scheduleDiagnostic?.message}
             readOnly={readOnly}
             saveStatus={scheduleSaveStatus}
             saveError={scheduleError}
