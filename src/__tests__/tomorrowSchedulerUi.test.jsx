@@ -1,6 +1,7 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as scheduling from '../v2/today/scheduling';
 
 const calendar = vi.hoisted(() => ({ events: [] }));
 vi.mock('../v2/components/GoogleCalendarConnection', () => ({
@@ -53,11 +54,31 @@ describe('TomorrowScheduler UI', () => {
     expect(container.textContent).not.toContain('You can still save your actions and complete your review');
   });
 
+  it('isolates an unsupported timezone to a scheduler diagnostic instead of throwing from render', async () => {
+    await render({ timezone: 'Unsupported/Nowhere', blocks: [{ source_key: 'action-1', starts_at: '2026-10-07T09:00:00Z', ends_at: '2026-10-07T09:30:00Z' }] });
+    expect(container.textContent).toContain('Timeline unavailable for this date or timezone. Your review is still available.');
+    expect(container.querySelector('[data-slot-timestamp]')).toBeNull();
+    expect(container.textContent).not.toContain('Google connection');
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('isolates skipped-date day-bound failures without mounting timeline or calendar controls', async () => {
+    const bounds = vi.spyOn(scheduling, 'getScheduleDateBounds').mockImplementationOnce(() => { throw new Error('This local date was skipped.'); });
+    try {
+      await render({ localDate: '2011-12-30', timezone: 'Pacific/Apia' });
+      expect(container.textContent).toContain('This local date was skipped.');
+      expect(container.textContent).toContain('Your review is still available.');
+      expect(container.querySelector('[data-slot-timestamp]')).toBeNull();
+    } finally {
+      bounds.mockRestore();
+    }
+  });
+
   it('has 96 slots and shows a scheduled item only once, outside the tray', async () => {
     await render({ blocks: [{ id: 'block', source_key: 'action-1', starts_at: '2026-10-07T09:00:00Z', ends_at: '2026-10-07T09:30:00Z' }] });
     expect(container.textContent).toContain('Unscheduled (1)');
     expect(container.textContent.match(/Write a chapter/g)).toHaveLength(1);
-    expect(container.querySelectorAll('[aria-hidden="true"]')).toHaveLength(96);
+    expect(container.querySelectorAll('[data-slot-timestamp]')).toHaveLength(96);
     expect(container.textContent).toContain('09:00–09:30');
     expect(container.textContent).toContain('Give your actions a place in the day. Scheduling is optional.');
   });
@@ -214,5 +235,34 @@ describe('TomorrowScheduler UI', () => {
     expect(preserved.querySelector('button')).toBeNull();
     await render({ ...props, readOnly: false });
     expect(container.textContent).not.toContain('Past reading');
+  });
+
+  it('keeps scheduled controls bounded while preserving long labels and times in their accessible names', async () => {
+    const label = 'Write a detailed chapter with a very long descriptive commitment label';
+    await render({ items: [{ ...items[0], label }], blocks: [{ source_key: 'action-1', starts_at: '2026-10-07T09:00:00Z', ends_at: '2026-10-07T09:30:00Z' }] });
+    const card = container.querySelector('[data-schedule-key="action-1"]');
+    const button = card.querySelector('[data-scheduler-edit-key="action-1"]');
+    expect(card.style.height).toBe('72px');
+    expect(card.firstElementChild.classList.contains('h-full')).toBe(true);
+    expect(card.firstElementChild.classList.contains('overflow-hidden')).toBe(true);
+    expect(button.getAttribute('aria-label')).toContain(label);
+    expect(button.getAttribute('aria-label')).toContain('09:00–09:30');
+    expect(button.querySelector('.line-clamp-2')).toBeTruthy();
+  });
+
+  it('restores focus to the new scheduled control after saving removes the original tray trigger', async () => {
+    function ControlledScheduler() {
+      const [savedBlocks, setSavedBlocks] = React.useState([]);
+      return <TomorrowScheduler userId="user" localDate="2026-10-07" timezone="UTC" items={items} blocks={savedBlocks} onUpdate={(key, times) => setSavedBlocks([{ source_key: key, ...times }])} onUnschedule={vi.fn()} />;
+    }
+    await act(async () => root.render(<ControlledScheduler />));
+    const original = container.querySelector('[data-scheduler-edit-key="action-1"]');
+    original.focus();
+    await act(async () => original.click());
+    await act(async () => document.querySelector('[role="dialog"] form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    const scheduled = container.querySelector('[data-schedule-key="action-1"] [data-scheduler-edit-key="action-1"]');
+    expect(scheduled).toBeTruthy();
+    expect(document.activeElement).toBe(scheduled);
   });
 });

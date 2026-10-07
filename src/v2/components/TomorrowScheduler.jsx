@@ -68,10 +68,14 @@ export default function TomorrowScheduler({
   const schedulerRoot = React.useRef(null);
   const focusReturn = React.useRef(null);
   const focusItemKey = React.useRef(null);
-  const dayBounds = React.useMemo(() => getScheduleDateBounds(localDate, timezone), [localDate, timezone]);
+  const dayBounds = React.useMemo(() => {
+    try { return { ...getScheduleDateBounds(localDate, timezone), error: null }; }
+    catch (failure) { return { starts_at: null, ends_at: null, error: failure?.message || 'This date or timezone is unavailable.' }; }
+  }, [localDate, timezone]);
   const dayStart = Date.parse(dayBounds.starts_at);
   const dayEnd = Date.parse(dayBounds.ends_at);
-  const dayMinutes = (dayEnd - dayStart) / 60000;
+  const dayMinutes = dayBounds.error ? 0 : (dayEnd - dayStart) / 60000;
+  const timelineAvailable = available && !dayBounds.error;
   const slots = React.useMemo(() => Array.from({ length: Math.ceil(dayMinutes / 15) }, (_, index) => {
     const timestamp = new Date(dayStart + index * 15 * 60000).toISOString();
     return { timestamp, minute: index * 15, ...localParts(timestamp, timezone) };
@@ -111,7 +115,7 @@ export default function TomorrowScheduler({
   let proposal = null;
   let timeError = '';
   try {
-    if (editing && resolveTime) proposal = resolveTime(localDate, time, timezone, occurrence, Number(duration));
+    if (editing && resolveTime && !dayBounds.error) proposal = resolveTime(localDate, time, timezone, occurrence, Number(duration));
   } catch (failure) { timeError = failure.message; }
   const busyAllDay = allDay.filter((event) => event.transparency !== 'transparent' && (event.start?.date || event.start || event.starts_at) <= localDate && (event.end?.date || event.end || event.ends_at) > localDate).map((event) => ({
     starts_at: '0001-01-01T00:00:00Z', ends_at: '9999-12-31T00:00:00Z',
@@ -169,7 +173,7 @@ export default function TomorrowScheduler({
         <p className="mt-1 text-sm text-zinc-400">Give your actions a place in the day. Scheduling is optional.</p>
         <p className="mt-2 text-xs text-zinc-400">{localDate} · {timezone} · Times are optional</p>
       </div>
-      {!available ? <div role="status" className="space-y-2 rounded-xl bg-amber-950/30 p-3 text-sm text-amber-200">{saveError ? <><p>{typeof saveError === 'string' ? saveError : saveError.message}</p><p>Your local schedule changes are preserved. Retry scheduling before completing your review.</p></> : <p>Scheduling is not available yet. You can still save your actions and complete your review. Try again after scheduling has been enabled for your account.</p>}{onRetry && <button type="button" onClick={onRetry} className={buttonClass}>Retry scheduling</button>}</div> : <>
+      {!timelineAvailable ? <div role="status" className="space-y-2 rounded-xl bg-amber-950/30 p-3 text-sm text-amber-200">{dayBounds.error && <><p>Timeline unavailable for this date or timezone. Your review is still available.</p><p>{dayBounds.error}</p></>}{saveError ? <><p>{typeof saveError === 'string' ? saveError : saveError.message}</p><p>Your local schedule changes are preserved. Retry scheduling before completing your review.</p></> : !dayBounds.error && <p>Scheduling is not available yet. You can still save your actions and complete your review. Try again after scheduling has been enabled for your account.</p>}{onRetry && <button type="button" onClick={onRetry} className={buttonClass}>Retry scheduling</button>}</div> : <>
         <GoogleCalendarConnection userId={userId} localDate={localDate} timezone={timezone} onEvents={setGoogleEvents} />
         <div role="status" aria-live="polite" className="text-xs text-zinc-400">{saveError ? <span className="text-amber-300">{typeof saveError === 'string' ? saveError : saveError.message}</span> : saveStatus === 'saving' ? 'Saving schedule…' : saveStatus === 'saved' ? 'Schedule saved' : saveStatus === 'offline' ? 'Schedule saved on this device — reconnect to sync.' : saveStatus === 'error' ? 'Schedule could not sync. Your review is still available.' : 'Schedule changes save automatically.'}</div>
         <DndContext sensors={sensors} onDragStart={({ active: dragged }) => setActive(dragged.data.current.item)} onDragCancel={() => setActive(null)} onDragEnd={drop}>
@@ -205,7 +209,7 @@ export default function TomorrowScheduler({
           <DragOverlay>{active && <div className="max-w-56 rounded-lg border border-red-500 bg-zinc-900 p-3 text-sm text-white">{active.label}</div>}</DragOverlay>
         </DndContext>
       </>}
-      <Dialog.Root open={Boolean(editing)} onOpenChange={(open) => { if (!open && !saving) setEditing(null); }}>
+      <Dialog.Root open={Boolean(editing) && !dayBounds.error} onOpenChange={(open) => { if (!open && !saving) setEditing(null); }}>
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-50 bg-black/75" />
           <Dialog.Content onCloseAutoFocus={(event) => {

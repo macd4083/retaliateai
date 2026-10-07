@@ -256,6 +256,8 @@ dashboard steps or verify production authorization without real credentials.
    For an external app in Testing, add each real-account QA user as a test user.
    Review Google's sensitive-scope verification requirements before publishing;
    do not assume Testing consent or refresh-token lifetime equals production.
+   External Testing grants using these Calendar scopes generally have seven-day
+   refresh-token lifetimes; expect reconnect prompts during prolonged QA.
 3. Create an OAuth client of type **Web application**, separate from any
    Supabase Google login client. This connects a calendar to the already signed-in
    Retaliate account, including email/password accounts; it does not change login.
