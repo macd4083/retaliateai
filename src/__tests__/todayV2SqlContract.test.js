@@ -41,6 +41,13 @@ describe('TodayV2 SQL contract', () => {
     expect(sql).toContain('before insert or update or delete on public.today_v2_commitment_fragments');
     expect(sql).toContain("to_regprocedure('public.today_v2_replace_plan_stable_unlocked");
     expect(sql).toContain('revoke all on function public.today_v2_replace_plan_stable_unlocked');
+    expect(sql).toContain('disable trigger today_v2_schedule_validate');
+    expect(sql).toContain('enable trigger today_v2_schedule_validate');
+    expect(sql).toContain('disable trigger today_v2_schedule_set_updated_at');
+    expect(sql).toContain('references public.today_v2_daily_reviews(user_id, id) on delete cascade');
+    expect(sql).toContain("confdeltype <> 'c'");
+    expect(sql).toContain('pg_trigger_depth() > 1');
+    expect(sql).toContain('execute $today_v2_repair_ddl$');
   });
 
   it('defines owned source-linked schedule blocks with local-date and duration guards', () => {

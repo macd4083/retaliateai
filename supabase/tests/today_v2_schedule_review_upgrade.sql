@@ -23,6 +23,10 @@ begin
     jsonb_build_object('commitment_fragment_id',v_action,'starts_at','2000-04-02T10:00:00Z','ends_at','2000-04-02T11:00:00Z'),
     jsonb_build_object('habit_definition_id',v_changed_habit,'starts_at','2000-04-02T12:00:00Z','ends_at','2000-04-02T13:00:00Z'),
     jsonb_build_object('habit_definition_id',v_habit,'starts_at','2000-04-02T23:30:00Z','ends_at','2000-04-03T00:30:00Z')));
+  alter table public.today_v2_schedule_blocks disable trigger today_v2_schedule_set_updated_at;
+  update public.today_v2_schedule_blocks set created_at = '2000-04-01T10:00:00Z', updated_at = '2000-04-02T15:00:00Z'
+    where user_id = auth.uid();
+  alter table public.today_v2_schedule_blocks enable trigger today_v2_schedule_set_updated_at;
   update public.today_v2_habit_definitions set is_archived = true where id = v_habit;
   update public.today_v2_habit_definitions set schedule_weekdays = array[1]::smallint[] where id = v_changed_habit;
   perform set_config('test.upgrade.schedule_ids',
@@ -56,6 +60,15 @@ begin
   assert v_rejected, 'Completed source review must remain locked after upgrade';
   update public.today_v2_commitment_fragments set completion_state = 'kept', answered_at = now() where user_id = auth.uid();
   update public.today_v2_daily_reviews set completed_at = null where user_id = auth.uid();
+  v_rejected := false;
+  begin
+    update public.today_v2_schedule_blocks
+    set starts_at = starts_at + interval '15 minutes', ends_at = ends_at + interval '15 minutes'
+    where user_id = auth.uid() and habit_definition_id is not null;
+  exception when others then
+    v_rejected := sqlerrm like 'Schedule habit must be owned, active%';
+  end;
+  assert v_rejected, 'Upgrade must not permit rescheduling archived or weekday-changed habits';
   perform public.today_v2_replace_schedule('2000-04-02','UTC','[]');
 end;
 $$;

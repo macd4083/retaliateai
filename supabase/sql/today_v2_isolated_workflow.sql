@@ -966,7 +966,10 @@ revoke all on function public.today_v2_archive_habit_schedule() from public, ano
 notify pgrst, 'reload schema';
 
 -- Repair only: retain the original workflow and scheduling migration history.
--- Apply transactionally: Supabase migration runner, or psql --single-transaction.
+-- A single DO statement keeps standalone runs atomic without committing caller transactions.
+do $today_v2_repair$
+begin
+execute $today_v2_repair_ddl$
 alter table public.today_v2_schedule_blocks add column if not exists source_review_id uuid;
 create unique index if not exists idx_today_v2_reviews_owner_id
   on public.today_v2_daily_reviews(user_id, id);
@@ -996,10 +999,14 @@ $$;
 alter table public.today_v2_schedule_blocks alter column source_review_id set not null;
 do $$
 begin
+  if exists (select 1 from pg_constraint where conname = 'today_v2_schedule_review_owner_fk'
+    and conrelid = 'public.today_v2_schedule_blocks'::regclass and confdeltype <> 'c') then
+    alter table public.today_v2_schedule_blocks drop constraint today_v2_schedule_review_owner_fk;
+  end if;
   if not exists (select 1 from pg_constraint where conname = 'today_v2_schedule_review_owner_fk'
     and conrelid = 'public.today_v2_schedule_blocks'::regclass) then
     alter table public.today_v2_schedule_blocks add constraint today_v2_schedule_review_owner_fk
-      foreign key (user_id, source_review_id) references public.today_v2_daily_reviews(user_id, id);
+      foreign key (user_id, source_review_id) references public.today_v2_daily_reviews(user_id, id) on delete cascade;
   end if;
 end;
 $$;
@@ -1026,6 +1033,10 @@ returns trigger language plpgsql security definer set search_path = public as $$
 declare v_date date; v_review_id uuid;
 begin
   if tg_op = 'DELETE' and not exists (select 1 from auth.users where id = old.user_id) then return old; end if;
+  if tg_op = 'DELETE' and pg_trigger_depth() > 1
+    and not exists (select 1 from public.today_v2_daily_reviews where id = old.source_review_id and user_id = old.user_id) then
+    return old;
+  end if;
   if tg_op <> 'INSERT' then
     select local_date into strict v_date from public.today_v2_daily_reviews
     where id = old.source_review_id and user_id = old.user_id;
@@ -1181,3 +1192,6 @@ revoke all on function public.today_v2_replace_plan_stable_unlocked(date,date,te
 revoke all on function public.today_v2_replace_plan_stable(date,date,text,text,text[],uuid[],text) from public, anon;
 grant execute on function public.today_v2_replace_plan_stable(date,date,text,text,text[],uuid[],text) to authenticated;
 notify pgrst, 'reload schema';
+$today_v2_repair_ddl$;
+end;
+$today_v2_repair$;

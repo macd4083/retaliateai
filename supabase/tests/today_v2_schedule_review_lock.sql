@@ -27,6 +27,9 @@ begin
     'Upgrade must backfill ownership for existing action and habit schedules';
   assert exists (select 1 from public.today_v2_schedule_blocks
     where user_id = auth.uid() and ends_at = '2099-02-03T00:30:00Z'), 'Upgrade must preserve midnight evidence';
+  assert exists (select 1 from pg_constraint where conname = 'today_v2_schedule_review_owner_fk'
+    and conrelid = 'public.today_v2_schedule_blocks'::regclass and confdeltype = 'c'),
+    'Source review deletion must cascade before account deletion checks';
 end;
 $$;
 create function pg_temp.expect_lock_failure(p_sql text) returns void language plpgsql as $$
@@ -111,6 +114,8 @@ begin
     'public.today_v2_lock_source_review(uuid,date,text)','EXECUTE');
   assert not has_function_privilege('authenticated',
     'public.today_v2_replace_plan_stable_unlocked(date,date,text,text,text[],uuid[],text)','EXECUTE');
+  assert not has_table_privilege('authenticated','public.today_v2_daily_reviews','DELETE'),
+    'Browser clients must not bypass completion locks by deleting source reviews';
 end;
 $$;
 reset role;
@@ -126,6 +131,15 @@ begin
   assert not exists (select 1 from public.today_v2_commitment_fragments where id = v_action), 'Unlocked plan deletion must cascade';
   assert not exists (select 1 from public.today_v2_schedule_blocks where commitment_fragment_id = v_action),
     'Unlocked plan deletion must cascade action schedules';
+  select id into v_action from public.today_v2_replace_plan_stable(
+    '2099-02-06','2099-02-05','UTC','Review cascade action',array['Review cascade action'],array[null]::uuid[]);
+  perform public.today_v2_replace_schedule('2099-02-06','UTC',jsonb_build_array(
+    jsonb_build_object('commitment_fragment_id',v_action,'starts_at','2099-02-06T10:00:00Z','ends_at','2099-02-06T11:00:00Z')));
+  update public.today_v2_daily_reviews set completed_at = now() where user_id = auth.uid() and local_date = '2099-02-05';
+  delete from public.today_v2_daily_reviews where user_id = auth.uid() and local_date = '2099-02-05';
+  assert exists (select 1 from auth.users where id = auth.uid()), 'Review-first cascade must not require account removal';
+  assert not exists (select 1 from public.today_v2_schedule_blocks where commitment_fragment_id = v_action),
+    'Authorized review-first deletion must cascade schedules safely';
   update public.today_v2_daily_reviews set completed_at = now() where user_id = auth.uid();
   assert (select count(*) = 2 from public.today_v2_schedule_blocks where user_id = auth.uid()),
     'Account cascade fixture must contain completed-review schedules';
