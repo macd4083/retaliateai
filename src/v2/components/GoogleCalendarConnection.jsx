@@ -254,7 +254,7 @@ export default function GoogleCalendarConnection({ userId, localDate = null, tim
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h3 className="text-sm font-semibold text-zinc-200">Google Calendar</h3>
-          <p className="mt-1 text-xs text-zinc-400">{status?.connected ? status.configured === false || status.schemaAvailable === false ? 'Connected · availability currently unavailable' : 'Connected · read-only availability' : 'See your availability alongside your plan.'}</p>
+          <p className="mt-1 text-xs text-zinc-400">{status?.connected ? status.configured === false || status.schemaAvailable === false ? 'Connected · availability currently unavailable' : 'Connected · read-only availability' : 'Optional import — no Google sign-in needed to use your planner.'}</p>
         </div>
         <div className="flex gap-2">
           {(!status?.connected || reconnect) && <button type="button" className={buttonClass} disabled={!userId || !status || busy || status?.configured === false || status?.schemaAvailable === false} onClick={connect}>{reconnect ? 'Reconnect Google Calendar' : 'Connect Google Calendar'}</button>}

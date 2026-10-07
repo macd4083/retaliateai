@@ -101,8 +101,18 @@ schedule loading. The scheduler now defaults on; only the exact value `false`
 disables it as an emergency rollback. Remove an existing `false` override or set
 `true`, then rebuild/redeploy (Vite variables are build-time).
 
-- `/today` (**Review & Plan**) renders `GoogleCalendarConnection` beside the
-  highest-ROI actions prompt and `TomorrowScheduler` after **6.2 Start focus**.
+- `/today` (**Review & Plan**) renders the native `TomorrowScheduler` after
+  **6.2 Start focus**, followed by optional `GoogleCalendarConnection` import controls.
+  Retaliate app sign-in is required; Google sign-in is not. Without Google, the
+  planner uses the full day grid with no empty external-calendar column.
+  Imported events share that grid as read-only availability, with overlapping
+  local/imported blocks placed in separate lanes.
+- The side list reuses each ROI action's `action, starting task` label and all
+  active habits due tomorrow. Drag a handle into a 15-minute slot, or click the
+  item to choose a time. Scheduled items move from the list into the calendar
+  and remain draggable; unscheduling returns them to the list. Google failures
+  do not disable local planning. Missing local scheduling database setup still
+  requires the migrations and retry described below.
 - `src/v2/today/useTodayV2State.js` connects actions/habits, stable fragment IDs,
   autosaved schedules, offline drafts, and completed-review edit locks.
 - `src/v2/services/scheduling.js` loads/saves owned blocks; `/home` shows the

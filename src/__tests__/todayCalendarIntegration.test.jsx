@@ -56,19 +56,43 @@ describe('Review & Plan calendar integration', () => {
     vi.unstubAllEnvs();
   });
 
-  it('shows connection controls beside the ROI prompt and the timeline in Plan Tomorrow without an environment flag', async () => {
+  it('shows the native calendar before optional Google import controls without an environment flag', async () => {
     await render();
     const headings = [...container.querySelectorAll('h2, h3')].map((node) => node.textContent);
-    expect(headings.indexOf('Google Calendar')).toBeGreaterThan(headings.indexOf('1. Follow-Through'));
-    expect(headings.indexOf('Google Calendar')).toBeLessThan(headings.indexOf('2. Habits'));
+    expect(headings.indexOf('Google Calendar')).toBeGreaterThan(headings.indexOf('Schedule tomorrow'));
     expect(headings.indexOf('Schedule tomorrow')).toBeGreaterThan(headings.indexOf('6.2 Start focus'));
     expect(container.querySelector('[data-slot-timestamp]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="Google events"]')).toBeNull();
+    expect(container.textContent).toContain('no Google sign-in needed to use your planner');
     expect([...container.querySelectorAll('button')].find((node) => node.textContent === 'Connect Google Calendar').disabled).toBe(false);
     await act(async () => container.querySelector('[data-scheduler-edit-key="action:write"]').click());
     await act(async () => [...document.querySelectorAll('button')].find((node) => node.textContent === 'Save time').click());
     expect(mocks.update).toHaveBeenCalledWith('action:write', expect.objectContaining({
       starts_at: '2026-10-08T09:00:00.000Z', ends_at: '2026-10-08T09:30:00.000Z',
     }));
+  });
+
+  it.each([
+    ['missing Google configuration', { connected: false, configured: false, schemaAvailable: true }],
+    ['missing Google connection schema', { connected: false, configured: true, schemaAvailable: false }],
+  ])('keeps the native planner editable with %s', async (_name, status) => {
+    fetchMock.mockImplementation(() => response(status));
+    await render();
+    expect(container.querySelectorAll('[data-slot-timestamp]')).toHaveLength(96);
+    expect(container.querySelector('[data-scheduler-drag-key="action:write"]')).not.toBeNull();
+    await act(async () => container.querySelector('[data-scheduler-edit-key="action:write"]').click());
+    await act(async () => [...document.querySelectorAll('button')].find((node) => node.textContent === 'Save time').click());
+    expect(mocks.update).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls.some(([url]) => url.includes('action=events'))).toBe(false);
+  });
+
+  it('keeps the planner available when Google status fails or there is no Google authorization', async () => {
+    fetchMock.mockRejectedValue(new Error('Google is unreachable'));
+    await render();
+    expect(container.textContent).toContain('Google is unreachable');
+    expect(container.querySelectorAll('[data-slot-timestamp]')).toHaveLength(96);
+    expect(container.querySelector('[data-scheduler-edit-key="action:write"]').disabled).toBe(false);
+    expect(container.querySelector('[aria-label="Google events"]')).toBeNull();
   });
 
   it('passes authenticated Google availability into the planning timeline', async () => {

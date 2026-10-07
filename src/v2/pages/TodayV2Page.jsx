@@ -372,16 +372,6 @@ export default function TodayV2Page() {
           )}
         </section>
 
-        {ENABLE_TODAY_V2_SCHEDULER && (
-          <GoogleCalendarConnection
-            userId={user?.id}
-            localDate={state.tomorrowLocalDate}
-            timezone={state.timezoneName}
-            includeNextDay
-            onEvents={setGoogleEvents}
-          />
-        )}
-
         <section className="relative space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
           {!readOnly && (
             <button
@@ -565,6 +555,7 @@ export default function TodayV2Page() {
         </section>
 
         {ENABLE_TODAY_V2_SCHEDULER && (
+          <div className="space-y-3">
           <TomorrowScheduler
             userId={user?.id}
             localDate={state.tomorrowLocalDate}
@@ -594,6 +585,14 @@ export default function TodayV2Page() {
             onUnschedule={unschedule}
             onRetry={load}
           />
+          <GoogleCalendarConnection
+            userId={user?.id}
+            localDate={state.tomorrowLocalDate}
+            timezone={state.timezoneName}
+            includeNextDay
+            onEvents={setGoogleEvents}
+          />
+          </div>
         )}
 
         <section className="space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
