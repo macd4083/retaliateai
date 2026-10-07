@@ -124,6 +124,9 @@ Automatic times are materialized into the same daily schedule used by `/home`.
 Per-day overrides preserve dragged, edited, or unscheduled occurrences across
 reloads without changing the weekly rule. Recurrence skips nonexistent DST
 times and uses the configured earlier/later occurrence for repeated times.
+Missing automatic occurrences can appear on an open target day even after the
+previous review is completed; existing completed-source plans and completed
+target days remain unchanged.
 
 ### `today_v2_habit_occurrences`
 Materialized daily habit checklist rows with immutable snapshots:

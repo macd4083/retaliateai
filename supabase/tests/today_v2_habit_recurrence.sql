@@ -48,6 +48,11 @@ begin
   perform public.today_v2_seed_habit_schedules('2026-09-29','2026-09-29','UTC');
   assert not exists(select 1 from public.today_v2_schedule_blocks where target_local_date = '2026-09-29'),
     'Unscheduling is persistent and never regenerated';
+  update public.today_v2_daily_reviews set completed_at = now()
+    where user_id = auth.uid() and local_date = '2026-09-28';
+  perform public.today_v2_seed_habit_schedules('2026-09-29','2026-09-29','UTC');
+  assert not exists(select 1 from public.today_v2_schedule_blocks where target_local_date = '2026-09-29'),
+    'The seed-only completion exception still honors unscheduling tombstones';
   perform public.today_v2_seed_habit_schedules('2026-09-22','2026-09-22','UTC');
   perform public.today_v2_replace_schedule('2026-09-22','UTC','[]');
   perform public.today_v2_seed_habit_schedules('2026-09-22','2026-09-22','UTC');
@@ -79,6 +84,44 @@ begin
       '{"2":{"time":"09:01","duration_minutes":1.5,"occurrence":"earlier"}}' where id = v_habit;
   exception when check_violation then v_failure := true; end;
   assert v_failure, 'Server rejects fractional durations';
+end;
+$$;
+
+do $$
+declare v_habit uuid; v_block uuid; v_source uuid; v_failed boolean := false;
+begin
+  insert into public.today_v2_habit_definitions(user_id,name,response_type,schedule_weekdays,planning_mode,schedule_times)
+  values(auth.uid(),'Unvisited future recurrence','boolean',array[2]::smallint[],'automatic',
+    '{"2":{"time":"09:07","duration_minutes":43,"occurrence":"earlier"}}') returning id into v_habit;
+  insert into public.today_v2_daily_reviews(user_id,local_date,timezone_name,desired_direction,completed_at)
+  values(auth.uid(),'2026-11-02','UTC','Preserve completed identity',now()) returning id into v_source;
+  -- Home can materialize this date without visiting yesterday's manual plan.
+  perform public.today_v2_seed_habit_schedules('2026-11-03','2026-11-03','UTC');
+  select id into strict v_block from public.today_v2_schedule_blocks
+    where habit_definition_id = v_habit and target_local_date = '2026-11-03';
+  assert exists(select 1 from public.today_v2_schedule_blocks where id = v_block
+    and source_review_id = v_source and starts_at = '2026-11-03T09:07:00Z' and is_automatic),
+    'An unmaterialized future habit is seeded even after the previous review completed';
+  assert exists(select 1 from public.today_v2_daily_reviews where id = v_source
+    and completed_at is not null and desired_direction = 'Preserve completed identity' and timezone_name = 'UTC'),
+    'Seed-only insertion does not rewrite the completed source review';
+  update public.today_v2_habit_definitions set schedule_times =
+    '{"2":{"time":"10:11","duration_minutes":60,"occurrence":"later"}}' where id = v_habit;
+  perform public.today_v2_seed_habit_schedules('2026-11-03','2026-11-03','America/New_York');
+  assert exists(select 1 from public.today_v2_schedule_blocks where id = v_block
+    and starts_at = '2026-11-03T09:07:00Z' and ends_at = '2026-11-03T09:50:00Z' and timezone_name = 'UTC'),
+    'Existing completed-source evidence is not changed by seeding';
+  begin perform public.today_v2_replace_schedule('2026-11-03','UTC','[]');
+  exception when others then v_failed := true; end;
+  assert v_failed, 'Seed-only completion exception never unlocks the manual writer';
+  insert into public.today_v2_daily_reviews(user_id,local_date,timezone_name,completed_at)
+  values(auth.uid(),'2026-11-10','UTC',now());
+  perform public.today_v2_seed_habit_schedules('2026-11-10','2026-11-10','UTC');
+  assert not exists(select 1 from public.today_v2_schedule_blocks where habit_definition_id = v_habit
+    and target_local_date = '2026-11-10'), 'A completed target day still cannot receive new rows';
+  perform public.today_v2_seed_habit_schedules('2026-11-17','2026-11-17','UTC');
+  assert exists(select 1 from public.today_v2_schedule_blocks where habit_definition_id = v_habit
+    and target_local_date = '2026-11-17'), 'Future Home recurrence does not require prior workflow visitation';
 end;
 $$;
 
@@ -117,14 +160,25 @@ begin
 end;
 $$;
 
+select set_config('test.foreign_habit_id',(select id::text from public.today_v2_habit_definitions
+  where user_id = auth.uid() and name = 'Precise recurrence'),true);
 select set_config('request.jwt.claim.sub','00000000-0000-4000-8000-000000000092',true);
 set local role authenticated;
 select public.today_v2_seed_habit_schedules('2026-09-29','2026-09-29','UTC');
 do $$
+declare v_failed boolean := false;
 begin
   assert not exists(select 1 from public.today_v2_schedule_blocks), 'Seeding and RLS are scoped to auth.uid()';
   assert not has_table_privilege('authenticated','public.today_v2_habit_schedule_overrides','INSERT'),
     'Overrides are writable only through authorized RPCs';
+  assert not has_function_privilege('authenticated','public.today_v2_guard_schedule_review()','EXECUTE'),
+    'The seed-only review guard remains private';
+  begin
+    perform public.today_v2_replace_schedule('2026-09-29','UTC',jsonb_build_array(jsonb_build_object(
+      'habit_definition_id',current_setting('test.foreign_habit_id'),
+      'starts_at','2026-09-29T09:07:00Z','ends_at','2026-09-29T09:50:00Z')));
+  exception when others then v_failed := true; end;
+  assert v_failed, 'The schedule RPC rejects another owner habit identity';
 end;
 $$;
 reset role;

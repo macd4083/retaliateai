@@ -81,13 +81,17 @@ export async function ensureTodayV2AutomaticHabitSchedules(startLocalDate, endLo
   return error ? { code: error.code, message: 'Automatic habit scheduling needs the recurrence migration.' } : null;
 }
 
+function isMissingHabitRecurrenceSchema(error) {
+  return ['42703', 'PGRST204'].includes(error?.code);
+}
+
 async function loadHabitDefinitions(userId) {
   const fields = 'id, seed_key, name, response_type, unit, schedule_weekdays, display_order, is_archived, archived_at, created_at, updated_at';
   const query = (selection) => supabase.from(TODAY_V2_TABLES.HABIT_DEFINITIONS)
     .select(selection).eq('user_id', userId)
     .order('display_order', { ascending: true }).order('created_at', { ascending: true });
   const result = await query(`${fields}, planning_mode, schedule_times`);
-  if (['42703', 'PGRST204'].includes(result.error?.code)) {
+  if (isMissingHabitRecurrenceSchema(result.error)) {
     return { ...await query(fields), recurrenceAvailable: false };
   }
   return { ...result, recurrenceAvailable: true };
@@ -301,31 +305,27 @@ export async function upsertHabitDefinition(userId, habit) {
     archived_at: null,
   };
 
-  if (habit.id) {
-    const { error } = await supabase
-      .from(TODAY_V2_TABLES.HABIT_DEFINITIONS)
-      .update(payload)
-      .eq('id', habit.id)
-      .eq('user_id', userId);
-
-    if (error) {
-      if (error.code === '23505') {
-        throw new Error('A habit with this name already exists.');
-      }
-      throw error;
+  const writeDefinition = (values) => {
+    if (habit.id) {
+      return supabase.from(TODAY_V2_TABLES.HABIT_DEFINITIONS).update(values)
+        .eq('id', habit.id).eq('user_id', userId);
     }
-
-    return habit.id;
+    return supabase.from(TODAY_V2_TABLES.HABIT_DEFINITIONS)
+      .insert({ ...values, seed_key: habit.seed_key || null }).select('id').single();
+  };
+  let result = await writeDefinition(payload);
+  if (isMissingHabitRecurrenceSchema(result.error)) {
+    if (payload.planning_mode !== 'manual' || Object.keys(payload.schedule_times).length > 0) {
+      const migrationError = new Error('Habit calendar preferences need migration 20261010_today_v2_habit_recurrence.sql. Apply it, or run the complete Today V2 SQL repair file, then retry.');
+      migrationError.code = 'HABIT_RECURRENCE_SCHEMA_MISSING';
+      throw migrationError;
+    }
+    const legacyPayload = { ...payload };
+    delete legacyPayload.planning_mode;
+    delete legacyPayload.schedule_times;
+    result = await writeDefinition(legacyPayload);
   }
-
-  const { data, error } = await supabase
-    .from(TODAY_V2_TABLES.HABIT_DEFINITIONS)
-    .insert({
-      ...payload,
-      seed_key: habit.seed_key || null,
-    })
-    .select('id')
-    .single();
+  const { data, error } = result;
 
   if (error) {
     if (error.code === '23505') {
@@ -334,7 +334,7 @@ export async function upsertHabitDefinition(userId, habit) {
     throw error;
   }
 
-  return data.id;
+  return habit.id || data.id;
 }
 
 export async function archiveHabit(userId, habitId) {

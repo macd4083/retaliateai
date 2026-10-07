@@ -682,7 +682,7 @@ export function useTodayV2State(userId) {
         return {
           id: `habit:${habit.id}`, key: `habit:${habit.id}`, type: 'habit', label: habit.name, source_id: habit.id,
           habit, planning_mode: habit.planning_mode || 'manual',
-          preferred_time: defaults?.time, schedule_time: defaults?.time,
+          preferred_time: defaults?.time,
           duration_minutes: defaults?.duration_minutes || 30,
           occurrence: defaults?.occurrence || 'earlier',
         };
@@ -944,12 +944,14 @@ export function useTodayV2State(userId) {
     const context = stateRef.current;
     const next = await loadTodayReviewState(userId);
     if (!isCurrent() || next.todayLocalDate !== context.todayLocalDate) return;
-    const baseline = stateRef.current.tomorrowSchedules || [];
+    const baseline = (stateRef.current.tomorrowSchedules || [])
+      .filter((block) => block.target_local_date === next.tomorrowLocalDate);
     const signature = (block) => block ? `${Date.parse(block.starts_at)}|${Date.parse(block.ends_at)}` : null;
     const local = scheduleRef.current;
     const validHabits = new Set((next.habitDefinitions || [])
       .filter((habit) => isTodayV2HabitScheduledForDate(habit, next.tomorrowLocalDate)).map((habit) => habit.id));
-    const remoteHabits = (next.tomorrowSchedules || []).filter((block) => block.source_type === 'habit');
+    const remoteHabits = (next.tomorrowSchedules || [])
+      .filter((block) => block.source_type === 'habit' && block.target_local_date === next.tomorrowLocalDate);
     const merged = local.filter((block) => block.source_type !== 'habit');
     for (const id of validHabits) {
       const oldBlock = baseline.find((block) => block.source_type === 'habit' && block.source_id === id);

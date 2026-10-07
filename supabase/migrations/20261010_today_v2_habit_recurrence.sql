@@ -39,6 +39,49 @@ end;
 $$;
 alter table public.today_v2_schedule_blocks add column if not exists is_automatic boolean not null default false;
 
+-- Only the authorized seeder writes new is_automatic rows: authenticated users
+-- have no table write grants, and the manual replacement RPC never sets it on
+-- insertion. Missing recurrence may materialize after source completion, but
+-- existing schedule evidence and completed target days remain immutable.
+create or replace function public.today_v2_guard_schedule_review()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare v_date date; v_review_id uuid;
+begin
+  if tg_op = 'DELETE' and not exists (select 1 from auth.users where id = old.user_id) then return old; end if;
+  if tg_op = 'DELETE' and pg_trigger_depth() > 1
+    and not exists (select 1 from public.today_v2_daily_reviews where id = old.source_review_id and user_id = old.user_id) then
+    return old;
+  end if;
+  if tg_op <> 'INSERT' then
+    select local_date into strict v_date from public.today_v2_daily_reviews
+    where id = old.source_review_id and user_id = old.user_id;
+    perform public.today_v2_lock_source_review(old.user_id, v_date, old.timezone_name);
+  end if;
+  if tg_op = 'DELETE' then return old; end if;
+  if new.commitment_fragment_id is not null then
+    select source_local_date into strict v_date from public.today_v2_commitment_fragments
+    where id = new.commitment_fragment_id and user_id = new.user_id and target_local_date = new.target_local_date;
+  else
+    v_date := new.target_local_date - 1;
+  end if;
+  if tg_op = 'INSERT' and new.is_automatic and new.habit_definition_id is not null
+    and auth.uid() = new.user_id then
+    insert into public.today_v2_daily_reviews(user_id,local_date,timezone_name)
+    values(new.user_id,v_date,new.timezone_name) on conflict (user_id,local_date) do nothing;
+    select id into strict v_review_id from public.today_v2_daily_reviews
+    where user_id = new.user_id and local_date = v_date for update;
+    perform public.today_v2_lock_source_review(new.user_id,new.target_local_date,new.timezone_name);
+  else
+    v_review_id := public.today_v2_lock_source_review(new.user_id, v_date, new.timezone_name);
+  end if;
+  if new.source_review_id is not null and new.source_review_id <> v_review_id then
+    raise exception 'Schedule source review must match its owned source';
+  end if;
+  new.source_review_id := v_review_id;
+  return new;
+end;
+$$;
+
 -- Presence means the user changed or removed this occurrence. An absent block
 -- with an override is a tombstone, not an invitation to seed it again.
 create table if not exists public.today_v2_habit_schedule_overrides (
@@ -67,6 +110,7 @@ declare
   v_habit record;
   v_wall timestamp;
   v_start timestamptz;
+  v_source_completed boolean;
 begin
   if v_user is null then raise exception 'Authentication required'; end if;
   if p_start_local_date is null or p_end_local_date is null
@@ -86,10 +130,12 @@ begin
   order by local_date for update;
   for v_date in select p_start_local_date + d from generate_series(0, p_end_local_date - p_start_local_date) d loop
     if exists (select 1 from public.today_v2_daily_reviews where user_id = v_user
-      and local_date in (v_date - 1, v_date) and completed_at is not null) then continue; end if;
+      and local_date = v_date and completed_at is not null) then continue; end if;
+    v_source_completed := exists (select 1 from public.today_v2_daily_reviews where user_id = v_user
+      and local_date = v_date - 1 and completed_at is not null);
     perform pg_advisory_xact_lock(hashtextextended(v_user::text || ':' || v_date::text, 0));
     delete from public.today_v2_schedule_blocks b
-    where b.user_id = v_user and b.target_local_date = v_date and b.is_automatic
+    where b.user_id = v_user and b.target_local_date = v_date and b.is_automatic and not v_source_completed
       and not exists (select 1 from public.today_v2_habit_definitions h
         where h.user_id = v_user and h.id = b.habit_definition_id
           and not h.is_archived and h.planning_mode = 'automatic'
@@ -115,7 +161,7 @@ begin
       ) candidates where candidate at time zone p_timezone_name = v_wall;
       if v_start is null then
         delete from public.today_v2_schedule_blocks where user_id = v_user
-          and target_local_date = v_date and habit_definition_id = v_habit.id and is_automatic;
+          and target_local_date = v_date and habit_definition_id = v_habit.id and is_automatic and not v_source_completed;
         continue;
       end if;
       insert into public.today_v2_schedule_blocks(
@@ -124,7 +170,7 @@ begin
         v_start + (v_habit.slot->>'duration_minutes')::integer * interval '1 minute',true)
       on conflict (user_id,target_local_date,habit_definition_id) do update set
         timezone_name = excluded.timezone_name, starts_at = excluded.starts_at, ends_at = excluded.ends_at
-      where today_v2_schedule_blocks.is_automatic
+      where today_v2_schedule_blocks.is_automatic and not v_source_completed
         and (today_v2_schedule_blocks.timezone_name, today_v2_schedule_blocks.starts_at, today_v2_schedule_blocks.ends_at)
           is distinct from (excluded.timezone_name, excluded.starts_at, excluded.ends_at);
     end loop;
@@ -204,6 +250,7 @@ end;
 $$;
 
 revoke all on function public.today_v2_seed_habit_schedules(date,date,text) from public,anon;
+revoke all on function public.today_v2_guard_schedule_review() from public,anon,authenticated;
 grant execute on function public.today_v2_seed_habit_schedules(date,date,text) to authenticated;
 revoke all on function public.today_v2_replace_schedule(date,text,jsonb) from public,anon;
 grant execute on function public.today_v2_replace_schedule(date,text,jsonb) to authenticated;

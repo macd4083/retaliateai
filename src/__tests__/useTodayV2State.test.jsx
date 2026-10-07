@@ -215,7 +215,7 @@ describe('useTodayV2State', () => {
         ...initial,
         habitDefinitions: [{ ...initial.habitDefinitions[0], name: 'Read updated', planning_mode: 'automatic',
           schedule_times: { 2: { time: '08:09', duration_minutes: 37, occurrence: 'later' } } }],
-        tomorrowSchedules: [{ source_type: 'habit', source_id: 'habit-id',
+        tomorrowSchedules: [{ source_type: 'habit', source_id: 'habit-id', target_local_date: '2026-09-29',
           starts_at: '2026-09-29T08:09:00Z', ends_at: '2026-09-29T08:46:00Z' }],
       });
       await act(async () => { await latest.saveHabitDefinition({ id: 'habit-id', name: 'Read updated' }); });
@@ -224,11 +224,42 @@ describe('useTodayV2State', () => {
       expect(latest.scheduleBlocks[0].starts_at).toBe('2026-09-29T10:07:00.000Z');
       expect(latest.schedulerItems.find((item) => item.type === 'habit')).toMatchObject({
         label: 'Read updated', planning_mode: 'automatic', preferred_time: '08:09',
-        schedule_time: '08:09', duration_minutes: 37, occurrence: 'later',
+        duration_minutes: 37, occurrence: 'later',
       });
       await act(async () => { latest.setTomorrowInput('Write and Walk and Read'); });
       expect(latest.tomorrowActions).toEqual(['Draft chapter', 'Read']);
     });
+
+  it.each([false, true])('excludes carryover habit rows when refreshing tomorrow bookings (existing %s)', async (hasExisting) => {
+    const habit = { id: 'habit-id', name: 'Read', planning_mode: 'automatic',
+      schedule_weekdays: [0, 1, 2, 3, 4, 5, 6] };
+    const carryover = {
+      id: 'carryover', source_type: 'habit', source_id: 'habit-id', target_local_date: '2026-09-28',
+      starts_at: '2026-09-28T23:30:00Z', ends_at: '2026-09-29T00:30:00Z',
+    };
+    const original = {
+      id: 'tomorrow-booking', source_type: 'habit', source_id: 'habit-id', target_local_date: '2026-09-29',
+      starts_at: '2026-09-29T09:07:00Z', ends_at: '2026-09-29T09:50:00Z',
+    };
+    const initial = {
+      ...makeState(), scheduleAvailable: true, habitDefinitions: [habit],
+      tomorrowSchedules: [carryover, ...(hasExisting ? [original] : [])],
+    };
+    serviceMocks.loadTodayReviewState.mockResolvedValue(initial);
+    serviceMocks.upsertHabitDefinition.mockResolvedValue('habit-id');
+    await renderHook();
+    const refreshed = { ...original, starts_at: '2026-09-29T10:11:00Z', ends_at: '2026-09-29T11:11:00Z' };
+    serviceMocks.loadTodayReviewState.mockResolvedValue({
+      ...initial, habitDefinitions: [{ ...habit, name: 'Read updated' }],
+      tomorrowSchedules: [carryover, refreshed],
+    });
+    await act(async () => { await latest.saveHabitDefinition({ id: 'habit-id', name: 'Read updated' }); });
+    expect(latest.scheduleBlocks).toHaveLength(1);
+    expect(latest.scheduleBlocks[0]).toMatchObject({
+      id: 'tomorrow-booking', target_local_date: '2026-09-29', source_key: 'habit:habit-id',
+      starts_at: '2026-09-29T10:11:00Z', ends_at: '2026-09-29T11:11:00Z',
+    });
+  });
 
   it('replaces the saved direction on every edit without using autofill', async () => {
     await renderHook();
