@@ -13,7 +13,6 @@ vi.mock('../lib/AuthContext', () => ({ useAuth: () => authState }));
 vi.mock('../hooks/usePWAInstall', () => ({ usePWAInstall: () => installState }));
 vi.mock('../lib/supabase/client', () => ({ supabase: supabaseMock }));
 vi.mock('../lib/analytics', () => ({ trackEvent: vi.fn() }));
-vi.mock('../lib/featureFlags', () => ({ ENABLE_TODAY_V2: false }));
 vi.mock('../components/pwa/PWAInstallBanner', () => ({ default: () => null }));
 vi.mock('../components/v2/ReflectionSummaryCard', () => ({ default: () => <div>Historical summary</div> }));
 
@@ -135,7 +134,7 @@ describe('public entry and navigation', () => {
     ['Review & Plan', '/today'],
     ['Progress', '/insights'],
     ['Settings', '/settings'],
-  ])('keeps %s navigation on V2 even with the rollback flag false', async (label, path) => {
+  ])('keeps %s navigation on V2', async (label, path) => {
     authState.user = { id: 'member' };
     await render(<AppShellV2 title="Today">Content</AppShellV2>);
     const labels = [...container.querySelectorAll('nav button')].map((button) => button.textContent.trim());
