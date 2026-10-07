@@ -7,39 +7,45 @@ No weekly review, Google event writeback, Apple sync, or legacy migration is inc
 
 ## Deployment evidence and unresolved blocker
 
-- PR #360 commit `55329c6423018c721729a636149a79b9259d225a` has a failed
-  Vercel status: `Deployment has failed — run this Vercel CLI command:
-  npx vercel inspect dpl_91kEJdCnNM88esXnR8oKUS65ELjY --logs`.
-  [Deployment dashboard](https://vercel.com/matt-macdonalds-projects/retaliateai/91kEJdCnNM88esXnR8oKUS65ELjY).
-  GitHub provides **no failing build command, file/line, or underlying Vercel log**.
-  The dashboard and Vercel documentation host were inaccessible from this sandbox.
-- [Latest main validation](https://github.com/macd4083/retaliateai/actions/runs/37569600905)
-  on `0efcf84521c38888965e02067c7e2ee89a6bcecd` passed SQL upgrade/repair,
-  focused tests (211), full tests (430), lint, and build.
-  [PR validation retry](https://github.com/macd4083/retaliateai/actions/runs/37562120893)
-  also passed. Earlier failed runs `37561609796` and `37559663134` return zero
-  jobs/logs through GitHub; their timeout cause cannot be recovered.
-- Clean local reproduction on Node 22.23.3 / npm 10.9.9:
+- PR #361 commit `0996fecb3908fe69b65926eb0ed63eed520417d7` has a failed
+  Vercel status for deployment
+  [`dpl_EEdkhU6Seho1Zu1J5PrSrJU6EThg`](https://vercel.com/matt-macdonalds-projects/retaliateai/EEdkhU6Seho1Zu1J5PrSrJU6EThg).
+  GitHub's status contains only the instruction to run
+  `npx vercel inspect dpl_EEdkhU6Seho1Zu1J5PrSrJU6EThg --logs`; Vercel logs and
+  dashboard access are unavailable here. This is the unresolved deploy blocker,
+  not a diagnosed code/config root cause.
+- **Required owner artifact:** provide that deployment URL and its first failing
+  log section (failing command, error, and adjacent context; redact secrets).
+  Until then, do not claim a Vercel fix or infer a root cause.
+- [GitHub Actions validation on main](https://github.com/macd4083/retaliateai/actions/runs/37573843894)
+  for `37a768b705123ea64f497b16d45e3fb11627330c` passed disposable-Postgres
+  migration upgrade/idempotence tests, scheduler/Calendar tests, lint, the full
+  regression suite, and production build. The separate successful "Vercel Preview
+  Comments" check is not evidence of a successful deployment.
+- Current local reproduction on Node 22.23.3 / npm 10.9.9:
 
   | Command | Exit | Wall time | Output |
   | --- | --- | --- | --- |
-  | `npm ci` | 0 | 28.95s | 1179 packages added; no lock drift |
-  | `npm run lint` | 0 | 2.59s | No lint errors |
-  | `npm run test` | 0 | 14.10s | 21 files, 430 tests passed |
-  | `npm run build` | 0 | 8.25s | Vite built; PWA worker generated |
-  | `npm run test -- --maxWorkers=1 --no-file-parallelism src/__tests__/schedulerDeployment.test.js` | 0 | 0.89s | 4 tests passed |
+  | `npm ci` | 0 | 33.64s | 1179 packages added; lockfile unchanged; 58 dependency advisories reported |
+  | `npm run lint` | 0 | 3.30s | No lint errors |
+  | `npm run test` | 0 | 15.73s | 21 files, 452 tests passed |
+  | `npm run build` | 0 | 8.08s | Vite built; PWA worker generated |
 
-  These are baseline reproduction results, not a successful remote deployment.
-  Build has a non-fatal large-chunk warning. Install reports 58 existing dependency
-  advisories; do not run a breaking `npm audit fix --force` as a release workaround.
+  These local results and the earlier CI workflow are not evidence of a successful
+  remote deployment. The build emitted non-fatal stale Browserslist data and
+  large-chunk warnings. Install reported 58 advisories (2 low, 18 moderate,
+  36 high, 2 critical); this patch changes no dependencies. Do not run a breaking
+  `npm audit fix --force` as a release workaround.
 - The actual API imports `../server/googleCalendar.js` with matching Linux case;
-  Node crypto and `AbortSignal.timeout` are exercised in deployment regressions.
-  `vercel.json` excludes `/api/` from SPA rewrites; generated PWA navigation
-  fallback also excludes `/api/`. No callback is routed through Supabase Auth.
+  the deployment regression imports that API without Google configuration and
+  verifies its JSON 401 response. Node crypto, `AbortSignal.timeout`, the
+  `/api/` SPA rewrite exclusion, and browser-source boundaries (no server crypto
+  or service-role secrets) are covered by tests. The production Vite build passes.
+  These checks rule out those local build/import/bundle-boundary failures; they do
+  not rule out Vercel project settings, limits, or environment configuration.
 
-**Next owner action:** open the failed deployment above (or, using the owner's
-authenticated Vercel CLI, run the exact inspect command from the status), record
-the first failing command and surrounding log lines, and compare these settings:
+**Next owner action:** using authenticated Vercel access, run the exact inspect
+command above and attach the required artifact. Then compare these settings:
 
 | Setting | Required value/check |
 | --- | --- |
@@ -76,6 +82,9 @@ before that evidence exists.
 - Auth loss during selection/connect/disconnect clears shared event overlays.
   When the last selected calendar disappears, Apply remains available to persist
   an empty selection.
+- The desired-direction textarea uses its native `readOnly` state during completion;
+  a deployment regression test prevents the unsupported `interactionDisabled` prop
+  from returning.
 - Node runtime parity, serial regression scripts, bounded CI steps, and explicit
   API/SPA/crypto/timeout regressions harden repeatable deployment validation.
 
@@ -150,6 +159,9 @@ HTTP is permitted only for localhost/127.0.0.1.
 
 Apply SQL **before** deploying/enabling the scheduler:
 
+This patch adds no SQL. For an existing database, apply only missing migrations
+below; for a fresh installation, use the consolidated SQL as the alternative.
+
 1. Check applied migration history. For an existing V2 installation apply any
    missing files in this order, using the **entire file** in Supabase SQL Editor:
    - [`20260928_today_v2_workflow.sql`](../supabase/migrations/20260928_today_v2_workflow.sql)
@@ -170,6 +182,11 @@ Apply SQL **before** deploying/enabling the scheduler:
 4. Run the verification queries below. Do not run test fixture SQL against
    production; CI uses a disposable database with mock `auth` objects.
 5. Deploy, then smoke-test API/routes and perform account/device QA.
+
+If the application deployment needs rollback, restore the previous Vercel
+deployment and disable the scheduler feature flag. This patch adds no schema
+changes to reverse; do not drop or manually roll back the existing scheduler
+migrations.
 
 Copy/paste verification SQL (read-only):
 
