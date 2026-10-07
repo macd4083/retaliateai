@@ -470,7 +470,6 @@ export default function TodayV2Page() {
           <textarea
             value={desiredDirection}
             readOnly={readOnly}
-            interactionDisabled={completionSaving}
             placeholder={state.previousDesiredDirection || ''}
             onChange={(event) => setDesiredDirection(event.target.value)}
             onBlur={() => { if (!readOnly) void saveDesiredDirection(); }}

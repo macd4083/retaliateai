@@ -57,4 +57,10 @@ describe('scheduler deployment boundaries', () => {
     };
     visit(path.join(root, 'src'));
   });
+
+  it('locks review textareas with supported native readOnly behavior while completing', () => {
+    const page = fs.readFileSync(path.join(root, 'src/v2/pages/TodayV2Page.jsx'), 'utf8');
+    expect(page).toContain('const readOnly = isCompleted || completionSaving;');
+    expect(page).not.toMatch(/\binteractionDisabled\s*=/);
+  });
 });
