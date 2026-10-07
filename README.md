@@ -87,6 +87,9 @@ for automated tests.
 
 ## Deployment configuration
 
+For the scheduler/Google Calendar release, use the
+[owner setup, SQL rollout, deployment evidence, and device QA runbook](docs/CALENDAR_SCHEDULER_RELEASE.md).
+
 Production domain intent is `https://retaliateai.com`, evidenced by the canonical
 metadata, sitemap and existing Stripe redirects, not verified live dashboard
 state. No production settings or database changes have been applied by this PR.

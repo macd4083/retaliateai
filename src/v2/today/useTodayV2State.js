@@ -142,7 +142,9 @@ export function useTodayV2State(userId) {
       if (generation !== loadGenerationRef.current || stateRef.current?.review?.id !== reviewId || currentUserRef.current !== ownerId) {
         throw new Error('Review changed before saving; retry the edit');
       }
-      return operation();
+      const isCurrent = () => generation === loadGenerationRef.current
+        && stateRef.current?.review?.id === reviewId && currentUserRef.current === ownerId;
+      return operation(isCurrent);
     }).then((result) => {
       if (generation === loadGenerationRef.current && stateRef.current?.review?.id === reviewId && currentUserRef.current === ownerId) writeErrorsRef.current.delete(key);
       return result;
@@ -283,7 +285,7 @@ export function useTodayV2State(userId) {
       const next = await loadTodayReviewState(userId);
       if (generation !== loadGenerationRef.current || revision !== planRevisionRef.current
         || scheduleRevision !== scheduleRevisionRef.current || editRevision !== editRevisionRef.current) return;
-      const draft = readDraft(userId, next.todayLocalDate);
+      const draft = next.review?.completed_at ? null : readDraft(userId, next.todayLocalDate);
       const nextDesiredDirection = draft && (draft.desiredDirectionNeedsSync || !normalizeTodayV2Text(next.review?.desired_direction))
         ? String(draft.desiredDirection || '')
         : next.review?.desired_direction || '';
@@ -892,10 +894,11 @@ export function useTodayV2State(userId) {
 
   const saveTomorrowPlan = React.useCallback(async () => flushTomorrowPlan(), [flushTomorrowPlan]);
 
-  const saveCommitmentCompletion = React.useCallback((fragmentId, completionState) => trackWrite(`fragment:${fragmentId}`, async () => {
+  const saveCommitmentCompletion = React.useCallback((fragmentId, completionState) => trackWrite(`fragment:${fragmentId}`, async (isCurrent) => {
     const reviewId = stateRef.current?.review?.id;
     const nextState = completionState || TODAY_V2_COMMITMENT_STATES.UNANSWERED;
     const savedRow = await setFollowThroughCompletion(fragmentId, nextState);
+    if (!isCurrent()) return;
     setState((previous) => {
       if (!previous || previous.review.id !== reviewId) return previous;
       return {
@@ -911,21 +914,22 @@ export function useTodayV2State(userId) {
 
   const saveDesiredDirection = React.useCallback(async () => flushDesiredDirection(), [flushDesiredDirection]);
 
-  const saveHabitDefinition = React.useCallback((habitDraft) => trackWrite(`habit:${habitDraft.id || 'new'}`, async () => {
+  const saveHabitDefinition = React.useCallback((habitDraft) => trackWrite(`habit:${habitDraft.id || 'new'}`, async (isCurrent) => {
     if (!userId) return null;
     const id = await upsertHabitDefinition(userId, habitDraft);
-    await load();
+    if (isCurrent()) await load();
     return id;
   }), [load, trackWrite, userId]);
 
-  const archiveHabitDefinition = React.useCallback((habitId) => trackWrite(`habit:${habitId}`, async () => {
+  const archiveHabitDefinition = React.useCallback((habitId) => trackWrite(`habit:${habitId}`, async (isCurrent) => {
     await archiveHabit(userId, habitId);
-    await load();
+    if (isCurrent()) await load();
   }), [load, trackWrite, userId]);
 
-  const saveHabitResponse = React.useCallback((occurrence, value) => trackWrite(`occurrence:${occurrence.id}`, async () => {
+  const saveHabitResponse = React.useCallback((occurrence, value) => trackWrite(`occurrence:${occurrence.id}`, async (isCurrent) => {
     const reviewId = stateRef.current?.review?.id;
     const savedOccurrence = await upsertHabitLog(occurrence.id, occurrence.snapshot_response_type, value);
+    if (!isCurrent()) return;
     setState((previous) => {
       if (!previous || previous.review.id !== reviewId) return previous;
       return {
@@ -939,7 +943,7 @@ export function useTodayV2State(userId) {
     });
   }), [trackWrite]);
 
-  const addManualFollowThrough = React.useCallback((actionText) => trackWrite('manual', async () => {
+  const addManualFollowThrough = React.useCallback((actionText) => trackWrite('manual', async (isCurrent) => {
     if (!state || !userId) return null;
     const nextFragmentOrder = state.followThroughItems.reduce(
       (maxOrder, item) => Math.max(maxOrder, Number(item.fragment_order ?? -1)),
@@ -954,6 +958,7 @@ export function useTodayV2State(userId) {
       state.timezoneName
     );
 
+    if (!isCurrent()) return created;
     setState((previous) => {
       if (!previous || previous.review.id !== state.review.id) return previous;
       return {
@@ -980,7 +985,7 @@ export function useTodayV2State(userId) {
         throw new Error('Review changed while saving; retry completion');
       }
       const savedReview = await completeTodayV2Review(reviewId);
-      if (generation !== loadGenerationRef.current || currentUserRef.current !== ownerId || stateRef.current?.review?.id !== reviewId) return savedReview;
+      if (generation !== loadGenerationRef.current || currentUserRef.current !== ownerId || stateRef.current?.review?.id !== reviewId) return null;
       stateRef.current = { ...stateRef.current, review: { ...stateRef.current.review, ...savedReview } };
       setState((previous) => previous?.review?.id === reviewId ? {
         ...previous,
@@ -1001,22 +1006,34 @@ export function useTodayV2State(userId) {
   }, [canEdit, flushAll]);
 
   const reopenReview = React.useCallback(async () => {
-    if (!stateRef.current?.review?.id || completionSavingRef.current) return null;
+    if (loadedUserRef.current !== currentUserRef.current || !stateRef.current?.review?.completed_at || completionSavingRef.current) return null;
     const reviewId = stateRef.current.review.id;
     const generation = loadGenerationRef.current;
     const ownerId = currentUserRef.current;
-    const savedReview = await reopenTodayV2Review(reviewId);
-    if (generation !== loadGenerationRef.current || currentUserRef.current !== ownerId || stateRef.current?.review?.id !== reviewId) return savedReview;
-    stateRef.current = { ...stateRef.current, review: { ...stateRef.current.review, ...savedReview } };
-    setState((previous) => previous?.review?.id === reviewId ? {
-      ...previous,
-      review: {
-        ...previous.review,
-        ...savedReview,
-      },
-      routeTarget: '/today',
-    } : previous);
-    return savedReview;
+    const operation = Symbol('reopen');
+    completionOperationRef.current = operation;
+    completionSavingRef.current = true;
+    setCompletionSaving(true);
+    try {
+      const savedReview = await reopenTodayV2Review(reviewId);
+      if (generation !== loadGenerationRef.current || currentUserRef.current !== ownerId || stateRef.current?.review?.id !== reviewId) return savedReview;
+      stateRef.current = { ...stateRef.current, review: { ...stateRef.current.review, ...savedReview } };
+      setState((previous) => previous?.review?.id === reviewId ? {
+        ...previous,
+        review: {
+          ...previous.review,
+          ...savedReview,
+        },
+        routeTarget: '/today',
+      } : previous);
+      return savedReview;
+    } finally {
+      if (completionOperationRef.current === operation) {
+        completionOperationRef.current = null;
+        completionSavingRef.current = false;
+        setCompletionSaving(false);
+      }
+    }
   }, []);
 
   return {

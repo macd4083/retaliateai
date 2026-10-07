@@ -34,6 +34,32 @@ Run files in filename order (alphabetical / chronological).
 25. `20260609_fix_trial_start.sql` — Ensures trial default behavior on signup and backfills missing trial_ends_at for trialing users
 26. `20260609_user_feedback.sql` — Creates user_feedback table and adds feedback/trial email tracking columns to user_profiles
 
+## Today V2 scheduling: deployment checklist
+
+- Apply `20260928_today_v2_workflow.sql`, `20261006_today_v2_controllable_and_first_five.sql`, `20261007_today_v2_scheduling.sql`, `20261008_today_v2_schedule_review_lock.sql`, then the additive [`20261009_today_v2_completion_release_guard.sql`](20261009_today_v2_completion_release_guard.sql) before enabling `VITE_ENABLE_TODAY_V2_SCHEDULER=true`. Apply the additive guard even if the earlier scheduling/repair migrations are already marked applied. The SQL Editor alternative is `supabase/sql/today_v2_isolated_workflow.sql`, containing the same migrations in order.
+- The repair and additive guard are atomic and repeatable: the repair backfills owned source reviews without changing historical schedules; the guard locks review fields and checklist responses against completion. Reopening restores edits. Global habit definitions can still change for future days; completed-day snapshots and schedule evidence remain protected. Completed-day reloads do not create new habit snapshots.
+- Run all three `supabase/tests/today_v2_*.sql` scripts as database owner on an isolated test database with `psql -v ON_ERROR_STOP=1`; they roll back their fixtures. The upgrade test restores the original scheduling schema within its transaction and checks archived/weekday-changed historical habits.
+- Verify the deployed repair (expect zero missing owners, six enabled lock triggers, and `false` for direct access to the unlocked implementation):
+
+```sql
+select count(*) as missing_schedule_owners
+from public.today_v2_schedule_blocks b
+left join public.today_v2_daily_reviews r on r.id = b.source_review_id and r.user_id = b.user_id
+where r.id is null;
+
+select tgname, tgenabled from pg_trigger
+where tgrelid in ('public.today_v2_daily_reviews'::regclass,
+  'public.today_v2_plan_inputs'::regclass, 'public.today_v2_commitment_fragments'::regclass,
+  'public.today_v2_habit_occurrences'::regclass, 'public.today_v2_schedule_blocks'::regclass)
+and tgname in ('today_v2_completed_review_lock', 'today_v2_plan_review_lock',
+  'today_v2_fragment_review_lock', 'today_v2_fragment_outcome_review_lock',
+  'today_v2_habit_outcome_review_lock', 'today_v2_schedule_review_lock');
+
+select has_function_privilege('authenticated',
+  'public.today_v2_replace_plan_stable_unlocked(date,date,text,text,text[],uuid[],text)',
+  'EXECUTE') as browser_can_bypass_review_lock;
+```
+
 ## Daily review reminders: deployment checklist
 
 - Deploy the V2 review schema before enabling reminders. Missed-review email eligibility uses only `today_v2_daily_reviews.completed_at`, never legacy sessions: two missed review days, a prior completed review, and a seven-day email cooldown. Query failures suppress delivery.

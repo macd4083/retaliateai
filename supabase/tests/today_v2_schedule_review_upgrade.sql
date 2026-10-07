@@ -38,6 +38,8 @@ end;
 $$;
 \ir ../migrations/20261008_today_v2_schedule_review_lock.sql
 \ir ../migrations/20261008_today_v2_schedule_review_lock.sql
+\ir ../migrations/20261009_today_v2_completion_release_guard.sql
+\ir ../migrations/20261009_today_v2_completion_release_guard.sql
 do $$
 declare v_rejected boolean := false;
 begin

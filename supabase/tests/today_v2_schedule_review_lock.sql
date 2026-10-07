@@ -19,6 +19,8 @@ end;
 $$;
 \ir ../migrations/20261008_today_v2_schedule_review_lock.sql
 \ir ../migrations/20261008_today_v2_schedule_review_lock.sql
+\ir ../migrations/20261009_today_v2_completion_release_guard.sql
+\ir ../migrations/20261009_today_v2_completion_release_guard.sql
 do $$
 begin
   assert (select count(*) = 2 from public.today_v2_schedule_blocks b
@@ -120,6 +122,70 @@ end;
 $$;
 reset role;
 select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-000000000081', true);
+do $$
+declare v_action uuid; v_habit uuid;
+begin
+  select id into v_action from public.today_v2_replace_plan_stable(
+    '2099-03-01','2099-02-28','UTC','Outcome action',array['Outcome action'],array[null]::uuid[]);
+  insert into public.today_v2_habit_definitions(user_id,name,response_type,schedule_weekdays)
+  values(auth.uid(),'Outcome habit','boolean',array[0,1,2,3,4,5,6]::smallint[]) returning id into v_habit;
+  perform public.today_v2_ensure_habit_occurrences_for_date('2099-03-01','UTC');
+  update public.today_v2_commitment_fragments set completion_state = 'kept', answered_at = now() where id = v_action;
+  update public.today_v2_habit_occurrences set boolean_response = true, answered_at = now()
+  where user_id = auth.uid() and local_date = '2099-03-01';
+  update public.today_v2_daily_reviews set completed_at = now()
+  where user_id = auth.uid() and local_date in ('2099-02-28','2099-03-01');
+end;
+$$;
+set local role authenticated;
+do $$
+declare v_rejected boolean; v_sql text;
+begin
+  insert into public.today_v2_daily_reviews(user_id,local_date,timezone_name)
+  values(auth.uid(),'2099-03-01','Pacific/Honolulu')
+  on conflict (user_id,local_date) do update set timezone_name = excluded.timezone_name;
+  assert (select timezone_name = 'UTC' from public.today_v2_daily_reviews where local_date = '2099-03-01'),
+    'Completed review reload across timezones must preserve original timezone evidence';
+  insert into public.today_v2_habit_definitions(user_id,name,response_type,schedule_weekdays)
+  values(auth.uid(),'Future habit after completion','boolean',array[0,1,2,3,4,5,6]::smallint[]);
+  perform public.today_v2_ensure_habit_occurrences_for_date('2099-03-01','UTC');
+  assert not exists (select 1 from public.today_v2_habit_occurrences
+    where local_date = '2099-03-01' and snapshot_name = 'Future habit after completion'),
+    'Ensuring a completed review must not add newly defined habits to its checklist';
+  foreach v_sql in array array[
+    $q$update public.today_v2_daily_reviews set desired_direction = 'Changed' where local_date = '2099-03-01'$q$,
+    $q$update public.today_v2_daily_reviews set controllable_focus = 'Changed' where local_date = '2099-03-01'$q$,
+    $q$update public.today_v2_daily_reviews set completed_at = null, desired_direction = 'Changed' where local_date = '2099-03-01'$q$,
+    $q$update public.today_v2_commitment_fragments set completion_state = 'not_kept' where target_local_date = '2099-03-01'$q$,
+    $q$update public.today_v2_commitment_fragments set completion_state = 'unanswered', answered_at = null where target_local_date = '2099-03-01'$q$,
+    $q$update public.today_v2_habit_occurrences set boolean_response = false where local_date = '2099-03-01'$q$,
+    $q$update public.today_v2_habit_occurrences set boolean_response = null, answered_at = null where local_date = '2099-03-01'$q$,
+    $q$insert into public.today_v2_habit_occurrences(user_id,habit_definition_id,local_date,timezone_name,
+      scheduled_weekday,snapshot_name,snapshot_response_type)
+      select user_id,id,'2099-03-01','UTC',0,name,response_type from public.today_v2_habit_definitions
+      where name = 'Future habit after completion'$q$
+  ] loop
+    v_rejected := false;
+    begin execute v_sql;
+    exception when others then v_rejected := sqlerrm ~* 'review is completed'; end;
+    assert v_rejected, 'Completed review must reject field/outcome edit: ' || v_sql;
+  end loop;
+  assert not has_function_privilege('authenticated','public.today_v2_guard_outcome_review()','EXECUTE');
+  update public.today_v2_daily_reviews set completed_at = null where local_date = '2099-03-01';
+  update public.today_v2_daily_reviews set desired_direction = 'Reopened', controllable_focus = 'Reopened'
+  where local_date = '2099-03-01';
+  update public.today_v2_commitment_fragments set completion_state = 'not_kept' where target_local_date = '2099-03-01';
+  update public.today_v2_habit_occurrences set boolean_response = false where local_date = '2099-03-01';
+  perform public.today_v2_ensure_habit_occurrences_for_date('2099-03-01','UTC');
+  assert exists (select 1 from public.today_v2_habit_occurrences
+    where local_date = '2099-03-01' and snapshot_name = 'Future habit after completion'),
+    'Reopening permits ensuring newly scheduled habits';
+  assert exists (select 1 from public.today_v2_commitment_fragments
+    where target_local_date = '2099-03-01' and completion_state = 'not_kept'),
+    'Reopened target review permits outcomes even when its source review remains completed';
+end;
+$$;
+reset role;
 do $$
 declare v_action uuid;
 begin

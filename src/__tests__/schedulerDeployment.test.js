@@ -2,11 +2,19 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 
 describe('scheduler deployment boundaries', () => {
+  it('provides the serverless Node crypto and abort timeout APIs', async () => {
+    const { createHash, randomBytes } = await import('node:crypto');
+    expect(createHash('sha256').update(randomBytes(32)).digest()).toHaveLength(32);
+    const signal = AbortSignal.timeout(1);
+    await vi.waitFor(() => expect(signal.aborted).toBe(true));
+    expect(signal.reason.name).toBe('TimeoutError');
+  });
+
   it('keeps API and Calendar callbacks out of the SPA fallback', () => {
     const config = JSON.parse(fs.readFileSync(`${root}/vercel.json`, 'utf8'));
     const fallback = config.rewrites.find((rewrite) => rewrite.destination === '/index.html');

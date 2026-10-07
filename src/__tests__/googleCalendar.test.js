@@ -61,7 +61,10 @@ function mockDatabase() {
             data = null;
           }
           if (record.action === 'delete') { matching.forEach(([key]) => rows.delete(key)); data = null; }
-          if (record.action === 'update') { matching.forEach(([key, row]) => rows.set(key, { ...row, ...record.payload })); data = null; }
+          if (record.action === 'update') {
+            matching.forEach(([key, row]) => rows.set(key, { ...row, ...record.payload }));
+            data = record.single ? (matching.length ? rows.get(matching[0][0]) : null) : null;
+          }
           return Promise.resolve({ data, error: null }).then(resolve, reject);
         },
       };
@@ -253,6 +256,32 @@ describe('secure read-only Google Calendar backend', () => {
     expect(db.states.has(hash(first.state))).toBe(true);
     expect(fetchImpl).not.toHaveBeenCalled();
   });
+  it('rejects a tampered nonce signature without consuming state', async () => {
+    const { state, cookie } = await flow();
+    const separator = cookie.lastIndexOf('.');
+    const altered = `${cookie.slice(0, separator + 1)}${cookie[separator + 1] === 'A' ? 'B' : 'A'}${cookie.slice(separator + 2)}`;
+    const res = await call('callback', { query: { state, code: 'code' }, headers: { cookie: altered } });
+    expect(res.body.code).toBe('invalid_state');
+    expect(db.states.has(hash(state))).toBe(true);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+  it.each([null, '', 'short', 42])('rejects a malformed encrypted PKCE verifier: %s', async (verifier) => {
+    const { state, cookie } = await flow();
+    const pending = db.states.get(hash(state));
+    const binding = decrypt(pending.verifier_encrypted, KEY, `state:${hash(state)}`);
+    pending.verifier_encrypted = encrypt({ ...binding, verifier }, KEY, `state:${hash(state)}`);
+    const res = await call('callback', { query: { state, code: 'code' }, headers: { cookie } });
+    expect(res.body.code).toBe('invalid_state');
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(db.states.has(hash(state))).toBe(true);
+  });
+  it('never redirects to an unsafe persisted return path', async () => {
+    const { state, cookie } = await flow();
+    db.states.get(hash(state)).return_path = 'https://attacker.test';
+    tokenSuccess();
+    const res = await call('callback', { query: { state, code: 'code' }, headers: { cookie } });
+    expect(res.location).toBe('https://example.test/today?googleCalendar=connected');
+  });
   it('consumes state atomically, exchanges PKCE, persists encrypted credentials and prevents replay', async () => {
     const { state, cookie } = await flow('/settings');
     tokenSuccess();
@@ -442,6 +471,23 @@ describe('secure read-only Google Calendar backend', () => {
     expect(fetchImpl.mock.calls[1][1].headers.Authorization).toBe(['Bearer', 'new-google-access-value'].join(' '));
     expect(JSON.stringify(res.body)).not.toContain('access');
   });
+  it.each(['calendars', 'events'])('offers repair for unreadable credentials on %s without losing saved selections', async (action) => {
+    connected({ selected: ['primary', 'work'] });
+    db.connections.get(USER).tokens_encrypted = 'unreadable';
+    const res = await call(action, { query: range });
+    expect(res.statusCode).toBe(401);
+    expect(res.body.code).toBe('reconnect_required');
+    expect(db.connections.get(USER).selected_calendar_ids).toEqual(['primary', 'work']);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+  it('requires reconnection when refresh no longer grants both read-only permissions', async () => {
+    connected({ expired: true });
+    tokenSuccess({ scope: GOOGLE_CALENDAR_SCOPES[0] });
+    const res = await call('calendars');
+    expect(res.statusCode).toBe(401);
+    expect(res.body.code).toBe('reconnect_required');
+    expect(db.connections.has(USER)).toBe(false);
+  });
   it('handles revoked refresh tokens and removes only the authenticated connection', async () => {
     connected({ expired: true });
     connected({ userId: OTHER });
@@ -533,6 +579,17 @@ describe('secure read-only Google Calendar backend', () => {
     fetchImpl.mockResolvedValueOnce(googleResponse({ items: [{ id: 'primary', summary: 'Work' }] }));
     expect((await call('select', { body: { calendarIds: ['primary'], user_id: OTHER } })).body.selectedCalendarIds).toEqual(['primary']);
     expect((await call('select', { body: { calendarIds: [] } })).body.selectedCalendarIds).toEqual([]);
+  });
+  it('does not report a selection saved after a concurrent disconnect', async () => {
+    connected();
+    fetchImpl.mockImplementationOnce(async () => {
+      db.connections.delete(USER);
+      return googleResponse({ items: [{ id: 'primary' }] });
+    });
+    const res = await call('select', { body: { calendarIds: ['primary'] } });
+    expect(res.statusCode).toBe(409);
+    expect(res.body.code).toBe('not_connected');
+    expect(db.connections.has(USER)).toBe(false);
   });
   it.each([{ selected: [] }, { selected: ['primary', 'secondary'] }])('persists explicit empty or multiple selection on reconnect: %j', async ({ selected }) => {
     connected({ selected });

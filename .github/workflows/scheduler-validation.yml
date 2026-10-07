@@ -11,6 +11,7 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     services:
       postgres:
         image: postgres:16
@@ -19,7 +20,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U postgres"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
@@ -34,7 +35,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
+      - name: Clean install
+        timeout-minutes: 5
+        run: npm ci
       - name: Bootstrap disposable Supabase auth fixtures
         run: |
           psql -v ON_ERROR_STOP=1 <<'SQL'
@@ -56,12 +59,22 @@ jobs:
             -f supabase/migrations/20261006_today_v2_controllable_and_first_five.sql \
             -f supabase/migrations/20261007_today_v2_scheduling.sql \
             -f supabase/migrations/20261008_today_v2_schedule_review_lock.sql \
-            -f supabase/migrations/20261008_today_v2_schedule_review_lock.sql
+            -f supabase/migrations/20261008_today_v2_schedule_review_lock.sql \
+            -f supabase/migrations/20261009_today_v2_completion_release_guard.sql \
+            -f supabase/migrations/20261009_today_v2_completion_release_guard.sql
           psql -v ON_ERROR_STOP=1 \
             -f supabase/tests/today_v2_scheduling.sql \
             -f supabase/tests/today_v2_schedule_review_lock.sql \
             -f supabase/tests/today_v2_schedule_review_upgrade.sql
-      - run: npm run test -- src/__tests__/schedulerDeployment.test.js src/__tests__/todayV2Scheduling.test.js src/__tests__/todayV2SchedulingService.test.js src/__tests__/tomorrowSchedulerUi.test.jsx src/__tests__/schedulerHomeUi.test.jsx src/__tests__/useTodayV2State.test.jsx src/__tests__/googleCalendar.test.js src/__tests__/googleCalendarConnectionUi.test.jsx
-      - run: npm run lint
-      - run: npm run test
-      - run: npm run build
+      - name: Scheduler and Calendar regressions (serial)
+        timeout-minutes: 3
+        run: npm run test:scheduler
+      - name: Lint
+        timeout-minutes: 3
+        run: npm run lint
+      - name: Full regression suite (serial)
+        timeout-minutes: 5
+        run: npm run test:ci
+      - name: Production build
+        timeout-minutes: 3
+        run: npm run build

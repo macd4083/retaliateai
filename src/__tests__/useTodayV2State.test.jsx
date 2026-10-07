@@ -24,8 +24,13 @@ const serviceMocks = vi.hoisted(() => ({
   upsertHabitLog: vi.fn(),
 }));
 const scheduleMocks = vi.hoisted(() => ({ replaceSchedule: vi.fn() }));
+const pageMocks = vi.hoisted(() => ({ navigate: vi.fn(), userId: 'user-1' }));
 
 vi.mock('../v2/services/todayReview', () => serviceMocks);
+vi.mock('../lib/AuthContext', () => ({ useAuth: () => ({ user: { id: pageMocks.userId } }) }));
+vi.mock('react-router-dom', () => ({ useNavigate: () => pageMocks.navigate }));
+vi.mock('../components/v2/AppShellV2', () => ({ default: ({ children }) => <div>{children}</div> }));
+vi.mock('../v2/components/GoogleCalendarConnection', () => ({ default: () => null }));
 vi.mock('../lib/featureFlags', () => ({ ENABLE_TODAY_V2_SCHEDULER: true }));
 vi.mock('../v2/services/scheduling', () => ({
   replaceSchedule: scheduleMocks.replaceSchedule,
@@ -33,6 +38,7 @@ vi.mock('../v2/services/scheduling', () => ({
 }));
 
 import { useTodayV2State } from '../v2/today/useTodayV2State';
+import TodayV2Page from '../v2/pages/TodayV2Page';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -92,6 +98,7 @@ describe('useTodayV2State', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-09-28T22:00:00.000Z'));
     vi.clearAllMocks();
+    pageMocks.userId = 'user-1';
     window.localStorage.clear();
 
     serviceMocks.loadTodayReviewState.mockResolvedValue(makeState());
@@ -816,7 +823,7 @@ describe('useTodayV2State', () => {
     expect(serviceMocks.completeTodayV2Review).toHaveBeenCalledTimes(2);
     await act(async () => {
       resolveOld({ completed_at: 'old-completion' });
-      await oldPending;
+      expect(await oldPending).toBeNull();
     });
     expect(latest.completionSaving).toBe(true);
     expect(latest.state.review.completed_at).toBeNull();
@@ -845,6 +852,194 @@ describe('useTodayV2State', () => {
     });
     expect(latest.isCompleted).toBe(true);
     expect(latest.state.routeTarget).toBe('/home');
+  });
+
+  it('loads completed server evidence instead of dirty local drafts, then reopens the saved plan', async () => {
+    const completed = {
+      ...makeState(), scheduleAvailable: true, tomorrowPlanInput: 'Saved plan',
+      tomorrowFragments: [{ id: 'saved-action', fragment_text: 'Saved action' }],
+      firstFiveMinutes: 'Saved start',
+      tomorrowSchedules: [{ source_type: 'action', source_id: 'saved-action',
+        starts_at: '2026-09-29T09:00:00Z', ends_at: '2026-09-29T09:30:00Z' }],
+    };
+    completed.review = { ...completed.review, desired_direction: 'Saved direction',
+      controllable_focus: 'Saved focus', completed_at: '2026-09-28T21:00:00Z' };
+    serviceMocks.loadTodayReviewState.mockResolvedValue(completed);
+    window.localStorage.setItem('today-v2-draft:user-1:2026-09-28', JSON.stringify({
+      desiredDirection: 'Unsaved direction', desiredDirectionNeedsSync: true,
+      controllableFocus: 'Unsaved focus', controllableFocusNeedsSync: true,
+      tomorrowInput: 'Unsaved plan', tomorrowActions: ['Unsaved action'],
+      firstFiveMinutes: 'Unsaved start', tomorrowPlanNeedsSync: true,
+      scheduleBlocks: [], scheduleNeedsSync: true,
+    }));
+    await renderHook();
+    expect(latest.desiredDirection).toBe('Saved direction');
+    expect(latest.controllableFocus).toBe('Saved focus');
+    expect(latest.tomorrowActions).toEqual(['Saved action']);
+    expect(latest.tomorrowInput).toBe('Saved plan');
+    expect(latest.firstFiveMinutes).toBe('Saved start');
+    expect(latest.scheduleBlocks).toHaveLength(1);
+    await act(async () => { vi.advanceTimersByTime(801); await latest.flushAll(); });
+    expect(serviceMocks.updateDesiredDirection).not.toHaveBeenCalled();
+    expect(serviceMocks.updateControllableFocus).not.toHaveBeenCalled();
+    expect(serviceMocks.replaceTomorrowActions).not.toHaveBeenCalled();
+    expect(scheduleMocks.replaceSchedule).not.toHaveBeenCalled();
+    expect(latest.desiredDirectionSaveStatus).toBe('saved');
+    expect(latest.controllableFocusSaveStatus).toBe('saved');
+    expect(latest.tomorrowPlanSaveStatus).toBe('saved');
+    expect(latest.firstFiveMinutesSaveStatus).toBe('saved');
+    expect(latest.scheduleSaveStatus).toBe('saved');
+    serviceMocks.reopenTodayV2Review.mockResolvedValue({ ...completed.review, completed_at: null });
+    await act(async () => {
+      await latest.reopenReview();
+      latest.setControllableFocus('New focus');
+      await latest.flushAll();
+    });
+    expect(latest.isCompleted).toBe(false);
+    expect(serviceMocks.updateControllableFocus).toHaveBeenCalledWith(completed.review.id, 'New focus');
+  });
+
+  it('serializes reopening and resets saving after a reopen failure before retry', async () => {
+    const completed = makeState();
+    completed.review.completed_at = 'completed';
+    serviceMocks.loadTodayReviewState.mockResolvedValue(completed);
+    await renderHook();
+    let rejectReopen;
+    serviceMocks.reopenTodayV2Review.mockImplementationOnce(() => new Promise((_, reject) => { rejectReopen = reject; }));
+    let pending;
+    await act(async () => { pending = latest.reopenReview(); void pending.catch(() => {}); });
+    expect(latest.completionSaving).toBe(true);
+    await act(async () => {
+      expect(await latest.reopenReview()).toBeNull();
+      expect(await latest.completeReview()).toBeNull();
+      latest.setDesiredDirection('Cannot edit while reopening');
+    });
+    expect(serviceMocks.reopenTodayV2Review).toHaveBeenCalledTimes(1);
+    expect(latest.desiredDirection).toBe('');
+    await act(async () => {
+      rejectReopen(new Error('Reopen failed'));
+      await expect(pending).rejects.toThrow('Reopen failed');
+    });
+    expect(latest.isCompleted).toBe(true);
+    expect(latest.completionSaving).toBe(false);
+    serviceMocks.reopenTodayV2Review.mockResolvedValue({ ...completed.review, completed_at: null });
+    await act(async () => { await latest.reopenReview(); });
+    expect(latest.isCompleted).toBe(false);
+    expect(latest.completionSaving).toBe(false);
+  });
+
+  it('ignores stale checklist and manual-item results after the same review ID is reloaded', async () => {
+    const initial = makeState();
+    const occurrence = { id: 'habit-occurrence', snapshot_response_type: 'boolean', boolean_response: false };
+    initial.followThroughItems = [{ id: 'checklist', completion_state: 'not_kept' }];
+    initial.habitOccurrences = [occurrence];
+    serviceMocks.loadTodayReviewState.mockResolvedValue(initial);
+    await renderHook();
+    let resolveFragment;
+    let resolveHabit;
+    let resolveManual;
+    serviceMocks.setFollowThroughCompletion.mockImplementationOnce(() => new Promise((resolve) => { resolveFragment = resolve; }));
+    serviceMocks.upsertHabitLog.mockImplementationOnce(() => new Promise((resolve) => { resolveHabit = resolve; }));
+    serviceMocks.addManualFollowThroughItem.mockImplementationOnce(() => new Promise((resolve) => { resolveManual = resolve; }));
+    let writes;
+    await act(async () => {
+      writes = Promise.all([
+        latest.saveCommitmentCompletion('checklist', 'kept'),
+        latest.saveHabitResponse(occurrence, true),
+        latest.addManualFollowThrough('Stale manual item'),
+      ]);
+    });
+    const completed = { ...initial, review: { ...initial.review, completed_at: 'completed-elsewhere' } };
+    serviceMocks.loadTodayReviewState.mockResolvedValue(completed);
+    await act(async () => { await latest.load(); });
+    await act(async () => {
+      resolveFragment({ completion_state: 'kept' });
+      resolveHabit({ boolean_response: true });
+      resolveManual({ id: 'stale-manual' });
+      await writes;
+    });
+    expect(latest.isCompleted).toBe(true);
+    expect(latest.state.followThroughItems).toEqual(initial.followThroughItems);
+    expect(latest.state.habitOccurrences).toEqual(initial.habitOccurrences);
+  });
+
+  it('does not reload a previous user when their habit save or archive finishes late', async () => {
+    await renderHook();
+    let resolveSave;
+    let resolveArchive;
+    serviceMocks.upsertHabitDefinition.mockImplementationOnce(() => new Promise((resolve) => { resolveSave = resolve; }));
+    serviceMocks.archiveHabit.mockImplementationOnce(() => new Promise((resolve) => { resolveArchive = resolve; }));
+    let writes;
+    await act(async () => {
+      writes = Promise.all([
+        latest.saveHabitDefinition({ id: 'edited-habit', name: 'Edited' }),
+        latest.archiveHabitDefinition('archived-habit'),
+      ]);
+    });
+    const second = makeState();
+    second.review = { ...second.review, id: 'second-user-review' };
+    serviceMocks.loadTodayReviewState.mockResolvedValue(second);
+    await act(async () => {
+      root.render(<HookProbe userId="user-2" onRender={(value) => { latest = value; }} />);
+    });
+    await act(async () => { resolveSave('edited-habit'); resolveArchive(); await writes; });
+    expect(serviceMocks.loadTodayReviewState.mock.calls.map((call) => call[0])).toEqual(['user-1', 'user-2']);
+    expect(latest.state.review.id).toBe('second-user-review');
+  });
+
+  it('prevents an already-open habit editor from saving during or after completion', async () => {
+    const initial = makeState();
+    initial.tomorrowFragments = [{ id: 'planned-action', fragment_text: 'Write' }];
+    initial.habitDefinitions = [{ id: 'habit', name: 'Read', response_type: 'boolean',
+      schedule_weekdays: [0, 1, 2, 3, 4, 5, 6], display_order: 0 }];
+    initial.habitOccurrences = [{ id: 'occurrence', habit_definition_id: 'habit',
+      snapshot_name: 'Read', snapshot_response_type: 'boolean', boolean_response: true,
+      answered_at: '2026-09-28T20:00:00Z' }];
+    serviceMocks.loadTodayReviewState.mockResolvedValue(initial);
+    let resolveCompletion;
+    serviceMocks.completeTodayV2Review.mockImplementationOnce(() => new Promise((resolve) => { resolveCompletion = resolve; }));
+    await act(async () => { root.render(<TodayV2Page />); });
+    const clickButton = async (text) => {
+      const button = [...container.querySelectorAll('button')].find((node) => node.textContent.trim() === text);
+      expect(button).toBeTruthy();
+      await act(async () => { button.click(); });
+    };
+    await act(async () => { container.querySelector('[aria-label="Habit options for Read"]').click(); });
+    await clickButton('Edit');
+    let saveHabit = [...container.querySelectorAll('button')].find((node) => node.textContent === 'Save Habit');
+    expect(saveHabit.disabled).toBe(false);
+    await clickButton("Complete tonight's review");
+    expect(serviceMocks.completeTodayV2Review).toHaveBeenCalledTimes(1);
+    expect(saveHabit.disabled).toBe(true);
+    await act(async () => { saveHabit.click(); });
+    expect(serviceMocks.upsertHabitDefinition).not.toHaveBeenCalled();
+    await act(async () => { resolveCompletion({ ...initial.review, completed_at: 'completed' }); });
+    saveHabit = [...container.querySelectorAll('button')].find((node) => node.textContent === 'Save Habit');
+    expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(saveHabit.disabled).toBe(true);
+    await act(async () => { saveHabit.click(); });
+    expect(serviceMocks.upsertHabitDefinition).not.toHaveBeenCalled();
+    expect(pageMocks.navigate).toHaveBeenCalledWith('/home');
+  });
+
+  it('does not navigate the new user when an old completion finishes late', async () => {
+    const initial = makeState();
+    initial.tomorrowFragments = [{ id: 'planned-action', fragment_text: 'Write' }];
+    serviceMocks.loadTodayReviewState.mockResolvedValue(initial);
+    let resolveCompletion;
+    serviceMocks.completeTodayV2Review.mockImplementationOnce(() => new Promise((resolve) => { resolveCompletion = resolve; }));
+    await act(async () => { root.render(<TodayV2Page />); });
+    const complete = [...container.querySelectorAll('button')].find((node) => node.textContent === "Complete tonight's review");
+    await act(async () => { complete.click(); });
+    expect(serviceMocks.completeTodayV2Review).toHaveBeenCalledTimes(1);
+    const second = makeState();
+    second.review = { ...second.review, id: 'second-user-review' };
+    serviceMocks.loadTodayReviewState.mockResolvedValue(second);
+    pageMocks.userId = 'user-2';
+    await act(async () => { root.render(<TodayV2Page />); });
+    await act(async () => { resolveCompletion({ ...initial.review, completed_at: 'completed' }); });
+    expect(pageMocks.navigate).not.toHaveBeenCalled();
+    expect(container.textContent).not.toContain("Tonight's review is complete.");
   });
 
   it('retains actual UUIDs through explicit edit/remove/resplit rather than substituting client keys', async () => {
