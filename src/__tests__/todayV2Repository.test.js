@@ -98,6 +98,7 @@ describe('TodayV2 repository', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-09-28T12:00:00.000Z'));
     vi.clearAllMocks();
+    supabaseMock.from.mockImplementation(() => createThenableBuilder({ data: [], error: null }));
   });
 
   afterEach(() => {
@@ -235,8 +236,14 @@ describe('TodayV2 repository', () => {
 
   it('saves tomorrow plans through the isolated replace RPC', async () => {
     supabaseMock.rpc.mockResolvedValue({ error: null });
+    const savedFragments = [
+      { id: '8cfde77d-dcaa-4c7c-a409-f9ef5e70e321', fragment_order: 0, fragment_text: 'Write 20 minutes' },
+      { id: '8cfde77d-dcaa-4c7c-a409-f9ef5e70e322', fragment_order: 1, fragment_text: 'review notes' },
+    ];
+    const tracker = {};
+    supabaseMock.from.mockImplementation(() => createThenableBuilder({ data: savedFragments, error: null }, tracker));
 
-    await replaceTomorrowActions({
+    const result = await replaceTomorrowActions({
       targetLocalDate: '2026-09-29',
       sourceLocalDate: '2026-09-28',
       timezoneName: 'UTC',
@@ -253,6 +260,10 @@ describe('TodayV2 repository', () => {
       p_fragment_texts: ['Write 20 minutes', 'review notes'],
       p_first_five_minutes: 'Open the outline',
     });
+    expect(result.savedFragments).toEqual(savedFragments);
+    expect(supabaseMock.from).toHaveBeenCalledWith(TODAY_V2_TABLES.COMMITMENT_FRAGMENTS);
+    expect(tracker.eq).toContainEqual(['target_local_date', '2026-09-29']);
+    expect(tracker.order).toContainEqual(['fragment_order', { ascending: true }]);
   });
 
   it('preserves explicitly edited fragment rows even when the raw paragraph is blank', async () => {

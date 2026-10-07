@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AppShellV2 from '../../components/v2/AppShellV2';
 import { useAuth } from '../../lib/AuthContext';
+import { ENABLE_TODAY_V2_SCHEDULER } from '../../lib/featureFlags';
+import TomorrowScheduler from '../components/TomorrowScheduler';
 import {
   getTodayV2BooleanAnswer,
   getTodayV2CommitmentStateLabel,
@@ -42,6 +44,7 @@ function NumericHabitResponseInput({ occurrence, onSave, disabled = false }) {
   }, [occurrence.id, occurrence.numeric_response]);
 
   const commit = () => {
+    if (disabled) return;
     onSave(draftValue === '' ? null : Number(draftValue));
   };
 
@@ -62,7 +65,7 @@ function NumericHabitResponseInput({ occurrence, onSave, disabled = false }) {
   );
 }
 
-function HabitEditorModal({ value, onClose, onSave }) {
+function HabitEditorModal({ value, onClose, onSave, disabled = false }) {
   const [draft, setDraft] = useState(value);
 
   const toggleWeekday = (dayIndex) => {
@@ -84,6 +87,7 @@ function HabitEditorModal({ value, onClose, onSave }) {
         </div>
 
         <input
+          disabled={disabled}
           value={draft.name}
           onChange={(event) => setDraft((previous) => ({ ...previous, name: event.target.value }))}
           placeholder="Habit name"
@@ -93,6 +97,7 @@ function HabitEditorModal({ value, onClose, onSave }) {
         <div className="grid grid-cols-2 gap-2">
           <button
             type="button"
+            disabled={disabled}
             onClick={() => setDraft((previous) => ({ ...previous, response_type: TODAY_V2_RESPONSE_TYPES.BOOLEAN, unit: '' }))}
             className={`rounded-lg border px-3 py-2 text-sm ${draft.response_type === TODAY_V2_RESPONSE_TYPES.BOOLEAN ? 'border-red-500 bg-red-600/10 text-white' : 'border-zinc-700 text-zinc-400'}`}
           >
@@ -100,6 +105,7 @@ function HabitEditorModal({ value, onClose, onSave }) {
           </button>
           <button
             type="button"
+            disabled={disabled}
             onClick={() => setDraft((previous) => ({ ...previous, response_type: TODAY_V2_RESPONSE_TYPES.NUMBER }))}
             className={`rounded-lg border px-3 py-2 text-sm ${draft.response_type === TODAY_V2_RESPONSE_TYPES.NUMBER ? 'border-red-500 bg-red-600/10 text-white' : 'border-zinc-700 text-zinc-400'}`}
           >
@@ -109,6 +115,7 @@ function HabitEditorModal({ value, onClose, onSave }) {
 
         {draft.response_type === TODAY_V2_RESPONSE_TYPES.NUMBER && (
           <input
+            disabled={disabled}
             value={draft.unit}
             onChange={(event) => setDraft((previous) => ({ ...previous, unit: event.target.value }))}
             placeholder="Unit (hours, minutes, etc.)"
@@ -125,6 +132,7 @@ function HabitEditorModal({ value, onClose, onSave }) {
                 <button
                   key={weekdayIndex}
                   type="button"
+                  disabled={disabled}
                   onClick={() => toggleWeekday(weekdayIndex)}
                   className={`rounded-md border px-1 py-2 text-xs ${active ? 'border-red-500 bg-red-600/20 text-white' : 'border-zinc-700 text-zinc-400'}`}
                 >
@@ -138,7 +146,7 @@ function HabitEditorModal({ value, onClose, onSave }) {
         <button
           type="button"
           onClick={() => onSave(draft)}
-          disabled={!draft.name.trim() || draft.schedule_weekdays.length === 0}
+          disabled={disabled || !draft.name.trim() || draft.schedule_weekdays.length === 0}
           className="w-full rounded-lg bg-red-600 py-2 text-sm font-semibold disabled:opacity-50"
         >
           Save Habit
@@ -166,7 +174,16 @@ export default function TodayV2Page() {
     tomorrowInput,
     setTomorrowInput,
     tomorrowActions,
-    setTomorrowActions,
+    tomorrowActionItems,
+    editTomorrowAction,
+    removeTomorrowAction,
+    schedulerItems,
+    scheduleBlocks,
+    scheduleSaveStatus,
+    scheduleError,
+    scheduleAvailable,
+    updateSchedule,
+    unschedule,
     firstFiveMinutes,
     setFirstFiveMinutes,
     visibleHabits,
@@ -193,7 +210,7 @@ export default function TodayV2Page() {
     createEmptyHabitDefinition,
   } = useTodayV2State(user?.id);
 
-  const readOnly = isCompleted;
+  const readOnly = isCompleted || completionSaving;
 
   const onAddManualAction = async () => {
     if (!manualActionInput.trim() || readOnly) return;
@@ -202,6 +219,7 @@ export default function TodayV2Page() {
   };
 
   const onSaveHabit = async (habitDraft) => {
+    if (readOnly) return;
     try {
       await saveHabitDefinition(habitDraft);
       setHabitEditorValue(null);
@@ -212,12 +230,14 @@ export default function TodayV2Page() {
   };
 
   const onDeleteHabit = async (habitId) => {
+    if (readOnly) return;
     if (!window.confirm('Delete this habit? Its history will be kept.')) return;
     await archiveHabitDefinition(habitId);
     setMenuOpenHabitId(null);
   };
 
   const onCompleteReview = async () => {
+    if (readOnly) return;
     try {
       await completeReview();
       navigate('/home');
@@ -227,6 +247,7 @@ export default function TodayV2Page() {
   };
 
   const onReopenReview = async () => {
+    if (completionSaving) return;
     try {
       await reopenReview();
     } catch (saveError) {
@@ -280,7 +301,7 @@ export default function TodayV2Page() {
           </section>
         )}
 
-        {readOnly && (
+        {isCompleted && (
           <section className="rounded-2xl border border-emerald-700/60 bg-emerald-950/20 p-4 text-sm text-emerald-100">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -290,6 +311,7 @@ export default function TodayV2Page() {
               <button
                 type="button"
                 onClick={onReopenReview}
+                disabled={completionSaving}
                 className="rounded-lg border border-emerald-600 px-3 py-2 text-sm font-semibold text-emerald-100"
               >
                 Edit
@@ -448,6 +470,7 @@ export default function TodayV2Page() {
           <textarea
             value={desiredDirection}
             readOnly={readOnly}
+            interactionDisabled={completionSaving}
             placeholder={state.previousDesiredDirection || ''}
             onChange={(event) => setDesiredDirection(event.target.value)}
             onBlur={() => { if (!readOnly) void saveDesiredDirection(); }}
@@ -482,22 +505,19 @@ export default function TodayV2Page() {
           {tomorrowActions.length > 0 && (
             <ul className="space-y-2">
               {tomorrowActions.map((action, index) => (
-                <li key={`${action}-${index}`} className="flex items-center gap-2 rounded-lg border border-zinc-800 p-2 text-sm">
+                <li key={tomorrowActionItems?.[index]?.id || index} className="flex items-center gap-2 rounded-lg border border-zinc-800 p-2 text-sm">
                   {index === 0 && <span className="text-xs font-semibold text-red-300">Primary</span>}
                   <input
                     readOnly={readOnly}
                     value={action}
-                    onChange={(event) => {
-                      const next = [...tomorrowActions];
-                      next[index] = event.target.value;
-                      setTomorrowActions(next);
-                    }}
+                    aria-label={`Tomorrow action ${index + 1}`}
+                    onChange={(event) => editTomorrowAction(index, event.target.value)}
                     className="flex-1 bg-transparent outline-none read-only:cursor-not-allowed read-only:opacity-70"
                   />
-                  {!readOnly && (
+                  {!isCompleted && (
                     <button
                       type="button"
-                      onClick={() => setTomorrowActions((previous) => previous.filter((_, candidateIndex) => candidateIndex !== index))}
+                      onClick={() => removeTomorrowAction(index)}
                       className="text-xs text-red-400"
                     >
                       Remove
@@ -529,6 +549,34 @@ export default function TodayV2Page() {
           />
           <p className="text-xs text-zinc-500">{firstFiveMinutesSaveLabel}</p>
         </section>
+
+        {ENABLE_TODAY_V2_SCHEDULER && (
+          <TomorrowScheduler
+            userId={user?.id}
+            localDate={state.tomorrowLocalDate}
+            timezone={state.timezoneName}
+            items={schedulerItems}
+            blocks={(scheduleBlocks || []).map((block) => {
+              const sourceId = block.source_id || block.commitment_fragment_id || block.habit_definition_id;
+              const action = (state.tomorrowFragments || []).find((item) => item.id === sourceId);
+              const habit = (state.habitOccurrences || []).find((item) => item.habit_definition_id === sourceId);
+              return { ...block, label: block.label || (action ? action.normalized_fragment_text || action.fragment_text : habit?.snapshot_name) };
+            })}
+            contextBlocks={(state.todaySchedules || []).map((block) => {
+              const sourceId = block.source_id || block.commitment_fragment_id || block.habit_definition_id;
+              const action = state.followThroughItems.find((item) => item.id === sourceId);
+              const habit = (state.habitOccurrences || []).find((item) => item.habit_definition_id === sourceId);
+              return { ...block, label: action ? action.normalized_fragment_text || action.fragment_text : habit?.snapshot_name || 'Previous-day plan' };
+            })}
+            available={scheduleAvailable}
+            readOnly={readOnly}
+            saveStatus={scheduleSaveStatus}
+            saveError={scheduleError}
+            onUpdate={updateSchedule}
+            onUnschedule={unschedule}
+            onRetry={load}
+          />
+        )}
 
         <section className="space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
           <div className="flex items-center justify-between gap-3">
@@ -568,6 +616,7 @@ export default function TodayV2Page() {
       {habitEditorValue && (
         <HabitEditorModal
           value={habitEditorValue}
+          disabled={readOnly}
           onClose={() => setHabitEditorValue(null)}
           onSave={onSaveHabit}
         />

@@ -1,4 +1,6 @@
 import { supabase } from '../../lib/supabase/client';
+import { ENABLE_TODAY_V2_SCHEDULER } from '../../lib/featureFlags';
+import { loadSchedules, isMissingScheduleSchema } from './scheduling';
 import {
   addDaysToLocalDate,
   buildTodayV2DraftStorageKey,
@@ -147,6 +149,7 @@ export async function loadTodayReviewState(userId, options = {}) {
 
   return {
     ...dateContext,
+    ...await loadSchedules(userId, dateContext.todayLocalDate, dateContext.tomorrowLocalDate),
     review,
     routeTarget: getTodayV2DefaultPath(review),
     draftStorageKey: buildTodayV2DraftStorageKey(userId, dateContext.todayLocalDate),
@@ -382,22 +385,49 @@ export async function replaceTomorrowActions({
   rawPlanText,
   actionTexts,
   firstFiveMinutes = '',
+  fragmentIds = [],
+  scheduleAvailable = false,
+  userId,
+  explicitActions = false,
 }) {
   const normalizedRawText = String(rawPlanText || '').trim();
-  const fragments = coerceTodayV2EditableFragments(normalizedRawText, actionTexts);
-  const { error } = await supabase.rpc(TODAY_V2_RPCS.REPLACE_PLAN, {
+  const fragments = coerceTodayV2EditableFragments(explicitActions ? '' : normalizedRawText, actionTexts);
+  const stable = ENABLE_TODAY_V2_SCHEDULER && scheduleAvailable;
+  const { data, error } = await supabase.rpc(stable ? 'today_v2_replace_plan_stable' : TODAY_V2_RPCS.REPLACE_PLAN, {
     p_target_local_date: targetLocalDate,
     p_source_local_date: sourceLocalDate,
     p_timezone_name: timezoneName,
     p_raw_plan_text: normalizedRawText,
     p_fragment_texts: fragments,
     p_first_five_minutes: String(firstFiveMinutes || '').trim() || null,
+    ...(stable ? { p_fragment_ids: fragments.map((_, index) => (
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(fragmentIds[index] || '')
+        ? fragmentIds[index] : null
+    )) } : {}),
   });
 
+  if (stable && isMissingScheduleSchema(error)) {
+    const saved = await replaceTomorrowActions({
+      targetLocalDate, sourceLocalDate, timezoneName, rawPlanText, actionTexts, firstFiveMinutes,
+      scheduleAvailable: false, userId,
+      explicitActions,
+    });
+    return { ...saved, scheduleAvailable: false, scheduleDiagnostic: { code: error.code, message: error.message } };
+  }
   if (error) throw error;
+  let savedFragments = stable ? [...(data || [])].sort((a, b) => a.fragment_order - b.fragment_order) : [];
+  if (!stable) {
+    let query = supabase.from(TODAY_V2_TABLES.COMMITMENT_FRAGMENTS).select('*')
+      .eq('target_local_date', targetLocalDate).order('fragment_order', { ascending: true });
+    if (userId) query = query.eq('user_id', userId);
+    const result = await query;
+    if (result.error) throw result.error;
+    savedFragments = result.data || [];
+  }
   return {
     rawPlanText: normalizedRawText,
     fragments,
+    savedFragments,
   };
 }
 
