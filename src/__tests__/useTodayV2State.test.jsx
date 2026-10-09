@@ -299,14 +299,14 @@ describe('useTodayV2State', () => {
     ]);
   });
 
-  it('places optional import controls beside the native planner and feeds it calendar events', async () => {
+  it('places optional import controls above the native planner and feeds it calendar events', async () => {
     serviceMocks.loadTodayReviewState.mockResolvedValue({ ...makeState(), scheduleAvailable: true });
     await act(async () => { root.render(<TodayV2Page />); });
     await waitForCondition(() => container.querySelector('[aria-label="Google events"]')?.textContent.includes('Calendar event'), 'calendar events in tomorrow schedule');
     const followThrough = [...container.querySelectorAll('section')].find((section) => section.querySelector('h3')?.textContent === '1. Follow-Through');
     const calendarConnection = container.querySelector('[data-calendar-local-date]');
     expect(followThrough.textContent).toContain("What were today's highest-ROI actions?");
-    expect(calendarConnection.previousElementSibling.querySelector('h3')?.textContent).toBe('Schedule tomorrow');
+    expect(calendarConnection.nextElementSibling.querySelector('h3')?.textContent).toBe('Schedule tomorrow');
     expect(followThrough.contains(calendarConnection)).toBe(false);
     expect(calendarConnection.getAttribute('data-calendar-local-date')).toBe('2026-09-29');
     expect(calendarConnection.getAttribute('data-calendar-next-day')).toBe('true');

@@ -183,7 +183,7 @@ History rules:
 ## Optional next-day scheduling and Google Calendar
 
 Scheduling is V2-only and never changes a commitment's completion state. There
-is no Calendar navigation tab, Google event writing, AI scheduling, or legacy
+is no Calendar navigation tab, automatic Google commitment export, AI scheduling, or legacy
 journal integration. `/today` and `/home` use the same
 `today_v2_schedule_blocks` dataset.
 
@@ -351,10 +351,13 @@ dashboard steps or verify production authorization without real credentials.
 5. Authorized JavaScript origins, if configured, are `http://localhost:3000`
    and `https://retaliateai.com`, without paths. They do not replace redirect
    URI registration.
-6. Request only these two read-only permissions:
-   `https://www.googleapis.com/auth/calendar.events.readonly` and
+6. Request only these two permissions:
+   `https://www.googleapis.com/auth/calendar.events` and
    `https://www.googleapis.com/auth/calendar.calendarlist.readonly`.
-   Do not add full Calendar, Google login or write scopes for this feature.
+   Do not add full Calendar, calendar-management, ACL, or Google login scopes.
+   Existing read-only grants must reconnect to upgrade event permissions.
+   See [event management rollout](CALENDAR_SCHEDULER_RELEASE.md#google-event-management-rollout)
+   for write restrictions, resize behavior, and owner smoke tests.
 
 Official references (check current Google policy during deployment):
 - [Calendar authorization scope reference](https://developers.google.com/workspace/calendar/api/auth)
@@ -420,7 +423,8 @@ deployment success or diagnose the earlier failed deployments.
 
 Imports cover only the planner's bounded date window, expand recurring instances,
 handle cancellation/pagination and preserve exclusive all-day end dates. Events
-are muted read-only visibility, never commitments or completion evidence.
+are external events, never commitments or completion evidence. Writable supported
+events can be edited or deleted; read-only events remain non-editable overlays.
 Descriptions and attendees are not needed or retained. Imported data is never
 sent to AI services. Temporary browser-memory caching may become stale; refresh
 on demand/resume, not with continuous polling. Quota/revocation/network failures
@@ -585,7 +589,7 @@ Owner actions, in order:
    `APP_ORIGIN` and `GOOGLE_CALENDAR_REDIRECT_URI`. Use separately registered
    dev/preview clients/origins and never arbitrary redirect wildcards.
 4. Complete the Google Cloud steps above: Calendar API, branding/audience/test
-   users, dedicated Web client and the two read-only scopes. Set all seven
+   users, dedicated Web client and the two scopes listed above. Set all seven
    server variables in the correct Vercel environment; preserve the encryption
    key if connections already exist. Check current official verification policy
    before publishing publicly. Redeploy after environment changes.

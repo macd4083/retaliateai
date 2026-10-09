@@ -1,7 +1,7 @@
 import React from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { DndContext, DragOverlay, PointerSensor, TouchSensor, pointerWithin, useDraggable, useDroppable, useSensor, useSensors } from '@dnd-kit/core';
-import { clipScheduleBlocksToDate, getScheduleDateBounds, getScheduleDayOffset, layoutScheduleBlocks, snapScheduleMinutes, zonedLocalTimeToTimestamp } from '../today/scheduling';
+import { clipScheduleBlocksToDate, getScheduleDateBounds, getScheduleDayOffset, layoutScheduleBlocks, resizeScheduleBlock, snapScheduleMinutes, zonedLocalTimeToTimestamp } from '../today/scheduling';
 
 const fieldClass = 'w-full rounded-lg border border-zinc-600 bg-zinc-950 px-3 py-2 text-sm text-white';
 const buttonClass = 'rounded-lg border border-zinc-600 px-3 py-2 text-sm hover:border-zinc-400 disabled:opacity-50';
@@ -44,6 +44,22 @@ function UnscheduledTray({ disabled, children }) {
   );
 }
 
+function ResizeHandles({ label, block, disabled, onStart, onMove, onEnd, onCancel, onEdit }) {
+  if (disabled) return null;
+  return ['start', 'end'].filter((edge) => edge === 'start' ? !block.continued : !block.continues).map((edge) => (
+    <button key={edge} type="button" aria-label={`Resize ${edge} of ${label}; press Enter to edit time`}
+      data-resize-edge={edge} style={{ touchAction: 'none' }}
+      className={`absolute inset-x-0 z-10 h-3 cursor-ns-resize rounded bg-zinc-400/30 hover:bg-zinc-300/60 focus:bg-zinc-300/60 ${edge === 'start' ? 'top-0' : 'bottom-0'}`}
+      onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); if (event.button !== 0) return; if (onStart(edge, event)) event.currentTarget.setPointerCapture?.(event.pointerId); }}
+      onPointerMove={(event) => { event.stopPropagation(); onMove(event); }}
+      onPointerUp={(event) => { event.preventDefault(); event.stopPropagation(); onEnd(event); }}
+      onPointerCancel={onCancel} onLostPointerCapture={onCancel}
+      onClick={(event) => { event.preventDefault(); event.stopPropagation(); }}
+      onKeyDown={(event) => { event.stopPropagation(); if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onEdit(); } if (event.key === 'Escape') onCancel(); }}
+    />
+  ));
+}
+
 function DraggableItem({ item, onEdit, disabled, style = undefined, compact = false, short = false, timeDescription = '', children = null }) {
   const key = itemKey(item);
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, isDragging } = useDraggable({ id: key, data: { item }, disabled });
@@ -61,7 +77,7 @@ function DraggableItem({ item, onEdit, disabled, style = undefined, compact = fa
 
 export default function TomorrowScheduler({
   userId, localDate, timezone = 'UTC', items = [], blocks = [], contextBlocks = [], googleEvents = [], available = true, readOnly = false, completionSaving = false,
-  saveStatus, saveError, availabilityError, onUpdate, onUnschedule, onRetry, resolveTime = resolveScheduleTime,
+  saveStatus, saveError, availabilityError, onUpdate, onUnschedule, onRetry, onGoogleEdit, onGoogleUpdate, resolveTime = resolveScheduleTime,
 }) {
   const sensors = useSensors(useSensor(MousePenPointerSensor, { activationConstraint: { distance: 8 } }), useSensor(TouchSensor, { activationConstraint: { delay: 300, tolerance: 8 } }));
   const [active, setActive] = React.useState(null);
@@ -72,6 +88,8 @@ export default function TomorrowScheduler({
   const [confirmOverlap, setConfirmOverlap] = React.useState(false);
   const [dialogError, setDialogError] = React.useState('');
   const [saving, setSaving] = React.useState(false);
+  const [resize, setResize] = React.useState(null);
+  const resizeRef = React.useRef(null);
   const timeline = React.useRef(null);
   const schedulerRoot = React.useRef(null);
   const focusReturn = React.useRef(null);
@@ -114,7 +132,9 @@ export default function TomorrowScheduler({
     const target = args.droppableContainers.find((entry) => entry.id === `slot:${timestamp}` && !entry.disabled);
     return target ? [{ id: target.id }] : [];
   }, [dayMinutes, dayStart]);
-  const visibleBlocks = clipScheduleBlocksToDate(blocks, dayBounds).map((block) => ({
+  const previewBlock = (block, google = false) => resize?.generation === generation && resize.google === google &&
+    (google ? block.id === resize.block.id : blockKey(block) === blockKey(resize.block)) ? { ...block, ...resize.next } : block;
+  const visibleBlocks = clipScheduleBlocksToDate(blocks.map((block) => previewBlock(block)), dayBounds).map((block) => ({
     ...block, read_only_context: block.read_only_context || block.continued || Boolean(block.target_local_date && block.target_local_date < localDate),
   }));
   const editableBlocks = visibleBlocks.filter((block) => !block.read_only_context);
@@ -126,7 +146,7 @@ export default function TomorrowScheduler({
     .map((block) => ({ ...block, read_only_context: true }));
   const sortedBlocks = [...visibleBlocks, ...carryoverBlocks].sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at));
   const timedGoogle = googleEvents.filter((event) => !event.all_day && !event.allDay && !(event.start?.date)).map((event) => ({
-    ...event, starts_at: event.starts_at || event.start?.dateTime || event.start, ends_at: event.ends_at || event.end?.dateTime || event.end,
+    ...previewBlock({ ...event, starts_at: event.starts_at || event.start?.dateTime || event.start, ends_at: event.ends_at || event.end?.dateTime || event.end }, true),
   })).filter((event) => event.starts_at && event.ends_at).sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at));
   const lanes = layoutScheduleBlocks([
     ...sortedBlocks,
@@ -148,13 +168,60 @@ export default function TomorrowScheduler({
     setConfirmOverlap(false);
     setDialogError('');
     setSaving(false);
+    setResize(null);
+    resizeRef.current = null;
     writePending.current = null;
     dragGeneration.current = null;
     editingGeneration.current = null;
   }, [scope]);
 
+  const cancelResize = () => {
+    if (resizeRef.current?.dragging) {
+      resizeRef.current = null;
+      setResize(null);
+    }
+  };
+  React.useEffect(() => {
+    const cancel = (event) => {
+      if (event.key === 'Escape' && writePending.current !== interaction.current.generation) {
+        resizeRef.current = null;
+        setResize(null);
+      }
+    };
+    window.addEventListener('keydown', cancel);
+    return () => window.removeEventListener('keydown', cancel);
+  }, []);
+
+  const startResize = (block, google, edge, event) => {
+    if (interaction.current.locked || generation !== interaction.current.generation || writePending.current === generation || resizeRef.current || active || editing) return false;
+    const next = { starts_at: block.starts_at, ends_at: block.ends_at };
+    const value = { block, google, edge, next, generation, pointerId: event.pointerId, y: event.clientY, scroll: timeline.current?.scrollTop || 0, dragging: true };
+    resizeRef.current = value;
+    setResize(value);
+    setDialogError('');
+    setConfirmOverlap(false);
+    return true;
+  };
+  const moveResize = (event) => {
+    const current = resizeRef.current;
+    if (!current?.dragging || current.pointerId !== event.pointerId || current.generation !== interaction.current.generation || interaction.current.locked) return;
+    try {
+      const delta = (event.clientY - current.y + (timeline.current?.scrollTop || 0) - current.scroll) / 2.4;
+      const next = resizeScheduleBlock(current.block, current.edge, delta, dayBounds, current.google ? 31 * 1440 - 15 : 1440);
+      resizeRef.current = { ...current, next };
+      setResize(resizeRef.current);
+    } catch (failure) { setDialogError(failure.message); }
+  };
+  const endResize = (event) => {
+    const current = resizeRef.current;
+    if (!current?.dragging || current.pointerId !== event.pointerId) return;
+    moveResize(event);
+    resizeRef.current = { ...resizeRef.current, dragging: false };
+    setResize(resizeRef.current);
+  };
+
   const edit = (item, timestamp) => {
-    if (interaction.current.locked || generation !== interaction.current.generation || writePending.current === generation) return;
+    if (interaction.current.locked || generation !== interaction.current.generation || writePending.current === generation || resize) return;
     focusReturn.current = [...(schedulerRoot.current?.querySelectorAll('[data-scheduler-edit-key]') || [])].find((node) => node.getAttribute('data-scheduler-edit-key') === itemKey(item)) || document.activeElement;
     if (schedulerRoot.current?.contains(document.activeElement) && document.activeElement !== document.body) focusReturn.current = document.activeElement;
     focusItemKey.current = itemKey(item);
@@ -192,6 +259,41 @@ export default function TomorrowScheduler({
     await onUpdate(itemKey(item), { starts_at: next.starts_at, ends_at: next.ends_at });
     return true;
   };
+
+  const resizeConflicts = resize ? conflictBlocks.filter((block) =>
+    !(resize.google ? block.id === resize.block.id : blockKey(block) === blockKey(resize.block)) &&
+    Date.parse(block.starts_at) < Date.parse(resize.next.ends_at) && Date.parse(block.ends_at) > Date.parse(resize.next.starts_at)) : [];
+  const saveResize = async () => {
+    const current = resizeRef.current;
+    if (!current || current.dragging || current.generation !== generation || generation !== interaction.current.generation ||
+      interaction.current.locked || writePending.current === generation || (resizeConflicts.length && !confirmOverlap)) return;
+    writePending.current = generation;
+    setSaving(true);
+    setDialogError('');
+    try {
+      if (current.google) {
+        const event = googleEvents.find((candidate) => candidate.id === current.block.id);
+        if (!event?.editable || !onGoogleUpdate) throw new Error('This Google event is no longer editable. Refresh your calendar.');
+        await onGoogleUpdate(event, current.next);
+      } else {
+        const item = itemMap.get(blockKey(current.block));
+        if (!item || !await commit(item, current.next, confirmOverlap)) throw new Error('This schedule changed. Choose its time again.');
+      }
+      if (generation === interaction.current.generation) { resizeRef.current = null; setResize(null); }
+    } catch (failure) {
+      if (generation === interaction.current.generation) {
+        resizeRef.current = null;
+        setResize(null);
+        setDialogError(failure.message || 'Could not save resized time. Original times are preserved; retry.');
+      }
+    } finally {
+      if (generation === interaction.current.generation) { writePending.current = null; setSaving(false); }
+    }
+  };
+  const handles = (block, google, label, disabled) => <ResizeHandles label={label}
+    block={resize?.generation === generation && resize.google === google && (google ? block.id === resize.block.id : blockKey(block) === blockKey(resize.block)) ? resize.block : block} disabled={disabled}
+    onStart={(edge, event) => startResize(block, google, edge, event)} onMove={moveResize} onEnd={endResize} onCancel={cancelResize}
+    onEdit={() => google ? onGoogleEdit?.(block) : edit(itemMap.get(blockKey(block)))} />;
 
   const save = async (event) => {
     event.preventDefault();
@@ -251,10 +353,17 @@ export default function TomorrowScheduler({
       <div>
         <h3 id="tomorrow-scheduler-title" className="font-semibold text-white">Schedule tomorrow</h3>
         <p className="mt-1 text-sm text-zinc-400">Give your actions a place in the day. Scheduling is optional.</p>
-        <p className="mt-1 text-xs text-zinc-400">Your calendar works without connecting Google. Drag actions and habits from the list into your day; Google only imports existing events to help you plan around them.</p>
+        <p className="mt-1 text-xs text-zinc-400">Your calendar works without connecting Google. Drag actions and habits into your day. Drag a block’s top or bottom to resize, then save the preview; click it to edit exact times. Private commitments are never automatically exported.</p>
         <p className="mt-2 text-xs text-zinc-400">{localDate} · {timezone} · Times are optional</p>
       </div>
       {!timelineAvailable ? <div role="status" className="space-y-2 rounded-xl bg-amber-950/30 p-3 text-sm text-amber-200">{dayBounds.error && <><p>Timeline unavailable for this date or timezone. Your review is still available.</p><p>{dayBounds.error}</p></>}{availabilityError && <p>{availabilityError}</p>}{saveError ? <><p>{typeof saveError === 'string' ? saveError : saveError.message}</p><p>Your local schedule changes are preserved. Retry scheduling before completing your review.</p></> : !dayBounds.error && <p>Scheduling is currently unavailable. You can still save your actions and complete your review. Retry after database setup or connectivity is restored.</p>}{onRetry && <button type="button" onClick={onRetry} className={buttonClass}>Retry scheduling</button>}</div> : <>
+        {resize && <div role="status" aria-live="polite" className="space-y-2 rounded-lg border border-zinc-500 p-3 text-sm text-zinc-200">
+          <p>Resize preview · {timeLabel(resize.next)} · minimum 15 minutes</p>
+          {resizeConflicts.length > 0 && <label className="flex gap-2 text-amber-300"><input type="checkbox" disabled={saving || resize.dragging} checked={confirmOverlap} onChange={(event) => setConfirmOverlap(event.target.checked)} />Keep this overlap intentionally</label>}
+          <button type="button" className={buttonClass} disabled={saving || resize.dragging || Boolean(resizeConflicts.length && !confirmOverlap)} onClick={saveResize}>{saving ? 'Saving…' : 'Save resized time'}</button>{' '}
+          <button type="button" className={buttonClass} disabled={saving} onClick={() => { resizeRef.current = null; setResize(null); setDialogError(''); }}>Cancel resize</button>
+        </div>}
+        {!editing && dialogError && <p role="alert" className="text-sm text-amber-300">{dialogError}</p>}
         <div role="status" aria-live="polite" className="text-xs text-zinc-400">{saveError ? <span className="text-amber-300">{typeof saveError === 'string' ? saveError : saveError.message}</span> : saveStatus === 'saving' ? 'Saving schedule…' : saveStatus === 'saved' ? 'Schedule saved' : saveStatus === 'offline' ? 'Schedule pending sync — reconnect to save.' : saveStatus === 'error' ? 'Schedule could not sync. Your review is still available.' : 'Schedule changes save automatically.'}</div>
         <DndContext sensors={sensors} collisionDetection={detectTimeSlot} onDragStart={({ active: dragged }) => { if (!interaction.current.locked && generation === interaction.current.generation && writePending.current !== generation) { dragGeneration.current = generation; setActive(dragged.data.current.item); } }} onDragCancel={() => { dragGeneration.current = null; setActive(null); }} onDragEnd={drop}>
           <div className="grid gap-4 md:grid-cols-[minmax(160px,1fr)_minmax(0,3fr)]">
@@ -263,13 +372,13 @@ export default function TomorrowScheduler({
               <p className="text-xs text-zinc-400">ROI action, starting task · Habits due tomorrow</p>
               <p className="text-xs text-zinc-500">Drag a card onto a time to snap to 15 minutes, or back here to unschedule it. On touch screens, hold its handle. Click a card to set an exact time.</p>
               <div className="flex gap-2 overflow-x-auto pb-2 md:flex-col md:overflow-x-visible">
-                {unscheduled.map((item) => <div key={itemKey(item)} className="min-w-[160px] md:min-w-0"><DraggableItem item={item} onEdit={edit} disabled={locked || saving} /></div>)}
+                {unscheduled.map((item) => <div key={itemKey(item)} className="min-w-[160px] md:min-w-0"><DraggableItem item={item} onEdit={edit} disabled={locked || saving || Boolean(resize)} /></div>)}
               </div>
               {!unscheduled.length && <p className="text-xs text-zinc-500">{readOnly ? 'No unscheduled items.' : items.length ? 'Everything has a time.' : 'Save an action or add a habit to begin.'}</p>}
             </UnscheduledTray>
             <div className="min-w-0">
-              {allDay.length > 0 && <div aria-label="All-day Google events" className="mb-2 space-y-1 rounded-lg border border-zinc-700 p-2"><p className="text-xs text-zinc-400">All day · Google (read-only)</p>{allDay.map((event) => <p key={event.id} className="text-xs text-zinc-500">{event.summary || event.title || 'Busy'}{event.ends_at || event.end ? ` · until ${event.ends_at || event.end?.date || event.end} (exclusive)` : ''}{event.transparency === 'transparent' ? ' · Free · non-blocking' : ''}</p>)}</div>}
-              <div className="mb-2 grid grid-cols-[52px_1fr] gap-1 text-[10px] text-zinc-400"><span>Time</span><span>Your plan{googleLanes.length > 0 && ' · Google events are read-only'}</span></div>
+              {allDay.length > 0 && <div aria-label="All-day Google events" className="mb-2 space-y-1 rounded-lg border border-zinc-700 p-2"><p className="text-xs text-zinc-400">All day · Google</p>{allDay.map((event) => <p key={event.id} className="text-xs text-zinc-500">{event.summary || event.title || 'Busy'}{event.ends_at || event.end ? ` · until ${event.ends_at || event.end?.date || event.end} (exclusive)` : ''}{event.transparency === 'transparent' ? ' · Free · non-blocking' : ''}{event.editable && onGoogleEdit && !locked && <button type="button" className={buttonClass} disabled={saving || Boolean(resize)} onClick={() => onGoogleEdit(event)}>Edit {event.title || 'event'}</button>}</p>)}</div>}
+              <div className="mb-2 grid grid-cols-[52px_1fr] gap-1 text-[10px] text-zinc-400"><span>Time</span><span>Your plan{googleLanes.length > 0 && ' · Google'}</span></div>
               <div ref={timeline} tabIndex={0} aria-label={`${dayMinutes / 60}-hour timeline for ${localDate}, ${timezone}`} className="h-[760px] md:h-[960px] overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-950">
                 <div className="relative grid grid-cols-[52px_1fr]" style={{ height: dayMinutes * 2.4 }}>
                   <div className="relative">{slots.filter((slot) => slot.minute % 60 === 0).map((slot) => <span key={slot.timestamp} className="absolute left-1 text-[10px] text-zinc-500" style={{ top: slot.minute * 2.4 }}><span className="block">{slot.time}</span><span className="block text-[8px]">{slot.offset}</span></span>)}</div>
@@ -279,9 +388,13 @@ export default function TomorrowScheduler({
                       if (block.read_only_context) return <div key={`carryover:${block.id || block.source_id || block.starts_at}`} data-context-schedule-id={block.id} style={blockPosition(block, laneCount)} className="pointer-events-auto rounded-lg border border-indigo-800/60 bg-indigo-950/40 p-2 text-[10px] text-indigo-200"><span className="block break-words font-medium">{block.label || 'Previous-day plan'}</span><span className="mt-1 block">{timeLabel(block)}</span><span className="mt-1 block text-indigo-300">Previous-day · {block.target_local_date || localParts(block.starts_at, timezone).date} · read-only</span></div>;
                       const item = itemMap.get(blockKey(block));
                       if (!item && readOnly) return <div key={block.id || blockKey(block)} data-schedule-key={blockKey(block)} style={blockPosition(block, laneCount)} className="pointer-events-auto rounded-lg border border-zinc-700 bg-zinc-800/60 p-2 text-xs text-zinc-300"><span className="block break-words font-medium">{block.label || (block.source_type === 'habit' || block.habit_definition_id ? 'Scheduled habit' : 'Scheduled commitment')}</span><span className="mt-1 block">{timeLabel(block)}</span><span className="mt-1 block text-[10px] text-zinc-400">Preserved plan · read-only</span></div>;
-                      return item ? <div key={block.id || blockKey(block)} data-schedule-key={blockKey(block)} className="pointer-events-auto" style={blockPosition(block, laneCount)}><DraggableItem item={item} onEdit={edit} disabled={locked || saving} compact short={blockPosition(block, laneCount).height <= 36} timeDescription={timeLabel(block)}><span className={`block truncate text-[10px] leading-3 ${item.type === 'habit' ? 'text-emerald-200' : 'text-red-200'}`}>{timeLabel(block)}</span></DraggableItem></div> : null;
+                      return item ? <div key={block.id || blockKey(block)} data-schedule-key={blockKey(block)} className="pointer-events-auto" style={blockPosition(block, laneCount)}><DraggableItem item={item} onEdit={edit} disabled={locked || saving || Boolean(resize)} compact short={blockPosition(block, laneCount).height <= 36} timeDescription={timeLabel(block)}><span className={`block truncate text-[10px] leading-3 ${item.type === 'habit' ? 'text-emerald-200' : 'text-red-200'}`}>{timeLabel(block)}</span></DraggableItem>{handles(block, false, item.label, locked || saving)}</div> : null;
                     })}</div>
-                    {googleLanes.length > 0 && <div className="pointer-events-none absolute inset-0" aria-label="Google events">{googleLanes.map((event) => <div key={event.id} tabIndex={0} title={`${event.summary || event.title || 'Busy'} · ${timeLabel(event)} · Google · read-only${event.transparency === 'transparent' ? ' · Free · non-blocking' : ''}`} style={blockPosition(event, laneCount)} className="pointer-events-auto rounded border border-zinc-700 bg-zinc-800/80 p-1 text-[10px] text-zinc-400"><span className="block break-words">{event.summary || event.title || 'Busy'}</span><span>{timeLabel(event)}</span><span className="block">Google · read-only</span>{event.transparency === 'transparent' && <span className="block">Free · non-blocking</span>}</div>)}</div>}
+                    {googleLanes.length > 0 && <div className="pointer-events-none absolute inset-0" aria-label="Google events">{googleLanes.map((event) => <div key={event.id} tabIndex={0} title={`${event.summary || event.title || 'Busy'} · ${timeLabel(event)} · Google${event.editable ? '' : ' · read-only'}${event.transparency === 'transparent' ? ' · Free · non-blocking' : ''}`} style={blockPosition(event, laneCount)} className="pointer-events-auto rounded border border-zinc-700 bg-zinc-800/80 p-1 text-[10px] text-zinc-400">
+                      {event.editable && onGoogleEdit && !locked ? <button type="button" className="block w-full text-left text-zinc-100" disabled={saving || Boolean(resize)} onClick={() => onGoogleEdit(event)} aria-label={`Edit Google event ${event.title || 'Busy'}`}><span className="block break-words">{event.summary || event.title || 'Busy'}</span><span>{timeLabel(event)}</span></button> : <><span className="block break-words">{event.summary || event.title || 'Busy'}</span><span>{timeLabel(event)}</span></>}
+                      <span className="block">Google{event.editable ? ' · Editable' : ' · read-only'}</span>{event.transparency === 'transparent' && <span className="block">Free · non-blocking</span>}
+                      {handles(event, true, event.title || 'Google event', locked || saving || !event.editable || !onGoogleUpdate || event.continued)}
+                    </div>)}</div>}
                   </div>
                 </div>
               </div>

@@ -87,6 +87,28 @@ export function snapScheduleMinutes(minutes, increment = SCHEDULE_SNAP_MINUTES) 
   return Math.round(minutes / increment) * increment;
 }
 
+export function resizeScheduleBlock(block, edge, deltaMinutes, bounds, maximumMinutes = 1440) {
+  const start = Date.parse(block.starts_at);
+  const end = Date.parse(block.ends_at);
+  const delta = snapScheduleMinutes(deltaMinutes) * 60000;
+  const minimum = SCHEDULE_SNAP_MINUTES * 60000;
+  const maximum = maximumMinutes * 60000;
+  if (![start, end, delta, maximum].every(Number.isFinite) || end <= start || !['start', 'end'].includes(edge)) {
+    throw new Error('Invalid resize');
+  }
+  // Resize in elapsed time: repeated or missing DST hours remain real instants.
+  const nextStart = edge === 'start'
+    ? Math.max(Date.parse(bounds.starts_at), end - maximum, Math.min(end - minimum, start + delta))
+    : start;
+  const nextEnd = edge === 'end'
+    ? Math.max(start + minimum, Math.min(start + maximum, end + delta))
+    : end;
+  if (nextStart >= Date.parse(bounds.ends_at) || nextEnd <= nextStart || nextEnd - nextStart > maximum) {
+    throw new Error('Choose a start in this day and a supported duration.');
+  }
+  return { starts_at: new Date(nextStart).toISOString(), ends_at: new Date(nextEnd).toISOString() };
+}
+
 export function normalizeScheduleBlock(block) {
   const start = Date.parse(block.starts_at);
   const end = block.ends_at == null ? start + DEFAULT_SCHEDULE_MINUTES * 60000 : Date.parse(block.ends_at);

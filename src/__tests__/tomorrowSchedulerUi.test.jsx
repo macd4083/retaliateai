@@ -95,6 +95,147 @@ describe('TomorrowScheduler UI', () => {
     expect(container.textContent).toContain('Give your actions a place in the day. Scheduling is optional.');
   });
 
+  const resizePointer = async (node, type, y, pointerType = 'mouse') => {
+    await act(async () => {
+      const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientY: y, button: 0 });
+      Object.defineProperties(event, { pointerId: { value: 1 }, pointerType: { value: pointerType } });
+      node.dispatchEvent(event);
+    });
+  };
+  const resizeBlock = { source_key: 'action-1', starts_at: '2026-10-07T09:00:00Z', ends_at: '2026-10-07T09:30:00Z' };
+
+  it.each([
+    ['start', 36, '2026-10-07T09:15:00.000Z', '2026-10-07T09:30:00.000Z'],
+    ['end', 36, '2026-10-07T09:00:00.000Z', '2026-10-07T09:45:00.000Z'],
+    ['end', -100, '2026-10-07T09:00:00.000Z', '2026-10-07T09:15:00.000Z'],
+  ])('previews and saves snapped %s resize with a minimum duration', async (edge, delta, starts_at, ends_at) => {
+    await render({ blocks: [resizeBlock] });
+    const handle = container.querySelector(`[data-resize-edge="${edge}"]`);
+    await resizePointer(handle, 'pointerdown', 100);
+    await resizePointer(handle, 'pointermove', 100 + delta);
+    await resizePointer(handle, 'pointerup', 100 + delta);
+    expect(update).not.toHaveBeenCalled();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    await click('Save resized time');
+    expect(update).toHaveBeenCalledExactlyOnceWith('action-1', { starts_at, ends_at });
+    expect(container.textContent).not.toContain('Resize preview');
+  });
+
+  it.each(['pointercancel', 'lostpointercapture', 'escape', 'cancel'])('cancels touch resize via %s without changing the plan', async (reason) => {
+    await render({ blocks: [resizeBlock] });
+    const handle = container.querySelector('[data-resize-edge="end"]');
+    expect(handle.style.touchAction).toBe('none');
+    await resizePointer(handle, 'pointerdown', 100, 'touch');
+    await resizePointer(handle, 'pointermove', 136, 'touch');
+    if (reason === 'escape') await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
+    else if (reason === 'cancel') await click('Cancel resize');
+    else await resizePointer(handle, reason, 136, 'touch');
+    expect(container.textContent).not.toContain('Resize preview');
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('offers a keyboard form equivalent on resize handles', async () => {
+    await render({ blocks: [resizeBlock] });
+    await act(async () => container.querySelector('[data-resize-edge="start"]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+    expect(document.querySelector('[role="dialog"]').textContent).toContain('Choose a time');
+    expect(getInput('input[type="time"]').value).toBe('09:00');
+  });
+
+  it('keeps the active end handle captured when preview crosses midnight', async () => {
+    await render({ blocks: [{ ...resizeBlock, starts_at: '2026-10-07T23:30:00Z', ends_at: '2026-10-07T23:45:00Z' }] });
+    const handle = container.querySelector('[data-resize-edge="end"]');
+    await resizePointer(handle, 'pointerdown', 100);
+    await resizePointer(handle, 'pointermove', 172);
+    expect(handle.isConnected).toBe(true);
+    await resizePointer(handle, 'pointerup', 172);
+    expect(container.textContent).toContain('(+1 day)');
+    await click('Save resized time');
+    expect(update).toHaveBeenCalledWith('action-1', {
+      starts_at: '2026-10-07T23:30:00.000Z', ends_at: '2026-10-08T00:15:00.000Z',
+    });
+  });
+
+  it('requires intentional overlap confirmation before persisting a resize', async () => {
+    await render({ blocks: [resizeBlock, { source_key: 'habit-1', starts_at: '2026-10-07T09:30:00Z', ends_at: '2026-10-07T10:00:00Z' }] });
+    const handle = container.querySelector('[data-schedule-key="action-1"] [data-resize-edge="end"]');
+    await resizePointer(handle, 'pointerdown', 100);
+    await resizePointer(handle, 'pointerup', 136);
+    await click('Save resized time');
+    expect(update).not.toHaveBeenCalled();
+    await act(async () => container.querySelector('input[type="checkbox"]').click());
+    await click('Save resized time');
+    expect(update).toHaveBeenCalledOnce();
+  });
+
+  it('cancels a resize preview when review completion locks the scheduler', async () => {
+    await render({ blocks: [resizeBlock] });
+    const handle = container.querySelector('[data-resize-edge="end"]');
+    await resizePointer(handle, 'pointerdown', 100);
+    await render({ blocks: [resizeBlock], completionSaving: true });
+    await resizePointer(handle, 'pointerup', 136);
+    expect(container.textContent).not.toContain('Resize preview');
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('resizes non-app Google events through their Google identity, not local saves', async () => {
+    const googleUpdate = vi.fn();
+    calendar.events = [{ id: 'import', calendarId: 'shared', eventId: 'external', editable: true, title: 'External meeting', start: resizeBlock.starts_at, end: resizeBlock.ends_at }];
+    await render({ items: [], onGoogleEdit: vi.fn(), onGoogleUpdate: googleUpdate });
+    const handle = container.querySelector('[data-resize-edge="end"]');
+    await resizePointer(handle, 'pointerdown', 100);
+    await resizePointer(handle, 'pointerup', 136);
+    await click('Save resized time');
+    expect(googleUpdate).toHaveBeenCalledExactlyOnceWith(calendar.events[0], {
+      starts_at: '2026-10-07T09:00:00.000Z', ends_at: '2026-10-07T09:45:00.000Z',
+    });
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('restores original Google times after a failed resize save and releases pending state', async () => {
+    const googleUpdate = vi.fn().mockRejectedValue(new Error('Google unavailable'));
+    calendar.events = [{ id: 'import', editable: true, title: 'External', start: resizeBlock.starts_at, end: resizeBlock.ends_at }];
+    await render({ items: [], onGoogleUpdate: googleUpdate });
+    const handle = container.querySelector('[data-resize-edge="end"]');
+    await resizePointer(handle, 'pointerdown', 100);
+    await resizePointer(handle, 'pointerup', 136);
+    await click('Save resized time');
+    expect(container.textContent).toContain('Google unavailable');
+    expect(container.textContent).toContain('09:00–09:30');
+    expect(container.textContent).not.toContain('Resize preview');
+    expect(container.querySelector('[data-resize-edge]')).not.toBeNull();
+  });
+
+  it('guards duplicate pending resize saves and discards late responses after an account change', async () => {
+    let finish;
+    update.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    await render({ blocks: [resizeBlock] });
+    const handle = container.querySelector('[data-resize-edge="end"]');
+    await resizePointer(handle, 'pointerdown', 100);
+    await resizePointer(handle, 'pointerup', 136);
+    await click('Save resized time');
+    await click('Saving…');
+    expect(update).toHaveBeenCalledTimes(1);
+    await render({ userId: 'other', blocks: [] });
+    await act(async () => finish());
+    expect(container.textContent).not.toContain('Resize preview');
+    expect(container.textContent).not.toContain('Saving…');
+  });
+
+  it.each([{ readOnly: true }, { completionSaving: true }, { available: false }])('does not expose resize handles when locked: %j', async (lock) => {
+    await render({ blocks: [resizeBlock], ...lock });
+    expect(container.querySelector('[data-resize-edge]')).toBeNull();
+  });
+
+  it('does not resize read-only or all-day Google events', async () => {
+    calendar.events = [
+      { id: 'readonly', editable: false, start: resizeBlock.starts_at, end: resizeBlock.ends_at },
+      { id: 'all-day', editable: true, allDay: true, start: '2026-10-07', end: '2026-10-08' },
+    ];
+    await render({ items: [], onGoogleEdit: vi.fn(), onGoogleUpdate: vi.fn() });
+    expect(container.querySelector('[data-resize-edge]')).toBeNull();
+    expect(container.querySelector('[aria-label="All-day Google events"] button')).not.toBeNull();
+  });
+
   it('uses the full native day calendar without an empty Google column', async () => {
     await render();
     expect(container.querySelector('[aria-label="Google events"]')).toBeNull();
