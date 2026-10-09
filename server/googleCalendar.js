@@ -2,7 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, 
 import { createClient } from '@supabase/supabase-js';
 
 export const GOOGLE_CALENDAR_SCOPES = [
-  'https://www.googleapis.com/auth/calendar.events.readonly',
+  'https://www.googleapis.com/auth/calendar.events',
   'https://www.googleapis.com/auth/calendar.calendarlist.readonly',
 ];
 const CONNECTIONS = 'today_v2_google_connections';
@@ -12,7 +12,8 @@ const DEV_COOKIE = 'google-calendar-nonce';
 const MAX_CALENDARS = 10;
 const MAX_PAGES = 5;
 const STATE_LIFETIME = 10 * 60 * 1000;
-const METHODS = { status: 'GET', connect: 'POST', callback: 'GET', calendars: 'GET', select: 'POST', events: 'GET', disconnect: 'POST' };
+const METHODS = { status: 'GET', connect: 'POST', callback: 'GET', calendars: 'GET', select: 'POST', events: 'GET', disconnect: 'POST',
+  create: 'POST', update: 'POST', delete: 'POST' };
 
 class CalendarError extends Error {
   constructor(status, code, message) {
@@ -92,7 +93,13 @@ function storage(result) {
   return result.data;
 }
 
-export function normalizeEvent(event, calendarId) {
+const writeScopes = (tokens) => Array.isArray(tokens?.scopes) && GOOGLE_CALENDAR_SCOPES.every((scope) => tokens.scopes.includes(scope));
+const writableRole = (role) => ['writer', 'owner'].includes(role);
+const mutableEvent = (event) => event.status !== 'cancelled' && !event.locked &&
+  (!event.eventType || event.eventType === 'default') && !event.recurrence?.length &&
+  (event.organizer?.self === true || event.guestsCanModify === true);
+
+export function normalizeEvent(event, calendarId, { canWrite = false, accessRole, timeZone } = {}) {
   if (event.status === 'cancelled' || !event.id || !event.start || !event.end) return null;
   const start = event.start.dateTime || event.start.date;
   const end = event.end.dateTime || event.end.date;
@@ -101,11 +108,79 @@ export function normalizeEvent(event, calendarId) {
   return {
     id: JSON.stringify([calendarId, event.recurringEventId || event.id, instance]),
     calendarId,
+    eventId: event.id,
+    timeZone: event.start.timeZone || timeZone || null,
+    editable: canWrite && writableRole(accessRole) && mutableEvent(event),
+    etag: event.etag || null,
+    recurringEventId: event.recurringEventId || null,
     title: typeof event.summary === 'string' && event.summary.trim() ? event.summary : 'Busy',
     start, end,
     allDay: Boolean(event.start.date && !event.start.dateTime),
     transparency: event.transparency === 'transparent' ? 'transparent' : 'opaque',
   };
+}
+
+function validDate(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || value.startsWith('0000')) return false;
+  const parsed = Date.parse(`${value}T00:00:00Z`);
+  return Number.isFinite(parsed) && new Date(parsed).toISOString().slice(0, 10) === value;
+}
+
+function eventBoundary(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) fail(400, 'invalid_event', 'Supply a Google Calendar start and end.');
+  if (Object.hasOwn(value, 'date')) {
+    if (Object.keys(value).some((key) => key !== 'date') || !validDate(value.date)) {
+      fail(400, 'invalid_event', 'All-day dates must be real YYYY-MM-DD dates with an exclusive end.');
+    }
+    return { value: { date: value.date }, instant: Date.parse(`${value.date}T00:00:00Z`), allDay: true };
+  }
+  const match = typeof value.dateTime === 'string' &&
+    /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(Z|[+-](\d{2}):(\d{2}))$/.exec(value.dateTime);
+  if (Object.keys(value).some((key) => !['dateTime', 'timeZone'].includes(key)) ||
+    !match || !validDate(match[1]) || Number(match[2]) > 23 || Number(match[3]) > 59 || Number(match[4]) > 59 ||
+    Number(match[6] || 0) > 23 || Number(match[7] || 0) > 59 || !Number.isFinite(Date.parse(value.dateTime))) {
+    fail(400, 'invalid_event', 'Timed events require real RFC3339 timestamps with an explicit UTC offset.');
+  }
+  if (Object.hasOwn(value, 'timeZone')) {
+    try {
+      if (typeof value.timeZone !== 'string' || !/^[A-Za-z_]+(?:\/[A-Za-z0-9_+-]+)*$/.test(value.timeZone)) throw new Error();
+      new Intl.DateTimeFormat('en', { timeZone: value.timeZone }).format();
+    } catch { fail(400, 'invalid_event', 'Use a valid IANA time zone.'); }
+  }
+  return { value: { dateTime: value.dateTime, ...(value.timeZone ? { timeZone: value.timeZone } : {}) },
+    instant: Date.parse(value.dateTime), allDay: false };
+}
+
+function eventPayload(input, existing) {
+  if (!input || typeof input !== 'object' || Array.isArray(input) || !Object.keys(input).length ||
+    Object.keys(input).some((key) => !['summary', 'start', 'end'].includes(key))) {
+    fail(400, 'invalid_event', 'Only summary, start and end may be changed.');
+  }
+  const patch = {};
+  if (!existing || Object.hasOwn(input, 'summary')) {
+    if (typeof input.summary !== 'string' || !input.summary.trim() || input.summary.length > 1024 ||
+      /[\u0000-\u001f\u007f]/.test(input.summary)) fail(400, 'invalid_event', 'Supply a title of 1–1024 characters.');
+    patch.summary = input.summary.trim();
+  }
+  const start = eventBoundary(Object.hasOwn(input, 'start') ? input.start : existing?.start);
+  const end = eventBoundary(Object.hasOwn(input, 'end') ? input.end : existing?.end);
+  if (start.allDay !== end.allDay || end.instant <= start.instant) {
+    fail(400, 'invalid_event', 'Start and end must have matching types and a positive duration.');
+  }
+  if (Object.hasOwn(input, 'start') || !existing) patch.start = start.value;
+  if (Object.hasOwn(input, 'end') || !existing) patch.end = end.value;
+  return patch;
+}
+
+function mutationIds(body, needsEvent) {
+  if (typeof body?.calendarId !== 'string' || !body.calendarId || body.calendarId.length > 1024 ||
+    /[\s\u0000-\u001f\u007f]/.test(body.calendarId) ||
+    (needsEvent && (typeof body.eventId !== 'string' || !/^[A-Za-z0-9_-]{1,1024}$/.test(body.eventId)))) {
+    fail(400, 'invalid_id', 'Supply valid Google calendar and event IDs.');
+  }
+  if (body.etag !== undefined && (typeof body.etag !== 'string' || !/^"[^"\u0000-\u001f\u007f]{1,250}"$/.test(body.etag))) {
+    fail(400, 'invalid_event', 'Supply the event version returned by Google Calendar.');
+  }
 }
 
 export function eventRange(timeMin, timeMax) {
@@ -132,7 +207,7 @@ export function createGoogleCalendarHandler({ env = process.env, supabase, fetch
     return client;
   }
 
-  async function googleRequest(url, options, deadline) {
+  async function googleRequest(url, options, deadline, mutation = false) {
     for (let attempt = 0; attempt < 3; attempt++) {
       const remaining = deadline - now();
       if (remaining <= 0) fail(504, 'google_timeout', 'Google Calendar request timed out. Try again later.');
@@ -140,7 +215,7 @@ export function createGoogleCalendarHandler({ env = process.env, supabase, fetch
       let body;
       try {
         response = await fetchImpl(url, { ...options, signal: AbortSignal.timeout(Math.min(8000, remaining)), redirect: 'error' });
-        body = await response.json();
+        body = response.status === 204 ? {} : await response.json();
       } catch {
         fail(502, 'google_unavailable', 'Google Calendar is temporarily unavailable.');
       }
@@ -153,6 +228,16 @@ export function createGoogleCalendarHandler({ env = process.env, supabase, fetch
       if (!response.ok) {
         if (body.error === 'invalid_grant' || response.status === 401) fail(401, 'reconnect_required', 'Google Calendar authorization expired or was revoked. Reconnect your calendar.');
         if (rateLimited) fail(429, 'google_rate_limited', 'Google Calendar rate limit reached. Try again later.');
+        if (mutation) {
+          const errors = {
+            403: ['calendar_read_only', 'Google Calendar denied this change. Check calendar permissions or reconnect.'],
+            404: ['event_not_found', 'The calendar or event is no longer available. Refresh your calendar.'],
+            409: ['request_conflict', 'This creation request conflicts with an existing event.'],
+            410: ['event_gone', 'This event has been removed. Refresh your calendar.'],
+            412: ['event_conflict', 'This event changed in Google Calendar. Refresh before trying again.'],
+          };
+          if (errors[response.status]) fail(response.status, ...errors[response.status]);
+        }
         fail(502, 'google_unavailable', 'Google Calendar could not complete the request.');
       }
       return body;
@@ -179,16 +264,20 @@ export function createGoogleCalendarHandler({ env = process.env, supabase, fetch
     } catch { /* Revocation is best effort; local deletion or atomic finalization is authoritative. */ }
   }
 
-  function mergeTokens(body, previous = {}) {
+  function mergeTokens(body, previous = {}, authorization = false) {
     if (typeof body.access_token !== 'string' || !body.access_token || !Number.isFinite(Number(body.expires_in)) || Number(body.expires_in) <= 0) {
       fail(502, 'google_unavailable', 'Google returned incomplete credentials.');
     }
-    if (body.scope && !GOOGLE_CALENDAR_SCOPES.every((scope) => body.scope.split(' ').includes(scope))) {
-      fail(400, 'consent_required', 'Grant both read-only calendar permissions to connect.');
+    const scopes = typeof body.scope === 'string' ? body.scope.split(/\s+/).filter(Boolean) :
+      (authorization ? [...GOOGLE_CALENDAR_SCOPES] : previous.scopes);
+    if (scopes && (!scopes.includes(GOOGLE_CALENDAR_SCOPES[1]) ||
+      !(scopes.includes(GOOGLE_CALENDAR_SCOPES[0]) || (!authorization && scopes.includes('https://www.googleapis.com/auth/calendar.events.readonly'))))) {
+      fail(400, 'consent_required', 'Grant event and calendar-list permissions to connect.');
     }
     const refreshToken = body.refresh_token || previous.refresh_token;
     if (!refreshToken) fail(400, 'consent_required', 'Offline calendar permission was not granted. Reconnect and grant consent.');
-    return { access_token: body.access_token, refresh_token: refreshToken, expires_at: now() + Number(body.expires_in) * 1000 };
+    return { access_token: body.access_token, refresh_token: refreshToken, expires_at: now() + Number(body.expires_in) * 1000,
+      ...(scopes ? { scopes } : {}) };
   }
 
   async function access(userId, row, config, deadline, force = false) {
@@ -219,7 +308,35 @@ export function createGoogleCalendarHandler({ env = process.env, supabase, fetch
     }
   }
 
-  async function paginated(path, parameters, userId, row, config, deadline) {
+  async function authorizedRequest(path, options, userId, row, config, deadline) {
+    let token = await access(userId, row, config, deadline);
+    const send = () => {
+      if (['POST', 'PATCH', 'DELETE'].includes(options.method) && !canWrite(userId, row, config)) {
+        fail(403, 'permission_upgrade_required', 'Reconnect Google Calendar and grant event editing permission.');
+      }
+      return googleRequest(`https://www.googleapis.com/calendar/v3/${path}`, {
+        ...options, headers: { ...options.headers, Authorization: ['Bearer', token].join(' ') },
+      }, deadline, true);
+    };
+    try { return await send(); } catch (error) {
+      if (error.code !== 'reconnect_required') throw error;
+      token = await access(userId, row, config, deadline, true);
+      try { return await send(); } catch (retryError) {
+        if (retryError.code === 'reconnect_required') {
+          storage(await database().from(CONNECTIONS).delete().eq('user_id', userId).eq('tokens_encrypted', row.tokens_encrypted));
+        }
+        throw retryError;
+      }
+    }
+  }
+
+  function canWrite(userId, row, config) {
+    if (!row || !config) return false;
+    try { return writeScopes(decrypt(row.tokens_encrypted, config.key, `tokens:${userId}`)); }
+    catch { return false; }
+  }
+
+  async function paginated(path, parameters, userId, row, config, deadline, metadata = {}) {
     let token = await access(userId, row, config, deadline);
     let refreshed = false;
     let pageToken;
@@ -249,6 +366,8 @@ export function createGoogleCalendarHandler({ env = process.env, supabase, fetch
         }
       }
       if (!Array.isArray(body.items) && body.items !== undefined) fail(502, 'google_unavailable', 'Google returned invalid calendar data.');
+      if (body.accessRole !== undefined) metadata.accessRole = body.accessRole;
+      if (body.timeZone !== undefined) metadata.timeZone = body.timeZone;
       items.push(...(body.items || []));
       if (!body.nextPageToken) return items;
       if (body.nextPageToken === pageToken) fail(502, 'pagination_limit', 'Google Calendar pagination could not complete.');
@@ -259,11 +378,76 @@ export function createGoogleCalendarHandler({ env = process.env, supabase, fetch
 
   async function calendars(userId, row, config, deadline) {
     const items = await paginated('users/me/calendarList', { showHidden: 'false', showDeleted: 'false',
-      fields: 'nextPageToken,items(id,summary,primary,backgroundColor,timeZone,deleted)' }, userId, row, config, deadline);
+      fields: 'nextPageToken,items(id,summary,primary,backgroundColor,timeZone,deleted,accessRole)' }, userId, row, config, deadline);
     return items.filter((item) => !item.deleted && typeof item.id === 'string').map((item) => ({
       id: item.id, name: item.summary || 'Calendar', primary: Boolean(item.primary),
       color: item.backgroundColor || null, timeZone: item.timeZone || null,
+      accessRole: item.accessRole || null,
+      canWrite: canWrite(userId, row, config) && writableRole(item.accessRole),
     }));
+  }
+
+  async function mutate(action, body, userId, row, config, deadline) {
+    mutationIds(body, action !== 'create');
+    if (!row) fail(409, 'not_connected', 'Connect Google Calendar first.');
+    if (!canWrite(userId, row, config)) fail(403, 'permission_upgrade_required', 'Reconnect Google Calendar and grant event editing permission.');
+    let payload;
+    let requestMarker;
+    let eventId = body.eventId;
+    if (action === 'create') {
+      if (typeof body.requestId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(body.requestId)) {
+        fail(400, 'invalid_request_id', 'Supply a caller-generated UUID requestId and reuse it when retrying creation.');
+      }
+      payload = eventPayload(body.event);
+      requestMarker = createHash('sha256').update(JSON.stringify([userId, body.calendarId, body.requestId.toLowerCase()])).digest('hex');
+      eventId = `c${requestMarker}`;
+    }
+    const available = await calendars(userId, row, config, deadline);
+    if (!canWrite(userId, row, config)) fail(403, 'permission_upgrade_required', 'Reconnect Google Calendar and grant event editing permission.');
+    const calendar = available.find((item) => item.id === body.calendarId || (body.calendarId === 'primary' && item.primary));
+    if (!calendar || !calendar.canWrite) fail(403, 'calendar_read_only', 'Choose a calendar where you have owner or writer access.');
+    const base = `calendars/${encodeURIComponent(body.calendarId)}/events`;
+    const path = `${base}/${encodeURIComponent(eventId)}`;
+    const model = (event) => {
+      const normalized = event?.id === eventId && normalizeEvent(event, body.calendarId, {
+        canWrite: true, accessRole: calendar.accessRole, timeZone: calendar.timeZone,
+      });
+      if (!normalized) fail(502, 'google_unavailable', 'Google returned an incomplete event. Refresh your calendar.');
+      return normalized;
+    };
+    if (action === 'create') {
+      try {
+        const created = await authorizedRequest(base, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...payload, id: eventId, extendedProperties: { private: { retaliateRequest: requestMarker } } }),
+        }, userId, row, config, deadline);
+        return { event: model(created) };
+      } catch (error) {
+        if (error.code !== 'request_conflict') throw error;
+        const existing = await authorizedRequest(path, { method: 'GET' }, userId, row, config, deadline);
+        if (existing.id !== eventId || existing.extendedProperties?.private?.retaliateRequest !== requestMarker ||
+          existing.status === 'cancelled') fail(409, 'request_conflict', 'This request ID is already used. Refresh your calendar before retrying.');
+        return { event: model(existing) };
+      }
+    }
+    const existing = await authorizedRequest(path, { method: 'GET' }, userId, row, config, deadline);
+    if (existing.id !== eventId || !mutableEvent(existing)) {
+      fail(409, 'event_not_editable', 'Only unlocked standard events you organize or may modify, and individual recurring instances, can be changed. Whole series cannot be changed.');
+    }
+    if (typeof existing.etag !== 'string' || !/^"[^"\u0000-\u001f\u007f]{1,250}"$/.test(existing.etag)) {
+      fail(502, 'google_unavailable', 'Google returned no usable event version. Refresh your calendar.');
+    }
+    if (body.etag !== undefined && body.etag !== existing.etag) {
+      fail(412, 'event_conflict', 'This event changed in Google Calendar. Refresh before trying again.');
+    }
+    const headers = { 'If-Match': existing.etag };
+    if (action === 'delete') {
+      await authorizedRequest(path, { method: 'DELETE', headers }, userId, row, config, deadline);
+      return { deleted: true, calendarId: body.calendarId, eventId };
+    }
+    payload = eventPayload(body.event, existing);
+    const updated = await authorizedRequest(path, { method: 'PATCH', headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload) }, userId, row, config, deadline);
+    return { event: model(updated) };
   }
 
   return async function handler(req, res) {
@@ -351,7 +535,7 @@ export function createGoogleCalendarHandler({ env = process.env, supabase, fetch
           new Set(previousIds).size === previousIds.length ? previousIds : [];
         const body = await tokenRequest({ grant_type: 'authorization_code', code: req.query.code, redirect_uri: config.redirect, code_verifier: binding.verifier }, config, deadline);
         try {
-          const tokens = mergeTokens(body, oldTokens);
+          const tokens = mergeTokens(body, oldTokens, true);
           const finalized = storage(await database().rpc('today_v2_finish_google_authorization', {
             p_state_hash: stateHash, p_tokens_encrypted: encrypt(tokens, config.key, `tokens:${pending.user_id}`),
             p_selected_calendar_ids: selectedIds,
@@ -374,9 +558,11 @@ export function createGoogleCalendarHandler({ env = process.env, supabase, fetch
             p_state_hash: hash(randomBytes(32)), p_tokens_encrypted: 'schema-probe', p_selected_calendar_ids: [],
           }));
           return res.status(200).json({ configured: Boolean(config), schemaAvailable: true, connected: Boolean(row),
+            canWrite: canWrite(userId, row, config), needsUpgrade: Boolean(row) && !canWrite(userId, row, config),
             selectedCalendarIds: row?.selected_calendar_ids || [], ...(configError ? { message: configError.message } : {}) });
         } catch {
           return res.status(200).json({ configured: Boolean(config), schemaAvailable: false, connected: Boolean(row),
+            canWrite: canWrite(userId, row, config), needsUpgrade: Boolean(row) && !canWrite(userId, row, config),
             selectedCalendarIds: row?.selected_calendar_ids || [],
             message: configError?.message || 'Google Calendar storage is unavailable. Apply the Google Calendar database migration.' });
         }
@@ -404,6 +590,9 @@ export function createGoogleCalendarHandler({ env = process.env, supabase, fetch
         return res.status(200).json({ authorizationUrl: url.href });
       }
       const row = await connection(userId);
+      if (['create', 'update', 'delete'].includes(action)) {
+        return res.status(200).json(await mutate(action, req.body, userId, row, config, deadline));
+      }
       if (action === 'calendars') return res.status(200).json({ calendars: await calendars(userId, row, config, deadline), selectedCalendarIds: row?.selected_calendar_ids || [] });
       if (action === 'select') {
         const ids = req.body?.calendarIds;
@@ -432,9 +621,11 @@ export function createGoogleCalendarHandler({ env = process.env, supabase, fetch
       let firstFailure;
       for (const id of selected) {
         try {
+          const metadata = {};
           const items = await paginated(`calendars/${encodeURIComponent(id)}/events`, { ...range, singleEvents: 'true', showDeleted: 'true',
-            fields: 'nextPageToken,items(id,recurringEventId,originalStartTime,start,end,summary,status,transparency)' }, userId, row, config, deadline);
-          events.push(...items.map((event) => normalizeEvent(event, id)).filter(Boolean));
+            fields: 'nextPageToken,accessRole,timeZone,items(id,etag,recurringEventId,originalStartTime,start,end,summary,status,transparency,locked,eventType,recurrence,organizer(self),guestsCanModify)' },
+          userId, row, config, deadline, metadata);
+          events.push(...items.map((event) => normalizeEvent(event, id, { ...metadata, canWrite: canWrite(userId, row, config) })).filter(Boolean));
           completed += 1;
         } catch (error) {
           if (!(error instanceof CalendarError) || ['reconnect_required', 'storage_unavailable', 'not_connected'].includes(error.code)) throw error;

@@ -216,6 +216,13 @@ export default function TodayV2Page() {
   const [habitEditorValue, setHabitEditorValue] = useState(null);
   const [menuOpenHabitId, setMenuOpenHabitId] = useState(null);
   const [googleEvents, setGoogleEvents] = useState([]);
+  const [googleControls, setGoogleControls] = useState(null);
+  const [googleWriting, setGoogleWriting] = useState(false);
+  const googleWritingRef = React.useRef(false);
+  const onGoogleWritePending = React.useCallback((pending) => {
+    googleWritingRef.current = pending;
+    setGoogleWriting(pending);
+  }, []);
   const {
     loading,
     error,
@@ -286,7 +293,7 @@ export default function TodayV2Page() {
   };
 
   const onCompleteReview = async () => {
-    if (readOnly) return;
+    if (readOnly || googleWritingRef.current) return;
     try {
       const savedReview = await completeReview();
       if (savedReview?.completed_at) navigate('/home');
@@ -603,6 +610,17 @@ export default function TodayV2Page() {
 
         {ENABLE_TODAY_V2_SCHEDULER && (
           <div className="space-y-3">
+          <GoogleCalendarConnection
+            userId={user?.id}
+            localDate={state.tomorrowLocalDate}
+            timezone={state.timezoneName}
+            includeNextDay
+            onEvents={setGoogleEvents}
+            onControls={setGoogleControls}
+            onWritePending={onGoogleWritePending}
+            readOnly={readOnly}
+            completionSaving={completionSaving}
+          />
           <TomorrowScheduler
             userId={user?.id}
             localDate={state.tomorrowLocalDate}
@@ -628,16 +646,11 @@ export default function TodayV2Page() {
             saveStatus={scheduleSaveStatus}
             saveError={scheduleError}
             googleEvents={googleEvents}
+            onGoogleEdit={googleControls?.edit}
+            onGoogleUpdate={googleControls?.update}
             onUpdate={updateSchedule}
             onUnschedule={unschedule}
             onRetry={load}
-          />
-          <GoogleCalendarConnection
-            userId={user?.id}
-            localDate={state.tomorrowLocalDate}
-            timezone={state.timezoneName}
-            includeNextDay
-            onEvents={setGoogleEvents}
           />
           </div>
         )}
@@ -651,11 +664,11 @@ export default function TodayV2Page() {
             {!readOnly && (
               <button
                 type="button"
-                disabled={!completionGate.canComplete || completionSaving}
+                disabled={!completionGate.canComplete || completionSaving || googleWriting}
                 onClick={onCompleteReview}
                 className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {completionSaving ? 'Completing…' : 'Complete tonight\'s review'}
+                {completionSaving ? 'Completing…' : googleWriting ? 'Saving Google event…' : 'Complete tonight\'s review'}
               </button>
             )}
           </div>

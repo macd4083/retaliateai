@@ -84,7 +84,7 @@ function response() {
   };
 }
 
-describe('secure read-only Google Calendar backend', () => {
+describe('secure Google Calendar backend', () => {
   let db;
   let fetchImpl;
   let handler;
@@ -98,14 +98,15 @@ describe('secure read-only Google Calendar backend', () => {
   async function call(action, { body = {}, query = {}, headers = {}, method } = {}) {
     const res = response();
     await handler({
-      method: method || (['connect', 'select', 'disconnect'].includes(action) ? 'POST' : 'GET'),
+      method: method || (['connect', 'select', 'disconnect', 'create', 'update', 'delete'].includes(action) ? 'POST' : 'GET'),
       query: { action, ...query }, body,
       headers: { authorization: ['Bearer', 'supabase-test-value'].join(' '), ...headers },
     }, res);
     return res;
   }
-  function connected({ selected = ['primary'], expired = false, userId = USER } = {}) {
-    const tokens = { access_token: 'google-access-test-value', refresh_token: 'google-refresh-test-value', expires_at: CLOCK + (expired ? -1 : 3600000) };
+  function connected({ selected = ['primary'], expired = false, userId = USER, scopes } = {}) {
+    const tokens = { access_token: 'google-access-test-value', refresh_token: 'google-refresh-test-value',
+      expires_at: CLOCK + (expired ? -1 : 3600000), ...(scopes ? { scopes } : {}) };
     db.connections.set(userId, { user_id: userId, tokens_encrypted: encrypt(tokens, KEY, `tokens:${userId}`), selected_calendar_ids: selected });
     return tokens;
   }
@@ -131,7 +132,7 @@ describe('secure read-only Google Calendar backend', () => {
     expect(() => decrypt(one, Buffer.alloc(32, 8), `tokens:${USER}`)).toThrow();
     expect(() => encryptionKey('not-a-key')).toThrow();
   });
-  it.each(['status', 'connect', 'calendars', 'select', 'events', 'disconnect'])('requires verified Supabase bearer auth for %s', async (action) => {
+  it.each(['status', 'connect', 'calendars', 'select', 'events', 'disconnect', 'create', 'update', 'delete'])('requires verified Supabase bearer auth for %s', async (action) => {
     const res = await call(action, { headers: { authorization: '' } });
     expect(res.statusCode).toBe(401);
     expect(db.from).not.toHaveBeenCalled();
@@ -179,10 +180,11 @@ describe('secure read-only Google Calendar backend', () => {
       { data: null, error: { message: 'Finalizer missing' } } : { data: [], error: null });
     expect((await call('status')).body.schemaAvailable).toBe(false);
   });
-  it('reports status without decrypting or returning credentials', async () => {
+  it('reports legacy permission status without returning credentials', async () => {
     connected();
     const res = await call('status');
-    expect(res.body).toEqual({ configured: true, schemaAvailable: true, connected: true, selectedCalendarIds: ['primary'] });
+    expect(res.body).toEqual({ configured: true, schemaAvailable: true, connected: true, selectedCalendarIds: ['primary'],
+      canWrite: false, needsUpgrade: true });
     expect(res.headers['Cache-Control']).toBe('no-store');
     expect(fetchImpl).not.toHaveBeenCalled();
   });
@@ -674,5 +676,438 @@ describe('secure read-only Google Calendar backend', () => {
     expect(one.id).not.toBe(two.id);
     expect(one.id).not.toBe(normalizeEvent(event, 'calendar-two').id);
     expect(normalizeEvent({ ...event, status: 'cancelled' }, 'calendar-one')).toBeNull();
+  });
+
+  describe('authenticated independent event mutations', () => {
+    const requestId = '12345678-1234-4123-8123-123456789abc';
+    const timed = { summary: 'Independent Google event', start: { dateTime: '2026-10-06T10:00:00Z', timeZone: 'Europe/London' },
+      end: { dateTime: '2026-10-06T11:00:00Z', timeZone: 'Europe/London' } };
+    const current = { ...event, summary: 'Original title', etag: '"version-one"', eventType: 'default',
+      organizer: { self: true },
+      description: 'Unrelated private description', attendees: [{ email: 'private@example.test' }],
+      conferenceData: { conferenceId: 'preserved' } };
+    const creation = (eventPayload = timed) => ({ calendarId: 'primary', requestId, event: eventPayload });
+    const change = (eventPayload = { summary: 'Updated title' }) => ({ calendarId: 'primary', eventId: current.id,
+      etag: current.etag, event: eventPayload });
+    function role(accessRole = 'owner', extra = {}) {
+      fetchImpl.mockResolvedValueOnce(googleResponse({ items: [{ id: 'primary', primary: true, timeZone: 'Europe/London', accessRole, ...extra }] }));
+    }
+    function getEvent(extra = {}) {
+      fetchImpl.mockResolvedValueOnce(googleResponse({ ...current, ...extra }));
+    }
+    beforeEach(() => connected({ scopes: GOOGLE_CALENDAR_SCOPES }));
+
+    it('requests only event CRUD and calendar-list readonly scopes', () => {
+      expect(GOOGLE_CALENDAR_SCOPES).toEqual(['https://www.googleapis.com/auth/calendar.events',
+        'https://www.googleapis.com/auth/calendar.calendarlist.readonly']);
+    });
+    it('persists granted scopes within encrypted tokens and reports upgrade eligibility', async () => {
+      const { state, cookie } = await flow();
+      tokenSuccess();
+      await call('callback', { query: { state, code: 'code' }, headers: { cookie } });
+      expect(decrypt(db.connections.get(USER).tokens_encrypted, KEY, `tokens:${USER}`).scopes).toEqual(GOOGLE_CALENDAR_SCOPES);
+      expect(JSON.stringify(db.connections.get(USER))).not.toContain('calendar.events');
+      expect((await call('status')).body).toMatchObject({ canWrite: true, needsUpgrade: false });
+    });
+    it.each([undefined, ['https://www.googleapis.com/auth/calendar.events.readonly', GOOGLE_CALENDAR_SCOPES[1]],
+      [GOOGLE_CALENDAR_SCOPES[0]], ['https://www.googleapis.com/auth/calendar']])('rejects legacy or insufficient scopes: %j', async (scopes) => {
+      connected({ scopes });
+      expect((await call('status')).body).toMatchObject({ canWrite: false, needsUpgrade: true });
+      for (const action of ['create', 'update', 'delete']) {
+        const res = await call(action, { body: action === 'create' ? creation() : change() });
+        expect(res.statusCode).toBe(403);
+        expect(res.body.code).toBe('permission_upgrade_required');
+        expect(res.body.error).toMatch(/Reconnect/);
+      }
+      expect(fetchImpl).not.toHaveBeenCalled();
+    });
+    it('retains legacy read viewing after a scope-less refresh without elevating permissions', async () => {
+      connected({ expired: true });
+      tokenSuccess({ scope: undefined, refresh_token: undefined });
+      fetchImpl.mockResolvedValueOnce(googleResponse({ accessRole: 'owner', items: [current] }));
+      const res = await call('events', { query: range });
+      expect(res.body.events[0]).toMatchObject({ editable: false, eventId: current.id, etag: current.etag });
+      expect((await call('status')).body).toMatchObject({ needsUpgrade: true, canWrite: false });
+    });
+    it('preserves write scopes on a scope-less refresh', async () => {
+      connected({ scopes: GOOGLE_CALENDAR_SCOPES, expired: true });
+      tokenSuccess({ scope: undefined, refresh_token: undefined });
+      role();
+      getEvent();
+      fetchImpl.mockResolvedValueOnce(googleResponse({ ...current, summary: 'Updated title' }));
+      expect((await call('update', { body: change() })).statusCode).toBe(200);
+      expect(decrypt(db.connections.get(USER).tokens_encrypted, KEY, `tokens:${USER}`).scopes).toEqual(GOOGLE_CALENDAR_SCOPES);
+    });
+    it.each(['reader', 'freeBusyReader', 'none', 'writerWithoutPrivateAccess', undefined])('denies a fresh non-writing role: %s', async (accessRole) => {
+      role(accessRole === undefined ? null : accessRole);
+      const res = await call('create', { body: creation() });
+      expect(res.body.code).toBe('calendar_read_only');
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    });
+    it.each(['writer', 'owner'])('creates on a fresh %s calendar with a deterministic provider-safe ID', async (accessRole) => {
+      role(accessRole);
+      fetchImpl.mockImplementationOnce(async (_url, options) => googleResponse({ ...JSON.parse(options.body), etag: '"created"',
+        organizer: { self: true } }));
+      const res = await call('create', { body: { ...creation(), user_id: OTHER, commitmentId: 'ignored-local-id' } });
+      expect(res.statusCode).toBe(200);
+      const payload = JSON.parse(fetchImpl.mock.calls[1][1].body);
+      expect(payload.id).toMatch(/^[a-v0-9]{65}$/);
+      expect(payload).toMatchObject({ summary: timed.summary, start: timed.start, end: timed.end });
+      expect(payload).not.toHaveProperty('commitmentId');
+      expect(res.body.event).toMatchObject({ eventId: payload.id, calendarId: 'primary', title: timed.summary, editable: true,
+        timeZone: 'Europe/London', etag: '"created"', recurringEventId: null });
+      expect(JSON.stringify(res.body)).not.toContain('retaliateRequest');
+      expect(db.operations.every((operation) => operation.table.startsWith('today_v2_google_'))).toBe(true);
+      expect(db.operations.filter((operation) => operation.action !== 'select')).toHaveLength(0);
+    });
+    it('recognizes the primary alias from a calendar list containing its actual email ID', async () => {
+      role('owner', { id: 'owner@example.test' });
+      getEvent();
+      fetchImpl.mockResolvedValueOnce(googleResponse(current));
+      expect((await call('update', { body: change() })).statusCode).toBe(200);
+    });
+    it('never borrows another authenticated user connection or credentials', async () => {
+      connected({ userId: OTHER, scopes: GOOGLE_CALENDAR_SCOPES });
+      db.connections.delete(USER);
+      const res = await call('update', { body: { ...change(), user_id: OTHER } });
+      expect(res.body.code).toBe('not_connected');
+      expect(fetchImpl).not.toHaveBeenCalled();
+      expect(db.connections.has(OTHER)).toBe(true);
+    });
+    it('never trusts a client-provided writing role for an absent calendar', async () => {
+      role('owner', { id: 'different-calendar' });
+      expect((await call('create', { body: { ...creation(), calendarId: 'unavailable', accessRole: 'owner' } })).body.code).toBe('calendar_read_only');
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    });
+    it.each(['create', 'update', 'delete'])('enforces POST and same-origin for %s', async (action) => {
+      expect((await call(action, { method: 'GET' })).statusCode).toBe(405);
+      expect((await call(action, { headers: { origin: 'https://attacker.test' }, body: creation() })).statusCode).toBe(403);
+      db.auth.getUser.mockResolvedValueOnce({ data: { user: null }, error: { message: 'invalid' } });
+      expect((await call(action, { body: creation() })).statusCode).toBe(401);
+      expect(fetchImpl).not.toHaveBeenCalled();
+    });
+    it('uses a time-only PATCH and a fetched version without replacing unrelated fields', async () => {
+      role();
+      getEvent();
+      const eventPatch = { end: { dateTime: '2026-10-06T12:00:00Z', timeZone: 'Europe/London' } };
+      fetchImpl.mockResolvedValueOnce(googleResponse({ ...current, ...eventPatch }));
+      const res = await call('update', { body: change(eventPatch) });
+      expect(res.statusCode).toBe(200);
+      expect(fetchImpl.mock.calls[1][1].method).toBe('GET');
+      const options = fetchImpl.mock.calls[2][1];
+      expect(options.method).toBe('PATCH');
+      expect(options.headers['If-Match']).toBe(current.etag);
+      expect(JSON.parse(options.body)).toEqual(eventPatch);
+      expect(JSON.stringify(res.body)).not.toContain('Unrelated private');
+      expect(res.body.event.end).toBe(eventPatch.end.dateTime);
+    });
+    it('uses a fetched etag even when the caller does not supply one', async () => {
+      role();
+      getEvent();
+      fetchImpl.mockResolvedValueOnce(googleResponse(current));
+      const body = change();
+      delete body.etag;
+      expect((await call('update', { body })).statusCode).toBe(200);
+      expect(fetchImpl.mock.calls[2][1].headers['If-Match']).toBe(current.etag);
+    });
+    it('rejects a stale client etag before sending a mutation', async () => {
+      role();
+      getEvent({ etag: '"new-version"' });
+      expect((await call('update', { body: change() })).body.code).toBe('event_conflict');
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+    });
+    it('refuses a provider response without an etag', async () => {
+      role();
+      getEvent({ etag: undefined });
+      expect((await call('delete', { body: change() })).statusCode).toBe(502);
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+    });
+    it.each([
+      { locked: true }, { recurrence: ['RRULE:FREQ=DAILY'] }, { eventType: 'birthday' },
+      { eventType: 'outOfOffice' }, { eventType: 'focusTime' }, { eventType: 'workingLocation' }, { status: 'cancelled' },
+    ])('rejects locked, special, cancelled and whole-series events: %j', async (extra) => {
+      for (const action of ['update', 'delete']) {
+        role();
+        getEvent(extra);
+        expect((await call(action, { body: change() })).body.code).toBe('event_not_editable');
+      }
+      expect(fetchImpl).toHaveBeenCalledTimes(4);
+    });
+    it.each(['update', 'delete'])('mutates only a recurring instance ID for %s', async (action) => {
+      const instance = { ...current, id: 'series_20261006T100000Z', recurringEventId: 'series',
+        originalStartTime: current.start };
+      role();
+      getEvent(instance);
+      const json = vi.fn(async () => { throw new Error('204 has no JSON'); });
+      fetchImpl.mockResolvedValueOnce(action === 'delete' ? { ok: true, status: 204, json } : googleResponse(instance));
+      const res = await call(action, { body: { ...change(), eventId: instance.id } });
+      expect(res.statusCode).toBe(200);
+      expect(fetchImpl.mock.calls[2][0]).toContain(`/events/${instance.id}`);
+      expect(fetchImpl.mock.calls[2][1].headers['If-Match']).toBe(current.etag);
+      if (action === 'delete') {
+        expect(res.body).toEqual({ deleted: true, calendarId: 'primary', eventId: instance.id });
+        expect(json).not.toHaveBeenCalled();
+      } else expect(res.body.event.recurringEventId).toBe('series');
+    });
+    it('creates and patches all-day events with exclusive end dates', async () => {
+      const allDay = { summary: 'All-day', start: { date: '2028-02-29' }, end: { date: '2028-03-01' } };
+      role();
+      fetchImpl.mockImplementationOnce(async (_url, options) => googleResponse(JSON.parse(options.body)));
+      const created = await call('create', { body: creation(allDay) });
+      expect(created.body.event).toMatchObject({ allDay: true, start: '2028-02-29', end: '2028-03-01' });
+      role();
+      getEvent(allDay);
+      fetchImpl.mockResolvedValueOnce(googleResponse({ ...current, ...allDay, end: { date: '2028-03-02' } }));
+      const patched = await call('update', { body: change({ end: { date: '2028-03-02' } }) });
+      expect(patched.statusCode).toBe(200);
+      expect(JSON.parse(fetchImpl.mock.calls[4][1].body)).toEqual({ end: { date: '2028-03-02' } });
+    });
+    it.each([
+      { summary: 'Multi-month timed event', start: { dateTime: '2026-10-06T10:00:00Z', timeZone: 'Europe/London' },
+        end: { dateTime: '2027-01-06T11:00:00Z', timeZone: 'Europe/London' } },
+      { summary: 'Multi-month all-day event', start: { date: '2026-10-06' }, end: { date: '2027-01-06' } },
+    ])('creates and updates long valid Google events without an arbitrary duration cap: %j', async (longEvent) => {
+      role();
+      fetchImpl.mockImplementationOnce(async (_url, options) => googleResponse({ ...JSON.parse(options.body),
+        organizer: { self: true } }));
+      const created = await call('create', { body: creation(longEvent) });
+      expect(created.statusCode).toBe(200);
+      expect(created.body.event.end).toBe(longEvent.end.date || longEvent.end.dateTime);
+      role();
+      getEvent({ start: longEvent.start, end: longEvent.start.date ? { date: '2026-10-07' } : current.end });
+      fetchImpl.mockResolvedValueOnce(googleResponse({ ...current, ...longEvent }));
+      expect((await call('update', { body: change({ end: longEvent.end }) })).statusCode).toBe(200);
+      expect(JSON.parse(fetchImpl.mock.calls[4][1].body)).toEqual({ end: longEvent.end });
+      role();
+      getEvent(longEvent);
+      fetchImpl.mockResolvedValueOnce(googleResponse({ ...current, ...longEvent, summary: 'Renamed long event' }));
+      expect((await call('update', { body: change({ summary: 'Renamed long event' }) })).statusCode).toBe(200);
+      expect(JSON.parse(fetchImpl.mock.calls[7][1].body)).toEqual({ summary: 'Renamed long event' });
+    });
+    it.each([
+      { summary: '' }, { summary: 'x'.repeat(1025) }, { summary: 'bad\nname' }, { summary: null },
+      { recurrence: ['RRULE:FREQ=DAILY'] }, { attendees: [] }, { description: 'not allowed' },
+      { start: null }, { start: { date: '2026-02-29' } }, { start: { date: '2026-04-31' } },
+      { start: { date: '0000-01-01' } }, { start: { date: '2026-10-06', dateTime: timed.start.dateTime } },
+      { start: { dateTime: '2026-02-30T10:00:00Z' } }, { start: { dateTime: '2026-10-06T24:00:00Z' } },
+      { start: { dateTime: '2026-10-06T10:60:00Z' } }, { start: { dateTime: '2026-10-06T10:00:60Z' } },
+      { start: { dateTime: '2026-10-06T10:00:00+24:00' } }, { start: { dateTime: '2026-10-06T10:00:00' } },
+      { start: { ...timed.start, timeZone: 'Imaginary/City' } }, { start: { ...timed.start, timeZone: '+01:00' } },
+      { end: timed.start }, { end: { date: '2026-10-07' } },
+    ])('rejects unsafe or invalid event payloads before creating: %j', async (extra) => {
+      expect((await call('create', { body: creation({ ...timed, ...extra }) })).body.code).toBe('invalid_event');
+      expect(fetchImpl).not.toHaveBeenCalled();
+    });
+    it.each(['', 'not-a-uuid', null, '12345678-1234-0123-8123-123456789abc'])('requires a creation UUID: %s', async (invalid) => {
+      expect((await call('create', { body: { ...creation(), requestId: invalid } })).body.code).toBe('invalid_request_id');
+      expect(fetchImpl).not.toHaveBeenCalled();
+    });
+    it.each([{ calendarId: 'calendar with spaces' }, { calendarId: 'id\ninjected' }, { eventId: 'id/escape' }, { eventId: '' },
+      { etag: '"version"\r\ninjected' }])('rejects invalid IDs and etags: %j', async (extra) => {
+      expect((await call('update', { body: { ...change(), ...extra } })).statusCode).toBe(400);
+      expect(fetchImpl).not.toHaveBeenCalled();
+    });
+    it('allows opaque Google calendar IDs while encoding URL components and verifying fresh roles', async () => {
+      const calendarId = 'team#calendar/opaque?name@example.test';
+      role('writer', { id: calendarId });
+      getEvent();
+      fetchImpl.mockResolvedValueOnce(googleResponse(current));
+      expect((await call('update', { body: { ...change(), calendarId } })).statusCode).toBe(200);
+      expect(fetchImpl.mock.calls[1][0]).toContain(`/calendars/${encodeURIComponent(calendarId)}/events/`);
+      expect(fetchImpl.mock.calls[2][0]).toContain(`/calendars/${encodeURIComponent(calendarId)}/events/`);
+    });
+    it.each([undefined, false])('does not advertise or mutate invited events without guest permission: %s', async (guestsCanModify) => {
+      const invited = { ...current, organizer: { self: false }, guestsCanModify };
+      fetchImpl.mockResolvedValueOnce(googleResponse({ accessRole: 'owner', items: [invited] }));
+      const listed = await call('events', { query: range });
+      expect(listed.body.events[0].editable).toBe(false);
+      const fields = new URL(fetchImpl.mock.calls[0][0]).searchParams.get('fields');
+      expect(fields).toContain('organizer(self)');
+      expect(fields).toContain('guestsCanModify');
+      for (const action of ['update', 'delete']) {
+        role();
+        getEvent(invited);
+        expect((await call(action, { body: change() })).body.code).toBe('event_not_editable');
+      }
+      expect(fetchImpl).toHaveBeenCalledTimes(5);
+    });
+    it.each([{ organizer: { self: true }, guestsCanModify: false },
+      { organizer: { self: false }, guestsCanModify: true }, {}])('allows verified organizers or explicitly editable invitations: %j', async (extra) => {
+      const allowed = { ...current, ...extra };
+      fetchImpl.mockResolvedValueOnce(googleResponse({ accessRole: 'owner', items: [allowed] }));
+      expect((await call('events', { query: range })).body.events[0].editable).toBe(true);
+      role();
+      getEvent(allowed);
+      fetchImpl.mockResolvedValueOnce(googleResponse(allowed));
+      expect((await call('update', { body: change() })).statusCode).toBe(200);
+    });
+    it.each([undefined, {}, { email: 'other@example.test' }])('conservatively rejects missing organizer ownership: %j', async (organizer) => {
+      const unknownOwnership = { ...current, organizer };
+      fetchImpl.mockResolvedValueOnce(googleResponse({ accessRole: 'owner', items: [unknownOwnership] }));
+      expect((await call('events', { query: range })).body.events[0].editable).toBe(false);
+      for (const action of ['update', 'delete']) {
+        role();
+        getEvent(unknownOwnership);
+        expect((await call(action, { body: change() })).body.code).toBe('event_not_editable');
+      }
+      expect(fetchImpl).toHaveBeenCalledTimes(5);
+    });
+    it('allows explicitly modifiable guests even when organizer ownership is omitted', async () => {
+      const allowed = { ...current, organizer: {}, guestsCanModify: true };
+      fetchImpl.mockResolvedValueOnce(googleResponse({ accessRole: 'writer', items: [allowed] }));
+      expect((await call('events', { query: range })).body.events[0].editable).toBe(true);
+      role('writer');
+      getEvent(allowed);
+      fetchImpl.mockResolvedValueOnce(googleResponse(allowed));
+      expect((await call('update', { body: change() })).statusCode).toBe(200);
+    });
+    it.each([403, 404, 410, 412])('returns safe mutation errors for provider status %s', async (status) => {
+      role();
+      getEvent();
+      fetchImpl.mockResolvedValueOnce(googleResponse({ error: { message: 'secret-provider-details' } }, status));
+      const res = await call('update', { body: change() });
+      expect(res.statusCode).toBe(status);
+      expect(res.body.code).toBe({ 403: 'calendar_read_only', 404: 'event_not_found', 410: 'event_gone', 412: 'event_conflict' }[status]);
+      expect(JSON.stringify(res.body)).not.toContain('secret-provider-details');
+    });
+    it('refreshes a rejected credential once and reuses the same conditional mutation', async () => {
+      role();
+      getEvent();
+      fetchImpl.mockResolvedValueOnce(googleResponse({ error: {} }, 401));
+      tokenSuccess({ refresh_token: undefined, scope: undefined });
+      fetchImpl.mockResolvedValueOnce(googleResponse(current));
+      expect((await call('update', { body: change() })).statusCode).toBe(200);
+      expect(fetchImpl.mock.calls[4][1].headers).toMatchObject({ 'If-Match': current.etag,
+        Authorization: ['Bearer', 'new-google-access-value'].join(' ') });
+    });
+    it('removes only this user connection after revocation during a write', async () => {
+      connected({ userId: OTHER, scopes: GOOGLE_CALENDAR_SCOPES });
+      role();
+      getEvent();
+      fetchImpl.mockResolvedValueOnce(googleResponse({ error: {} }, 401));
+      fetchImpl.mockResolvedValueOnce(googleResponse({ error: 'invalid_grant' }, 400));
+      const res = await call('update', { body: change() });
+      expect(res.body.code).toBe('reconnect_required');
+      expect(db.connections.has(USER)).toBe(false);
+      expect(db.connections.has(OTHER)).toBe(true);
+    });
+    it('requires a permission upgrade if a forced refresh removes event editing scope', async () => {
+      role();
+      getEvent();
+      fetchImpl.mockResolvedValueOnce(googleResponse({ error: {} }, 401));
+      tokenSuccess({ refresh_token: undefined, scope: ['https://www.googleapis.com/auth/calendar.events.readonly',
+        GOOGLE_CALENDAR_SCOPES[1]].join(' ') });
+      const res = await call('update', { body: change() });
+      expect(res.body.code).toBe('permission_upgrade_required');
+      expect(fetchImpl).toHaveBeenCalledTimes(4);
+      expect((await call('status')).body).toMatchObject({ canWrite: false, needsUpgrade: true });
+    });
+    it('requires reconnection after a newly refreshed credential is rejected during a mutation', async () => {
+      role();
+      getEvent();
+      fetchImpl.mockResolvedValueOnce(googleResponse({ error: {} }, 401));
+      tokenSuccess({ refresh_token: undefined });
+      fetchImpl.mockResolvedValueOnce(googleResponse({ error: {} }, 401));
+      expect((await call('update', { body: change() })).body.code).toBe('reconnect_required');
+      expect(db.connections.has(USER)).toBe(false);
+    });
+    it.each([404, 410])('stops before mutating when the fetched event returns %s', async (status) => {
+      role();
+      fetchImpl.mockResolvedValueOnce(googleResponse({ error: { message: 'private' } }, status));
+      expect((await call('delete', { body: change() })).statusCode).toBe(status);
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+    });
+    it('rejects a fetched ID that does not match the requested event', async () => {
+      role();
+      getEvent({ id: 'another-event' });
+      expect((await call('delete', { body: change() })).body.code).toBe('event_not_editable');
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+    });
+    it('does not report successful creation for an incomplete provider response', async () => {
+      role();
+      fetchImpl.mockResolvedValueOnce(googleResponse({}));
+      expect((await call('create', { body: creation() })).statusCode).toBe(502);
+    });
+    it('reconciles retries only after checking the existing private request marker', async () => {
+      let created;
+      role();
+      fetchImpl.mockImplementationOnce(async (_url, options) => {
+        created = { ...JSON.parse(options.body), etag: '"created"' };
+        return googleResponse(created);
+      });
+      const first = await call('create', { body: creation() });
+      role();
+      fetchImpl.mockResolvedValueOnce(googleResponse({ error: {} }, 409));
+      fetchImpl.mockImplementationOnce(async () => googleResponse(created));
+      const retry = await call('create', { body: creation() });
+      expect(retry.body).toEqual(first.body);
+      expect(JSON.parse(fetchImpl.mock.calls[3][1].body).id).toBe(created.id);
+      expect(fetchImpl.mock.calls[4][1].method).toBe('GET');
+      role();
+      fetchImpl.mockResolvedValueOnce(googleResponse({ error: {} }, 409));
+      fetchImpl.mockImplementationOnce(async () => googleResponse({ ...created, extendedProperties: { private: { retaliateRequest: 'other-user' } } }));
+      expect((await call('create', { body: creation() })).body.code).toBe('request_conflict');
+    });
+    it('binds creation IDs to the authenticated user even on a shared calendar', async () => {
+      const ids = [];
+      for (const userId of [USER, OTHER]) {
+        connected({ userId, scopes: GOOGLE_CALENDAR_SCOPES });
+        db.auth.getUser.mockResolvedValueOnce({ data: { user: { id: userId } } });
+        role();
+        fetchImpl.mockImplementationOnce(async (_url, options) => {
+          const created = JSON.parse(options.body);
+          ids.push(created.id);
+          return googleResponse(created);
+        });
+        expect((await call('create', { body: creation() })).statusCode).toBe(200);
+      }
+      expect(ids[0]).not.toBe(ids[1]);
+    });
+    it('does not duplicate a retried request when the caller changes its title', async () => {
+      let created;
+      role();
+      fetchImpl.mockImplementationOnce(async (_url, options) => {
+        created = JSON.parse(options.body);
+        return googleResponse(created);
+      });
+      await call('create', { body: creation() });
+      role();
+      fetchImpl.mockResolvedValueOnce(googleResponse({ error: {} }, 409));
+      fetchImpl.mockImplementationOnce(async () => googleResponse(created));
+      const res = await call('create', { body: creation({ ...timed, summary: 'Changed on retry' }) });
+      expect(res.body.event.title).toBe(timed.summary);
+      expect(fetchImpl.mock.calls.filter(([, options]) => options.method === 'PATCH')).toHaveLength(0);
+    });
+    it('exposes writing roles only together with granted editing scopes in calendar choices', async () => {
+      role('writer');
+      expect((await call('calendars')).body.calendars[0]).toMatchObject({ accessRole: 'writer', canWrite: true });
+      connected();
+      role('owner');
+      expect((await call('calendars')).body.calendars[0]).toMatchObject({ accessRole: 'owner', canWrite: false });
+    });
+    it('reconciles a provider retry after an ambiguous server failure without duplicate creation', async () => {
+      let created;
+      role();
+      fetchImpl.mockImplementationOnce(async (_url, options) => {
+        created = JSON.parse(options.body);
+        return googleResponse({ error: {} }, 503);
+      });
+      fetchImpl.mockResolvedValueOnce(googleResponse({ error: {} }, 409));
+      fetchImpl.mockImplementationOnce(async () => googleResponse(created));
+      expect((await call('create', { body: creation() })).body.event.eventId).toBe(created.id);
+      expect(JSON.parse(fetchImpl.mock.calls[1][1].body).id).toBe(JSON.parse(fetchImpl.mock.calls[2][1].body).id);
+      expect(sleep).toHaveBeenCalledTimes(1);
+    });
+    it.each(['owner', 'writer', 'reader', 'freeBusyReader'])('combines fresh events-list role %s with scope and event eligibility', async (accessRole) => {
+      fetchImpl.mockResolvedValueOnce(googleResponse({ accessRole, timeZone: 'America/New_York',
+        items: [current, { ...current, id: 'locked', locked: true }, { ...current, id: 'special', eventType: 'focusTime' },
+          { ...current, id: 'master', recurrence: ['RRULE:FREQ=DAILY'] },
+          { ...current, id: 'instance', recurringEventId: 'master', originalStartTime: { dateTime: '2026-10-07T10:00:00Z' } }] }));
+      const res = await call('events', { query: range });
+      expect(res.body.events.map((item) => item.editable)).toEqual([
+        ['owner', 'writer'].includes(accessRole), false, false, false, ['owner', 'writer'].includes(accessRole),
+      ]);
+      expect(res.body.events[0].timeZone).toBe('America/New_York');
+    });
   });
 });

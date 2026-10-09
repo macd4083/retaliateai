@@ -3,17 +3,18 @@
 Status: **not cleared for production** until the owner records a successful Vercel
 deployment, dashboard configuration, and real-account/device checks below.
 Automated tests are not evidence of Google consent or iPhone/PWA behavior.
-No weekly review, Google event writeback, Apple sync, or legacy migration is included.
+Google event management and timed-block resizing are included. No weekly review,
+Apple sync, automatic commitment export, or legacy migration is included.
 
-## Deployment evidence and unresolved blocker
+## Historical deployment evidence (not a verified current failure)
 
 - PR #361 commit `0996fecb3908fe69b65926eb0ed63eed520417d7` has a failed
   Vercel status for deployment
   [`dpl_EEdkhU6Seho1Zu1J5PrSrJU6EThg`](https://vercel.com/matt-macdonalds-projects/retaliateai/EEdkhU6Seho1Zu1J5PrSrJU6EThg).
   GitHub's status contains only the instruction to run
   `npx vercel inspect dpl_EEdkhU6Seho1Zu1J5PrSrJU6EThg --logs`; Vercel logs and
-  dashboard access are unavailable here. This is the unresolved deploy blocker,
-  not a diagnosed code/config root cause.
+  dashboard access are unavailable here. This is a historical unresolved report,
+  not evidence that the current deployment fails or a diagnosed root cause.
 - **Required owner artifact:** provide that deployment URL and its first failing
   log section (failing command, error, and adjacent context; redact secrets).
   Until then, do not claim a Vercel fix or infer a root cause.
@@ -22,7 +23,7 @@ No weekly review, Google event writeback, Apple sync, or legacy migration is inc
   migration upgrade/idempotence tests, scheduler/Calendar tests, lint, the full
   regression suite, and production build. The separate successful "Vercel Preview
   Comments" check is not evidence of a successful deployment.
-- Current local reproduction on Node 22.23.3 / npm 10.9.9:
+- Historical local reproduction on Node 22.23.3 / npm 10.9.9:
 
   | Command | Exit | Wall time | Output |
   | --- | --- | --- | --- |
@@ -44,8 +45,11 @@ No weekly review, Google event writeback, Apple sync, or legacy migration is inc
   These checks rule out those local build/import/bundle-boundary failures; they do
   not rule out Vercel project settings, limits, or environment configuration.
 
-**Next owner action:** using authenticated Vercel access, run the exact inspect
-command above and attach the required artifact. Then compare these settings:
+The owner reports adding the production environment variables. Their values,
+environment targets, hosted schema, and deployed build have not been verified here.
+**Next owner action:** verify the current Production deployment and these settings.
+If it fails, attach its deployment URL and redacted failing log section; inspect the
+historical deployment above only if that failure remains relevant.
 
 | Setting | Required value/check |
 | --- | --- |
@@ -101,12 +105,12 @@ schedule loading. The scheduler now defaults on; only the exact value `false`
 disables it as an emergency rollback. Remove an existing `false` override or set
 `true`, then rebuild/redeploy (Vite variables are build-time).
 
-- `/today` (**Review & Plan**) renders the native `TomorrowScheduler` after
-  **6.2 Start focus**, followed by optional `GoogleCalendarConnection` import controls.
+- `/today` (**Review & Plan**) renders prominent `GoogleCalendarConnection` controls
+  immediately above the native `TomorrowScheduler` after **6.2 Start focus**.
   Retaliate app sign-in is required; Google sign-in is not. Without Google, the
   planner uses the full day grid with no empty external-calendar column.
-  Imported events share that grid as read-only availability, with overlapping
-  local/imported blocks placed in separate lanes.
+  Imported events share that grid, with overlapping local/imported blocks in
+  separate lanes. Google events with supported write permissions can be edited.
 - The side list reuses each ROI action's `action, starting task` label and all
   active habits due tomorrow. Drag a handle into a 15-minute slot, or click the
   item to choose a time. Scheduled items move from the list into the calendar
@@ -117,8 +121,8 @@ disables it as an emergency rollback. Remove an existing `false` override or set
   autosaved schedules, offline drafts, and completed-review edit locks.
 - `src/v2/services/scheduling.js` loads/saves owned blocks; `/home` shows the
   persisted schedule times, and `/settings` manages the Google connection.
-- `api/google-calendar.js` delegates to `server/googleCalendar.js` for authenticated,
-  read-only Google availability. Google is optional for local scheduling.
+- `api/google-calendar.js` delegates to `server/googleCalendar.js` for authenticated
+  Google event reads and writes. Google is optional for local scheduling.
 - The five SQL files listed below (or the consolidated SQL alternative) provide
   the database setup, including Google credentials storage. Missing schema now
   displays an actionable setup message on Review & Plan rather than vanishing.
@@ -131,7 +135,7 @@ the owner checks below still apply.
 ## Google Cloud owner setup
 
 1. In the intended Google Cloud project enable **Google Calendar API**. No Gmail,
-   Drive, or write API is needed.
+   Drive, or separate write API is needed.
 2. Configure the OAuth consent screen: External for personal/general Google
    accounts, or Internal only for the intended Workspace organization. Supply
    the real app support/contact details and authorized production domain.
@@ -141,7 +145,7 @@ the owner checks below still apply.
    opening access beyond authorized testers. An Internal app cannot test with
    arbitrary personal accounts.
 4. Create a **Web application** OAuth client. Request only:
-   - `https://www.googleapis.com/auth/calendar.events.readonly`
+   - `https://www.googleapis.com/auth/calendar.events`
    - `https://www.googleapis.com/auth/calendar.calendarlist.readonly`
 5. Add these exact authorized redirect URIs (including the query string):
    - Production: `https://retaliateai.com/api/google-calendar?action=callback`
@@ -184,6 +188,10 @@ Generate the encryption value privately with
 `node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"`;
 store it only in the secret manager/dashboard. Do not casually rotate it: old
 encrypted credentials will become unreadable and users will need to reconnect.
+Credentials exposed in conversation should be replaced privately. No rotation
+was performed by this change. Before replacing the encryption key, plan either a
+controlled old-key-to-new-key credential migration or a deliberate disconnect and
+reconnect rollout; simply changing it makes saved credentials unreadable.
 Keep existing Stripe, Resend, push, and cron configuration unchanged.
 The existing review-day boundary is 04:00 local; if overriding
 `VITE_TODAY_V2_DAY_BOUNDARY_HOUR`, keep client and server values consistent.
@@ -301,7 +309,83 @@ select
 -- true, false, true.
 ```
 
+## Google event management rollout
+
+This change adds no SQL and does not export local commitments. Google events are
+created explicitly with **New Google event** in a writable existing destination
+calendar. Retaliate email/password login is unchanged. Existing encrypted token
+storage holds grant scopes; old grants without proven write scope still show
+availability but require **Reconnect to enable event management** before writing.
+Reconnect uses fresh consent for exactly `calendar.events` and
+`calendar.calendarlist.readonly` (full URLs above), not calendar management scopes.
+
+The authenticated API adds POST `create`, `update`, and `delete`. It checks the
+current user's credentials and Google's current calendar access, then checks the
+target event's restrictions. Normal writable events need not have been created
+by Retaliate. Time/title edits use PATCH, preserving attendees, reminders,
+descriptions, and other unrelated fields. Conditional event writes reject stale
+versions. Creation retries reuse a user-bound event ID; no commitment mapping is
+needed because no commitment export is implemented.
+
+Recurring actions target the returned occurrence event ID, never the series
+master. All-day editing uses dates with an **exclusive end date** and has no timed
+resize handles. Timed blocks have top/bottom pointer/touch handles, a snapped
+preview, Save/Cancel, a 15-minute resize minimum, and exact-time form alternatives.
+The timeline uses elapsed instants through DST; local blocks retain the 24-hour
+duration limit and source-review ownership. Clipped continuation edges are not
+draggable; use the event form for cross-midnight Google edits. Failed Google
+writes restore the original overlay; local writes retain retryable native drafts.
+Completed-review/completion-in-progress controls remain locked.
+
+Official API references checked for this implementation:
+- [Scopes](https://developers.google.com/workspace/calendar/api/auth)
+- [Insert](https://developers.google.com/workspace/calendar/api/v3/reference/events/insert),
+  [patch](https://developers.google.com/workspace/calendar/api/v3/reference/events/patch),
+  [delete](https://developers.google.com/workspace/calendar/api/v3/reference/events/delete)
+- [Calendar list roles](https://developers.google.com/workspace/calendar/api/v3/reference/calendarList)
+- [Event restrictions](https://developers.google.com/workspace/calendar/api/v3/reference/events)
+- [Modify/delete recurring instances](https://developers.google.com/workspace/calendar/api/guides/recurringevents#modify-or-delete-instances)
+
+### Remaining owner steps
+
+1. Verify the Production environment target, all server variables and both public
+   Supabase build variables against the intended projects. Added variables are
+   user-reported, not dashboard-verified. Do not paste their values into the PR.
+2. Verify Calendar API enablement, Web client, exact production redirect/origin,
+   consent scopes, audience, publication/verification, and authorized test users.
+3. Verify existing SQL prerequisites and RLS using the queries above. No new
+   migration is required; include the existing habit recurrence migration
+   `20261010_today_v2_habit_recurrence.sql` if absent.
+4. Redeploy Production, record its SHA/URL, and verify authenticated status plus
+   the unauthenticated 401 endpoint smoke check.
+5. Reconnect an old read-only account; record the upgrade consent and verify
+   selected calendars remain usable. Mocked tests do not prove production consent.
+6. Run the following real-account tests on desktop and a touch device:
+   - Create a titled timed event in a writable secondary calendar; refresh both
+     apps, retry a failed creation, and confirm there is only one event.
+   - Edit and explicitly confirm deletion of an event created outside Retaliate.
+     Check untouched attendees/reminders/description remain intact after edits.
+   - Select a read-only calendar; confirm no write/resize controls are available.
+   - Change one recurring occurrence; confirm neighboring occurrences and the
+     series are unchanged. Edit an all-day event's dates and exclusive end.
+   - Resize start/end, cancel with Escape or Cancel, clamp below 15 minutes,
+     save across midnight and both DST transitions; exercise exact-time forms
+     with keyboard and touch. Verify local times persist on reload and `/home`.
+   - Complete/reopen review; confirm editing locks. Revoke Google authorization,
+     simulate network failure, disconnect while fetching, and switch app accounts:
+     no stale events or stuck saves, and native planning stays available.
+
 ## Deterministic validation
+
+For this event-management change, local validation passed: **422 scheduler tests,
+694 full-suite tests**, repository lint, production build, and changed JSX checked
+with the existing component lint rules. No SQL or dependencies changed, so SQL
+migration execution was not repeated. Browser-tool access was unavailable; actual
+Google consent, hosted schema, and real-device checks remain unperformed.
+CodeQL JavaScript analysis found **zero alerts**. The platform code-review model
+was unavailable; a separate read-only reviewer checked the changes, identified
+the organizer-permission default issue, and verified its correction.
+Existing non-fatal build warnings concern Browserslist data and bundle size.
 
 Run Node 22.x, `npm ci`, `npm run test:scheduler`, `npm run lint`,
 `npm run test:ci`, then `npm run build`. Vitest does not support Jest's
@@ -317,7 +401,7 @@ timeout root cause. Serial workers reduce resource contention; job/step limits
 make a recurrence fail visibly rather than hang indefinitely. CI still runs
 full coverage, SQL upgrade assertions, and repeated repair application.
 
-Final post-patch CI-equivalent results (Node 22.23.3, wall times; not a remote
+Historical release-guard CI-equivalent results (Node 22.23.3, wall times; not a remote
 Vercel deployment):
 
 | Command / sequence | Exit | Wall time | Output |
@@ -339,7 +423,7 @@ consolidated file's exact migration concatenation, including the new patch.
 
 ### Review/security evidence limitation
 
-An independent read-only code review found no significant issues, including the
+For the earlier release-guard patch, an independent read-only code review found no significant issues, including the
 final additive SQL guards and snapshot lock ordering. The automated review
 service could not run because `model claude-sonnet-4.6 not found in registry`.
 The required combined validation tool completed CodeQL's Actions analysis with
@@ -362,7 +446,7 @@ unperformed on real accounts/devices by the agent.**
 | [ ] | Open `/today`, `/home`, `/settings` directly and reload; open `/legacy/reflection` | SPA loads correct authenticated route, not 404; legacy bookmark redirects through `/app` to V2 even with the retired entry flag set to false |
 | [ ] | GET `/api/google-calendar?action=status` signed out | HTTP 401 JSON `unauthorized`, `Cache-Control: no-store`; never index.html or a browser asset |
 | [ ] | In signed-in app inspect status with valid session | Configured/schemaAvailable true after setup; no secret/token fields. Missing config/schema gives diagnostic, not broken review flow |
-| [ ] | Connect from Settings and from Review & Plan | Google consent requests only two readonly scopes; successful callback returns to initiating allowlisted route |
+| [ ] | Connect from Settings and from Review & Plan | Google consent requests only event read/write and calendar-list read-only scopes; successful callback returns to initiating allowlisted route |
 | [ ] | Cancel consent; retry, then replay an already-used callback | Cancel leaves review usable; retry works; replay rejected without replacing credentials |
 | [ ] | Select primary plus a secondary calendar, then select none and save | Matching timed/all-day overlay; empty selection clears overlay without disconnecting |
 | [ ] | Remove access to a selected secondary calendar in Google and reload | Stale calendar selection is recoverable; no phantom busy blocks or unusable scheduler |

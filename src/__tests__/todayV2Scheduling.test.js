@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   createActionIdentity, reconcileActionIdentities, zonedLocalTimeToTimestamp,
-  clipScheduleBlocksToDate, getScheduleDateBounds, getScheduleDayOffset, getScheduleLocalDate, normalizeScheduleBlock, scheduleBlocksOverlap, layoutScheduleBlocks, snapScheduleMinutes,
+  clipScheduleBlocksToDate, getScheduleDateBounds, getScheduleDayOffset, getScheduleLocalDate, normalizeScheduleBlock, resizeScheduleBlock, scheduleBlocksOverlap, layoutScheduleBlocks, snapScheduleMinutes,
 } from '../v2/today/scheduling';
 
 describe('scheduler identities', () => {
@@ -89,5 +89,22 @@ describe('zoned scheduling', () => {
     expect(scheduleBlocksOverlap(a, b)).toBe(true);
     expect(scheduleBlocksOverlap(a, c)).toBe(false);
     expect(layoutScheduleBlocks([c, b, a]).map((block) => block.lane)).toEqual([0, 1, 0]);
+  });
+  it.each([
+    ['2026-03-08', '2026-03-08T06:45:00Z', '2026-03-08T07:00:00Z', '2026-03-08T07:30:00.000Z'],
+    ['2026-11-01', '2026-11-01T05:45:00Z', '2026-11-01T06:00:00Z', '2026-11-01T06:30:00.000Z'],
+    ['2026-10-07', '2026-10-08T03:30:00Z', '2026-10-08T03:45:00Z', '2026-10-08T04:15:00.000Z'],
+  ])('resizes through DST or midnight using elapsed timeline minutes on %s', (date, starts_at, ends_at, expectedEnd) => {
+    const bounds = getScheduleDateBounds(date, 'America/New_York');
+    expect(resizeScheduleBlock({ starts_at, ends_at }, 'end', 30, bounds)).toEqual({
+      starts_at: new Date(starts_at).toISOString(), ends_at: expectedEnd,
+    });
+  });
+  it('clamps start to the owning day and duration to the local persistence limit', () => {
+    const bounds = getScheduleDateBounds('2026-10-07', 'UTC');
+    const block = { starts_at: '2026-10-07T00:15:00Z', ends_at: '2026-10-07T01:00:00Z' };
+    expect(resizeScheduleBlock(block, 'start', -60, bounds).starts_at).toBe(bounds.starts_at);
+    expect(resizeScheduleBlock(block, 'end', 2000, bounds).ends_at).toBe('2026-10-08T00:15:00.000Z');
+    expect(() => resizeScheduleBlock(block, 'invalid', 0, bounds)).toThrow('Invalid resize');
   });
 });

@@ -56,10 +56,10 @@ describe('Review & Plan calendar integration', () => {
     vi.unstubAllEnvs();
   });
 
-  it('shows the native calendar before optional Google import controls without an environment flag', async () => {
+  it('shows optional Google controls prominently above the native calendar without an environment flag', async () => {
     await render();
     const headings = [...container.querySelectorAll('h2, h3')].map((node) => node.textContent);
-    expect(headings.indexOf('Google Calendar')).toBeGreaterThan(headings.indexOf('Schedule tomorrow'));
+    expect(headings.indexOf('Google Calendar')).toBeLessThan(headings.indexOf('Schedule tomorrow'));
     expect(headings.indexOf('Schedule tomorrow')).toBeGreaterThan(headings.indexOf('6.2 Start focus'));
     expect(container.querySelector('[data-slot-timestamp]')).not.toBeNull();
     expect(container.querySelector('[aria-label="Google events"]')).toBeNull();
@@ -132,6 +132,35 @@ describe('Review & Plan calendar integration', () => {
     expect(container.querySelector('[data-schedule-key="action:write"]').textContent).toContain('09:00');
     expect(container.querySelector('[data-scheduler-edit-key="action:write"]').disabled).toBe(true);
     expect(container.textContent).toContain("Tonight's review is complete.");
+  });
+
+  it('does not allow review completion while a Google event write is pending', async () => {
+    review.completionGate = { ...review.completionGate, canComplete: true };
+    review.completeReview = vi.fn().mockResolvedValue({});
+    let resolveCreate;
+    fetchMock.mockImplementation((url) => {
+      if (url.includes('action=status')) return response({ connected: true, canWrite: true, selectedCalendarIds: ['primary'] });
+      if (url.includes('action=calendars')) return response({ calendars: [{ id: 'primary', accessRole: 'owner', summary: 'Personal' }], selectedCalendarIds: ['primary'] });
+      if (url.includes('action=create')) return new Promise((resolve) => { resolveCreate = resolve; });
+      return response({ events: [] });
+    });
+    await render();
+    await act(async () => Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'New Google event').click());
+    await act(async () => {
+      const title = document.querySelector('[aria-label="Event title"]');
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(title, 'Google meeting');
+      title.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => document.querySelector('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    const complete = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Saving Google event…');
+    expect(complete.disabled).toBe(true);
+    await act(async () => complete.click());
+    expect(review.completeReview).not.toHaveBeenCalled();
+    await act(async () => resolveCreate(await response({ event: { eventId: 'new' } })));
+    const resumedComplete = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === "Complete tonight's review");
+    expect(resumedComplete.disabled).toBe(false);
+    await act(async () => resumedComplete.click());
+    expect(review.completeReview).toHaveBeenCalledOnce();
   });
 
   it('retains an explicit false emergency rollback without hiding the rest of Review & Plan', async () => {

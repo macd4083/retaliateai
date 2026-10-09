@@ -50,6 +50,375 @@ describe('GoogleCalendarConnection UI contract', () => {
     expect(events.mock.calls.at(-1)[0][0].title).toBe('Meeting');
     expect(container.textContent).toContain('Choose calendars (1)');
   });
+  const editableEvent = {
+    id: 'google:primary:occurrence', eventId: 'occurrence', calendarId: 'primary', etag: '"version-1"',
+    title: 'Meeting', start: '2026-11-01T14:00:00Z', end: '2026-11-01T15:00:00Z',
+    allDay: false, editable: true, recurringEventId: 'series', timeZone: 'America/New_York',
+  };
+  const enableManagement = () => {
+    const original = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation((url, options) => {
+      if (url.includes('action=status')) return response({ connected: true, canWrite: true, selectedCalendarIds: ['primary'] });
+      if (url.includes('action=calendars')) return response({ calendars: [{ id: 'primary', summary: 'Personal', accessRole: 'owner' }, { id: 'read', summary: 'Read only', accessRole: 'reader' }, { id: 'unselected', summary: 'Other writable', accessRole: 'writer' }], selectedCalendarIds: ['primary'] });
+      if (url.includes('action=events')) return response({ events: [editableEvent, { ...editableEvent, id: 'read', eventId: 'readonly', editable: false, title: 'Read-only event' }] });
+      return original(url, options);
+    });
+  };
+
+  it('creates Google events independently using only writable destinations including unselected calendars', async () => {
+    enableManagement();
+    await render();
+    await click('New Google event');
+    const select = document.querySelector('[aria-label="Destination calendar"]');
+    expect(Array.from(select.options).map((option) => option.value)).toEqual(['primary', 'unselected']);
+    await act(async () => {
+      const title = document.querySelector('[aria-label="Event title"]');
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(title, 'New meeting');
+      title.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => document.querySelector('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    const request = fetchMock.mock.calls.find(([url]) => url.includes('action=create'));
+    expect(request[1].method).toBe('POST');
+    expect(JSON.parse(request[1].body)).toMatchObject({ calendarId: 'primary', requestId: expect.stringMatching(/^[a-f0-9-]{36}$/), event: { summary: 'New meeting' } });
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('offers stable edit/update controls and awaits an authenticated resize before refreshing', async () => {
+    enableManagement();
+    const onControls = vi.fn();
+    await render({ onControls });
+    const controls = onControls.mock.calls.at(-1)[0];
+    const original = fetchMock.getMockImplementation();
+    let resolveUpdate;
+    fetchMock.mockImplementation((url, options) => url.includes('action=update') ? new Promise((resolve) => { resolveUpdate = resolve; }) : original(url, options));
+    const eventCalls = fetchMock.mock.calls.filter(([url]) => url.includes('action=events')).length;
+    let updatePromise;
+    await act(async () => { updatePromise = controls.update(editableEvent, { starts_at: '2026-11-01T14:00:00Z', ends_at: '2026-11-01T16:00:00Z' }); });
+    const request = fetchMock.mock.calls.find(([url]) => url.includes('action=update'));
+    expect(JSON.parse(request[1].body)).toEqual({ calendarId: 'primary', eventId: 'occurrence', etag: '"version-1"', event: {
+      start: { dateTime: '2026-11-01T14:00:00.000Z', timeZone: 'America/New_York' },
+      end: { dateTime: '2026-11-01T16:00:00.000Z', timeZone: 'America/New_York' },
+    } });
+    expect(fetchMock.mock.calls.filter(([url]) => url.includes('action=events'))).toHaveLength(eventCalls);
+    await act(async () => resolveUpdate(await response({ event: editableEvent })));
+    await act(async () => updatePromise);
+    expect(fetchMock.mock.calls.filter(([url]) => url.includes('action=events'))).toHaveLength(eventCalls + 1);
+    await render({ onControls });
+    expect(onControls.mock.calls.at(-1)[0]).toBe(controls);
+  });
+
+  it('deletes only the selected recurring occurrence with etag after explicit confirmation', async () => {
+    enableManagement();
+    const onControls = vi.fn();
+    await render({ onControls });
+    await act(async () => onControls.mock.calls.at(-1)[0].edit(editableEvent));
+    const portalClick = async (text) => act(async () => Array.from(document.querySelectorAll('button')).find((button) => button.textContent === text).click());
+    await portalClick('Delete Google event');
+    expect(fetchMock.mock.calls.some(([url]) => url.includes('action=delete'))).toBe(false);
+    await portalClick('Confirm delete');
+    const request = fetchMock.mock.calls.find(([url]) => url.includes('action=delete'));
+    expect(JSON.parse(request[1].body)).toEqual({ calendarId: 'primary', eventId: 'occurrence', etag: '"version-1"' });
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('retains events after resize failure and permits a retry without a stuck pending state', async () => {
+    enableManagement();
+    const onControls = vi.fn();
+    await render({ onControls });
+    const controls = onControls.mock.calls.at(-1)[0];
+    const original = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation((url, options) => url.includes('action=update') ? response({ error: 'Event changed; refresh first', code: 'event_conflict' }, 409) : original(url, options));
+    const times = { starts_at: editableEvent.start, ends_at: editableEvent.end };
+    await act(async () => { await expect(controls.update(editableEvent, times)).rejects.toThrow('Event changed'); });
+    expect(events.mock.calls.at(-1)[0][0].title).toBe('Meeting');
+    expect(container.textContent).not.toContain('Updating calendar');
+    fetchMock.mockImplementation(original);
+    await act(async () => controls.update(editableEvent, times));
+    expect(fetchMock.mock.calls.filter(([url]) => url.includes('action=update'))).toHaveLength(2);
+    expect(container.textContent).not.toContain('Event changed');
+  });
+
+  it('rejects duplicate writes, recovers after failure, and preserves availability for permission upgrades', async () => {
+    enableManagement();
+    const onControls = vi.fn();
+    await render({ onControls });
+    const controls = onControls.mock.calls.at(-1)[0];
+    const original = fetchMock.getMockImplementation();
+    let resolveUpdate;
+    fetchMock.mockImplementation((url, options) => url.includes('action=update') ? new Promise((resolve) => { resolveUpdate = resolve; }) : original(url, options));
+    const times = { starts_at: '2026-11-01T14:00:00Z', ends_at: '2026-11-01T16:00:00Z' };
+    let promise;
+    await act(async () => { promise = controls.update(editableEvent, times).catch((error) => error); });
+    await act(async () => { await expect(controls.update(editableEvent, times)).rejects.toThrow('locked'); });
+    expect(fetchMock.mock.calls.filter(([url]) => url.includes('action=update'))).toHaveLength(1);
+    await act(async () => resolveUpdate(await response({ code: 'permission_upgrade_required', error: 'Grant event permissions' }, 403)));
+    await act(async () => promise);
+    expect(container.textContent).toContain('Reconnect to enable event management');
+    expect(events.mock.calls.at(-1)[0][0].title).toBe('Meeting');
+    expect(events.mock.calls.at(-1)[0].every((event) => event.editable === false)).toBe(true);
+    expect([...container.querySelectorAll('button')].find((button) => button.textContent === 'Reconnect to enable event management').disabled).toBe(false);
+  });
+
+  it('reconciles a lost create response without closing the editor or changing its retry UUID', async () => {
+    enableManagement();
+    const original = fetchMock.getMockImplementation();
+    let creates = 0;
+    fetchMock.mockImplementation((url, options) => {
+      if (url.includes('action=create')) {
+        creates += 1;
+        if (creates === 1) return Promise.reject(new Error('Network response lost after write'));
+        return response({ event: { ...editableEvent, eventId: 'new' } });
+      }
+      if (url.includes('action=events') && creates > 0) return response({ events: [{ ...editableEvent, eventId: 'new', title: 'Created at Google' }] });
+      return original(url, options);
+    });
+    await render();
+    await click('New Google event');
+    await act(async () => {
+      const title = document.querySelector('[aria-label="Event title"]');
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(title, 'New meeting');
+      title.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const originalForm = document.querySelector('form');
+    await act(async () => originalForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    expect(document.querySelector('form')).toBe(originalForm);
+    expect(document.querySelector('[aria-label="Event title"]').value).toBe('New meeting');
+    expect(document.body.textContent).toContain('Network response lost after write');
+    expect(events.mock.calls.at(-1)[0][0].title).toBe('Created at Google');
+    await act(async () => originalForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    const requests = fetchMock.mock.calls.filter(([url]) => url.includes('action=create')).map(([, options]) => JSON.parse(options.body));
+    expect(requests).toHaveLength(2);
+    expect(requests[1].requestId).toBe(requests[0].requestId);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('refreshes actual Google event times after a conflict instead of retaining stale editable data', async () => {
+    enableManagement();
+    const original = fetchMock.getMockImplementation();
+    let conflicted = false;
+    fetchMock.mockImplementation((url, options) => {
+      if (url.includes('action=update')) {
+        conflicted = true;
+        return response({ error: 'Event changed elsewhere', code: 'event_conflict' }, 409);
+      }
+      if (url.includes('action=events') && conflicted) return response({ events: [{ ...editableEvent, end: '2026-11-01T16:00:00Z', etag: '"version-2"' }] });
+      return original(url, options);
+    });
+    const onControls = vi.fn();
+    await render({ onControls });
+    await act(async () => { await expect(onControls.mock.calls.at(-1)[0].update(editableEvent, { starts_at: editableEvent.start, ends_at: editableEvent.end })).rejects.toThrow('changed elsewhere'); });
+    expect(events.mock.calls.at(-1)[0][0]).toMatchObject({ end: '2026-11-01T16:00:00Z', etag: '"version-2"' });
+    expect(container.textContent).not.toContain('Updating calendar');
+  });
+
+  it('closes a conflicted edit so reopening uses the refreshed etag and can succeed', async () => {
+    enableManagement();
+    const original = fetchMock.getMockImplementation();
+    let updates = 0;
+    const latest = { ...editableEvent, title: 'Changed elsewhere', etag: '"version-2"' };
+    fetchMock.mockImplementation((url, options) => {
+      if (url.includes('action=update')) {
+        updates += 1;
+        return updates === 1 ? response({ error: 'Concurrent Google edit', code: 'event_conflict' }, 409) : response({ event: latest });
+      }
+      if (url.includes('action=events') && updates > 0) return response({ events: [latest] });
+      return original(url, options);
+    });
+    const onControls = vi.fn();
+    await render({ onControls });
+    await act(async () => onControls.mock.calls.at(-1)[0].edit(editableEvent));
+    await act(async () => document.querySelector('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(container.textContent).toContain('Reopen the event');
+    await click('Edit Changed elsewhere');
+    await act(async () => document.querySelector('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    const requests = fetchMock.mock.calls.filter(([url]) => url.includes('action=update')).map(([, options]) => JSON.parse(options.body));
+    expect(requests.map((request) => request.etag)).toEqual(['"version-1"', '"version-2"']);
+    expect(requests.map((request) => request.event)).toEqual([{ summary: 'Meeting' }, { summary: 'Changed elsewhere' }]);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it.each(['invalid_event', 'invalid_id'])('retains an ordinary rejected edit draft for %s while refreshing Google data', async (code) => {
+    enableManagement();
+    const original = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation((url, options) => url.includes('action=update')
+      ? response({ error: 'Invalid event duration', code }, 400) : original(url, options));
+    const onControls = vi.fn();
+    await render({ onControls });
+    await act(async () => onControls.mock.calls.at(-1)[0].edit(editableEvent));
+    await act(async () => {
+      const title = document.querySelector('[aria-label="Event title"]');
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(title, 'Unsaved title draft');
+      title.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const form = document.querySelector('form');
+    await act(async () => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    expect(document.querySelector('form')).toBe(form);
+    expect(document.querySelector('[aria-label="Event title"]').value).toBe('Unsaved title draft');
+    expect(document.body.textContent).toContain('Invalid event duration');
+  });
+
+  it.each([
+    ['calendar_read_only', 'update'],
+    ['event_not_editable', 'update'],
+    ['event_not_found', 'update'],
+    ['event_gone', 'delete'],
+  ])('closes the obsolete %s editor and refreshes event access after %s', async (code, action) => {
+    enableManagement();
+    const original = fetchMock.getMockImplementation();
+    let rejected = false;
+    fetchMock.mockImplementation((url, options) => {
+      if (url.includes(`action=${action}`)) {
+        rejected = true;
+        return response({ error: 'Google event access changed', code }, 403);
+      }
+      if (url.includes('action=events') && rejected) return response({ events: ['event_not_found', 'event_gone'].includes(code) ? [] : [{ ...editableEvent, editable: false }] });
+      return original(url, options);
+    });
+    const onControls = vi.fn();
+    await render({ onControls });
+    await act(async () => onControls.mock.calls.at(-1)[0].edit(editableEvent));
+    if (action === 'delete') {
+      await act(async () => Array.from(document.querySelectorAll('button')).find((button) => button.textContent === 'Delete Google event').click());
+      await act(async () => Array.from(document.querySelectorAll('button')).find((button) => button.textContent === 'Confirm delete').click());
+    } else {
+      await act(async () => document.querySelector('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    }
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(container.textContent).not.toContain('Edit Meeting');
+    expect(events.mock.calls.at(-1)[0].every((event) => event.editable === false)).toBe(true);
+    expect(container.textContent).toContain('Choose an editable event');
+  });
+
+  it('allows legacy grants to view availability and clearly offers event permission upgrade', async () => {
+    const original = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation((url, options) => url.includes('action=status')
+      ? response({ connected: true, canWrite: false, needsUpgrade: true, selectedCalendarIds: ['primary'] }) : original(url, options));
+    await render();
+    expect(container.textContent).toContain('Reconnect to enable event management');
+    expect(container.textContent).not.toContain('New Google event');
+    expect(events.mock.calls.at(-1)[0][0].title).toBe('Meeting');
+    expect(container.textContent).toContain('does not allow managing calendars');
+  });
+
+  it('locks writes through stable controls and forms once completion starts', async () => {
+    enableManagement();
+    const onControls = vi.fn();
+    await render({ onControls });
+    const controls = onControls.mock.calls.at(-1)[0];
+    await act(async () => controls.edit(editableEvent));
+    expect(document.querySelector('[role="dialog"]')).toBeTruthy();
+    await render({ onControls, completionSaving: true });
+    expect(document.querySelector('fieldset').disabled).toBe(true);
+    await act(async () => { await expect(controls.update(editableEvent, { starts_at: editableEvent.start, ends_at: editableEvent.end })).rejects.toThrow('locked'); });
+    expect(fetchMock.mock.calls.some(([url]) => url.includes('action=update'))).toBe(false);
+  });
+
+  it('does not offer read-only event editing or permit all-day drag resizing', async () => {
+    enableManagement();
+    const onControls = vi.fn();
+    await render({ onControls });
+    const controls = onControls.mock.calls.at(-1)[0];
+    await act(async () => controls.edit({ ...editableEvent, editable: false }));
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(container.textContent).not.toContain('Edit Read-only event');
+    await act(async () => {
+      await expect(controls.update({ ...editableEvent, editable: false }, { starts_at: editableEvent.start, ends_at: editableEvent.end })).rejects.toThrow('read-only');
+      await expect(controls.update({ ...editableEvent, allDay: true }, { starts_at: editableEvent.start, ends_at: editableEvent.end })).rejects.toThrow('date fields');
+    });
+    expect(fetchMock.mock.calls.some(([url]) => url.includes('action=update'))).toBe(false);
+  });
+
+    it('blocks synchronous writes once a refresh starts before busy state rerenders', async () => {
+      enableManagement();
+      const onControls = vi.fn();
+      await render({ onControls });
+      const controls = onControls.mock.calls.at(-1)[0];
+      let resolveStatus;
+      const original = fetchMock.getMockImplementation();
+      fetchMock.mockImplementation((url, options) => url.includes('action=status') ? new Promise((resolve) => { resolveStatus = resolve; }) : original(url, options));
+      await act(async () => {
+        Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Refresh').click();
+        await expect(controls.update(editableEvent, { starts_at: editableEvent.start, ends_at: editableEvent.end })).rejects.toThrow('locked');
+      });
+      expect(fetchMock.mock.calls.some(([url]) => url.includes('action=update'))).toBe(false);
+      await act(async () => resolveStatus(await response({ connected: true, canWrite: true, selectedCalendarIds: ['primary'] })));
+    });
+
+    it('invalidates stale account responses on auth identity changes even when the access token is identical', async () => {
+      enableManagement();
+      const userId = `user-${sequence}`;
+      auth.getSession.mockResolvedValue({ data: { session: { access_token: 'same-token', user: { id: userId } } } });
+      const onControls = vi.fn();
+      const pending = vi.fn();
+      await render({ onControls, onWritePending: pending });
+      const original = fetchMock.getMockImplementation();
+      let resolveUpdate;
+      fetchMock.mockImplementation((url, options) => url.includes('action=update') ? new Promise((resolve) => { resolveUpdate = resolve; }) : original(url, options));
+      let promise;
+      await act(async () => { promise = onControls.mock.calls.at(-1)[0].update(editableEvent, { starts_at: editableEvent.start, ends_at: editableEvent.end }); });
+      expect(pending.mock.calls.at(-1)[0]).toBe(true);
+      const authChanged = auth.onAuthStateChange.mock.calls.at(-1)[0];
+      await act(async () => authChanged('SIGNED_IN', { access_token: 'same-token', user: { id: 'other-account' } }));
+      expect(events.mock.calls.at(-1)[0]).toEqual([]);
+      expect(pending.mock.calls.at(-1)[0]).toBe(false);
+      const count = fetchMock.mock.calls.length;
+      await act(async () => resolveUpdate(await response({ event: editableEvent })));
+      await act(async () => promise);
+      expect(fetchMock.mock.calls).toHaveLength(count);
+      expect(events.mock.calls.at(-1)[0]).toEqual([]);
+      expect(container.textContent).not.toContain('Manage Google events');
+      await act(async () => { await expect(onControls.mock.calls.at(-1)[0].update(editableEvent, { starts_at: editableEvent.start, ends_at: editableEvent.end })).rejects.toThrow('locked'); });
+    });
+
+    it('restores focus to the initiating control when the event form closes', async () => {
+      enableManagement();
+      await render();
+      const trigger = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'New Google event');
+      trigger.focus();
+      await click('New Google event');
+      expect(document.querySelector('[role="dialog"]').contains(document.activeElement)).toBe(true);
+      await act(async () => Array.from(document.querySelectorAll('button')).find((button) => button.textContent === 'Cancel').click());
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+      expect(document.activeElement).toBe(trigger);
+    });
+
+  it('ignores late mutation responses from a previous account and releases busy state', async () => {
+    enableManagement();
+    const onControls = vi.fn();
+    await render({ onControls });
+    const original = fetchMock.getMockImplementation();
+    let resolveUpdate;
+    fetchMock.mockImplementation((url, options) => url.includes('action=update') ? new Promise((resolve) => { resolveUpdate = resolve; }) : original(url, options));
+    let promise;
+    await act(async () => { promise = onControls.mock.calls.at(-1)[0].update(editableEvent, { starts_at: editableEvent.start, ends_at: editableEvent.end }); });
+    await render({ userId: 'another-account', onControls });
+    const eventCalls = fetchMock.mock.calls.filter(([url]) => url.includes('action=events')).length;
+    await act(async () => resolveUpdate(await response({ event: editableEvent })));
+    await act(async () => promise);
+    expect(fetchMock.mock.calls.filter(([url]) => url.includes('action=events'))).toHaveLength(eventCalls);
+    expect(container.textContent).not.toContain('Updating calendar');
+    expect([...container.querySelectorAll('button')].find((button) => button.textContent === 'New Google event').disabled).toBe(false);
+  });
+
+  it('does not display late write failures on a different date or keep its editor locked', async () => {
+    enableManagement();
+    const onControls = vi.fn();
+    await render({ onControls });
+    const original = fetchMock.getMockImplementation();
+    let resolveUpdate;
+    fetchMock.mockImplementation((url, options) => url.includes('action=update') ? new Promise((resolve) => { resolveUpdate = resolve; }) : original(url, options));
+    let promise;
+    await act(async () => { promise = onControls.mock.calls.at(-1)[0].update(editableEvent, { starts_at: editableEvent.start, ends_at: editableEvent.end }).catch((error) => error); });
+    await render({ localDate: '2026-11-02', onControls });
+    await act(async () => resolveUpdate(await response({ error: 'Old date failure', code: 'google_error' }, 503)));
+    await act(async () => promise);
+    expect(container.textContent).not.toContain('Old date failure');
+    expect(container.textContent).not.toContain('Updating calendar');
+    await click('New Google event');
+    expect(document.querySelector('fieldset').disabled).toBe(false);
+  });
   it('fetches next-day busy events through 24 elapsed hours beyond a 25-hour DST day when requested', async () => {
     const original = fetchMock.getMockImplementation();
     fetchMock.mockImplementation((url, options) => url.includes('action=events')
