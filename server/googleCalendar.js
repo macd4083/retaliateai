@@ -164,8 +164,8 @@ function eventPayload(input, existing) {
   }
   const start = eventBoundary(Object.hasOwn(input, 'start') ? input.start : existing?.start);
   const end = eventBoundary(Object.hasOwn(input, 'end') ? input.end : existing?.end);
-  if (start.allDay !== end.allDay || end.instant <= start.instant || end.instant - start.instant >= 31 * 86400000) {
-    fail(400, 'invalid_event', 'Start and end must have matching types and a positive duration shorter than 31 days.');
+  if (start.allDay !== end.allDay || end.instant <= start.instant) {
+    fail(400, 'invalid_event', 'Start and end must have matching types and a positive duration.');
   }
   if (Object.hasOwn(input, 'start') || !existing) patch.start = start.value;
   if (Object.hasOwn(input, 'end') || !existing) patch.end = end.value;

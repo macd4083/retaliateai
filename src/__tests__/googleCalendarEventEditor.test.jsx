@@ -80,10 +80,35 @@ describe('Google event editor', () => {
     expect(input('end clock-change occurrence').value).toBe('later');
     await fill('Event title', 'New title only');
     await submit();
+    expect(save.mock.calls[0][0].event).toEqual({ summary: 'New title only' });
+  });
+
+  it('uses a summary-only update for unchanged fractional-second boundaries, even for a subsecond event', async () => {
+    const event = {
+      eventId: 'precise', calendarId: 'work', title: 'Precise event', timeZone: 'America/New_York',
+      start: '2026-11-01T14:00:00.125Z', end: '2026-11-01T14:00:00.875Z',
+    };
+    await render({ event });
+    expect(input('Event start').value).toBe(input('Event end').value);
+    await fill('Event title', 'Title only');
+    await submit();
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls[0][0].event).toEqual({ summary: 'Title only' });
+    expect(event.start).toBe('2026-11-01T14:00:00.125Z');
+    expect(event.end).toBe('2026-11-01T14:00:00.875Z');
+  });
+
+  it('includes validated start/end boundaries when an existing timed event actually changes', async () => {
+    await render({ event: {
+      eventId: 'timed', calendarId: 'work', title: 'Meeting', timeZone: 'America/New_York',
+      start: '2026-11-01T14:00:00Z', end: '2026-11-01T15:00:00Z',
+    } });
+    await fill('Event end', '2026-11-01T10:30');
+    await submit();
     expect(save.mock.calls[0][0].event).toEqual({
-      summary: 'New title only',
-      start: { dateTime: '2026-11-01T06:15:00.000Z', timeZone: 'America/New_York' },
-      end: { dateTime: '2026-11-01T06:45:00.000Z', timeZone: 'America/New_York' },
+      summary: 'Meeting',
+      start: { dateTime: '2026-11-01T14:00:00.000Z', timeZone: 'America/New_York' },
+      end: { dateTime: '2026-11-01T15:30:00.000Z', timeZone: 'America/New_York' },
     });
   });
 
@@ -115,8 +140,9 @@ describe('Google event editor', () => {
     expect(input('Event timezone')).toBeNull();
     expect(input('Event start').type).toBe('date');
     expect(document.body.textContent).toContain('End date is exclusive');
+    await fill('Event end', '2026-11-03');
     await submit();
-    expect(save.mock.calls[0][0].event).toEqual({ summary: 'Holiday', start: { date: '2026-11-01' }, end: { date: '2026-11-02' } });
+    expect(save.mock.calls[0][0].event).toEqual({ summary: 'Holiday', start: { date: '2026-11-01' }, end: { date: '2026-11-03' } });
     await fill('Event end', '2026-11-01');
     await submit();
     expect(save).toHaveBeenCalledTimes(1);

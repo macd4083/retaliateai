@@ -196,8 +196,9 @@ labels update as the answers are edited, without refreshing the page.
 
 ### SQL → verification → deploy
 
-Keep `VITE_ENABLE_TODAY_V2_SCHEDULER=false` (the default) until verification
-passes. This is a build-time public feature switch, not a secret.
+To hold the rollout until verification passes, explicitly set
+`VITE_ENABLE_TODAY_V2_SCHEDULER=false`; the current default is enabled.
+This is a build-time public feature switch, not a secret.
 
 For an existing V2 installation (including one where Calendar SQL has never
 been run), or a fresh installation, copy/paste **the complete contents** of

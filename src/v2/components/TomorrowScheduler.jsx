@@ -207,7 +207,9 @@ export default function TomorrowScheduler({
     if (!current?.dragging || current.pointerId !== event.pointerId || current.generation !== interaction.current.generation || interaction.current.locked) return;
     try {
       const delta = (event.clientY - current.y + (timeline.current?.scrollTop || 0) - current.scroll) / 2.4;
-      const next = resizeScheduleBlock(current.block, current.edge, delta, dayBounds, current.google ? 31 * 1440 - 15 : 1440);
+      const maximum = current.google ? Math.max(31 * 1440 - 15,
+        (Date.parse(current.block.ends_at) - Date.parse(current.block.starts_at)) / 60000 + dayMinutes) : 1440;
+      const next = resizeScheduleBlock(current.block, current.edge, delta, dayBounds, maximum);
       resizeRef.current = { ...current, next };
       setResize(resizeRef.current);
     } catch (failure) { setDialogError(failure.message); }

@@ -191,6 +191,21 @@ describe('TomorrowScheduler UI', () => {
     expect(update).not.toHaveBeenCalled();
   });
 
+  it('preserves the end of a long writable Google event when resizing its start', async () => {
+    const googleUpdate = vi.fn();
+    calendar.events = [{ id: 'long', calendarId: 'shared', eventId: 'external', editable: true, title: 'Long event',
+      start: resizeBlock.starts_at, end: '2026-12-07T09:30:00Z' }];
+    await render({ items: [], onGoogleEdit: vi.fn(), onGoogleUpdate: googleUpdate });
+    const handle = container.querySelector('[data-resize-edge="start"]');
+    expect(container.querySelector('[data-resize-edge="end"]')).toBeNull();
+    await resizePointer(handle, 'pointerdown', 100);
+    await resizePointer(handle, 'pointerup', 136);
+    await click('Save resized time');
+    expect(googleUpdate).toHaveBeenCalledWith(calendar.events[0], {
+      starts_at: '2026-10-07T09:15:00.000Z', ends_at: '2026-12-07T09:30:00.000Z',
+    });
+  });
+
   it('restores original Google times after a failed resize save and releases pending state', async () => {
     const googleUpdate = vi.fn().mockRejectedValue(new Error('Google unavailable'));
     calendar.events = [{ id: 'import', editable: true, title: 'External', start: resizeBlock.starts_at, end: resizeBlock.ends_at }];

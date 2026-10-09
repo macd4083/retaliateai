@@ -863,6 +863,28 @@ describe('secure Google Calendar backend', () => {
       expect(JSON.parse(fetchImpl.mock.calls[4][1].body)).toEqual({ end: { date: '2028-03-02' } });
     });
     it.each([
+      { summary: 'Multi-month timed event', start: { dateTime: '2026-10-06T10:00:00Z', timeZone: 'Europe/London' },
+        end: { dateTime: '2027-01-06T11:00:00Z', timeZone: 'Europe/London' } },
+      { summary: 'Multi-month all-day event', start: { date: '2026-10-06' }, end: { date: '2027-01-06' } },
+    ])('creates and updates long valid Google events without an arbitrary duration cap: %j', async (longEvent) => {
+      role();
+      fetchImpl.mockImplementationOnce(async (_url, options) => googleResponse({ ...JSON.parse(options.body),
+        organizer: { self: true } }));
+      const created = await call('create', { body: creation(longEvent) });
+      expect(created.statusCode).toBe(200);
+      expect(created.body.event.end).toBe(longEvent.end.date || longEvent.end.dateTime);
+      role();
+      getEvent({ start: longEvent.start, end: longEvent.start.date ? { date: '2026-10-07' } : current.end });
+      fetchImpl.mockResolvedValueOnce(googleResponse({ ...current, ...longEvent }));
+      expect((await call('update', { body: change({ end: longEvent.end }) })).statusCode).toBe(200);
+      expect(JSON.parse(fetchImpl.mock.calls[4][1].body)).toEqual({ end: longEvent.end });
+      role();
+      getEvent(longEvent);
+      fetchImpl.mockResolvedValueOnce(googleResponse({ ...current, ...longEvent, summary: 'Renamed long event' }));
+      expect((await call('update', { body: change({ summary: 'Renamed long event' }) })).statusCode).toBe(200);
+      expect(JSON.parse(fetchImpl.mock.calls[7][1].body)).toEqual({ summary: 'Renamed long event' });
+    });
+    it.each([
       { summary: '' }, { summary: 'x'.repeat(1025) }, { summary: 'bad\nname' }, { summary: null },
       { recurrence: ['RRULE:FREQ=DAILY'] }, { attendees: [] }, { description: 'not allowed' },
       { start: null }, { start: { date: '2026-02-29' } }, { start: { date: '2026-04-31' } },
@@ -871,7 +893,7 @@ describe('secure Google Calendar backend', () => {
       { start: { dateTime: '2026-10-06T10:60:00Z' } }, { start: { dateTime: '2026-10-06T10:00:60Z' } },
       { start: { dateTime: '2026-10-06T10:00:00+24:00' } }, { start: { dateTime: '2026-10-06T10:00:00' } },
       { start: { ...timed.start, timeZone: 'Imaginary/City' } }, { start: { ...timed.start, timeZone: '+01:00' } },
-      { end: timed.start }, { end: { dateTime: '2026-11-06T10:00:00Z' } }, { end: { date: '2026-10-07' } },
+      { end: timed.start }, { end: { date: '2026-10-07' } },
     ])('rejects unsafe or invalid event payloads before creating: %j', async (extra) => {
       expect((await call('create', { body: creation({ ...timed, ...extra }) })).body.code).toBe('invalid_event');
       expect(fetchImpl).not.toHaveBeenCalled();

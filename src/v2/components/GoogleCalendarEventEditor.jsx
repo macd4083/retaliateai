@@ -35,6 +35,7 @@ export default function GoogleCalendarEventEditor({ event, calendars, localDate,
     startOccurrence: event?.allDay ? '' : existingOccurrence(event?.start, initialZone),
     endOccurrence: event?.allDay ? '' : existingOccurrence(event?.end, initialZone),
   }));
+  const initialDraft = React.useRef(draft);
   const [requestId] = React.useState(() => crypto.randomUUID());
   const returnFocus = React.useRef(document.activeElement);
   const [error, setError] = React.useState('');
@@ -51,6 +52,12 @@ export default function GoogleCalendarEventEditor({ event, calendars, localDate,
     setError('');
     try {
       if (!draft.calendarId || !draft.summary.trim()) throw new Error('Choose a calendar and enter a title.');
+      const timingChanged = ['allDay', 'timeZone', 'start', 'end', 'startOccurrence', 'endOccurrence']
+        .some((key) => draft[key] !== initialDraft.current[key]);
+      if (editing && !timingChanged) {
+        await onSave({ calendarId: draft.calendarId, requestId, event: { summary: draft.summary.trim() } });
+        return;
+      }
       let start;
       let end;
       if (draft.allDay) {

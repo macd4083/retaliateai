@@ -35,6 +35,7 @@ async function calendarRequest(action, body, params = {}, userId, isAuthorized) 
   const payload = await response.json();
   if (!response.ok) {
     const error = new Error(payload.error?.message || payload.error || 'Google Calendar is temporarily unavailable.');
+    error.code = payload.code;
     error.reconnect = payload.code === 'reconnect_required';
     error.disconnected = payload.code === 'not_connected';
     error.upgrade = payload.code === 'permission_upgrade_required';
@@ -59,6 +60,8 @@ export default function GoogleCalendarConnection({ userId, localDate = null, tim
   const [reconnect, setReconnect] = React.useState(false);
   const [warning, setWarning] = React.useState('');
   const [visibleEvents, setVisibleEvents] = React.useState([]);
+  const visibleEventsRef = React.useRef(visibleEvents);
+  visibleEventsRef.current = visibleEvents;
   const [editor, setEditor] = React.useState(null);
   const [writing, setWriting] = React.useState(false);
   const pendingWrite = React.useRef(null);
@@ -88,6 +91,10 @@ export default function GoogleCalendarConnection({ userId, localDate = null, tim
   }, [userId]);
   const clearFailedAuthorization = React.useCallback((failure) => {
     if (failure.upgrade) {
+      invalidateCalendarCache(userId);
+      const readOnlyEvents = visibleEventsRef.current.map((event) => ({ ...event, editable: false }));
+      setVisibleEvents(readOnlyEvents);
+      eventsCallback.current?.(readOnlyEvents);
       setStatus((previous) => ({ ...previous, canWrite: false, needsUpgrade: true }));
       setEditor(null);
       setError(failure.message);
@@ -278,7 +285,14 @@ export default function GoogleCalendarConnection({ userId, localDate = null, tim
       return result;
     } catch (failure) {
       if (isCurrent()) {
-        if (!clearFailedAuthorization(failure)) setError(failure.message);
+        if (!clearFailedAuthorization(failure)) {
+          const conflictedEdit = action !== 'create' && failure.code === 'event_conflict';
+          const unavailableEdit = action !== 'create' && ['event_not_found', 'event_gone', 'event_not_editable', 'calendar_read_only'].includes(failure.code);
+          if (conflictedEdit || unavailableEdit) setEditor(null);
+          invalidateCalendarCache(userId, 'mutation_failure');
+          setError(conflictedEdit ? `${failure.message} Reopen the event to review its refreshed version before trying again.`
+            : unavailableEdit ? `${failure.message} Refreshing Google data. Choose an editable event to continue.` : failure.message);
+        }
       }
       throw failure;
     } finally {

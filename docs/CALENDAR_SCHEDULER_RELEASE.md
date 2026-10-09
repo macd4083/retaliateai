@@ -377,6 +377,16 @@ Official API references checked for this implementation:
 
 ## Deterministic validation
 
+For this event-management change, local validation passed: **422 scheduler tests,
+694 full-suite tests**, repository lint, production build, and changed JSX checked
+with the existing component lint rules. No SQL or dependencies changed, so SQL
+migration execution was not repeated. Browser-tool access was unavailable; actual
+Google consent, hosted schema, and real-device checks remain unperformed.
+CodeQL JavaScript analysis found **zero alerts**. The platform code-review model
+was unavailable; a separate read-only reviewer checked the changes, identified
+the organizer-permission default issue, and verified its correction.
+Existing non-fatal build warnings concern Browserslist data and bundle size.
+
 Run Node 22.x, `npm ci`, `npm run test:scheduler`, `npm run lint`,
 `npm run test:ci`, then `npm run build`. Vitest does not support Jest's
 `--runInBand`; the scripts use one worker and disable file parallelism instead.
