@@ -17,7 +17,7 @@ import HomeV2Page from '../v2/pages/HomeV2Page';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
-describe('scheduled Home check-ins', () => {
+describe('scheduled Home calendar', () => {
   let root;
   let container;
   const habit = { id: 'occurrence', habit_definition_id: 'definition', snapshot_name: 'Read', snapshot_response_type: 'boolean', boolean_response: null, answered_at: null };
@@ -44,20 +44,20 @@ describe('scheduled Home check-ins', () => {
   afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.useRealTimers(); vi.unstubAllGlobals(); });
   const render = async () => act(async () => root.render(<HomeV2Page />));
 
-  it('shows persisted times and writes habit responses to the same occurrence', async () => {
+  it('shows persisted action and habit times without exposing habit check-ins', async () => {
     await render();
-    expect(container.textContent).toContain('Today\'s habits');
     expect(container.textContent).toContain("Today's calendar");
     expect(container.textContent).not.toContain("Today's actions checklist");
     expect(container.querySelectorAll('[data-slot-timestamp]')).toHaveLength(96);
     expect(container.querySelector('[data-schedule-key="action:commitment"]').textContent).toContain('Write');
+    expect(container.querySelector('[data-schedule-key="habit:definition"]').textContent).toContain('10:00');
     expect([...container.querySelectorAll('button')].some((button) => ['Kept', 'Not kept'].includes(button.textContent))).toBe(false);
+    expect([...container.querySelectorAll('button')].some((button) => ['Yes', 'No'].includes(button.textContent))).toBe(false);
     expect(container.querySelector('[data-scheduler-drag-key]')).not.toBeNull();
     expect(container.textContent).toMatch(/9:00|09:00/);
     expect(container.textContent).toMatch(/10:00/);
-    const yes = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Yes');
-    await act(async () => yes.click());
-    expect(mocks.habit).toHaveBeenCalledWith('occurrence', 'boolean', true);
+    expect(container.textContent).not.toContain('Habit momentum');
+    expect(mocks.habit).not.toHaveBeenCalled();
     expect(mocks.completion).not.toHaveBeenCalled();
   });
 
@@ -65,6 +65,7 @@ describe('scheduled Home check-ins', () => {
     mocks.enabled = false;
     await render();
     expect(container.textContent).not.toContain('Today\'s habits');
+    expect(container.textContent).not.toContain('Habit momentum');
     expect(container.textContent).not.toMatch(/9:00|09:00/);
     expect(container.textContent).not.toContain("Today's calendar");
     expect(container.textContent).not.toContain("Today's actions checklist");
@@ -248,11 +249,12 @@ describe('scheduled Home check-ins', () => {
     expect(carryover.textContent).not.toMatch(/11:30|23:30/);
     expect(carryover.querySelector('button, input')).toBeNull();
     expect(container.textContent).not.toContain('Already ended');
-    const habitSection = [...container.querySelectorAll('section')].find((section) => section.textContent.includes("Today's habits"));
-    expect(habitSection.textContent).toContain('10:00');
-    expect(habitSection.textContent).not.toContain('Continued from previous day');
-    await act(async () => [...habitSection.querySelectorAll('button')].find((button) => button.textContent === 'Yes').click());
-    expect(mocks.habit).toHaveBeenCalledWith('occurrence', 'boolean', true);
+    const currentHabit = container.querySelector('[data-schedule-key="habit:definition"]');
+    expect(currentHabit.textContent).toContain('10:00');
+    expect(currentHabit.textContent).not.toContain('Continued from previous day');
+    expect(container.textContent).not.toContain("Today's habits");
+    expect(container.textContent).not.toContain('Habit momentum');
+    expect(mocks.habit).not.toHaveBeenCalled();
   });
 
   it('keeps tomorrow carryover separate from current-day habit evidence and excludes future blocks', async () => {
@@ -272,7 +274,7 @@ describe('scheduled Home check-ins', () => {
     expect(mocks.habit).not.toHaveBeenCalled();
   });
 
-  it('clips midnight display and reports unsupported timezone without losing check-ins', async () => {
+  it('reports unsupported timezone without exposing habit check-ins', async () => {
     const base = await mocks.load();
     mocks.load.mockResolvedValue({
       ...base,
@@ -285,8 +287,9 @@ describe('scheduled Home check-ins', () => {
     root = createRoot(container);
     mocks.load.mockResolvedValue({ ...base, timezoneName: 'Unsupported/Nowhere' });
     await render();
-    expect(container.textContent).toContain('Check your date and timezone settings');
-    expect([...container.querySelectorAll('button')].find((button) => button.textContent === 'Yes').disabled).toBe(false);
+    expect(container.textContent).toContain('Timeline unavailable for this date or timezone');
+    expect([...container.querySelectorAll('button')].some((button) => ['Yes', 'No'].includes(button.textContent))).toBe(false);
+    expect(mocks.habit).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -317,9 +320,10 @@ describe('scheduled Home check-ins', () => {
     expect(container.textContent).not.toContain("Today's actions checklist");
     expect(container.textContent).toContain('Review day 2026-10-07');
     expect(mocks.completion).not.toHaveBeenCalled();
-    const yes = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Yes');
-    await act(async () => yes.click());
-    expect(mocks.habit).toHaveBeenCalledWith('occurrence', 'boolean', true);
+    expect(container.textContent).not.toContain("Today's habits");
+    expect(container.textContent).not.toContain('Habit momentum');
+    expect([...container.querySelectorAll('button')].some((button) => ['Yes', 'No'].includes(button.textContent))).toBe(false);
+    expect(mocks.habit).not.toHaveBeenCalled();
   });
 
   it('uses the stored timezone civil date rather than the UTC or machine date', async () => {

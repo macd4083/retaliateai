@@ -2,7 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import AppShellV2 from '../../components/v2/AppShellV2';
 import { useAuth } from '../../lib/AuthContext';
-import { loadTodayV2HomeState, upsertHabitLog } from '../services/todayReview';
+import { loadTodayV2HomeState } from '../services/todayReview';
 import { ENABLE_TODAY_V2_SCHEDULER } from '../../lib/featureFlags';
 import GoogleCalendarConnection from '../components/GoogleCalendarConnection';
 import TomorrowScheduler from '../components/TomorrowScheduler';
@@ -13,27 +13,6 @@ import {
   addDaysToLocalDate,
 } from '../today/model';
 import { clipScheduleBlocksToDate, getScheduleDateBounds, getScheduleDayOffset, getScheduleLocalDate } from '../today/scheduling';
-
-function SegmentedChoice({ value, options, onChange, disabled = false }) {
-  return (
-    <div className="inline-flex overflow-hidden rounded-lg border border-zinc-700">
-      {options.map((option) => {
-        const active = option.value === value;
-        return (
-          <button
-            key={option.value}
-            type="button"
-            disabled={disabled}
-            onClick={() => onChange(active && option.allowToggleOff ? null : option.value)}
-            className={`px-3 py-1.5 text-xs transition-colors ${active ? 'bg-red-600 text-white' : 'bg-zinc-950 text-zinc-400 hover:text-white'} disabled:cursor-not-allowed disabled:opacity-50`}
-          >
-            {option.label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
 
 function formatPercent(rate) {
   if (rate == null) return '—';
@@ -62,19 +41,12 @@ function ScheduleTime({ schedule, timezone, localDate }) {
   }
 }
 
-function NumericHabitCheckIn({ occurrence, disabled, onSave }) {
-  const [draft, setDraft] = React.useState(occurrence.numeric_response ?? '');
-  React.useEffect(() => setDraft(occurrence.numeric_response ?? ''), [occurrence.id, occurrence.numeric_response]);
-  return <label className="flex items-center gap-2 text-xs text-zinc-400">{occurrence.snapshot_unit || 'Value'}<input aria-label={`${occurrence.snapshot_name} value`} type="number" disabled={disabled} value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={() => onSave(draft === '' ? null : Number(draft))} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} className="w-24 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm text-white" /></label>;
-}
-
 export default function HomeV2Page() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState(null);
   const [homeState, setHomeState] = React.useState(null);
-  const [commitmentSaveError, setCommitmentSaveError] = React.useState(null);
   const [googleEvents, setGoogleEvents] = React.useState([]);
   const [googleControls, setGoogleControls] = React.useState(null);
   const [googleWriting, setGoogleWriting] = React.useState(false);
@@ -141,22 +113,6 @@ export default function HomeV2Page() {
     };
   }, [homeState, load]);
 
-  const actionsLocked = Boolean(homeState?.review?.completed_at);
-
-  const onSaveHabit = async (occurrence, value) => {
-    if (actionsLocked) return;
-    setCommitmentSaveError(null);
-    try {
-      const saved = await upsertHabitLog(occurrence.id, occurrence.snapshot_response_type, value);
-      setHomeState((previous) => ({
-        ...previous,
-        habitOccurrences: previous.habitOccurrences.map((habit) => habit.id === occurrence.id ? { ...habit, ...saved } : habit),
-      }));
-    } catch {
-      setCommitmentSaveError('Could not update that habit. Please try again.');
-    }
-  };
-
   if (loading) {
     return (
       <AppShellV2 title="Today">
@@ -206,7 +162,6 @@ export default function HomeV2Page() {
   const civilDiffers = todayDate && civilDate > todayDate;
   const civilVisible = civilDiffers ? visibleSchedules(homeState.civilSchedules || homeState.tomorrowSchedules, civilDate) : [];
   const isCarryover = (schedule, date) => schedule.continued || schedule.read_only_context || Boolean(date && schedule.target_local_date && schedule.target_local_date < date);
-  const todaySchedules = todayVisible.filter((schedule) => !isCarryover(schedule, todayDate));
   const tomorrowSchedules = tomorrowVisible.filter((schedule) => !isCarryover(schedule, tomorrowDate));
   const calendarSources = homeState.civilFollowThroughItems || (civilDiffers ? homeState.tomorrowFragments : homeState.followThroughItems) || [];
   const calendarHabits = homeState.civilHabitOccurrences || (civilDiffers ? [] : todayHabits);
@@ -353,22 +308,6 @@ export default function HomeV2Page() {
           <button type="button" onClick={() => navigate('/today')} className="rounded-lg border border-zinc-700 px-3 py-2 text-sm">Open Review &amp; Plan</button>
         </div>}
 
-        {ENABLE_TODAY_V2_SCHEDULER && (
-          <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
-            <h2 className="font-semibold text-white">Today&apos;s habits</h2>
-            {commitmentSaveError && <p className="mt-3 text-xs text-amber-300">{commitmentSaveError}</p>}
-            <p className="mt-1 text-xs text-zinc-400">{homeState.todayLocalDate} · {homeState.timezoneName} · Review-day check-ins</p>
-            {todayHabits.length ? <div className="mt-3 space-y-2">{todayHabits.map((habit) => (
-              <div key={habit.id} className="space-y-2 rounded-xl border border-zinc-800 p-3">
-                <p className="text-sm text-zinc-200">{habit.snapshot_name}</p>
-                <ScheduleTime schedule={findSchedule(todaySchedules, habit.id) || findSchedule(todaySchedules, habit.habit_definition_id)} timezone={homeState.timezoneName} localDate={todayDate} />
-                {habit.snapshot_response_type === 'boolean' ? <div className="flex items-center gap-2"><SegmentedChoice disabled={actionsLocked} value={habit.answered_at ? habit.boolean_response ? 'yes' : 'no' : null} onChange={(value) => onSaveHabit(habit, value === null ? null : value === 'yes')} options={[{ value: 'yes', label: 'Yes', allowToggleOff: true }, { value: 'no', label: 'No', allowToggleOff: true }]} />{!actionsLocked && habit.answered_at && <button type="button" className="text-xs text-zinc-400" onClick={() => onSaveHabit(habit, null)}>Clear</button>}</div> : <NumericHabitCheckIn occurrence={habit} disabled={actionsLocked} onSave={(value) => onSaveHabit(habit, value)} />}
-              </div>
-            ))}</div> : <p className="mt-3 text-sm text-zinc-500">No habits scheduled for today.</p>}
-            {homeState.scheduleAvailable === false && <p className="mt-3 text-xs text-amber-300">Schedule times are unavailable. Your check-ins still work.</p>}
-          </section>
-        )}
-
         <section className="grid grid-cols-2 gap-3">
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
             <p className="text-xs text-zinc-500">Review streak</p>
@@ -392,26 +331,6 @@ export default function HomeV2Page() {
               ))}
             </div>
           </div>
-        </section>
-
-        <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
-          <h2 className="font-semibold text-white">Habit momentum (7 days)</h2>
-          {homeState.metrics.perHabitRates.length > 0 ? (
-            <div className="mt-3 space-y-2">
-              {homeState.metrics.perHabitRates.map((habit) => (
-                <div key={`${habit.name}-${habit.responseType}`} className="flex items-center justify-between gap-3 rounded-xl border border-zinc-800 px-3 py-2 text-sm">
-                  <span className="text-zinc-200">{habit.name}</span>
-                  <span className="text-zinc-400">
-                    {habit.responseType === 'boolean'
-                      ? `${habit.kept}/${habit.answered || 0} yes • ${formatPercent(habit.rate)}`
-                      : `${habit.answered}/${habit.scheduled || 0} answered • ${formatPercent(habit.rate)}`}
-                  </span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="mt-3 text-sm text-zinc-500">Habit momentum will appear after a few check-ins.</p>
-          )}
         </section>
 
         <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
