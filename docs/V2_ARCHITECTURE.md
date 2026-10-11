@@ -4,10 +4,16 @@
 - `src/lib/featureFlags.js` retains only the independent `ENABLE_TODAY_V2_SCHEDULER` switch.
 - `/app` is the authenticated generic entry point. It uses the existing V2 completion resolver: incomplete or unavailable completion metadata goes to `/today`; completed reviews go to `/home`.
 - `/reflection` and `/legacy/reflection` are compatibility redirects to `/app`. The legacy coaching page and its endpoints are retired.
-- Explicit `/today` always opens the structured nightly workflow, including its completed-review reopen/edit behavior; `/home` always opens the live checklist.
+- Explicit `/today` always opens the structured nightly workflow, including its completed-review reopen/edit behavior and ROI action checklist. `/home` opens Today with an editable calendar of actions and habits, plus habit check-ins; ROI completion is recorded only in Review & Plan.
 - `VITE_ENABLE_TODAY_V2` is retired and ignored. Generic entry cannot roll back to the removed AI dialogue; legacy bookmarks always use the live V2 resolver.
 - User navigation is Today (`/home`), Review & Plan (`/today`), Progress (`/insights`), Settings (`/settings`). Administration remains separate.
 - Progress currently uses the existing Insights implementation. Migrating its reporting data to V2 is separate work; this change does not merge legacy and V2 histories.
+- Both pages reuse `TomorrowScheduler` and Google event management controls. A missing scheduling schema or connection disables native editing and shows diagnostics without hiding the calendar; an invalid date/timezone still prevents timeline rendering. Unscheduled actions remain visible in the calendar's tray. Today uses the actual civil local date, including before the 04:00 review boundary, and refreshes on date rollover.
+- Review & Plan's planning date is the next civil local date, independent of the 04:00 review/check-in boundary. Planning sources use the preceding civil date; nightly review completion and ROI outcomes keep their existing review-day identities.
+
+Before 04:00, completing the prior review makes Review & Plan read-only, but does not complete the civil-today source review of the new civil-tomorrow plan. Its server-side planning lock takes effect when that source review is completed; no other review is silently completed or reopened. `planningLocalDate`/`planningSchedules` describe civil tomorrow, `planningContextSchedules` describes civil-today carryover context, and Home's `civilFirstFiveMinutes` belongs to civil today. Legacy review dates and schedule fields retain their 04:00 scope.
+
+- Apply `supabase/migrations/20261011_today_v2_day_schedule.sql` after the habit recurrence migration to enable Today timing edits. Its `today_v2_update_day_schedule` RPC changes one owned schedule source at a time without rewriting the plan, reopening yesterday's review, or replacing other blocks. Habit edits and removals retain recurrence overrides. Completed target days and historical carryover stay locked.
 
 ## Boundary map
 
@@ -315,7 +321,9 @@ Dragging snaps starts to 15 minutes; exact-time editing accepts any minute and
 durations from 1 to 1440 minutes.
 Each block belongs to its start date, even when it ends the following day;
 crossing midnight does not create a second commitment, habit or completion row.
-Its source review owns editability, not the target day's checklist. Timeline
+Review & Plan edits remain protected by the source review. Today's dedicated
+timing RPC permits current-day changes after the source review completes, but
+protects completed target days and does not change ROI outcomes. Timeline
 dates are civil midnight-to-midnight in the displayed timezone; the nightly
 review/checklist still follows the separate 04:00 boundary. Home labels its civil
 schedule date separately when these differ. Carryover is read-only context,

@@ -75,6 +75,15 @@ function normalizeFragmentList(items) {
     .filter(Boolean);
 }
 
+function isCurrentDateScope(state) {
+  if (!state) return false;
+  if (!state.planningSourceLocalDate) return true;
+  const options = { timezoneName: state.timezoneName, dayBoundaryHour: state.dayBoundaryHour };
+  return getTodayV2DateContext(options).todayLocalDate === state.todayLocalDate
+    && (!state.planningSourceLocalDate
+      || getTodayV2DateContext({ ...options, dayBoundaryHour: 0 }).todayLocalDate === state.planningSourceLocalDate);
+}
+
 export function useTodayV2State(userId) {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState(null);
@@ -133,7 +142,7 @@ export function useTodayV2State(userId) {
   firstFiveMinutesRef.current = firstFiveMinutes;
 
   const canEdit = React.useCallback(() => loadedUserRef.current === currentUserRef.current
-    && Boolean(stateRef.current) && !completionSavingRef.current && !stateRef.current.review?.completed_at, []);
+    && isCurrentDateScope(stateRef.current) && !completionSavingRef.current && !stateRef.current.review?.completed_at, []);
   const trackWrite = React.useCallback((key, operation) => {
     if (!canEdit()) return Promise.reject(new Error('Reopen the review before editing'));
     const reviewId = stateRef.current.review.id;
@@ -143,11 +152,11 @@ export function useTodayV2State(userId) {
     const previousWrite = [...pendingWritesRef.current].reverse()
       .find((pending) => pending.key === key && pending.reviewId === reviewId && pending.ownerId === ownerId);
     const promise = Promise.resolve(previousWrite?.promise).catch(() => {}).then(() => {
-      if (generation !== loadGenerationRef.current || stateRef.current?.review?.id !== reviewId || currentUserRef.current !== ownerId) {
+      if (generation !== loadGenerationRef.current || stateRef.current?.review?.id !== reviewId || currentUserRef.current !== ownerId || !isCurrentDateScope(stateRef.current)) {
         throw new Error('Review changed before saving; retry the edit');
       }
       const isCurrent = () => generation === loadGenerationRef.current
-        && stateRef.current?.review?.id === reviewId && currentUserRef.current === ownerId;
+        && stateRef.current?.review?.id === reviewId && currentUserRef.current === ownerId && isCurrentDateScope(stateRef.current);
       return operation(isCurrent);
     }).then((result) => {
       if (generation === loadGenerationRef.current && stateRef.current?.review?.id === reviewId && currentUserRef.current === ownerId) writeErrorsRef.current.delete(key);
@@ -302,12 +311,15 @@ export function useTodayV2State(userId) {
       const next = await loadTodayReviewState(userId);
       if (generation !== loadGenerationRef.current || revision !== planRevisionRef.current
         || scheduleRevision !== scheduleRevisionRef.current || editRevision !== editRevisionRef.current) return;
-      const draft = next.review?.completed_at ? null : readDraft(userId, next.todayLocalDate);
-      const nextDesiredDirection = draft && (draft.desiredDirectionNeedsSync || !normalizeTodayV2Text(next.review?.desired_direction))
-        ? String(draft.desiredDirection || '')
+      const draft = next.review?.completed_at ? null : readDraft(userId, next.planningSourceLocalDate || next.todayLocalDate);
+      const storedReviewDraft = next.review?.completed_at ? null : readDraft(userId, next.todayLocalDate);
+      const reviewDraft = storedReviewDraft && (storedReviewDraft.reviewLocalDate || next.todayLocalDate) === next.todayLocalDate
+        ? storedReviewDraft : null;
+      const nextDesiredDirection = reviewDraft && (reviewDraft.desiredDirectionNeedsSync || !normalizeTodayV2Text(next.review?.desired_direction))
+        ? String(reviewDraft.desiredDirection || '')
         : next.review?.desired_direction || '';
-      const nextControllableFocus = draft && (draft.controllableFocusNeedsSync || !normalizeTodayV2Text(next.review?.controllable_focus))
-        ? String(draft.controllableFocus || '')
+      const nextControllableFocus = reviewDraft && (reviewDraft.controllableFocusNeedsSync || !normalizeTodayV2Text(next.review?.controllable_focus))
+        ? String(reviewDraft.controllableFocus || '')
         : next.review?.controllable_focus || '';
       const nextTomorrowInput = draft && (draft.tomorrowPlanNeedsSync || (!normalizeTodayV2Text(next.tomorrowPlanInput) && normalizeFragmentList(next.tomorrowFragments).length === 0))
         ? String(draft.tomorrowInput || '')
@@ -359,11 +371,11 @@ export function useTodayV2State(userId) {
       const sourceKeys = new Map(nextIdentities.filter((item) => item.persistedId).map((item) => [item.persistedId, item.key]));
       const nextSchedules = draft?.scheduleNeedsSync && Array.isArray(draft.scheduleBlocks)
         ? draft.scheduleBlocks
-        : (next.tomorrowSchedules || []).filter((row) => !row.target_local_date || row.target_local_date === next.tomorrowLocalDate).map((row) => ({
+        : (next.planningSchedules || next.tomorrowSchedules || []).filter((row) => !row.target_local_date || row.target_local_date === (next.planningLocalDate || next.tomorrowLocalDate)).map((row) => ({
           ...row, source_key: row.source_type === 'habit' ? `habit:${row.source_id}` : sourceKeys.get(row.source_id),
         }));
       const validKeys = new Set([...nextIdentities.map((item) => item.key),
-        ...(next.habitDefinitions || []).filter((habit) => isTodayV2HabitScheduledForDate(habit, next.tomorrowLocalDate)).map((habit) => `habit:${habit.id}`)]);
+        ...(next.habitDefinitions || []).filter((habit) => isTodayV2HabitScheduledForDate(habit, next.planningLocalDate || next.tomorrowLocalDate)).map((habit) => `habit:${habit.id}`)]);
       scheduleRef.current = nextSchedules.filter((block) => validKeys.has(block.source_key));
       setScheduleBlocks(scheduleRef.current);
       scheduleRevisionRef.current = draft?.scheduleNeedsSync ? 1 : 0;
@@ -392,8 +404,8 @@ export function useTodayV2State(userId) {
       setTomorrowActionsState(nextTomorrowActions);
       setFirstFiveMinutesState(nextFirstFiveMinutes);
       setCustomTomorrowActions(nextTomorrowActions.join('\n') !== autoSplit.join('\n'));
-      setDesiredDirectionSaveStatus(draft?.desiredDirectionNeedsSync ? 'offline' : 'saved');
-      setControllableFocusSaveStatus(draft?.controllableFocusNeedsSync ? 'offline' : 'saved');
+      setDesiredDirectionSaveStatus(reviewDraft?.desiredDirectionNeedsSync ? 'offline' : 'saved');
+      setControllableFocusSaveStatus(reviewDraft?.controllableFocusNeedsSync ? 'offline' : 'saved');
       setTomorrowPlanSaveStatus(draft?.tomorrowPlanNeedsSync ? 'offline' : 'saved');
       setFirstFiveMinutesSaveStatus(draft?.tomorrowPlanNeedsSync ? 'offline' : 'saved');
       setTomorrowPlanError(null);
@@ -414,7 +426,19 @@ export function useTodayV2State(userId) {
   React.useEffect(() => {
     if (!userId || loadedUserRef.current !== userId || !state?.todayLocalDate) return;
 
-    writeDraft(userId, state.todayLocalDate, {
+    if (state.planningSourceLocalDate && state.planningSourceLocalDate !== state.todayLocalDate) {
+      writeDraft(userId, state.todayLocalDate, {
+        ...readDraft(userId, state.todayLocalDate),
+        reviewLocalDate: state.todayLocalDate,
+        desiredDirection,
+        desiredDirectionNeedsSync: desiredDirectionDirty,
+        controllableFocus,
+        controllableFocusNeedsSync: controllableFocusDirty,
+      });
+    }
+    writeDraft(userId, state.planningSourceLocalDate || state.todayLocalDate, {
+      reviewLocalDate: state.todayLocalDate,
+      planningLocalDate: state.planningLocalDate || state.tomorrowLocalDate,
       desiredDirection,
       desiredDirectionNeedsSync: desiredDirectionDirty,
       controllableFocus,
@@ -429,7 +453,7 @@ export function useTodayV2State(userId) {
       tomorrowPlanNeedsSync: tomorrowPlanDirty,
       updatedAt: new Date().toISOString(),
     });
-  }, [tomorrowActions, customTomorrowActions, actionIdentities, scheduleBlocks, scheduleSaveStatus, controllableFocus, controllableFocusDirty, desiredDirection, desiredDirectionDirty, firstFiveMinutes, normalizedTomorrowActions, state?.todayLocalDate, tomorrowInput, tomorrowPlanDirty, userId]);
+  }, [tomorrowActions, customTomorrowActions, actionIdentities, scheduleBlocks, scheduleSaveStatus, controllableFocus, controllableFocusDirty, desiredDirection, desiredDirectionDirty, firstFiveMinutes, normalizedTomorrowActions, state?.todayLocalDate, state?.planningSourceLocalDate, state?.planningLocalDate, tomorrowInput, tomorrowPlanDirty, userId]);
 
   const flushDesiredDirection = React.useCallback(async () => {
     if (loadedUserRef.current !== currentUserRef.current) return;
@@ -547,6 +571,7 @@ export function useTodayV2State(userId) {
     if (loadedUserRef.current !== currentUserRef.current) return;
     const currentState = stateRef.current;
     if (!currentState) return;
+    if (!isCurrentDateScope(currentState)) throw new Error('Planning date changed; reload before saving');
     if (currentState.review.completed_at) return;
     if (identitiesRef.current.some((item) => !normalizeTodayV2Text(item.text))) {
       const message = 'Finish editing empty actions or remove them before saving the plan.';
@@ -593,8 +618,8 @@ export function useTodayV2State(userId) {
     const ownerId = currentUserRef.current;
 
     const savePromise = replaceTomorrowActions({
-      targetLocalDate: currentState.tomorrowLocalDate,
-      sourceLocalDate: currentState.todayLocalDate,
+      targetLocalDate: currentState.planningLocalDate || currentState.tomorrowLocalDate,
+      sourceLocalDate: currentState.planningSourceLocalDate || currentState.todayLocalDate,
       timezoneName: currentState.timezoneName,
       rawPlanText,
       actionTexts: fragments,
@@ -605,7 +630,7 @@ export function useTodayV2State(userId) {
       explicitActions: true,
     })
       .then((savedPlan) => {
-        if (generation !== loadGenerationRef.current || currentUserRef.current !== ownerId) return;
+        if (generation !== loadGenerationRef.current || currentUserRef.current !== ownerId || !isCurrentDateScope(stateRef.current)) return;
         const savedRows = savedPlan.savedFragments || [];
         const savedIds = new Map(snapshot.map((item, index) => [item.key, savedRows[index]?.id || null]));
         identitiesRef.current = identitiesRef.current.map((item) => ({
@@ -630,8 +655,8 @@ export function useTodayV2State(userId) {
             ...(previous.tomorrowPlanMeta || {}),
             raw_plan_text: savedPlan.rawPlanText,
             first_five_minutes: normalizeTodayV2ActionStarts(firstFiveMinutesValue) || null,
-            target_local_date: previous.tomorrowLocalDate,
-            source_local_date: previous.todayLocalDate,
+            target_local_date: previous.planningLocalDate || previous.tomorrowLocalDate,
+            source_local_date: previous.planningSourceLocalDate || previous.todayLocalDate,
             timezone_name: previous.timezoneName,
             updated_at: new Date().toISOString(),
           },
@@ -646,7 +671,7 @@ export function useTodayV2State(userId) {
         }
       })
       .catch(async (saveError) => {
-        if (generation !== loadGenerationRef.current || currentUserRef.current !== ownerId) throw saveError;
+        if (generation !== loadGenerationRef.current || currentUserRef.current !== ownerId || !isCurrentDateScope(stateRef.current)) throw saveError;
         const message = String(saveError?.message || saveError?.details || '');
         const isOverwriteError = /cannot overwrite answered fragments/i.test(message);
         setTomorrowPlanSaveStatus(isOfflineLikeError(saveError) ? 'offline' : 'error');
@@ -676,9 +701,9 @@ export function useTodayV2State(userId) {
       source_id: item.persistedId, text: item.text,
     })).filter((item) => normalizeTodayV2Text(item.text)),
     ...(state?.habitDefinitions || [])
-      .filter((habit) => isTodayV2HabitScheduledForDate(habit, state.tomorrowLocalDate))
+      .filter((habit) => isTodayV2HabitScheduledForDate(habit, state.planningLocalDate || state.tomorrowLocalDate))
       .map((habit) => {
-        const defaults = getHabitScheduleForDate(habit, state.tomorrowLocalDate);
+        const defaults = getHabitScheduleForDate(habit, state.planningLocalDate || state.tomorrowLocalDate);
         return {
           id: `habit:${habit.id}`, key: `habit:${habit.id}`, type: 'habit', label: habit.name, source_id: habit.id,
           habit, planning_mode: habit.planning_mode || 'manual',
@@ -687,7 +712,7 @@ export function useTodayV2State(userId) {
           occurrence: defaults?.occurrence || 'earlier',
         };
       }),
-  ], [actionIdentities, firstFiveMinutes, state?.habitDefinitions, state?.tomorrowLocalDate]);
+  ], [actionIdentities, firstFiveMinutes, state?.habitDefinitions, state?.tomorrowLocalDate, state?.planningLocalDate]);
 
   const updateSchedule = React.useCallback((itemKey, times) => {
     if (!canEdit()) return;
@@ -715,6 +740,7 @@ export function useTodayV2State(userId) {
 
   const flushSchedule = React.useCallback(async () => {
     if (loadedUserRef.current !== currentUserRef.current) return;
+    if (!isCurrentDateScope(stateRef.current)) throw new Error('Planning date changed; reload before saving');
     if (stateRef.current?.review?.completed_at) return;
     const requireAvailability = () => {
       if (ENABLE_TODAY_V2_SCHEDULER && stateRef.current?.scheduleAvailable) return true;
@@ -736,11 +762,11 @@ export function useTodayV2State(userId) {
       do {
         planRevision = planRevisionRef.current;
         await flushTomorrowPlan();
-        if (generation !== loadGenerationRef.current || currentUserRef.current !== ownerId) return;
+        if (generation !== loadGenerationRef.current || currentUserRef.current !== ownerId || !isCurrentDateScope(stateRef.current)) return;
       } while (planRevision !== planRevisionRef.current);
       if (!requireAvailability()) return;
       while (scheduleSavedRevisionRef.current !== scheduleRevisionRef.current) {
-        if (generation !== loadGenerationRef.current || currentUserRef.current !== ownerId) return;
+        if (generation !== loadGenerationRef.current || currentUserRef.current !== ownerId || !isCurrentDateScope(stateRef.current)) return;
         const currentState = stateRef.current;
         const revision = scheduleRevisionRef.current;
         const snapshot = scheduleRef.current;
@@ -752,9 +778,9 @@ export function useTodayV2State(userId) {
         });
         setScheduleSaveStatus('saving');
         const rows = await replaceSchedule({
-          targetLocalDate: currentState.tomorrowLocalDate, timezoneName: currentState.timezoneName, blocks,
+          targetLocalDate: currentState.planningLocalDate || currentState.tomorrowLocalDate, timezoneName: currentState.timezoneName, blocks,
         });
-        if (generation !== loadGenerationRef.current || currentUserRef.current !== ownerId) return;
+        if (generation !== loadGenerationRef.current || currentUserRef.current !== ownerId || !isCurrentDateScope(stateRef.current)) return;
         scheduleSavedRevisionRef.current = revision;
         if (revision === scheduleRevisionRef.current) {
           scheduleRef.current = snapshot.map((block) => ({
@@ -763,7 +789,10 @@ export function useTodayV2State(userId) {
           }));
           setScheduleBlocks(scheduleRef.current);
         }
-        setState((previous) => previous ? { ...previous, tomorrowSchedules: rows } : previous);
+        setState((previous) => previous ? {
+          ...previous, planningSchedules: rows,
+          ...(previous.planningLocalDate && previous.planningLocalDate !== previous.tomorrowLocalDate ? {} : { tomorrowSchedules: rows }),
+        } : previous);
         if (planRevision !== planRevisionRef.current) {
           planRevision = planRevisionRef.current;
           await flushTomorrowPlan();
@@ -772,7 +801,7 @@ export function useTodayV2State(userId) {
       setScheduleSaveStatus('saved');
       setScheduleError(null);
     })().catch((saveError) => {
-      if (generation !== loadGenerationRef.current || currentUserRef.current !== ownerId) throw saveError;
+      if (generation !== loadGenerationRef.current || currentUserRef.current !== ownerId || !isCurrentDateScope(stateRef.current)) throw saveError;
       setScheduleSaveStatus(isOfflineLikeError(saveError) ? 'offline' : 'error');
       setScheduleError(saveError);
       if (isMissingScheduleSchema(saveError)) {
@@ -791,7 +820,7 @@ export function useTodayV2State(userId) {
     const generation = loadGenerationRef.current;
     const ownerId = currentUserRef.current;
     const requireCurrentContext = () => {
-      if (generation !== loadGenerationRef.current || ownerId !== currentUserRef.current) {
+      if (generation !== loadGenerationRef.current || ownerId !== currentUserRef.current || !isCurrentDateScope(stateRef.current)) {
         throw new Error('Review changed while saving; retry the save');
       }
     };
@@ -822,8 +851,10 @@ export function useTodayV2State(userId) {
   const checkForDayRollover = React.useCallback(async () => {
     const currentState = stateRef.current;
     if (!currentState) return;
-    const nextDateContext = getTodayV2DateContext({ dayBoundaryHour: currentState.dayBoundaryHour });
-    if (nextDateContext.todayLocalDate === currentState.todayLocalDate) return;
+    const reviewDate = getTodayV2DateContext({
+      timezoneName: currentState.timezoneName, dayBoundaryHour: currentState.dayBoundaryHour,
+    }).todayLocalDate;
+    if (reviewDate === currentState.todayLocalDate && isCurrentDateScope(currentState)) return;
 
     await load();
   }, [load]);
@@ -862,7 +893,10 @@ export function useTodayV2State(userId) {
 
     const timeoutId = window.setTimeout(() => {
       void checkForDayRollover();
-    }, getTodayV2MsUntilNextBoundary({ dayBoundaryHour: state?.dayBoundaryHour }) + 1_000);
+    }, Math.min(
+      getTodayV2MsUntilNextBoundary({ dayBoundaryHour: state?.dayBoundaryHour }),
+      getTodayV2MsUntilNextBoundary({ dayBoundaryHour: 0 })
+    ) + 1_000);
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('focus', handleFocus);
@@ -943,15 +977,16 @@ export function useTodayV2State(userId) {
   const refreshHabits = React.useCallback(async (isCurrent) => {
     const context = stateRef.current;
     const next = await loadTodayReviewState(userId);
-    if (!isCurrent() || next.todayLocalDate !== context.todayLocalDate) return;
-    const baseline = (stateRef.current.tomorrowSchedules || [])
-      .filter((block) => block.target_local_date === next.tomorrowLocalDate);
+    if (!isCurrent() || !isCurrentDateScope(context) || next.todayLocalDate !== context.todayLocalDate
+      || next.planningLocalDate !== context.planningLocalDate) return;
+    const baseline = (stateRef.current.planningSchedules || stateRef.current.tomorrowSchedules || [])
+      .filter((block) => block.target_local_date === (next.planningLocalDate || next.tomorrowLocalDate));
     const signature = (block) => block ? `${Date.parse(block.starts_at)}|${Date.parse(block.ends_at)}` : null;
     const local = scheduleRef.current;
     const validHabits = new Set((next.habitDefinitions || [])
-      .filter((habit) => isTodayV2HabitScheduledForDate(habit, next.tomorrowLocalDate)).map((habit) => habit.id));
-    const remoteHabits = (next.tomorrowSchedules || [])
-      .filter((block) => block.source_type === 'habit' && block.target_local_date === next.tomorrowLocalDate);
+      .filter((habit) => isTodayV2HabitScheduledForDate(habit, next.planningLocalDate || next.tomorrowLocalDate)).map((habit) => habit.id));
+    const remoteHabits = (next.planningSchedules || next.tomorrowSchedules || [])
+      .filter((block) => block.source_type === 'habit' && block.target_local_date === (next.planningLocalDate || next.tomorrowLocalDate));
     const merged = local.filter((block) => block.source_type !== 'habit');
     for (const id of validHabits) {
       const oldBlock = baseline.find((block) => block.source_type === 'habit' && block.source_id === id);
@@ -965,6 +1000,8 @@ export function useTodayV2State(userId) {
     const nextState = {
       ...stateRef.current, habitDefinitions: next.habitDefinitions, habitOccurrences: next.habitOccurrences,
       tomorrowSchedules: next.tomorrowSchedules, todaySchedules: next.todaySchedules,
+      planningSchedules: next.planningSchedules,
+      planningContextSchedules: next.planningContextSchedules,
     };
     stateRef.current = nextState;
     setState(nextState);
@@ -1037,11 +1074,11 @@ export function useTodayV2State(userId) {
     setCompletionSaving(true);
     try {
       await flushAll();
-      if (generation !== loadGenerationRef.current || currentUserRef.current !== ownerId || stateRef.current?.review?.id !== reviewId) {
+      if (generation !== loadGenerationRef.current || currentUserRef.current !== ownerId || stateRef.current?.review?.id !== reviewId || !isCurrentDateScope(stateRef.current)) {
         throw new Error('Review changed while saving; retry completion');
       }
       const savedReview = await completeTodayV2Review(reviewId);
-      if (generation !== loadGenerationRef.current || currentUserRef.current !== ownerId || stateRef.current?.review?.id !== reviewId) return null;
+      if (generation !== loadGenerationRef.current || currentUserRef.current !== ownerId || stateRef.current?.review?.id !== reviewId || !isCurrentDateScope(stateRef.current)) return null;
       stateRef.current = { ...stateRef.current, review: { ...stateRef.current.review, ...savedReview } };
       setState((previous) => previous?.review?.id === reviewId ? {
         ...previous,
@@ -1062,7 +1099,7 @@ export function useTodayV2State(userId) {
   }, [canEdit, flushAll]);
 
   const reopenReview = React.useCallback(async () => {
-    if (loadedUserRef.current !== currentUserRef.current || !stateRef.current?.review?.completed_at || completionSavingRef.current) return null;
+    if (loadedUserRef.current !== currentUserRef.current || !isCurrentDateScope(stateRef.current) || !stateRef.current?.review?.completed_at || completionSavingRef.current) return null;
     const reviewId = stateRef.current.review.id;
     const generation = loadGenerationRef.current;
     const ownerId = currentUserRef.current;

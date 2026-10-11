@@ -44,7 +44,7 @@ async function calendarRequest(action, body, params = {}, userId, isAuthorized) 
   return payload;
 }
 
-export default function GoogleCalendarConnection({ userId, localDate = null, timezone = 'UTC', onEvents = null, onControls = null, onWritePending = null, readOnly = false, completionSaving = false, settings = false, includeNextDay = false }) {
+export default function GoogleCalendarConnection({ userId, localDate = null, timezone = 'UTC', onEvents = null, onControls = null, onWritePending = null, readOnly = false, completionSaving = false, settings = false, includeNextDay = false, returnPath = '/today' }) {
   const callbackResult = new URLSearchParams(window.location.search).get('googleCalendar');
   const [status, setStatus] = React.useState(null);
   const [calendars, setCalendars] = React.useState([]);
@@ -324,7 +324,7 @@ export default function GoogleCalendarConnection({ userId, localDate = null, tim
     setCalendarBusy(true);
     setError('');
     try {
-      const result = await request('connect', { returnPath: settings ? '/settings' : '/today' });
+      const result = await request('connect', { returnPath: settings ? '/settings' : returnPath });
       if (!isCurrent()) return;
       const destination = new URL(result.authorizationUrl, window.location.origin);
       if (destination.origin !== 'https://accounts.google.com' || destination.pathname !== '/o/oauth2/v2/auth' || destination.username || destination.password || destination.hash) throw new Error('Invalid Google connection link.');

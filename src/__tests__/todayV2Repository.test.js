@@ -183,6 +183,8 @@ describe('TodayV2 repository', () => {
 
     expect(state.todayLocalDate).toBe('2026-09-28');
     expect(state.tomorrowLocalDate).toBe('2026-09-29');
+    expect(state.planningSourceLocalDate).toBe('2026-09-28');
+    expect(state.planningLocalDate).toBe('2026-09-29');
     expect(state.firstFiveMinutes).toBe('Open the outline');
 
     const commitmentTrackers = trackers.filter((tracker) => tracker.tableName === TODAY_V2_TABLES.COMMITMENT_FRAGMENTS);
@@ -230,10 +232,12 @@ describe('TodayV2 repository', () => {
 
     expect(state.todayLocalDate).toBe('2026-09-28');
     expect(state.tomorrowLocalDate).toBe('2026-09-29');
+    expect(state.planningSourceLocalDate).toBe('2026-09-29');
+    expect(state.planningLocalDate).toBe('2026-09-30');
     expect(trackers.find((tracker) => tracker.tableName === TODAY_V2_TABLES.DAILY_REVIEWS).upsert.payload.local_date).toBe('2026-09-28');
     const commitmentTrackers = trackers.filter((tracker) => tracker.tableName === TODAY_V2_TABLES.COMMITMENT_FRAGMENTS);
     expect(commitmentTrackers[0].eq).toContainEqual(['target_local_date', '2026-09-28']);
-    expect(commitmentTrackers[1].eq).toContainEqual(['target_local_date', '2026-09-29']);
+    expect(commitmentTrackers[1].eq).toContainEqual(['target_local_date', '2026-09-30']);
   });
 
   it('saves tomorrow plans through the isolated replace RPC', async () => {

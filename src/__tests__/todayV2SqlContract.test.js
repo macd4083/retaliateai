@@ -11,6 +11,7 @@ const schedulingMigrationPath = path.join(repositoryRoot, 'supabase/migrations/2
 const lockMigrationPath = path.join(repositoryRoot, 'supabase/migrations/20261008_today_v2_schedule_review_lock.sql');
 const releaseGuardPath = path.join(repositoryRoot, 'supabase/migrations/20261009_today_v2_completion_release_guard.sql');
 const recurrenceMigrationPath = path.join(repositoryRoot, 'supabase/migrations/20261010_today_v2_habit_recurrence.sql');
+const dayScheduleMigrationPath = path.join(repositoryRoot, 'supabase/migrations/20261011_today_v2_day_schedule.sql');
 const consolidatedSqlPath = path.join(repositoryRoot, 'supabase/sql/today_v2_isolated_workflow.sql');
 const todayV2ServicePath = path.join(repositoryRoot, 'src/v2/services/todayReview.js');
 
@@ -23,12 +24,31 @@ describe('TodayV2 SQL contract', () => {
     const lockMigration = fs.readFileSync(lockMigrationPath, 'utf8');
     const releaseGuard = fs.readFileSync(releaseGuardPath, 'utf8');
     const recurrenceMigration = fs.readFileSync(recurrenceMigrationPath, 'utf8');
+    const dayScheduleMigration = fs.readFileSync(dayScheduleMigrationPath, 'utf8');
 
     expect(consolidatedSql.startsWith(initialMigration)).toBe(true);
     expect(consolidatedSql.slice(initialMigration.length).trim()).toBe(
-      `${featureMigration.trim()}\n\n${schedulingMigration.trim()}\n\n${lockMigration.trim()}\n\n${releaseGuard.trim()}\n\n${recurrenceMigration.trim()}`
+      `${featureMigration.trim()}\n\n${schedulingMigration.trim()}\n\n${lockMigration.trim()}\n\n${releaseGuard.trim()}\n\n${recurrenceMigration.trim()}\n\n${dayScheduleMigration.trim()}`
     );
-    expect(consolidatedSql.endsWith(recurrenceMigration)).toBe(true);
+    expect(consolidatedSql.endsWith(dayScheduleMigration)).toBe(true);
+  });
+
+  it('authorizes only current civil-day timing edits with a private transaction capability', () => {
+    const sql = fs.readFileSync(dayScheduleMigrationPath, 'utf8');
+    expect(sql).toContain('create or replace function public.today_v2_update_day_schedule(');
+    expect(sql).toContain('revoke all on public.today_v2_day_schedule_writes from public, anon, authenticated, service_role');
+    expect(sql).toContain('backend_pid = pg_backend_pid() and transaction_id = txid_current()');
+    expect(sql).toContain('(statement_timestamp() at time zone p_timezone_name)::date');
+    expect(sql).toContain("array['starts_at','ends_at','is_automatic','updated_at']");
+    expect(sql).toContain('order by local_date for update');
+    expect(sql).toContain('if v_review.completed_at is not null then');
+    expect(sql).toContain('if v_review.timezone_name <> p_timezone_name then');
+    expect(sql).toContain('source_local_date in (p_target_local_date - 1, p_target_local_date)');
+    expect(sql).toContain('v_date not in (v_row.target_local_date - 1, v_row.target_local_date)');
+    expect(sql).toContain('on conflict do nothing');
+    expect(sql).toContain('delete from public.today_v2_schedule_blocks where id = v_existing.id');
+    expect(sql).not.toContain('set_config(');
+    expect(sql).not.toMatch(/update public.today_v2_(?:daily_reviews|commitment_fragments|plan_inputs)/);
   });
 
   it('serializes all schedule and plan mutations against their owned source review while allowing outcome-only writes', () => {

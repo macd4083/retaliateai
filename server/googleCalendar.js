@@ -511,7 +511,7 @@ export function createGoogleCalendarHandler({ env = process.env, supabase, fetch
         if (!binding || typeof binding.verifier !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(binding.verifier) ||
           typeof binding.browser_hash !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(binding.browser_hash) ||
           !equal(binding.browser_hash, hash(nonce))) fail(400, 'invalid_state', 'Calendar authorization did not originate in this browser.');
-        const returnPath = pending.return_path === '/settings' ? '/settings' : '/today';
+        const returnPath = ['/home', '/settings'].includes(pending.return_path) ? pending.return_path : '/today';
         callbackReturn = `${config.origin}${returnPath}`;
         callbackStateHash = stateHash;
         const invalidCode = typeof req.query?.code !== 'string' || !req.query.code || req.query.code.length > 4096;
@@ -569,8 +569,8 @@ export function createGoogleCalendarHandler({ env = process.env, supabase, fetch
       }
       if (action === 'connect') {
         const submittedPath = req.body?.returnPath;
-        if (submittedPath !== undefined && !['/today', '/settings'].includes(submittedPath)) {
-          fail(400, 'invalid_return_path', 'Return path must be /today or /settings.');
+        if (submittedPath !== undefined && !['/today', '/home', '/settings'].includes(submittedPath)) {
+          fail(400, 'invalid_return_path', 'Return path must be /today, /home or /settings.');
         }
         const returnPath = submittedPath || '/today';
         const state = randomBytes(32).toString('base64url');

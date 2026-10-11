@@ -2,14 +2,16 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import AppShellV2 from '../../components/v2/AppShellV2';
 import { useAuth } from '../../lib/AuthContext';
-import { loadTodayV2HomeState, setFollowThroughCompletion, upsertHabitLog } from '../services/todayReview';
+import { loadTodayV2HomeState, upsertHabitLog } from '../services/todayReview';
 import { ENABLE_TODAY_V2_SCHEDULER } from '../../lib/featureFlags';
+import GoogleCalendarConnection from '../components/GoogleCalendarConnection';
+import TomorrowScheduler from '../components/TomorrowScheduler';
+import { updateDaySchedule, isMissingScheduleSchema } from '../services/scheduling';
 import {
-  getTodayV2CommitmentStateLabel,
   getTodayV2NextBoundaryDate,
+  getTodayV2DateContext,
   addDaysToLocalDate,
 } from '../today/model';
-import { TODAY_V2_COMMITMENT_STATES } from '../today/types';
 import { clipScheduleBlocksToDate, getScheduleDateBounds, getScheduleDayOffset, getScheduleLocalDate } from '../today/scheduling';
 
 function SegmentedChoice({ value, options, onChange, disabled = false }) {
@@ -73,8 +75,18 @@ export default function HomeV2Page() {
   const [error, setError] = React.useState(null);
   const [homeState, setHomeState] = React.useState(null);
   const [commitmentSaveError, setCommitmentSaveError] = React.useState(null);
+  const [googleEvents, setGoogleEvents] = React.useState([]);
+  const [googleControls, setGoogleControls] = React.useState(null);
+  const [googleWriting, setGoogleWriting] = React.useState(false);
+  const [scheduleSaveStatus, setScheduleSaveStatus] = React.useState('idle');
+  const [scheduleError, setScheduleError] = React.useState(null);
+  const scopeRef = React.useRef(null);
+  const schedulePending = React.useRef(false);
+  const loadGeneration = React.useRef(0);
 
   const load = React.useCallback(async () => {
+    const generation = ++loadGeneration.current;
+    scopeRef.current = null;
     if (!user?.id) {
       setLoading(false);
       setHomeState(null);
@@ -85,12 +97,17 @@ export default function HomeV2Page() {
     setError(null);
 
     try {
-      setHomeState(await loadTodayV2HomeState(user.id));
+      const next = await loadTodayV2HomeState(user.id);
+      if (generation !== loadGeneration.current) return;
+      setHomeState(next);
+      setScheduleSaveStatus('idle');
+      setScheduleError(null);
     } catch (loadError) {
+      if (generation !== loadGeneration.current) return;
       console.error('[HomeV2] load failed:', loadError);
       setError(loadError);
     } finally {
-      setLoading(false);
+      if (generation === loadGeneration.current) setLoading(false);
     }
   }, [user?.id]);
 
@@ -98,21 +115,33 @@ export default function HomeV2Page() {
     load();
   }, [load]);
 
+  React.useEffect(() => {
+    return () => { scopeRef.current = null; loadGeneration.current += 1; };
+  }, [user?.id]);
+
+  React.useEffect(() => {
+    if (!homeState) return undefined;
+    const refreshDate = () => {
+      try {
+        const currentDate = getScheduleLocalDate(new Date(), homeState.timezoneName || 'UTC');
+        const reviewDate = getTodayV2DateContext({
+          timezoneName: homeState.timezoneName || 'UTC', dayBoundaryHour: homeState.dayBoundaryHour,
+        }).todayLocalDate;
+        if (currentDate !== (homeState.civilScheduleLocalDate || homeState.todayLocalDate)
+          || reviewDate !== homeState.todayLocalDate) void load();
+      } catch { /* The calendar displays timezone diagnostics. */ }
+    };
+    const interval = window.setInterval(refreshDate, 60_000);
+    window.addEventListener('focus', refreshDate);
+    document.addEventListener('visibilitychange', refreshDate);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refreshDate);
+      document.removeEventListener('visibilitychange', refreshDate);
+    };
+  }, [homeState, load]);
+
   const actionsLocked = Boolean(homeState?.review?.completed_at);
-
-  const onSaveCommitmentCompletion = async (fragmentId, completionState) => {
-    const nextState = completionState || TODAY_V2_COMMITMENT_STATES.UNANSWERED;
-    setCommitmentSaveError(null);
-
-    try {
-      if (actionsLocked) return;
-      await setFollowThroughCompletion(fragmentId, nextState);
-      await load();
-    } catch (saveError) {
-      console.error('[HomeV2] commitment save failed:', saveError);
-      setCommitmentSaveError('Could not update that checklist item. Please try again.');
-    }
-  };
 
   const onSaveHabit = async (occurrence, value) => {
     if (actionsLocked) return;
@@ -162,7 +191,7 @@ export default function HomeV2Page() {
   const findSchedule = (schedules, sourceId) => ENABLE_TODAY_V2_SCHEDULER ? (schedules || []).find((schedule) => schedule.source_id === sourceId || schedule.commitment_fragment_id === sourceId || schedule.habit_definition_id === sourceId) : null;
   const todayHabits = homeState.habitOccurrences || [];
   const todayDate = homeState.todayLocalDate;
-  const tomorrowDate = homeState.tomorrowLocalDate || (todayDate ? addDaysToLocalDate(todayDate, 1) : null);
+  const tomorrowDate = homeState.planningLocalDate || homeState.tomorrowLocalDate || (todayDate ? addDaysToLocalDate(todayDate, 1) : null);
   let civilDate = todayDate;
   try {
     civilDate = homeState.civilScheduleLocalDate || getScheduleLocalDate(new Date(), homeState.timezoneName || 'UTC');
@@ -173,12 +202,75 @@ export default function HomeV2Page() {
     catch { return schedules || []; }
   };
   const todayVisible = visibleSchedules(homeState.todaySchedules, todayDate);
-  const tomorrowVisible = visibleSchedules(homeState.tomorrowSchedules, tomorrowDate);
+  const tomorrowVisible = visibleSchedules(homeState.planningSchedules || homeState.tomorrowSchedules, tomorrowDate);
   const civilDiffers = todayDate && civilDate > todayDate;
   const civilVisible = civilDiffers ? visibleSchedules(homeState.civilSchedules || homeState.tomorrowSchedules, civilDate) : [];
   const isCarryover = (schedule, date) => schedule.continued || schedule.read_only_context || Boolean(date && schedule.target_local_date && schedule.target_local_date < date);
   const todaySchedules = todayVisible.filter((schedule) => !isCarryover(schedule, todayDate));
   const tomorrowSchedules = tomorrowVisible.filter((schedule) => !isCarryover(schedule, tomorrowDate));
+  const calendarSources = homeState.civilFollowThroughItems || (civilDiffers ? homeState.tomorrowFragments : homeState.followThroughItems) || [];
+  const calendarHabits = homeState.civilHabitOccurrences || (civilDiffers ? [] : todayHabits);
+  const calendarReview = homeState.civilReview === undefined ? (civilDiffers ? null : homeState.review) : homeState.civilReview;
+  const calendarStarts = homeState.civilFirstFiveMinutes ?? (civilDiffers ? homeState.firstFiveMinutes : homeState.todayFirstFiveMinutes);
+  const calendarItems = [
+    ...calendarSources.map((item) => ({
+      key: `action:${item.id}`, source_id: item.id, type: 'action', label: item.normalized_fragment_text || item.fragment_text,
+    })),
+    ...calendarHabits.map((habit) => ({
+      key: `habit:${habit.habit_definition_id}`, source_id: habit.habit_definition_id, type: 'habit', label: habit.snapshot_name,
+    })),
+  ];
+  const calendarBlocks = (civilDiffers ? civilVisible : todayVisible).map((block) => {
+    const sourceId = block.source_id || block.commitment_fragment_id || block.habit_definition_id;
+    const type = block.source_type || (block.habit_definition_id ? 'habit' : 'action');
+    const sourceKey = block.source_key || `${type}:${sourceId}`;
+    const item = calendarItems.find((candidate) => candidate.key === sourceKey);
+    const definition = (homeState.habitDefinitions || []).find((habit) => habit.id === sourceId);
+    return { ...block, source_key: sourceKey, label: block.label || item?.label || definition?.name };
+  });
+  const scope = `${user?.id}:${civilDate}:${homeState.timezoneName}`;
+  scopeRef.current = scope;
+  const saveCalendarItem = async (key, times = null) => {
+    const generation = loadGeneration.current;
+    const item = calendarItems.find((candidate) => candidate.key === key);
+    if (!item || schedulePending.current || calendarReview?.completed_at || homeState.scheduleAvailable === false) return;
+    if (getScheduleLocalDate(new Date(), homeState.timezoneName || 'UTC') !== civilDate) {
+      throw new Error('The calendar date changed. Refresh Today before editing.');
+    }
+    schedulePending.current = true;
+    setScheduleSaveStatus('saving');
+    setScheduleError(null);
+    try {
+      const rows = await updateDaySchedule({
+        targetLocalDate: civilDate, timezoneName: homeState.timezoneName,
+        sourceType: item.type, sourceId: item.source_id,
+        startsAt: times?.starts_at ?? null, endsAt: times?.ends_at ?? null,
+      });
+      if (scopeRef.current !== scope || loadGeneration.current !== generation) return;
+      setHomeState((previous) => {
+        const merge = (blocks) => [
+          ...(blocks || []).filter((block) => block.target_local_date && block.target_local_date !== civilDate), ...rows,
+        ];
+        return {
+          ...previous,
+          civilSchedules: merge(previous.civilSchedules || (civilDiffers ? previous.tomorrowSchedules : previous.todaySchedules)),
+          ...(civilDate === previous.todayLocalDate ? { todaySchedules: merge(previous.todaySchedules) } : {}),
+          ...(civilDate === previous.tomorrowLocalDate ? { tomorrowSchedules: merge(previous.tomorrowSchedules) } : {}),
+        };
+      });
+      setScheduleSaveStatus('saved');
+    } catch (failure) {
+      if (scopeRef.current === scope && loadGeneration.current === generation) {
+        setScheduleSaveStatus('error');
+        setScheduleError(isMissingScheduleSchema(failure)
+          ? 'Today calendar editing needs the 20261011_today_v2_day_schedule.sql migration. Apply it, then retry.'
+          : failure.message || 'Could not save your calendar change. Please try again.');
+      }
+      throw failure;
+    } finally {
+      schedulePending.current = false;
+    }
+  };
   const carryover = (schedules, date, includeCurrent = false) => schedules.filter((schedule) => includeCurrent || isCarryover(schedule, date)).map((schedule) => {
     const sourceId = schedule.source_id || schedule.commitment_fragment_id || schedule.habit_definition_id;
     const source = [...homeState.followThroughItems, ...(homeState.tomorrowFragments || [])].find((item) => item.id === sourceId);
@@ -197,13 +289,6 @@ export default function HomeV2Page() {
             {homeState.latestDesiredDirection || 'Who are you becoming, or what are you changing about yourself?'}
           </p>
         </section>
-
-        {ENABLE_TODAY_V2_SCHEDULER && civilDiffers && <section aria-label="Current calendar day schedule" className="rounded-2xl border border-indigo-800/60 bg-zinc-900 p-4">
-          <h2 className="font-semibold text-white">Current calendar day schedule</h2>
-          <p className="mt-1 text-xs text-zinc-400">{civilDate} · {homeState.timezoneName} · Read-only schedule context</p>
-          <p className="mt-1 text-xs text-zinc-400">Your checklist still belongs to review day {todayDate}; calendar days change at midnight.</p>
-          {civilVisible.length ? carryover(civilVisible, civilDate, true) : <p className="mt-3 text-sm text-zinc-500">No schedule context loaded for this calendar day.</p>}
-        </section>}
 
         <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
           <h2 className="font-semibold text-white">Tomorrow you said you&apos;d prove it by:</h2>
@@ -239,53 +324,39 @@ export default function HomeV2Page() {
           {ENABLE_TODAY_V2_SCHEDULER && homeState.review?.completed_at && carryover(tomorrowVisible, tomorrowDate)}
         </section>
 
-        <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="font-semibold text-white">Today&apos;s actions checklist</h2>
-            {!homeState.review?.completed_at && (
-              <button type="button" onClick={() => navigate('/today')} className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold">
-                Start tonight&apos;s review
-              </button>
-            )}
-          </div>
-          {ENABLE_TODAY_V2_SCHEDULER && <p className="mt-1 text-xs text-zinc-400">Review day {todayDate} · {homeState.timezoneName}</p>}
-          {commitmentSaveError && <p className="mt-3 text-xs text-amber-300">{commitmentSaveError}</p>}
-          {homeState.todayFirstFiveMinutes && (
-            <p className="mt-3 text-sm text-zinc-300">
-              <span className="font-medium text-white">Start with:</span> {homeState.todayFirstFiveMinutes}
-            </p>
-          )}
-          {homeState.followThroughItems.length > 0 ? (
-            <div className="mt-3 space-y-2">
-              {homeState.followThroughItems.map((item) => (
-                <div key={item.id} className="rounded-xl border border-zinc-800 p-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div><p className="text-sm text-zinc-200">{item.normalized_fragment_text || item.fragment_text}</p><ScheduleTime schedule={findSchedule(todaySchedules, item.id)} timezone={homeState.timezoneName} localDate={todayDate} /></div>
-                    <span className="text-xs text-zinc-500">{getTodayV2CommitmentStateLabel(item.completion_state)}</span>
-                  </div>
-                  <div className="mt-3 flex items-center gap-2">
-                    <SegmentedChoice
-                      disabled={actionsLocked}
-                      value={item.completion_state}
-                      onChange={(nextValue) => onSaveCommitmentCompletion(item.id, nextValue || TODAY_V2_COMMITMENT_STATES.UNANSWERED)}
-                      options={[
-                        { value: TODAY_V2_COMMITMENT_STATES.KEPT, label: 'Kept', allowToggleOff: true },
-                        { value: TODAY_V2_COMMITMENT_STATES.NOT_KEPT, label: 'Not kept', allowToggleOff: true },
-                      ]}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="mt-3 text-sm text-zinc-500">No live commitments yet for today.</p>
-          )}
-          {ENABLE_TODAY_V2_SCHEDULER && carryover(todayVisible, todayDate)}
-        </section>
+        {ENABLE_TODAY_V2_SCHEDULER && <div className="space-y-3">
+          <p className="text-xs text-zinc-400">Review day {todayDate} · {homeState.timezoneName}</p>
+          {civilDiffers && <p className="text-xs text-zinc-400">Your checklist still belongs to review day {todayDate}; calendar days change at midnight.</p>}
+          {calendarStarts && <p className="text-sm text-zinc-300"><span className="font-medium text-white">Start with:</span> {calendarStarts}</p>}
+          <GoogleCalendarConnection userId={user?.id} localDate={civilDate} timezone={homeState.timezoneName} onEvents={setGoogleEvents} onControls={setGoogleControls} onWritePending={setGoogleWriting} returnPath="/home" completionSaving={scheduleSaveStatus === 'saving'} readOnly={Boolean(calendarReview?.completed_at)} />
+          <TomorrowScheduler
+            title="Today's calendar"
+            preserveUnmatchedBlocks
+            userId={user?.id}
+            localDate={civilDate}
+            timezone={homeState.timezoneName}
+            items={calendarItems}
+            blocks={calendarBlocks}
+            googleEvents={googleEvents}
+            onGoogleEdit={googleControls?.edit}
+            onGoogleUpdate={googleControls?.update}
+            onUpdate={saveCalendarItem}
+            onUnschedule={(key) => saveCalendarItem(key)}
+            saveStatus={scheduleSaveStatus}
+            saveError={scheduleError}
+            available={homeState.scheduleAvailable !== false}
+            availabilityError={homeState.scheduleDiagnostic?.message}
+            onRetry={load}
+            readOnly={Boolean(calendarReview?.completed_at)}
+            completionSaving={googleWriting}
+          />
+          <button type="button" onClick={() => navigate('/today')} className="rounded-lg border border-zinc-700 px-3 py-2 text-sm">Open Review &amp; Plan</button>
+        </div>}
 
         {ENABLE_TODAY_V2_SCHEDULER && (
           <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
             <h2 className="font-semibold text-white">Today&apos;s habits</h2>
+            {commitmentSaveError && <p className="mt-3 text-xs text-amber-300">{commitmentSaveError}</p>}
             <p className="mt-1 text-xs text-zinc-400">{homeState.todayLocalDate} · {homeState.timezoneName} · Review-day check-ins</p>
             {todayHabits.length ? <div className="mt-3 space-y-2">{todayHabits.map((habit) => (
               <div key={habit.id} className="space-y-2 rounded-xl border border-zinc-800 p-3">

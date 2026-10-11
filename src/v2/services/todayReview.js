@@ -98,7 +98,12 @@ async function loadHabitDefinitions(userId) {
 }
 
 export async function loadTodayReviewState(userId, options = {}) {
-  const dateContext = getTodayV2DateContext(options);
+  const now = options.now instanceof Date ? options.now : new Date();
+  const dateContext = getTodayV2DateContext({ ...options, now });
+  const planningSourceLocalDate = getTodayV2DateContext({
+    ...options, now, timezoneName: dateContext.timezoneName, dayBoundaryHour: 0,
+  }).todayLocalDate;
+  const planningLocalDate = addDaysToLocalDate(planningSourceLocalDate, 1);
   const seedResult = await seedDefaultHabits(userId);
 
   const review = await ensureTodayV2DailyReview(
@@ -128,7 +133,7 @@ export async function loadTodayReviewState(userId, options = {}) {
       .from(TODAY_V2_TABLES.PLAN_INPUTS)
       .select('id, raw_plan_text, first_five_minutes, target_local_date, source_local_date, timezone_name, parser_version, updated_at')
       .eq('user_id', userId)
-      .eq('target_local_date', dateContext.tomorrowLocalDate)
+      .eq('target_local_date', planningLocalDate)
       .maybeSingle(),
     supabase
       .from(TODAY_V2_TABLES.PLAN_INPUTS)
@@ -150,7 +155,7 @@ export async function loadTodayReviewState(userId, options = {}) {
       .from(TODAY_V2_TABLES.COMMITMENT_FRAGMENTS)
       .select('id, target_local_date, source_local_date, fragment_order, fragment_text, normalized_fragment_text, completion_state, answered_at, parser_version')
       .eq('user_id', userId)
-      .eq('target_local_date', dateContext.tomorrowLocalDate)
+      .eq('target_local_date', planningLocalDate)
       .order('fragment_order', { ascending: true }),
     loadHabitDefinitions(userId),
     supabase
@@ -172,15 +177,24 @@ export async function loadTodayReviewState(userId, options = {}) {
 
   const recurrenceDiagnostic = ENABLE_TODAY_V2_SCHEDULER && habitDefinitionsResult.recurrenceAvailable
     ? await ensureTodayV2AutomaticHabitSchedules(
-      dateContext.todayLocalDate, dateContext.tomorrowLocalDate, dateContext.timezoneName
+      dateContext.todayLocalDate, planningLocalDate, dateContext.timezoneName
     ) : null;
+  const scheduleState = await loadSchedules(userId, dateContext.todayLocalDate, dateContext.tomorrowLocalDate, dateContext.timezoneName);
+  const planningScheduleState = planningLocalDate === dateContext.tomorrowLocalDate ? scheduleState
+    : await loadSchedules(userId, planningSourceLocalDate, planningLocalDate, dateContext.timezoneName);
 
   return {
     ...dateContext,
-    ...await loadSchedules(userId, dateContext.todayLocalDate, dateContext.tomorrowLocalDate, dateContext.timezoneName),
+    planningSourceLocalDate,
+    planningLocalDate,
+    ...scheduleState,
+    scheduleAvailable: scheduleState.scheduleAvailable && planningScheduleState.scheduleAvailable,
+    scheduleDiagnostic: scheduleState.scheduleDiagnostic || planningScheduleState.scheduleDiagnostic,
+    planningSchedules: planningScheduleState.tomorrowSchedules,
+    planningContextSchedules: planningScheduleState.todaySchedules,
     review,
     routeTarget: getTodayV2DefaultPath(review),
-    draftStorageKey: buildTodayV2DraftStorageKey(userId, dateContext.todayLocalDate),
+    draftStorageKey: buildTodayV2DraftStorageKey(userId, planningSourceLocalDate),
     seedDiagnostic: seedResult.diagnostic,
     recurrenceDiagnostic: recurrenceDiagnostic || (habitDefinitionsResult.recurrenceAvailable ? null : {
       code: 'HABIT_RECURRENCE_SCHEMA_MISSING', message: 'Automatic habit scheduling needs the recurrence migration.',
@@ -199,9 +213,37 @@ export async function loadTodayReviewState(userId, options = {}) {
 
 export async function loadTodayV2HomeState(userId, options = {}) {
   const current = await loadTodayReviewState(userId, options);
-  const civilScheduleLocalDate = getTodayV2DateContext({
-    ...options, timezoneName: current.timezoneName, dayBoundaryHour: 0,
-  }).todayLocalDate;
+  const civilScheduleLocalDate = current.planningSourceLocalDate;
+  let civilHabitOccurrences = current.habitOccurrences;
+  let civilReview = current.review;
+  let civilFollowThroughItems = current.followThroughItems;
+  let civilSchedules = current.todaySchedules;
+  let civilFirstFiveMinutes = current.todayFirstFiveMinutes;
+  if (civilScheduleLocalDate !== current.todayLocalDate) {
+    await ensureTodayV2HabitOccurrences(civilScheduleLocalDate, current.timezoneName);
+    const [habitsResult, reviewResult, civilFragmentsResult, civilPlanResult] = await Promise.all([
+      supabase.from(TODAY_V2_TABLES.HABIT_OCCURRENCES).select('*')
+        .eq('user_id', userId).eq('local_date', civilScheduleLocalDate)
+        .order('snapshot_display_order', { ascending: true }).order('created_at', { ascending: true }),
+      supabase.from(TODAY_V2_TABLES.DAILY_REVIEWS).select('id, local_date, completed_at')
+        .eq('user_id', userId).eq('local_date', civilScheduleLocalDate).maybeSingle(),
+      supabase.from(TODAY_V2_TABLES.COMMITMENT_FRAGMENTS)
+        .select('id, target_local_date, source_local_date, fragment_order, fragment_text, normalized_fragment_text, completion_state, answered_at, parser_version')
+        .eq('user_id', userId).eq('target_local_date', civilScheduleLocalDate)
+        .order('fragment_order', { ascending: true }),
+      supabase.from(TODAY_V2_TABLES.PLAN_INPUTS).select('first_five_minutes')
+        .eq('user_id', userId).eq('target_local_date', civilScheduleLocalDate).maybeSingle(),
+    ]);
+    if (habitsResult.error) throw habitsResult.error;
+    if (reviewResult.error) throw reviewResult.error;
+    if (civilFragmentsResult.error) throw civilFragmentsResult.error;
+    if (civilPlanResult.error) throw civilPlanResult.error;
+    civilHabitOccurrences = habitsResult.data || [];
+    civilReview = reviewResult.data;
+    civilFollowThroughItems = civilFragmentsResult.data || [];
+    civilSchedules = current.tomorrowSchedules;
+    civilFirstFiveMinutes = civilPlanResult.data?.first_five_minutes || '';
+  }
   const last30Start = addDaysToLocalDate(current.todayLocalDate, -29);
   const last7Start = addDaysToLocalDate(current.todayLocalDate, -6);
 
@@ -236,8 +278,11 @@ export async function loadTodayV2HomeState(userId, options = {}) {
   return {
     ...current,
     civilScheduleLocalDate,
-    civilSchedules: civilScheduleLocalDate === current.todayLocalDate
-      ? current.todaySchedules : current.tomorrowSchedules,
+    civilSchedules,
+    civilFirstFiveMinutes,
+    civilFollowThroughItems,
+    civilHabitOccurrences,
+    civilReview,
     latestDesiredDirection: getLatestTodayV2Identity(reviewHistory, current.review?.desired_direction || ''),
     metrics: buildTodayV2HomeMetrics({
       reviews: reviewHistory,
