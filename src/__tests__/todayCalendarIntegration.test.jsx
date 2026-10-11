@@ -117,7 +117,9 @@ describe('Review & Plan calendar integration', () => {
     expect(container.textContent).toContain('Calendar database setup is incomplete');
     expect(container.textContent).toContain('20261009_today_v2_completion_release_guard.sql');
     expect(container.textContent).toContain('You can still save your actions and complete your review');
-    expect(container.querySelector('[data-slot-timestamp]')).toBeNull();
+    expect(container.querySelectorAll('[data-slot-timestamp]')).toHaveLength(96);
+    expect(container.querySelector('[data-scheduler-edit-key="action:write"]').disabled).toBe(true);
+    expect(container.querySelector('[data-scheduler-drag-key]')).toBeNull();
     await act(async () => [...container.querySelectorAll('button')].find((node) => node.textContent === 'Retry scheduling').click());
     expect(mocks.load).toHaveBeenCalledOnce();
     expect(container.textContent).toContain('6.1 Identity Alignment');

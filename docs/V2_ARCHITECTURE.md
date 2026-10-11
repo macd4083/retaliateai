@@ -4,10 +4,11 @@
 - `src/lib/featureFlags.js` retains only the independent `ENABLE_TODAY_V2_SCHEDULER` switch.
 - `/app` is the authenticated generic entry point. It uses the existing V2 completion resolver: incomplete or unavailable completion metadata goes to `/today`; completed reviews go to `/home`.
 - `/reflection` and `/legacy/reflection` are compatibility redirects to `/app`. The legacy coaching page and its endpoints are retired.
-- Explicit `/today` always opens the structured nightly workflow, including its completed-review reopen/edit behavior; `/home` always opens the live checklist.
+- Explicit `/today` always opens the structured nightly workflow, including its completed-review reopen/edit behavior and ROI action checklist. `/home` opens Today with a read-only calendar of actions and habits, plus habit check-ins; ROI completion is recorded only in Review & Plan.
 - `VITE_ENABLE_TODAY_V2` is retired and ignored. Generic entry cannot roll back to the removed AI dialogue; legacy bookmarks always use the live V2 resolver.
 - User navigation is Today (`/home`), Review & Plan (`/today`), Progress (`/insights`), Settings (`/settings`). Administration remains separate.
 - Progress currently uses the existing Insights implementation. Migrating its reporting data to V2 is separate work; this change does not merge legacy and V2 histories.
+- Both pages reuse `TomorrowScheduler`. A missing scheduling schema or connection disables editing and shows diagnostics without hiding the calendar; an invalid date/timezone still prevents timeline rendering. Unscheduled actions remain visible in the calendar's tray. Today uses the review-day date, with separate civil-day schedule context after midnight.
 
 ## Boundary map
 

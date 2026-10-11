@@ -2,14 +2,14 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import AppShellV2 from '../../components/v2/AppShellV2';
 import { useAuth } from '../../lib/AuthContext';
-import { loadTodayV2HomeState, setFollowThroughCompletion, upsertHabitLog } from '../services/todayReview';
+import { loadTodayV2HomeState, upsertHabitLog } from '../services/todayReview';
 import { ENABLE_TODAY_V2_SCHEDULER } from '../../lib/featureFlags';
+import GoogleCalendarConnection from '../components/GoogleCalendarConnection';
+import TomorrowScheduler from '../components/TomorrowScheduler';
 import {
-  getTodayV2CommitmentStateLabel,
   getTodayV2NextBoundaryDate,
   addDaysToLocalDate,
 } from '../today/model';
-import { TODAY_V2_COMMITMENT_STATES } from '../today/types';
 import { clipScheduleBlocksToDate, getScheduleDateBounds, getScheduleDayOffset, getScheduleLocalDate } from '../today/scheduling';
 
 function SegmentedChoice({ value, options, onChange, disabled = false }) {
@@ -73,6 +73,7 @@ export default function HomeV2Page() {
   const [error, setError] = React.useState(null);
   const [homeState, setHomeState] = React.useState(null);
   const [commitmentSaveError, setCommitmentSaveError] = React.useState(null);
+  const [googleEvents, setGoogleEvents] = React.useState([]);
 
   const load = React.useCallback(async () => {
     if (!user?.id) {
@@ -99,20 +100,6 @@ export default function HomeV2Page() {
   }, [load]);
 
   const actionsLocked = Boolean(homeState?.review?.completed_at);
-
-  const onSaveCommitmentCompletion = async (fragmentId, completionState) => {
-    const nextState = completionState || TODAY_V2_COMMITMENT_STATES.UNANSWERED;
-    setCommitmentSaveError(null);
-
-    try {
-      if (actionsLocked) return;
-      await setFollowThroughCompletion(fragmentId, nextState);
-      await load();
-    } catch (saveError) {
-      console.error('[HomeV2] commitment save failed:', saveError);
-      setCommitmentSaveError('Could not update that checklist item. Please try again.');
-    }
-  };
 
   const onSaveHabit = async (occurrence, value) => {
     if (actionsLocked) return;
@@ -179,6 +166,22 @@ export default function HomeV2Page() {
   const isCarryover = (schedule, date) => schedule.continued || schedule.read_only_context || Boolean(date && schedule.target_local_date && schedule.target_local_date < date);
   const todaySchedules = todayVisible.filter((schedule) => !isCarryover(schedule, todayDate));
   const tomorrowSchedules = tomorrowVisible.filter((schedule) => !isCarryover(schedule, tomorrowDate));
+  const calendarItems = [
+    ...(homeState.followThroughItems || []).map((item) => ({
+      key: `action:${item.id}`, type: 'action', label: item.normalized_fragment_text || item.fragment_text,
+    })),
+    ...todayHabits.map((habit) => ({
+      key: `habit:${habit.habit_definition_id}`, type: 'habit', label: habit.snapshot_name,
+    })),
+  ];
+  const calendarBlocks = todayVisible.map((block) => {
+    const sourceId = block.source_id || block.commitment_fragment_id || block.habit_definition_id;
+    const type = block.source_type || (block.habit_definition_id ? 'habit' : 'action');
+    const sourceKey = block.source_key || `${type}:${sourceId}`;
+    const item = calendarItems.find((candidate) => candidate.key === sourceKey);
+    const definition = (homeState.habitDefinitions || []).find((habit) => habit.id === sourceId);
+    return { ...block, source_key: sourceKey, label: block.label || item?.label || definition?.name };
+  });
   const carryover = (schedules, date, includeCurrent = false) => schedules.filter((schedule) => includeCurrent || isCarryover(schedule, date)).map((schedule) => {
     const sourceId = schedule.source_id || schedule.commitment_fragment_id || schedule.habit_definition_id;
     const source = [...homeState.followThroughItems, ...(homeState.tomorrowFragments || [])].find((item) => item.id === sourceId);
@@ -239,53 +242,30 @@ export default function HomeV2Page() {
           {ENABLE_TODAY_V2_SCHEDULER && homeState.review?.completed_at && carryover(tomorrowVisible, tomorrowDate)}
         </section>
 
-        <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="font-semibold text-white">Today&apos;s actions checklist</h2>
-            {!homeState.review?.completed_at && (
-              <button type="button" onClick={() => navigate('/today')} className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold">
-                Start tonight&apos;s review
-              </button>
-            )}
-          </div>
-          {ENABLE_TODAY_V2_SCHEDULER && <p className="mt-1 text-xs text-zinc-400">Review day {todayDate} · {homeState.timezoneName}</p>}
-          {commitmentSaveError && <p className="mt-3 text-xs text-amber-300">{commitmentSaveError}</p>}
-          {homeState.todayFirstFiveMinutes && (
-            <p className="mt-3 text-sm text-zinc-300">
-              <span className="font-medium text-white">Start with:</span> {homeState.todayFirstFiveMinutes}
-            </p>
-          )}
-          {homeState.followThroughItems.length > 0 ? (
-            <div className="mt-3 space-y-2">
-              {homeState.followThroughItems.map((item) => (
-                <div key={item.id} className="rounded-xl border border-zinc-800 p-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div><p className="text-sm text-zinc-200">{item.normalized_fragment_text || item.fragment_text}</p><ScheduleTime schedule={findSchedule(todaySchedules, item.id)} timezone={homeState.timezoneName} localDate={todayDate} /></div>
-                    <span className="text-xs text-zinc-500">{getTodayV2CommitmentStateLabel(item.completion_state)}</span>
-                  </div>
-                  <div className="mt-3 flex items-center gap-2">
-                    <SegmentedChoice
-                      disabled={actionsLocked}
-                      value={item.completion_state}
-                      onChange={(nextValue) => onSaveCommitmentCompletion(item.id, nextValue || TODAY_V2_COMMITMENT_STATES.UNANSWERED)}
-                      options={[
-                        { value: TODAY_V2_COMMITMENT_STATES.KEPT, label: 'Kept', allowToggleOff: true },
-                        { value: TODAY_V2_COMMITMENT_STATES.NOT_KEPT, label: 'Not kept', allowToggleOff: true },
-                      ]}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="mt-3 text-sm text-zinc-500">No live commitments yet for today.</p>
-          )}
-          {ENABLE_TODAY_V2_SCHEDULER && carryover(todayVisible, todayDate)}
-        </section>
+        {ENABLE_TODAY_V2_SCHEDULER && <div className="space-y-3">
+          <p className="text-xs text-zinc-400">Review day {todayDate} · {homeState.timezoneName}</p>
+          {homeState.todayFirstFiveMinutes && <p className="text-sm text-zinc-300"><span className="font-medium text-white">Start with:</span> {homeState.todayFirstFiveMinutes}</p>}
+          <GoogleCalendarConnection userId={user?.id} localDate={todayDate} timezone={homeState.timezoneName} onEvents={setGoogleEvents} readOnly />
+          <TomorrowScheduler
+            title="Today's calendar"
+            userId={user?.id}
+            localDate={todayDate}
+            timezone={homeState.timezoneName}
+            items={calendarItems}
+            blocks={calendarBlocks}
+            googleEvents={googleEvents}
+            available={homeState.scheduleAvailable !== false}
+            availabilityError={homeState.scheduleDiagnostic?.message}
+            onRetry={load}
+            readOnly
+          />
+          <button type="button" onClick={() => navigate('/today')} className="rounded-lg border border-zinc-700 px-3 py-2 text-sm">Open Review &amp; Plan</button>
+        </div>}
 
         {ENABLE_TODAY_V2_SCHEDULER && (
           <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
             <h2 className="font-semibold text-white">Today&apos;s habits</h2>
+            {commitmentSaveError && <p className="mt-3 text-xs text-amber-300">{commitmentSaveError}</p>}
             <p className="mt-1 text-xs text-zinc-400">{homeState.todayLocalDate} · {homeState.timezoneName} · Review-day check-ins</p>
             {todayHabits.length ? <div className="mt-3 space-y-2">{todayHabits.map((habit) => (
               <div key={habit.id} className="space-y-2 rounded-xl border border-zinc-800 p-3">

@@ -2,12 +2,13 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ load: vi.fn(), habit: vi.fn(), completion: vi.fn(), navigate: vi.fn(), enabled: true }));
+const mocks = vi.hoisted(() => ({ load: vi.fn(), habit: vi.fn(), completion: vi.fn(), navigate: vi.fn(), session: vi.fn(), enabled: true }));
 vi.mock('../lib/AuthContext', () => ({ useAuth: () => ({ user: { id: 'user' } }) }));
 vi.mock('../lib/featureFlags', () => ({ get ENABLE_TODAY_V2_SCHEDULER() { return mocks.enabled; } }));
 vi.mock('react-router-dom', () => ({ useNavigate: () => mocks.navigate }));
 vi.mock('../components/v2/AppShellV2', () => ({ default: ({ children }) => <div>{children}</div> }));
 vi.mock('../v2/services/todayReview', () => ({ loadTodayV2HomeState: mocks.load, upsertHabitLog: mocks.habit, setFollowThroughCompletion: mocks.completion }));
+vi.mock('../lib/supabase/client', () => ({ supabase: { auth: { getSession: mocks.session } } }));
 import HomeV2Page from '../v2/pages/HomeV2Page';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -18,6 +19,10 @@ describe('scheduled Home check-ins', () => {
   const habit = { id: 'occurrence', habit_definition_id: 'definition', snapshot_name: 'Read', snapshot_response_type: 'boolean', boolean_response: null, answered_at: null };
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-07T12:00:00Z'));
+    mocks.session.mockResolvedValue({ data: { session: { access_token: 'test-session', user: { id: 'user' } } } });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ connected: false, configured: true, schemaAvailable: true }) }));
     mocks.enabled = true;
     mocks.load.mockResolvedValue({
       review: { completed_at: null }, todayLocalDate: '2026-10-07', timezoneName: 'UTC', dayBoundaryHour: 4,
@@ -31,12 +36,18 @@ describe('scheduled Home check-ins', () => {
     document.body.appendChild(container);
     root = createRoot(container);
   });
-  afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.useRealTimers(); });
+  afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.useRealTimers(); vi.unstubAllGlobals(); });
   const render = async () => act(async () => root.render(<HomeV2Page />));
 
   it('shows persisted times and writes habit responses to the same occurrence', async () => {
     await render();
     expect(container.textContent).toContain('Today\'s habits');
+    expect(container.textContent).toContain("Today's calendar");
+    expect(container.textContent).not.toContain("Today's actions checklist");
+    expect(container.querySelectorAll('[data-slot-timestamp]')).toHaveLength(96);
+    expect(container.querySelector('[data-schedule-key="action:commitment"]').textContent).toContain('Write');
+    expect([...container.querySelectorAll('button')].some((button) => ['Kept', 'Not kept'].includes(button.textContent))).toBe(false);
+    expect(container.querySelector('[data-scheduler-drag-key]')).toBeNull();
     expect(container.textContent).toMatch(/9:00|09:00/);
     expect(container.textContent).toMatch(/10:00/);
     const yes = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Yes');
@@ -50,7 +61,42 @@ describe('scheduled Home check-ins', () => {
     await render();
     expect(container.textContent).not.toContain('Today\'s habits');
     expect(container.textContent).not.toMatch(/9:00|09:00/);
-    expect(container.textContent).toContain('Write');
+    expect(container.textContent).not.toContain("Today's calendar");
+    expect(container.textContent).not.toContain("Today's actions checklist");
+  });
+
+  it('keeps unscheduled ROI actions visible without reintroducing a checklist', async () => {
+    const base = await mocks.load();
+    mocks.load.mockResolvedValue({ ...base, todaySchedules: [], scheduleAvailable: false, scheduleDiagnostic: { message: 'Database setup is incomplete' } });
+    await render();
+    const tray = container.querySelector('[aria-label="Unscheduled items"]');
+    expect(tray.textContent).toContain('Write');
+    expect(tray.textContent).toContain('Read');
+    expect(container.querySelectorAll('[data-slot-timestamp]')).toHaveLength(96);
+    expect(container.textContent).toContain('Database setup is incomplete');
+    expect(container.querySelector('[data-scheduler-edit-key="action:commitment"]').disabled).toBe(true);
+    expect(container.textContent).not.toContain("Today's actions checklist");
+    await act(async () => [...container.querySelectorAll('button')].find((button) => button.textContent === 'Retry scheduling').click());
+    expect(mocks.load).toHaveBeenCalledTimes(3);
+    await act(async () => [...container.querySelectorAll('button')].find((button) => button.textContent === 'Open Review & Plan').click());
+    expect(mocks.navigate).toHaveBeenCalledWith('/today');
+  });
+
+  it('overlays connected Google events without exposing event or ROI editing on Today', async () => {
+    fetch.mockImplementation(async (url) => ({
+      ok: true,
+      json: async () => {
+        if (url.includes('action=status')) return { connected: true, canWrite: true, selectedCalendarIds: ['primary'] };
+        if (url.includes('action=calendars')) return { calendars: [{ id: 'primary', accessRole: 'owner', summary: 'Personal' }], selectedCalendarIds: ['primary'] };
+        return { events: [{ id: 'meeting', calendarId: 'primary', eventId: 'meeting', editable: true, title: 'Planning meeting', start: '2026-10-07T11:00:00Z', end: '2026-10-07T12:00:00Z' }] };
+      },
+    }));
+    await render();
+    expect(container.querySelector('[aria-label="Google events"]').textContent).toContain('Planning meeting');
+    expect(container.querySelector('[aria-label="Edit Google event Planning meeting"]')).toBeNull();
+    expect(container.querySelector('[data-resize-edge]')).toBeNull();
+    expect([...container.querySelectorAll('[data-scheduler-edit-key]')].every((button) => button.disabled)).toBe(true);
+    expect(mocks.completion).not.toHaveBeenCalled();
   });
 
   it('keeps completed scheduled-habit evidence using an occurrence snapshot after its definition is archived', async () => {
@@ -78,10 +124,10 @@ describe('scheduled Home check-ins', () => {
       ],
     });
     await render();
-    const carryover = container.querySelector('[data-carryover-schedule-id="carryover"]');
+    const carryover = container.querySelector('[data-context-schedule-id="carryover"]');
     expect(carryover.textContent).toContain('Read yesterday');
     expect(carryover.textContent).toContain('Continued from previous day');
-    expect(carryover.textContent).toContain('Previous-day plan · read-only');
+    expect(carryover.textContent).toContain('Previous-day · 2026-10-06 · read-only');
     expect(carryover.textContent).not.toMatch(/11:30|23:30/);
     expect(carryover.querySelector('button, input')).toBeNull();
     expect(container.textContent).not.toContain('Already ended');
@@ -151,10 +197,9 @@ describe('scheduled Home check-ins', () => {
     expect(context.textContent).toContain('Early reading');
     expect(context.textContent).not.toMatch(/11:30|23:30/);
     expect(context.querySelector('button, input')).toBeNull();
-    const checklist = [...container.querySelectorAll('section')].find((section) => section.textContent.includes("Today's actions checklist"));
-    expect(checklist.textContent).toContain('Review day 2026-10-07');
-    await act(async () => [...checklist.querySelectorAll('button')].find((button) => button.textContent === 'Kept').click());
-    expect(mocks.completion).toHaveBeenCalledWith('commitment', 'kept');
+    expect(container.textContent).not.toContain("Today's actions checklist");
+    expect(container.textContent).toContain('Review day 2026-10-07');
+    expect(mocks.completion).not.toHaveBeenCalled();
     const yes = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Yes');
     await act(async () => yes.click());
     expect(mocks.habit).toHaveBeenCalledWith('occurrence', 'boolean', true);
@@ -181,7 +226,7 @@ describe('scheduled Home check-ins', () => {
       todaySchedules: [{ id: 'dst-carryover', commitment_fragment_id: 'commitment', target_local_date: '2026-03-07', label: 'Long DST plan', starts_at: '2026-03-08T04:45:00Z', ends_at: '2026-03-09T04:45:00Z' }],
     });
     await render();
-    const context = container.querySelector('[data-carryover-schedule-id="dst-carryover"]');
+    const context = container.querySelector('[data-context-schedule-id="dst-carryover"]');
     expect(context.textContent).toContain('(+2 days)');
     expect(context.textContent).not.toContain('(+1 day)');
     expect(context.textContent).not.toMatch(/11:45|23:45/);

@@ -52,11 +52,17 @@ describe('TomorrowScheduler UI', () => {
     container.remove();
   });
 
-  it('shows an actionable unavailable message without a calendar or drag targets', async () => {
+  it('keeps the calendar visible with an actionable unavailable message and no editing or drag targets', async () => {
     await render({ available: false });
     expect(container.textContent).toContain('You can still save your actions and complete your review');
     expect(container.textContent).not.toContain('Google connection');
-    expect(container.querySelector('[aria-label^="24-hour"]')).toBeNull();
+    expect(container.querySelector('[aria-label^="24-hour"]')).not.toBeNull();
+    expect(container.querySelectorAll('[data-slot-timestamp]')).toHaveLength(96);
+    expect(container.querySelector('[data-scheduler-drag-key]')).toBeNull();
+    expect([...container.querySelectorAll('[data-scheduler-edit-key]')].every((button) => button.disabled)).toBe(true);
+    await act(async () => container.querySelector('[data-scheduler-edit-key]').click());
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(update).not.toHaveBeenCalled();
   });
 
   it('exposes unavailable pending-schedule errors without claiming completion is allowed', async () => {
@@ -740,7 +746,7 @@ describe('TomorrowScheduler UI', () => {
 
   it('shows a cross-midnight block on its start planning date with an explicit next-day label', async () => {
     await render({ blocks: [{ source_key: 'action-1', starts_at: '2026-10-07T23:45:00Z', ends_at: '2026-10-08T00:15:00Z' }] });
-    expect(container.textContent).toContain('23:45–00:15 (+1 day)');
+    expect(container.textContent).toContain('23:45–00:00 (+1 day) · Continues tomorrow');
     expect(container.querySelector('[data-schedule-key="action-1"]').style.height).toBe('36px');
     await click('Write a chapter');
     expect(getInput('[role="dialog"] input[type="number"]').value).toBe('30');
