@@ -1,6 +1,7 @@
 import { Resend } from 'resend';
 import { createClient } from '@supabase/supabase-js';
 import { escapeHtml, getLocalReviewContext, isAuthorizedCron, publicAppUrl } from '../server/notifications.js';
+import { recoverNotifications, supportClients } from '../server/supportInbox.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -22,6 +23,12 @@ function buildEmailHtml() {
 export default async function handler(req, res) {
   if (req.method !== 'GET' && req.method !== 'POST') return res.status(405).end();
   if (!isAuthorizedCron(req)) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const clients = supportClients();
+    await recoverNotifications(clients.db, clients.resend, 1);
+  } catch {
+    console.error('missed-sessions-email: support notification recovery failed');
+  }
 
   const now = new Date();
   const { data: profiles, error: profileError } = await supabase

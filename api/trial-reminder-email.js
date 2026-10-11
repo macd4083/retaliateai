@@ -1,4 +1,5 @@
 import { Resend } from 'resend';
+import { recoverNotifications, supportClients } from '../server/supportInbox.js';
 import { createClient } from '@supabase/supabase-js';
 import { escapeHtml, isAuthorizedCron, publicAppUrl } from '../server/notifications.js';
 
@@ -60,6 +61,12 @@ function extendedTrialExpiredHtml() {
 export default async function handler(req, res) {
   if (req.method !== 'GET' && req.method !== 'POST') return res.status(405).end();
   if (!isAuthorizedCron(req)) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const clients = supportClients();
+    await recoverNotifications(clients.db, clients.resend, 1);
+  } catch {
+    console.error('trial-reminder-email: support notification recovery failed');
+  }
 
   const now = new Date();
   const twoDaysFromNow = new Date(now.getTime() + TWO_DAYS_MS);

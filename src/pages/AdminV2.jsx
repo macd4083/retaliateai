@@ -1034,6 +1034,12 @@ export default function AdminV2() {
         <div className="flex items-center gap-3">
           <Database className="w-5 h-5 text-red-500" />
           <h2 className="text-white font-semibold text-lg">Admin Panel</h2>
+          <button
+            onClick={() => navigate('/admin/support-inbox')}
+            className="px-3 py-1.5 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-300 hover:text-white text-sm"
+          >
+            Support Inbox
+          </button>
           <span className="px-2 py-0.5 rounded text-xs font-bold bg-red-900/40 border border-red-800 text-red-400">DEV</span>
         </div>
 
