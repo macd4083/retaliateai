@@ -26,6 +26,10 @@ vi.mock('stripe', () => ({
   },
 }));
 vi.mock('../lib/auth.js', () => ({ getAuthenticatedUserId: mocks.authenticatedUser }));
+vi.mock('../../server/supportInbox.js', () => ({
+  supportClients: () => ({ db: {}, resend: {} }),
+  recoverNotifications: vi.fn().mockResolvedValue(0),
+}));
 
 import missedHandler from '../../api/missed-sessions-email.js';
 import trialHandler from '../../api/trial-reminder-email.js';

@@ -34,6 +34,7 @@ vi.mock('../pages/InsightsV2', () => ({ default: () => <div>Insights</div> }));
 vi.mock('../pages/SettingsV2', () => ({ default: () => <div>Settings</div> }));
 vi.mock('../pages/AdminV2', () => ({ default: () => null }));
 vi.mock('../pages/AdminFeedback', () => ({ default: () => null }));
+vi.mock('../pages/AdminSupportInbox', () => ({ default: () => <div>Support Inbox</div> }));
 vi.mock('../pages/AdminSessionLog', () => ({ default: () => null }));
 vi.mock('../pages/admin/LiveDemo', () => ({ default: () => null }));
 vi.mock('../pages/admin/LiveDemoInsights', () => ({ default: () => null }));
@@ -135,6 +136,20 @@ describe('shouldShowTrialExpiredModal', () => {
       expect(router.state.location.pathname).toBe(path);
       expect(container.textContent).toBe(text);
       expect(mocks.routeTarget).not.toHaveBeenCalled();
+    });
+
+    it.each(['/admin/support-inbox', '/admin/support-inbox/11111111-1111-4111-8111-111111111111'])('keeps the support route %s behind authentication', async (path) => {
+      mocks.auth = { user: null, loading: false };
+      await render(path);
+      expect(router.state.location.pathname).toBe('/login');
+      expect(new URLSearchParams(router.state.location.search).get('next')).toBe('/app');
+      expect(container.textContent).not.toContain('Support Inbox');
+    });
+
+    it.each(['/admin/support-inbox', '/admin/support-inbox/11111111-1111-4111-8111-111111111111'])('renders the authenticated support route %s', async (path) => {
+      await render(path);
+      expect(router.state.location.pathname).toBe(path);
+      expect(container.textContent).toBe('Support Inbox');
     });
 
     it('preserves protected deep links through login', async () => {

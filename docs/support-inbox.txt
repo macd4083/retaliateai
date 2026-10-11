@@ -1,0 +1,153 @@
+SUPPORT EMAIL — OWNER SETUP
+
+Implemented endpoint: https://retaliateai.com/api/support-inbox
+Implemented inbox: https://retaliateai.com/admin/support-inbox
+Specific-message notifications: /admin/support-inbox/<stored message UUID>
+
+Nothing in this change applies SQL remotely, verifies dashboard/DNS state, or
+configures the owner's personal email. Complete the steps below before testing.
+
+1. SUPABASE SQL
+
+Open Supabase Dashboard > your production project > SQL Editor > New query.
+Open this complete, real file in the repository:
+  supabase/migrations/20261011_support_inbox.sql
+Copy ALL its contents, from "begin;" through "commit;", into the SQL Editor
+and click Run. Do not copy excerpts. It is executable and rerunnable, requires
+only the existing public.user_profiles and Supabase auth schemas, and creates
+the support tables, indexes, role guard, policies and service-only functions.
+Do not apply unrelated historical migrations to set up the inbox.
+
+To grant yourself admin without editing SQL templates: sign in to Retaliate
+first. Supabase > Authentication > Users: locate your actual Retaliate sign-in
+email and copy that user's UID. Supabase > Table Editor > user_profiles:
+filter id equals the copied UID, open that exact row, change role to admin,
+and Save. Verify exactly one correct profile before editing. If it is missing,
+finish profile creation in Retaliate first. Do not use a GitHub email or invent
+a UUID. This sign-in email need not equal the personal notification destination.
+Admin role changes must be performed in SQL Editor or by trusted server code,
+never the browser. Existing role grants are not changed automatically; review
+existing admins since the old checkout did not guarantee role immutability.
+
+2. SERVER-ONLY VERCEL ENVIRONMENT VARIABLES
+
+Vercel > retaliateai project > Settings > Environment Variables.
+Set Production values, then redeploy:
+  SUPABASE_URL: project URL (existing)
+  SUPABASE_SERVICE_ROLE_KEY: service-role key (existing; never VITE_ prefixed)
+  RESEND_API_KEY: Resend Full access API key; sending-only keys cannot retrieve mail
+  RESEND_FROM_EMAIL: an address/sender on your verified Resend sending domain
+    (required for support; no delivered@resend.dev fallback)
+  SUPPORT_NOTIFICATION_EMAIL: your actual personal email, outside retaliateai.com
+    (one fixed recipient only; never inferred, committed, or VITE_ prefixed)
+  SUPPORT_WEBHOOK_SECRET: signing secret copied from the webhook in step 3
+  PUBLIC_APP_ORIGIN: https://retaliateai.com
+  CRON_SECRET: existing high-entropy server cron secret, also used for recovery
+  SUPPORT_ACCEPT_CATCH_ALL: false (or omit); only support@retaliateai.com is accepted
+    Set exactly true to accept any local part ONLY at retaliateai.com.
+Avoid enabling the production receiving webhook on a preview deployment.
+The full message is stored even if notification configuration is incomplete.
+Fix configuration and retry promptly; messages requiring manual review are
+visible in the inbox's notification status.
+
+3. RESEND DASHBOARD
+
+Receiving/MX was reported already configured. In Resend > Domains, open
+retaliateai.com and confirm Receiving is enabled and verified. Do NOT replace
+existing MX records or change Supabase Auth SMTP settings. Dashboard state has
+not been verified by this implementation.
+
+Resend > Webhooks > Add Webhook:
+  Endpoint URL: https://retaliateai.com/api/support-inbox
+  Event: email.received only
+Copy its signing secret into SUPPORT_WEBHOOK_SECRET, then redeploy.
+Resend receives domain-wide; there is no assumed "Receiving > New Rule".
+Recipient selection is performed by this application, using received_for
+(envelope destination) when present and to/cc/bcc otherwise, case-insensitively.
+The inbox displays all known destination addresses, including catch-all mail.
+The webhook needs no Supabase/browser JWT. Missing, invalid, or expired
+signatures are rejected before any provider request, database access or send.
+
+4. RETRY / RECOVERY
+
+Resend automatically retries non-2xx webhook responses; use the webhook
+dashboard's message replay controls for a failed intake after fixing setup.
+Notifications are awaited, not fired after a serverless response.
+The existing 10:00 and 12:00 UTC daily trial/missed-session Vercel cron jobs each
+attempt one due notification without removing or adding cron schedules.
+There are now 11 API functions, within the current Vercel Hobby 12-function
+packaging constraint. Recovery is isolated from existing reminder failures.
+
+For reliable prompt recovery and larger queues, configure your trusted job
+runner to request this every minute (one job per request; repeat sequentially
+as necessary). Send an Authorization header consisting of "Bearer " followed
+by your actual CRON_SECRET:
+  GET https://retaliateai.com/api/support-inbox
+An executable shell request, with CRON_SECRET already set securely:
+  curl --fail-with-body --oauth2-bearer "$CRON_SECRET" https://retaliateai.com/api/support-inbox
+Never put the secret in a URL or public scheduler. Daily Hobby cron alone
+provides bounded best-effort recovery, not minute-level notification delivery.
+Monitor failed/needs_review statuses in the admin inbox and non-2xx job results.
+
+A unique provider ID and transactional message/outbox insert deduplicate
+concurrent events. Two-minute leases recover a crashed worker; a stable
+provider idempotency key and frozen payload cover send-success/DB-failure.
+Automatic retries stop after 12 claims or 23 hours from first claim, before
+Resend's 24-hour idempotency TTL expires. A needs_review job is NOT marked sent:
+inspect Resend's outbound delivery history before taking manual action.
+Do not reset/replay sending state blindly beyond that window: exactly-once
+delivery cannot be guaranteed across provider/DB failures after key expiry.
+No automatic replies or user-controlled forwarding are implemented.
+Generated notifications, auto-submitted mail, and notification-subject mail
+are stored but suppressed to prevent loops. Suppression is not authorization;
+sender/header spoofing can suppress a notification but cannot access the inbox.
+
+5. LIMITS AND PRESERVATION
+
+The webhook is limited to 128 KiB; provider response to 6 MiB; stored combined
+UTF-8 text/HTML to 2 MiB; up to 100 addresses per field and 100 attachments.
+Provider/database requests have five-second deadlines. Oversized or missing
+bodies fail explicitly, are not claimed as stored, and need manual handling
+from Resend before provider retention expires. Empty but present bodies are valid.
+Full bodies are fetched from the authenticated receiving API, not outbound
+emails.get() and not metadata alone. HTML is stored as inert source text and
+never rendered as HTML, so scripts, remote images and tracking cannot execute.
+Plain text and inert HTML remain in Supabase independently of Resend retention.
+
+ATTACHMENTS ARE METADATA ONLY: id, filename, MIME type, disposition, content ID,
+and size when provided. Attachment bytes/inline images/raw MIME are NOT backed
+up. No downloads, signed URLs, public bucket, or external-link fetching exists.
+After Resend retention ends, attachment files may be unavailable. If you need
+attachment-file archival, this implementation does not provide it.
+
+Admin deletion really removes support_messages and clears notification content.
+A minimal provider-ID/status tombstone remains to prevent webhook replay from
+resurrecting deleted mail. A notification already in flight may still arrive;
+its link will honestly show the message as unavailable. No admin/browser update
+access to the notification ledger exists. Anon and non-admin sessions cannot
+read or delete messages; profile role/identity changes are blocked in browser
+DB sessions, including calls through security-definer profile writers.
+
+6. END-TO-END ACCEPTANCE
+
+Send a real email from an external account to support@retaliateai.com with a
+unique subject, text/HTML and a small attachment. In Resend verify webhook 200.
+Sign in as admin, open /admin/support-inbox, open that exact message, confirm
+sender/destinations/bodies/attachment metadata and notification status. Check
+your personal mailbox for its canonical retaliateai.com link. Replay the webhook
+and confirm no duplicate row or notification. Test a non-admin session: no
+inbox access. Confirm deletion; verify the message disappears and replay does
+not restore it. Test notification failure in a non-production setup: message
+remains stored, status is failed, recovery reuses the same outbound key.
+
+Official references checked against Resend SDK 6.32.1 (previous lock: 3.5.0):
+https://resend.com/docs/dashboard/receiving/custom-domains
+https://resend.com/docs/dashboard/receiving/create-receiving-webhook
+https://resend.com/docs/webhooks/emails/received
+https://resend.com/docs/webhooks/verify-webhooks-requests
+https://resend.com/docs/api-reference/emails/retrieve-received-email
+https://resend.com/docs/dashboard/receiving/attachments
+https://resend.com/docs/webhooks/retries-and-replays
+https://resend.com/docs/dashboard/emails/idempotency-keys
+https://github.com/resend/resend-node
+The installed SDK verifier uses headers.id/timestamp/signature and webhookSecret.

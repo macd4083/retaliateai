@@ -9,6 +9,7 @@ import AdminV2 from './pages/AdminV2';
 import TodayV2Page from './v2/pages/TodayV2Page';
 import HomeV2Page from './v2/pages/HomeV2Page';
 import AdminFeedback from './pages/AdminFeedback';
+import AdminSupportInbox from './pages/AdminSupportInbox';
 import AdminSessionLog from './pages/AdminSessionLog';
 import LiveDemo from './pages/admin/LiveDemo';
 import LiveDemoInsights from './pages/admin/LiveDemoInsights';
@@ -329,6 +330,22 @@ export default function App() {
         element={
           <AuthGuardV2>
             <AdminV2 />
+          </AuthGuardV2>
+        }
+      />
+      <Route
+        path="/admin/support-inbox"
+        element={
+          <AuthGuardV2>
+            <AdminSupportInbox />
+          </AuthGuardV2>
+        }
+      />
+      <Route
+        path="/admin/support-inbox/:messageId"
+        element={
+          <AuthGuardV2>
+            <AdminSupportInbox />
           </AuthGuardV2>
         }
       />
