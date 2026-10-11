@@ -167,6 +167,89 @@ describe('useTodayV2State', () => {
     }));
   });
 
+  it('plans civil tomorrow before 4AM while preserving the prior review and check-ins', async () => {
+      vi.setSystemTime(new Date('2026-09-29T01:00:00Z'));
+      serviceMocks.loadTodayReviewState.mockResolvedValue({
+        ...makeState(), planningSourceLocalDate: '2026-09-29', planningLocalDate: '2026-09-30', scheduleAvailable: true,
+        habitDefinitions: [
+          { id: 'tuesday', name: 'Tuesday', schedule_weekdays: [2] },
+          { id: 'wednesday', name: 'Wednesday', schedule_weekdays: [3] },
+        ],
+      });
+      await renderHook();
+      expect(latest.schedulerItems.filter((item) => item.type === 'habit').map((item) => item.source_id)).toEqual(['wednesday']);
+      await act(async () => {
+        latest.setControllableFocus('Finish Monday');
+        latest.setTomorrowInput('Write');
+        latest.setFirstFiveMinutes('Open notes');
+        latest.updateSchedule('habit:wednesday', {
+          starts_at: '2026-09-30T10:00:00Z', ends_at: '2026-09-30T10:30:00Z',
+        });
+      });
+      await act(async () => latest.flushAll());
+      expect(serviceMocks.updateControllableFocus).toHaveBeenCalledWith('review-2026-09-28', 'Finish Monday');
+      expect(serviceMocks.replaceTomorrowActions).toHaveBeenCalledWith(expect.objectContaining({
+        targetLocalDate: '2026-09-30', sourceLocalDate: '2026-09-29',
+      }));
+      expect(latest.state.tomorrowPlanMeta).toMatchObject({
+        target_local_date: '2026-09-30', source_local_date: '2026-09-29',
+      });
+      expect(scheduleMocks.replaceSchedule).toHaveBeenCalledWith(expect.objectContaining({ targetLocalDate: '2026-09-30' }));
+      expect(JSON.parse(window.localStorage.getItem('today-v2-draft:user-1:2026-09-29')).planningLocalDate).toBe('2026-09-30');
+    });
+
+    it('rolls planning scope at civil midnight without changing review identity or applying late plan responses', async () => {
+      vi.setSystemTime(new Date('2026-09-28T23:59:00Z'));
+      serviceMocks.loadTodayReviewState.mockResolvedValue({
+        ...makeState(), planningSourceLocalDate: '2026-09-28', planningLocalDate: '2026-09-29',
+      });
+      await renderHook();
+      let resolvePlan;
+      serviceMocks.replaceTomorrowActions.mockImplementation(() => new Promise((resolve) => { resolvePlan = resolve; }));
+      await act(async () => latest.setTomorrowInput('Old plan'));
+      let pending;
+      await act(async () => { pending = latest.saveTomorrowPlan(); });
+      vi.setSystemTime(new Date('2026-09-29T00:01:00Z'));
+      serviceMocks.loadTodayReviewState.mockResolvedValue({
+        ...makeState(), planningSourceLocalDate: '2026-09-29', planningLocalDate: '2026-09-30',
+        tomorrowPlanInput: 'New civil tomorrow plan',
+        tomorrowFragments: [{ id: 'new-id', fragment_text: 'New civil tomorrow plan' }],
+      });
+      await act(async () => window.dispatchEvent(new Event('focus')));
+      expect(latest.state.review.id).toBe('review-2026-09-28');
+      expect(latest.state.planningLocalDate).toBe('2026-09-30');
+      await act(async () => {
+        resolvePlan({ rawPlanText: 'Old plan', savedFragments: [{ id: 'old-id', fragment_text: 'Old plan' }] });
+        await pending;
+      });
+      expect(latest.tomorrowInput).toBe('New civil tomorrow plan');
+      expect(latest.tomorrowActionItems[0].persistedId).toBe('new-id');
+    });
+
+  it('rejects stale midnight writes before focus reload and completes only the active 4AM review', async () => {
+    vi.setSystemTime(new Date('2026-09-29T01:00:00Z'));
+    const initial = {
+      ...makeState(), planningSourceLocalDate: '2026-09-29', planningLocalDate: '2026-09-30',
+    };
+    serviceMocks.loadTodayReviewState.mockResolvedValue(initial);
+    serviceMocks.completeTodayV2Review.mockResolvedValue({ ...initial.review, completed_at: '2026-09-29T01:00:00Z' });
+    await renderHook();
+    await act(async () => latest.completeReview());
+    expect(serviceMocks.completeTodayV2Review).toHaveBeenCalledExactlyOnceWith('review-2026-09-28');
+    expect(latest.isCompleted).toBe(true);
+    expect(latest.state.planningLocalDate).toBe('2026-09-30');
+    serviceMocks.reopenTodayV2Review.mockResolvedValue(initial.review);
+    await act(async () => latest.reopenReview());
+    await act(async () => latest.setTomorrowInput('Unsaved future plan'));
+    vi.setSystemTime(new Date('2026-09-30T00:01:00Z'));
+    await act(async () => {
+      await expect(latest.saveTomorrowPlan()).rejects.toThrow('Planning date changed');
+      await expect(latest.flushSchedule()).rejects.toThrow('Planning date changed');
+    });
+    expect(serviceMocks.replaceTomorrowActions).not.toHaveBeenCalled();
+    expect(serviceMocks.reopenTodayV2Review).toHaveBeenCalledExactlyOnceWith('review-2026-09-28');
+  });
+
   it('reconciles newly typed commitments after persisted explicit edits without refresh', async () => {
       const initial = {
         ...makeState(), scheduleAvailable: true, tomorrowPlanInput: 'Write and Walk',

@@ -2,13 +2,17 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ load: vi.fn(), habit: vi.fn(), completion: vi.fn(), navigate: vi.fn(), session: vi.fn(), enabled: true }));
+const mocks = vi.hoisted(() => ({ load: vi.fn(), habit: vi.fn(), completion: vi.fn(), navigate: vi.fn(), session: vi.fn(), schedule: vi.fn(), enabled: true }));
 vi.mock('../lib/AuthContext', () => ({ useAuth: () => ({ user: { id: 'user' } }) }));
 vi.mock('../lib/featureFlags', () => ({ get ENABLE_TODAY_V2_SCHEDULER() { return mocks.enabled; } }));
 vi.mock('react-router-dom', () => ({ useNavigate: () => mocks.navigate }));
 vi.mock('../components/v2/AppShellV2', () => ({ default: ({ children }) => <div>{children}</div> }));
 vi.mock('../v2/services/todayReview', () => ({ loadTodayV2HomeState: mocks.load, upsertHabitLog: mocks.habit, setFollowThroughCompletion: mocks.completion }));
 vi.mock('../lib/supabase/client', () => ({ supabase: { auth: { getSession: mocks.session } } }));
+vi.mock('../v2/services/scheduling', () => ({
+  updateDaySchedule: mocks.schedule,
+  isMissingScheduleSchema: (error) => error?.code === 'PGRST202',
+}));
 import HomeV2Page from '../v2/pages/HomeV2Page';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -24,6 +28,7 @@ describe('scheduled Home check-ins', () => {
     mocks.session.mockResolvedValue({ data: { session: { access_token: 'test-session', user: { id: 'user' } } } });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ connected: false, configured: true, schemaAvailable: true }) }));
     mocks.enabled = true;
+    mocks.schedule.mockResolvedValue([]);
     mocks.load.mockResolvedValue({
       review: { completed_at: null }, todayLocalDate: '2026-10-07', timezoneName: 'UTC', dayBoundaryHour: 4,
       followThroughItems: [{ id: 'commitment', normalized_fragment_text: 'Write', completion_state: 'unanswered' }],
@@ -47,7 +52,7 @@ describe('scheduled Home check-ins', () => {
     expect(container.querySelectorAll('[data-slot-timestamp]')).toHaveLength(96);
     expect(container.querySelector('[data-schedule-key="action:commitment"]').textContent).toContain('Write');
     expect([...container.querySelectorAll('button')].some((button) => ['Kept', 'Not kept'].includes(button.textContent))).toBe(false);
-    expect(container.querySelector('[data-scheduler-drag-key]')).toBeNull();
+    expect(container.querySelector('[data-scheduler-drag-key]')).not.toBeNull();
     expect(container.textContent).toMatch(/9:00|09:00/);
     expect(container.textContent).toMatch(/10:00/);
     const yes = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Yes');
@@ -63,6 +68,97 @@ describe('scheduled Home check-ins', () => {
     expect(container.textContent).not.toMatch(/9:00|09:00/);
     expect(container.textContent).not.toContain("Today's calendar");
     expect(container.textContent).not.toContain("Today's actions checklist");
+  });
+
+  it('edits and unschedules today timings using persisted identities without changing ROI completion', async () => {
+    mocks.schedule.mockResolvedValueOnce([
+      { id: 'action-block', source_type: 'action', source_id: 'commitment', target_local_date: '2026-10-07', starts_at: '2026-10-07T09:00:00Z', ends_at: '2026-10-07T09:30:00Z' },
+      { id: 'habit-block', source_type: 'habit', source_id: 'definition', target_local_date: '2026-10-07', starts_at: '2026-10-07T10:00:00Z', ends_at: '2026-10-07T10:30:00Z' },
+    ]).mockResolvedValueOnce([
+      { id: 'habit-block', source_type: 'habit', source_id: 'definition', target_local_date: '2026-10-07', starts_at: '2026-10-07T10:00:00Z', ends_at: '2026-10-07T10:30:00Z' },
+    ]);
+    await render();
+    await act(async () => container.querySelector('[data-scheduler-edit-key="action:commitment"]').click());
+    await act(async () => [...document.querySelectorAll('button')].find((button) => button.textContent === 'Save time').click());
+    expect(mocks.schedule).toHaveBeenCalledWith({
+      targetLocalDate: '2026-10-07', timezoneName: 'UTC', sourceType: 'action', sourceId: 'commitment',
+      startsAt: '2026-10-07T09:00:00.000Z', endsAt: '2026-10-07T09:30:00.000Z',
+    });
+    expect(container.querySelector('[data-schedule-key="habit:definition"]')).not.toBeNull();
+    await act(async () => container.querySelector('[data-scheduler-edit-key="action:commitment"]').click());
+    await act(async () => [...document.querySelectorAll('button')].find((button) => button.textContent === 'Unschedule').click());
+    expect(mocks.schedule).toHaveBeenLastCalledWith({
+      targetLocalDate: '2026-10-07', timezoneName: 'UTC', sourceType: 'action', sourceId: 'commitment', startsAt: null, endsAt: null,
+    });
+    expect(container.querySelector('[data-schedule-key="action:commitment"]')).toBeNull();
+    expect(container.querySelector('[aria-label="Unscheduled items"]').textContent).toContain('Write');
+    expect(mocks.completion).not.toHaveBeenCalled();
+  });
+
+  it('reports missing editing migration without discarding displayed schedules', async () => {
+    mocks.schedule.mockRejectedValue({ code: 'PGRST202', message: 'RPC missing' });
+    await render();
+    await act(async () => container.querySelector('[data-scheduler-edit-key="action:commitment"]').click());
+    await act(async () => [...document.querySelectorAll('button')].find((button) => button.textContent === 'Save time').click());
+    expect(container.textContent).toContain('20261011_today_v2_day_schedule.sql');
+    expect(container.querySelector('[data-schedule-key="action:commitment"]')).not.toBeNull();
+  });
+
+  it('uses the current civil day sources before 4AM without reopening the completed prior review', async () => {
+    vi.setSystemTime(new Date('2026-10-08T01:00:00Z'));
+    const base = await mocks.load();
+    mocks.load.mockResolvedValue({
+      ...base, review: { completed_at: '2026-10-07T22:00:00Z' },
+      civilScheduleLocalDate: '2026-10-08', civilSchedules: [],
+      civilFollowThroughItems: [{ id: 'current-action', normalized_fragment_text: 'Today action' }],
+      civilHabitOccurrences: [], civilReview: { completed_at: null },
+    });
+    await render();
+    expect(container.querySelector('[aria-label^="24-hour timeline"]').getAttribute('aria-label')).toContain('2026-10-08');
+    expect(container.querySelector('[data-scheduler-edit-key="action:commitment"]')).toBeNull();
+    await act(async () => container.querySelector('[data-scheduler-edit-key="action:current-action"]').click());
+    await act(async () => [...document.querySelectorAll('button')].find((button) => button.textContent === 'Save time').click());
+    expect(mocks.schedule).toHaveBeenCalledWith(expect.objectContaining({ targetLocalDate: '2026-10-08', sourceId: 'current-action' }));
+    expect(mocks.completion).not.toHaveBeenCalled();
+  });
+
+  it('keeps completed target-day schedule evidence locked', async () => {
+    const base = await mocks.load();
+    mocks.load.mockResolvedValue({ ...base, civilReview: { completed_at: '2026-10-07T22:00:00Z' } });
+    await render();
+    expect(container.querySelector('[data-scheduler-edit-key="action:commitment"]').disabled).toBe(true);
+    expect(container.querySelector('[data-scheduler-drag-key]')).toBeNull();
+    expect(mocks.schedule).not.toHaveBeenCalled();
+  });
+
+  it('refreshes the displayed calendar at civil midnight instead of waiting for the review boundary', async () => {
+    await render();
+    const before = mocks.load.mock.calls.length;
+    vi.setSystemTime(new Date('2026-10-08T00:01:00Z'));
+    await act(async () => window.dispatchEvent(new Event('focus')));
+    expect(mocks.load.mock.calls.length).toBeGreaterThan(before);
+  });
+
+  it.each([
+    { timezone: 'UTC', beforeBoundary: '2026-10-08T03:59:00Z', atBoundary: '2026-10-08T04:00:00Z' },
+    { timezone: 'America/New_York', beforeBoundary: '2026-10-08T07:59:00Z', atBoundary: '2026-10-08T08:00:00Z' },
+  ])('refreshes review ownership at 4AM in $timezone even when the civil calendar date stays unchanged', async ({ timezone, beforeBoundary, atBoundary }) => {
+    const base = await mocks.load();
+    vi.setSystemTime(new Date(beforeBoundary));
+    mocks.load.mockResolvedValue({
+      ...base, timezoneName: timezone, dayBoundaryHour: 4,
+      civilScheduleLocalDate: '2026-10-08', civilSchedules: [], civilHabitOccurrences: [],
+    });
+    await render();
+    const before = mocks.load.mock.calls.length;
+    await act(async () => window.dispatchEvent(new Event('focus')));
+    expect(mocks.load).toHaveBeenCalledTimes(before);
+    expect(container.textContent).toContain('Review day 2026-10-07');
+    vi.setSystemTime(new Date(atBoundary));
+    mocks.load.mockResolvedValue({ ...base, timezoneName: timezone, dayBoundaryHour: 4, todayLocalDate: '2026-10-08' });
+    await act(async () => window.dispatchEvent(new Event('focus')));
+    expect(mocks.load).toHaveBeenCalledTimes(before + 1);
+    expect(container.textContent).toContain('Review day 2026-10-08');
   });
 
   it('keeps unscheduled ROI actions visible without reintroducing a checklist', async () => {
@@ -82,7 +178,7 @@ describe('scheduled Home check-ins', () => {
     expect(mocks.navigate).toHaveBeenCalledWith('/today');
   });
 
-  it('overlays connected Google events without exposing event or ROI editing on Today', async () => {
+  it('overlays connected Google events with the same editing controls but no ROI completion checklist', async () => {
     fetch.mockImplementation(async (url) => ({
       ok: true,
       json: async () => {
@@ -93,9 +189,11 @@ describe('scheduled Home check-ins', () => {
     }));
     await render();
     expect(container.querySelector('[aria-label="Google events"]').textContent).toContain('Planning meeting');
-    expect(container.querySelector('[aria-label="Edit Google event Planning meeting"]')).toBeNull();
-    expect(container.querySelector('[data-resize-edge]')).toBeNull();
-    expect([...container.querySelectorAll('[data-scheduler-edit-key]')].every((button) => button.disabled)).toBe(true);
+    expect(container.querySelector('[aria-label="Edit Google event Planning meeting"]')).not.toBeNull();
+    expect(container.querySelector('[data-resize-edge]')).not.toBeNull();
+    expect([...container.querySelectorAll('[data-scheduler-edit-key]')].every((button) => !button.disabled)).toBe(true);
+    await act(async () => container.querySelector('[aria-label="Edit Google event Planning meeting"]').click());
+    expect(document.querySelector('[aria-label="Event title"]').value).toBe('Planning meeting');
     expect(mocks.completion).not.toHaveBeenCalled();
   });
 
@@ -110,6 +208,25 @@ describe('scheduled Home check-ins', () => {
     await render();
     expect(container.textContent).toContain('Read · Habit');
     expect(container.textContent).toContain('11:00');
+    expect(mocks.habit).not.toHaveBeenCalled();
+  });
+
+  it('uses planning schedules for civil tomorrow before the 4AM review boundary', async () => {
+    const base = await mocks.load();
+    vi.setSystemTime(new Date('2026-10-08T03:59:00Z'));
+    mocks.load.mockResolvedValue({
+      ...base,
+      review: { completed_at: '2026-10-07T22:00:00Z' },
+      civilScheduleLocalDate: '2026-10-08', civilSchedules: [],
+      tomorrowLocalDate: '2026-10-08', planningLocalDate: '2026-10-09',
+      tomorrowSchedules: [{ id: 'old-plan', habit_definition_id: 'definition', starts_at: '2026-10-08T11:00:00Z', ends_at: '2026-10-08T11:30:00Z' }],
+      planningSchedules: [{ id: 'new-plan', habit_definition_id: 'definition', starts_at: '2026-10-09T12:00:00Z', ends_at: '2026-10-09T12:30:00Z' }],
+    });
+    await render();
+    const plan = [...container.querySelectorAll('h2')].find((heading) => heading.textContent === "Tomorrow you said you'd prove it by:").closest('section');
+    expect(plan.textContent).toContain('Read · Habit');
+    expect(plan.textContent).toContain('12:00');
+    expect(plan.textContent).not.toContain('11:00');
     expect(mocks.habit).not.toHaveBeenCalled();
   });
 
@@ -189,14 +306,14 @@ describe('scheduled Home check-ins', () => {
       ],
     });
     await render();
-    const context = container.querySelector('[aria-label="Current calendar day schedule"]');
+    const context = container.querySelector('[aria-labelledby="tomorrow-scheduler-title"]');
     expect(context.textContent).toContain('2026-10-08');
-    expect(context.textContent).toContain('Your checklist still belongs to review day 2026-10-07');
+    expect(container.textContent).toContain('Your checklist still belongs to review day 2026-10-07');
     expect(context.textContent).toContain('Late writing');
     expect(context.textContent).toContain('Continued from previous day');
     expect(context.textContent).toContain('Early reading');
     expect(context.textContent).not.toMatch(/11:30|23:30/);
-    expect(context.querySelector('button, input')).toBeNull();
+    expect(context.querySelector('[data-context-schedule-id="civil-carryover"]').querySelector('button, input')).toBeNull();
     expect(container.textContent).not.toContain("Today's actions checklist");
     expect(container.textContent).toContain('Review day 2026-10-07');
     expect(mocks.completion).not.toHaveBeenCalled();
@@ -247,12 +364,12 @@ describe('scheduled Home check-ins', () => {
       tomorrowSchedules: [{ id: 'unused-context', label: 'Unselected tomorrow plan', starts_at: '2026-10-08T01:00:00Z', ends_at: '2026-10-08T01:30:00Z' }],
     });
     await render();
-    const context = container.querySelector('[aria-label="Current calendar day schedule"]');
+    const context = container.querySelector('[aria-labelledby="tomorrow-scheduler-title"]');
     expect(context.textContent).toContain('2026-10-08');
     expect(context.textContent).toContain('Explicit late plan');
     expect(context.textContent).not.toContain('Unselected tomorrow plan');
     expect(context.textContent).toContain('Continued from previous day');
-    expect(context.querySelector('button, input')).toBeNull();
+    expect(context.querySelector('[data-context-schedule-id="explicit-carryover"]').querySelector('button, input')).toBeNull();
     expect(container.textContent).toContain('Review day 2026-10-07');
   });
 });

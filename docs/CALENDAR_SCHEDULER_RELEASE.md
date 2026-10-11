@@ -162,7 +162,7 @@ the owner checks below still apply.
 Use a stable preview alias with its own OAuth client/project and isolated
 Supabase test data where possible. Never point a preview callback at production:
 nonce cookies are host-bound and the backend requires redirect and origin equality.
-Do not use `/auth/callback` for Calendar. Returns are only `/today` or `/settings`;
+Do not use `/auth/callback` for Calendar. Returns are only `/today`, `/home`, or `/settings`;
 an external or modified destination must be rejected.
 
 ## Vercel environment checklist
@@ -206,7 +206,7 @@ HTTP is permitted only for localhost/127.0.0.1.
 
 Apply SQL **before** deploying/enabling the scheduler:
 
-This patch adds no SQL. For an existing database, apply only missing migrations
+Today calendar editing adds `20261011_today_v2_day_schedule.sql`. For an existing database, apply only missing migrations
 below; for a fresh installation, use the consolidated SQL as the alternative.
 
 1. Check applied migration history. For an existing V2 installation apply any
@@ -216,12 +216,15 @@ below; for a fresh installation, use the consolidated SQL as the alternative.
    - [`20261007_today_v2_scheduling.sql`](../supabase/migrations/20261007_today_v2_scheduling.sql)
    - [`20261008_today_v2_schedule_review_lock.sql`](../supabase/migrations/20261008_today_v2_schedule_review_lock.sql)
    - [`20261009_today_v2_completion_release_guard.sql`](../supabase/migrations/20261009_today_v2_completion_release_guard.sql)
-2. If scheduling already exists, apply the lock/repair migration last; do not
+   - [`20261010_today_v2_habit_recurrence.sql`](../supabase/migrations/20261010_today_v2_habit_recurrence.sql)
+   - [`20261011_today_v2_day_schedule.sql`](../supabase/migrations/20261011_today_v2_day_schedule.sql)
+2. If scheduling already exists, apply missing repair and additive migrations in the order above; do not
    reapply the base scheduling migration alone afterward (it replaces RPC bodies).
    The repair is atomic and idempotent. It backfills only V2 review provenance;
    it does not retime historical schedules or modify legacy records.
    **Always apply the new `20261009` release patch after the repair**, even if the
-   older migrations were already marked applied. Copy/paste that entire linked
+   older migrations were already marked applied. Then apply `20261010` and `20261011`
+   to enable recurring habits and current-day calendar editing. Copy/paste that entire linked
    SQL file; it adds completed-review/outcome guards without dropping data.
 3. For a new installation the complete
    [`today_v2_isolated_workflow.sql`](../supabase/sql/today_v2_isolated_workflow.sql)
@@ -446,7 +449,7 @@ unperformed on real accounts/devices by the agent.**
 | [ ] | Open `/today`, `/home`, `/settings` directly and reload; open `/legacy/reflection` | SPA loads correct authenticated route, not 404; legacy bookmark redirects through `/app` to V2 even with the retired entry flag set to false |
 | [ ] | GET `/api/google-calendar?action=status` signed out | HTTP 401 JSON `unauthorized`, `Cache-Control: no-store`; never index.html or a browser asset |
 | [ ] | In signed-in app inspect status with valid session | Configured/schemaAvailable true after setup; no secret/token fields. Missing config/schema gives diagnostic, not broken review flow |
-| [ ] | Connect from Settings and from Review & Plan | Google consent requests only event read/write and calendar-list read-only scopes; successful callback returns to initiating allowlisted route |
+| [ ] | Connect from Settings, Today, and Review & Plan | Google consent requests only event read/write and calendar-list read-only scopes; successful callback returns to initiating allowlisted route |
 | [ ] | Cancel consent; retry, then replay an already-used callback | Cancel leaves review usable; retry works; replay rejected without replacing credentials |
 | [ ] | Select primary plus a secondary calendar, then select none and save | Matching timed/all-day overlay; empty selection clears overlay without disconnecting |
 | [ ] | Remove access to a selected secondary calendar in Google and reload | Stale calendar selection is recoverable; no phantom busy blocks or unusable scheduler |

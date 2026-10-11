@@ -102,6 +102,7 @@ describe('Review & Plan calendar integration', () => {
       if (action === 'calendars') return response({ calendars: [{ id: 'primary', summary: 'Personal' }], selectedCalendarIds: ['primary'] });
       return response({ events: [{ id: 'meeting', title: 'Planning meeting', start: '2026-10-08T11:00:00Z', end: '2026-10-08T12:00:00Z' }] });
     });
+
     await render();
     expect(container.querySelector('[aria-label="Google events"]').textContent).toContain('Planning meeting');
     const [url, options] = fetchMock.mock.calls.find(([url]) => url.includes('action=events'));
@@ -110,6 +111,23 @@ describe('Review & Plan calendar integration', () => {
     expect(new URL(url, 'https://example.invalid').searchParams.get('timeMax')).toBe('2026-10-10T00:00:00.000Z');
   });
 
+  it('uses civil tomorrow for both native planning and Google before the 4AM review boundary', async () => {
+      review.state.planningLocalDate = '2026-10-09';
+      review.state.planningSourceLocalDate = '2026-10-08';
+      fetchMock.mockImplementation((url) => {
+        if (url.includes('action=status')) return response({ connected: true, selectedCalendarIds: ['primary'] });
+        if (url.includes('action=calendars')) return response({ calendars: [{ id: 'primary' }], selectedCalendarIds: ['primary'] });
+        return response({ events: [] });
+      });
+      await render();
+      const [url] = fetchMock.mock.calls.find(([url]) => url.includes('action=events'));
+      expect(new URL(url, 'https://example.invalid').searchParams.get('timeMin')).toBe('2026-10-09T00:00:00.000Z');
+      await act(async () => container.querySelector('[data-scheduler-edit-key="action:write"]').click());
+      await act(async () => [...document.querySelectorAll('button')].find((node) => node.textContent === 'Save time').click());
+      expect(mocks.update).toHaveBeenCalledWith('action:write', expect.objectContaining({
+        starts_at: '2026-10-09T09:00:00.000Z',
+      }));
+    });
   it('identifies missing database setup without hiding the calendar or blocking the review', async () => {
     review.scheduleAvailable = false;
     review.scheduleDiagnostic = { code: '42P01', message: 'relation does not exist' };

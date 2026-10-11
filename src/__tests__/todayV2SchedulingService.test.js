@@ -103,6 +103,22 @@ describe('optional schedule repository', () => {
     ];
     mocks.from.mockImplementation((table) => {
       const query = builder({ data: table === 'today_v2_schedule_blocks' ? rows : [], error: null });
+      if (table === 'today_v2_commitment_fragments') {
+        query.eq.mockImplementation((column, date) => {
+          if (column === 'target_local_date') query.then = (resolve, reject) => Promise.resolve({
+            data: [{ id: `fragment-${date}`, target_local_date: date }], error: null,
+          }).then(resolve, reject);
+          return query;
+        });
+      }
+      if (table === 'today_v2_plan_inputs') {
+        query.eq.mockImplementation((column, date) => {
+          if (column === 'target_local_date') query.maybeSingle.mockResolvedValue({
+            data: { first_five_minutes: `Start ${date}` }, error: null,
+          });
+          return query;
+        });
+      }
       query.single.mockResolvedValue({ data: { id: 'prior-review', local_date: '2026-09-28' }, error: null });
       return query;
     });
@@ -114,6 +130,39 @@ describe('optional schedule repository', () => {
     expect(state.civilSchedules.map((row) => row.id)).toEqual(['carryover', 'civil-day']);
     expect(state.todaySchedules.map((row) => row.id)).toEqual(['carryover']);
     expect(state.review.id).toBe('prior-review');
+    expect(state.planningSourceLocalDate).toBe('2026-09-29');
+    expect(state.planningLocalDate).toBe('2026-09-30');
+    expect(state.tomorrowLocalDate).toBe('2026-09-29');
+    expect(state.civilFollowThroughItems.map((row) => row.id)).toEqual(['fragment-2026-09-29']);
+    expect(state.tomorrowFragments.map((row) => row.id)).toEqual(['fragment-2026-09-30']);
+    expect(state.tomorrowSchedules.map((row) => row.id)).toEqual(['carryover', 'civil-day']);
+    expect(state.planningSchedules).toEqual([]);
+    expect(state.planningContextSchedules.map((row) => row.id)).toEqual(['carryover', 'civil-day']);
+    expect(state.civilFirstFiveMinutes).toBe('Start 2026-09-29');
+    expect(state.firstFiveMinutes).toBe('Start 2026-09-30');
+    expect(state.todayFirstFiveMinutes).toBe('Start 2026-09-28');
+    expect(mocks.rpc).toHaveBeenCalledWith('today_v2_seed_habit_schedules', {
+      p_start_local_date: '2026-09-28', p_end_local_date: '2026-09-30', p_timezone_name: 'UTC',
+    });
+    expect(state.civilHabitOccurrences).toEqual([]);
+  });
+  it('propagates a failed planning-context schedule load even when legacy schedules loaded', async () => {
+    let scheduleLoads = 0;
+    mocks.from.mockImplementation((table) => {
+      if (table === 'today_v2_schedule_blocks' && ++scheduleLoads === 2) {
+        return builder({ error: { code: 'PGRST205', message: 'civil scheduling unavailable' } });
+      }
+      const query = builder({ data: [], error: null });
+      query.single.mockResolvedValue({ data: { id: 'review', local_date: '2026-09-28' }, error: null });
+      return query;
+    });
+    const state = await loadTodayV2HomeState('user', {
+      now: new Date('2026-09-29T01:00:00Z'), timezoneName: 'UTC', dayBoundaryHour: 4,
+    });
+    expect(state.scheduleAvailable).toBe(false);
+    expect(state.scheduleDiagnostic).toMatchObject({ code: 'PGRST205' });
+    expect(state.planningContextSchedules).toEqual([]);
+    expect(state.civilFirstFiveMinutes).toBe('');
   });
   it('sends persisted UUIDs or null, never client keys, to stable replacement', async () => {
     const id = '8cfde77d-dcaa-4c7c-a409-f9ef5e70e321';

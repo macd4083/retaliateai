@@ -61,3 +61,29 @@ export async function replaceSchedule({ targetLocalDate, timezoneName, blocks })
   if (error) throw error;
   return (data || []).map(normalizeSavedSchedule);
 }
+
+export async function updateDaySchedule({ targetLocalDate, timezoneName, sourceType, sourceId, startsAt, endsAt }) {
+  if (!['action', 'habit'].includes(sourceType)
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sourceId || '')) {
+    throw new Error('A persisted action or habit UUID is required');
+  }
+  if (startsAt === undefined || endsAt === undefined || (startsAt === null) !== (endsAt === null)) {
+    throw new Error('Both schedule times or two explicit nulls are required');
+  }
+  const { data, error } = await supabase.rpc('today_v2_update_day_schedule', {
+    p_target_local_date: targetLocalDate,
+    p_timezone_name: timezoneName,
+    p_source_type: sourceType,
+    p_source_id: sourceId,
+    p_starts_at: startsAt,
+    p_ends_at: endsAt,
+  });
+  if (error) throw error;
+  return (data || []).map(normalizeSavedSchedule);
+}
+
+export const upsertDaySchedule = updateDaySchedule;
+
+export async function removeDaySchedule(identity) {
+  return updateDaySchedule({ ...identity, startsAt: null, endsAt: null });
+}

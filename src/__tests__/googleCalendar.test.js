@@ -208,7 +208,7 @@ describe('secure Google Calendar backend', () => {
     expect(JSON.stringify(pending)).not.toContain(state);
     expect(res.body).not.toHaveProperty('verifier');
   });
-  it.each(['https://attacker.test', '//attacker.test', '/today?next=evil', '/settings#evil', '/Today', '', null])('rejects a submitted unsafe return destination: %s', async (returnPath) => {
+  it.each(['https://attacker.test', '//attacker.test', '/today?next=evil', '/home?next=evil', '/home#evil', '/settings#evil', '/Today', '', null])('rejects a submitted unsafe return destination: %s', async (returnPath) => {
     const res = await call('connect', { body: { returnPath } });
     expect(res.statusCode).toBe(400);
     expect(res.body.code).toBe('invalid_return_path');
@@ -219,6 +219,12 @@ describe('secure Google Calendar backend', () => {
     const res = await call('connect');
     expect(res.statusCode).toBe(200);
     expect([...db.states.values()][0].return_path).toBe('/today');
+  });
+  it('returns a successful Today connection to the fixed /home destination', async () => {
+    const { state, cookie } = await flow('/home');
+    tokenSuccess();
+    const res = await call('callback', { query: { state, code: 'code' }, headers: { cookie } });
+    expect(res.location).toBe('https://example.test/home?googleCalendar=connected');
   });
   it.each(['localhost', '127.0.0.1'])('supports HTTP loopback development on %s with a signed non-Secure cookie', async (hostname) => {
     const origin = `http://${hostname}:3000`;
@@ -317,7 +323,7 @@ describe('secure Google Calendar backend', () => {
     expect(db.states.size).toBe(0);
     expect(fetchImpl).not.toHaveBeenCalled();
   });
-  it.each(['/today', '/settings'])('returns provider failures safely to %s and consumes state without leaking errors', async (path) => {
+  it.each(['/today', '/home', '/settings'])('returns provider failures safely to %s and consumes state without leaking errors', async (path) => {
     const { state, cookie } = await flow(path);
     fetchImpl.mockResolvedValueOnce(googleResponse({ error: 'invalid_grant', error_description: 'secret-provider-message' }, 400));
     const res = await call('callback', { query: { state, code: 'code' }, headers: { cookie } });

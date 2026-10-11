@@ -612,7 +612,7 @@ export default function TodayV2Page() {
           <div className="space-y-3">
           <GoogleCalendarConnection
             userId={user?.id}
-            localDate={state.tomorrowLocalDate}
+            localDate={state.planningLocalDate || state.tomorrowLocalDate}
             timezone={state.timezoneName}
             includeNextDay
             onEvents={setGoogleEvents}
@@ -623,7 +623,7 @@ export default function TodayV2Page() {
           />
           <TomorrowScheduler
             userId={user?.id}
-            localDate={state.tomorrowLocalDate}
+            localDate={state.planningLocalDate || state.tomorrowLocalDate}
             timezone={state.timezoneName}
             items={schedulerItems}
             blocks={(scheduleBlocks || []).map((block) => {
@@ -632,7 +632,7 @@ export default function TodayV2Page() {
               const habit = (state.habitOccurrences || []).find((item) => item.habit_definition_id === sourceId);
               return { ...block, label: block.label || (action ? action.normalized_fragment_text || action.fragment_text : habit?.snapshot_name) };
             })}
-            contextBlocks={(state.todaySchedules || []).map((block) => {
+            contextBlocks={(state.planningContextSchedules || state.todaySchedules || []).map((block) => {
               const sourceId = block.source_id || block.commitment_fragment_id || block.habit_definition_id;
               const action = state.followThroughItems.find((item) => item.id === sourceId);
               const habit = (state.habitOccurrences || []).find((item) => item.habit_definition_id === sourceId);

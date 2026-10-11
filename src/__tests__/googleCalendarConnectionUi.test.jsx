@@ -527,16 +527,19 @@ describe('GoogleCalendarConnection UI contract', () => {
     expect(request[1].credentials).toBe('same-origin');
   });
 
-  it('posts the OAuth returnPath and rejects an unexpected authorization destination', async () => {
+  it.each([
+    { settings: true, expected: '/settings' },
+    { returnPath: '/home', expected: '/home' },
+  ])('posts the OAuth returnPath $expected and rejects an unexpected authorization destination', async ({ expected, ...props }) => {
     window.history.replaceState({}, '', '/settings');
     fetchMock.mockImplementation((url) => {
       if (url.includes('action=connect')) return response({ authorizationUrl: 'https://unexpected.example/authorize' });
       return response({ connected: false, configured: true, schemaAvailable: true, selectedCalendarIds: [] });
     });
-    await render({ settings: true });
+    await render(props);
     await click('Connect Google Calendar');
     const request = fetchMock.mock.calls.find(([url]) => url.includes('action=connect'));
-    expect(JSON.parse(request[1].body)).toEqual({ returnPath: '/settings' });
+    expect(JSON.parse(request[1].body)).toEqual({ returnPath: expected });
     expect(request[1].method).toBe('POST');
     expect(request[1].credentials).toBe('same-origin');
     expect(container.textContent).toContain('Invalid Google connection link.');
