@@ -350,6 +350,10 @@ export default function TodayV2Page() {
   return (
     <AppShellV2 title="Review & Plan">
       <div className="h-full space-y-4 overflow-y-auto p-4">
+        <p className="text-sm text-zinc-400">
+          Review <time dateTime={state.todayLocalDate}>{state.todayLocalDate}</time>
+          {' · '}Plan <time dateTime={state.planningLocalDate || state.tomorrowLocalDate}>{state.planningLocalDate || state.tomorrowLocalDate}</time>
+        </p>
         {seedDiagnostic && (
           <section className="rounded-2xl border border-amber-700/60 bg-amber-950/30 p-4 text-sm text-amber-100">
             <p className="font-medium">Default habits weren’t initialized automatically.</p>
