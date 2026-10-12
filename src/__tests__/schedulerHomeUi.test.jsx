@@ -61,6 +61,27 @@ describe('scheduled Home calendar', () => {
     expect(mocks.completion).not.toHaveBeenCalled();
   });
 
+  it('removes only the Today tray while retaining scheduled block editing, movement, and resizing', async () => {
+    const base = await mocks.load();
+    mocks.load.mockResolvedValue({
+      ...base,
+      followThroughItems: [...base.followThroughItems, { id: 'unscheduled', normalized_fragment_text: 'Unscheduled action' }],
+    });
+    await render();
+    expect(container.querySelector('[aria-label="Unscheduled items"]')).toBeNull();
+    expect(container.textContent).not.toContain('Unscheduled action');
+    expect(container.textContent).not.toContain('Unscheduled (');
+    expect(container.textContent).not.toContain('Drag actions and habits into your day');
+    expect(container.querySelector('[data-scheduler-drag-key="action:commitment"]')).not.toBeNull();
+    expect(container.querySelector('[data-resize-edge]')).not.toBeNull();
+    await act(async () => container.querySelector('[data-scheduler-edit-key="action:commitment"]').click());
+    await act(async () => [...document.querySelectorAll('button')].find((button) => button.textContent === 'Save time').click());
+    expect(mocks.schedule).toHaveBeenCalledWith(expect.objectContaining({
+      targetLocalDate: '2026-10-07', sourceId: 'commitment',
+      startsAt: '2026-10-07T09:00:00.000Z', endsAt: '2026-10-07T09:30:00.000Z',
+    }));
+  });
+
   it('hides scheduler-only display when the feature flag is off', async () => {
     mocks.enabled = false;
     await render();
@@ -92,7 +113,7 @@ describe('scheduled Home calendar', () => {
       targetLocalDate: '2026-10-07', timezoneName: 'UTC', sourceType: 'action', sourceId: 'commitment', startsAt: null, endsAt: null,
     });
     expect(container.querySelector('[data-schedule-key="action:commitment"]')).toBeNull();
-    expect(container.querySelector('[aria-label="Unscheduled items"]').textContent).toContain('Write');
+    expect(container.querySelector('[aria-label="Unscheduled items"]')).toBeNull();
     expect(mocks.completion).not.toHaveBeenCalled();
   });
 
@@ -110,7 +131,9 @@ describe('scheduled Home calendar', () => {
     const base = await mocks.load();
     mocks.load.mockResolvedValue({
       ...base, review: { completed_at: '2026-10-07T22:00:00Z' },
-      civilScheduleLocalDate: '2026-10-08', civilSchedules: [],
+      civilScheduleLocalDate: '2026-10-08',
+      civilSchedules: [{ id: 'current-block', target_local_date: '2026-10-08', commitment_fragment_id: 'current-action',
+        starts_at: '2026-10-08T11:00:00Z', ends_at: '2026-10-08T11:30:00Z' }],
       civilFollowThroughItems: [{ id: 'current-action', normalized_fragment_text: 'Today action' }],
       civilHabitOccurrences: [], civilReview: { completed_at: null },
     });
@@ -182,16 +205,16 @@ describe('scheduled Home calendar', () => {
     expect(container.textContent).toContain('Review day 2026-10-08');
   });
 
-  it('keeps unscheduled ROI actions visible without reintroducing a checklist', async () => {
+  it('does not replace the removed tray with an unscheduled list when scheduling is unavailable', async () => {
     const base = await mocks.load();
     mocks.load.mockResolvedValue({ ...base, todaySchedules: [], scheduleAvailable: false, scheduleDiagnostic: { message: 'Database setup is incomplete' } });
     await render();
-    const tray = container.querySelector('[aria-label="Unscheduled items"]');
-    expect(tray.textContent).toContain('Write');
-    expect(tray.textContent).toContain('Read');
+    expect(container.querySelector('[aria-label="Unscheduled items"]')).toBeNull();
+    expect(container.textContent).not.toContain('Write');
+    expect(container.textContent).not.toContain('Read');
     expect(container.querySelectorAll('[data-slot-timestamp]')).toHaveLength(96);
     expect(container.textContent).toContain('Database setup is incomplete');
-    expect(container.querySelector('[data-scheduler-edit-key="action:commitment"]').disabled).toBe(true);
+    expect(container.querySelector('[data-scheduler-edit-key="action:commitment"]')).toBeNull();
     expect(container.textContent).not.toContain("Today's actions checklist");
     await act(async () => [...container.querySelectorAll('button')].find((button) => button.textContent === 'Retry scheduling').click());
     expect(mocks.load).toHaveBeenCalledTimes(3);
