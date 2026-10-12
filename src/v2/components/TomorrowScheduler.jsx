@@ -80,6 +80,7 @@ export default function TomorrowScheduler({
   saveStatus, saveError, availabilityError, onUpdate, onUnschedule, onRetry, onGoogleEdit, onGoogleUpdate, resolveTime = resolveScheduleTime,
   title = 'Schedule tomorrow',
   preserveUnmatchedBlocks = false,
+  showUnscheduledTray = true,
 }) {
   const sensors = useSensors(useSensor(MousePenPointerSensor, { activationConstraint: { distance: 8 } }), useSensor(TouchSensor, { activationConstraint: { delay: 300, tolerance: 8 } }));
   const [active, setActive] = React.useState(null);
@@ -315,6 +316,7 @@ export default function TomorrowScheduler({
     setActive(null);
     if (interaction.current.locked || generation !== interaction.current.generation || dragGeneration.current !== generation || writePending.current === generation) return;
     dragGeneration.current = null;
+    if (!showUnscheduledTray && over?.id === unscheduledTrayId) return;
     const item = dragged.data.current?.item;
     const timestamp = over?.data?.current?.timestamp;
     if (!item || !items.some((candidate) => itemKey(candidate) === itemKey(item))) return;
@@ -357,7 +359,7 @@ export default function TomorrowScheduler({
       <div>
         <h3 id="tomorrow-scheduler-title" className="font-semibold text-white">{title}</h3>
         <p className="mt-1 text-sm text-zinc-400">{readOnly ? 'Your actions and habits, in one calendar. Review & Plan is where you update your ROI action checklist.' : 'Give your actions a place in the day. Scheduling is optional.'}</p>
-        <p className="mt-1 text-xs text-zinc-400">{readOnly ? 'Read-only calendar. Your calendar works without connecting Google.' : 'Your calendar works without connecting Google. Drag actions and habits into your day. Drag a block’s top or bottom to resize, then save the preview; click it to edit exact times. Private commitments are never automatically exported.'}</p>
+        <p className="mt-1 text-xs text-zinc-400">{readOnly ? 'Read-only calendar. Your calendar works without connecting Google.' : showUnscheduledTray ? 'Your calendar works without connecting Google. Drag actions and habits into your day. Drag a block’s top or bottom to resize, then save the preview; click it to edit exact times. Private commitments are never automatically exported.' : 'Your calendar works without connecting Google. Click a saved block to edit its time, drag it to move it, or drag its top or bottom to resize and save the preview. Private commitments are never automatically exported.'}</p>
         <p className="mt-2 text-xs text-zinc-400">{localDate} · {timezone} · Times are optional</p>
       </div>
       {(!available || !timelineAvailable) && <div role="status" className="space-y-2 rounded-xl bg-amber-950/30 p-3 text-sm text-amber-200">{dayBounds.error && <><p>Timeline unavailable for this date or timezone. Your review is still available.</p><p>{dayBounds.error}</p></>}{availabilityError && <p>{availabilityError}</p>}{saveError ? <><p>{typeof saveError === 'string' ? saveError : saveError.message}</p><p>Your local schedule changes are preserved. Retry scheduling before completing your review.</p></> : !dayBounds.error && <p>Scheduling is currently unavailable. You can still save your actions and complete your review. Retry after database setup or connectivity is restored.</p>}{onRetry && <button type="button" onClick={onRetry} className={buttonClass}>Retry scheduling</button>}</div>}
@@ -371,8 +373,8 @@ export default function TomorrowScheduler({
         {!editing && dialogError && <p role="alert" className="text-sm text-amber-300">{dialogError}</p>}
         {!readOnly && available && <div role="status" aria-live="polite" className="text-xs text-zinc-400">{saveError ? <span className="text-amber-300">{typeof saveError === 'string' ? saveError : saveError.message}</span> : saveStatus === 'saving' ? 'Saving schedule…' : saveStatus === 'saved' ? 'Schedule saved' : saveStatus === 'offline' ? 'Schedule pending sync — reconnect to save.' : saveStatus === 'error' ? 'Schedule could not sync. Your review is still available.' : 'Schedule changes save automatically.'}</div>}
         <DndContext sensors={sensors} collisionDetection={detectTimeSlot} onDragStart={({ active: dragged }) => { if (!interaction.current.locked && generation === interaction.current.generation && writePending.current !== generation) { dragGeneration.current = generation; setActive(dragged.data.current.item); } }} onDragCancel={() => { dragGeneration.current = null; setActive(null); }} onDragEnd={drop}>
-          <div className="grid gap-4 md:grid-cols-[minmax(160px,1fr)_minmax(0,3fr)]">
-            <UnscheduledTray disabled={locked || saving}>
+          <div className={showUnscheduledTray ? 'grid gap-4 md:grid-cols-[minmax(160px,1fr)_minmax(0,3fr)]' : 'grid gap-4'}>
+            {showUnscheduledTray && <UnscheduledTray disabled={locked || saving}>
               <h4 className="text-sm font-medium text-zinc-300">Unscheduled ({unscheduled.length})</h4>
               <p className="text-xs text-zinc-400">ROI actions · Habits</p>
               {!readOnly && <p className="text-xs text-zinc-500">Drag a card onto a time to snap to 15 minutes, or back here to unschedule it. On touch screens, hold its handle. Click a card to set an exact time.</p>}
@@ -380,7 +382,7 @@ export default function TomorrowScheduler({
                 {unscheduled.map((item) => <div key={itemKey(item)} className="min-w-[160px] md:min-w-0"><DraggableItem item={item} onEdit={edit} disabled={locked || saving || Boolean(resize)} /></div>)}
               </div>
               {!unscheduled.length && <p className="text-xs text-zinc-500">{readOnly ? 'No unscheduled items.' : items.length ? 'Everything has a time.' : 'Save an action or add a habit to begin.'}</p>}
-            </UnscheduledTray>
+            </UnscheduledTray>}
             <div className="min-w-0">
               {allDay.length > 0 && <div aria-label="All-day Google events" className="mb-2 space-y-1 rounded-lg border border-zinc-700 p-2"><p className="text-xs text-zinc-400">All day · Google</p>{allDay.map((event) => <p key={event.id} className="text-xs text-zinc-500">{event.summary || event.title || 'Busy'}{event.ends_at || event.end ? ` · until ${event.ends_at || event.end?.date || event.end} (exclusive)` : ''}{event.transparency === 'transparent' ? ' · Free · non-blocking' : ''}{event.editable && onGoogleEdit && !locked && <button type="button" className={buttonClass} disabled={saving || Boolean(resize)} onClick={() => onGoogleEdit(event)}>Edit {event.title || 'event'}</button>}</p>)}</div>}
               <div className="mb-2 grid grid-cols-[52px_1fr] gap-1 text-[10px] text-zinc-400"><span>Time</span><span>Your plan{googleLanes.length > 0 && ' · Google'}</span></div>

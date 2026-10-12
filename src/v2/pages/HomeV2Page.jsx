@@ -293,6 +293,7 @@ export default function HomeV2Page() {
             items={calendarItems}
             blocks={calendarBlocks}
             googleEvents={googleEvents}
+            showUnscheduledTray={false}
             onGoogleEdit={googleControls?.edit}
             onGoogleUpdate={googleControls?.update}
             onUpdate={saveCalendarItem}

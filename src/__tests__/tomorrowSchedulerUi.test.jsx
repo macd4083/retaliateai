@@ -322,6 +322,22 @@ describe('TomorrowScheduler UI', () => {
     expect(container.querySelector(`[data-schedule-key="${item.key}"]`)).toBeNull();
   });
 
+  it('omits the tray and rejects tray drops when that destination is hidden', async () => {
+    const unschedule = vi.fn();
+    await render({ showUnscheduledTray: false, onUnschedule: unschedule, blocks: [{
+      source_key: 'action-1', starts_at: '2026-10-07T09:00:00Z', ends_at: '2026-10-07T09:30:00Z',
+    }] });
+    expect(container.querySelector('[aria-label="Unscheduled items"]')).toBeNull();
+    expect(container.textContent).not.toContain('Drag actions and habits into your day');
+    expect(container.querySelector('[data-scheduler-drag-key="action-1"]')).not.toBeNull();
+    expect(container.querySelector('[data-resize-edge]')).not.toBeNull();
+    const dragged = { data: { current: { item: items[0] } } };
+    await act(async () => dnd.handlers.onDragStart({ active: dragged }));
+    await act(async () => dnd.handlers.onDragEnd({ active: dragged, over: { id: 'unscheduled-tray' } }));
+    expect(unschedule).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+  });
+
   it('detects the tray outside the timeline and ignores disabled tray targets', async () => {
     await render();
     const target = { id: 'unscheduled-tray', disabled: false };

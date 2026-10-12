@@ -61,6 +61,27 @@ describe('scheduled Home calendar', () => {
     expect(mocks.completion).not.toHaveBeenCalled();
   });
 
+  it('removes only the Today tray while retaining scheduled block editing, movement, and resizing', async () => {
+    const base = await mocks.load();
+    mocks.load.mockResolvedValue({
+      ...base,
+      followThroughItems: [...base.followThroughItems, { id: 'unscheduled', normalized_fragment_text: 'Unscheduled action' }],
+    });
+    await render();
+    expect(container.querySelector('[aria-label="Unscheduled items"]')).toBeNull();
+    expect(container.textContent).not.toContain('Unscheduled action');
+    expect(container.textContent).not.toContain('Unscheduled (');
+    expect(container.textContent).not.toContain('Drag actions and habits into your day');
+    expect(container.querySelector('[data-scheduler-drag-key="action:commitment"]')).not.toBeNull();
+    expect(container.querySelector('[data-resize-edge]')).not.toBeNull();
+    await act(async () => container.querySelector('[data-scheduler-edit-key="action:commitment"]').click());
+    await act(async () => [...document.querySelectorAll('button')].find((button) => button.textContent === 'Save time').click());
+    expect(mocks.schedule).toHaveBeenCalledWith(expect.objectContaining({
+      targetLocalDate: '2026-10-07', sourceId: 'commitment',
+      startsAt: '2026-10-07T09:00:00.000Z', endsAt: '2026-10-07T09:30:00.000Z',
+    }));
+  });
+
   it('hides scheduler-only display when the feature flag is off', async () => {
     mocks.enabled = false;
     await render();
