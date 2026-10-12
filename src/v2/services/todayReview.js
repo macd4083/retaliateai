@@ -1,6 +1,7 @@
 import { supabase } from '../../lib/supabase/client';
 import { ENABLE_TODAY_V2_SCHEDULER } from '../../lib/featureFlags';
 import { loadSchedules, isMissingScheduleSchema } from './scheduling';
+import { syncSavedSchedule } from './calendarScheduleSync';
 import { normalizeHabitRecurrence } from '../today/recurrence';
 import {
   addDaysToLocalDate,
@@ -499,6 +500,7 @@ export async function replaceTomorrowActions({
     if (result.error) throw result.error;
     savedFragments = result.data || [];
   }
+  if (stable) await syncSavedSchedule({ userId, targetLocalDate });
   return {
     rawPlanText: normalizedRawText,
     fragments,

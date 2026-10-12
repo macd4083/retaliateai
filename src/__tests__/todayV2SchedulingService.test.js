@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ from: vi.fn(), rpc: vi.fn(), enabled: true }));
+const mocks = vi.hoisted(() => ({ from: vi.fn(), rpc: vi.fn(), enabled: true,
+  auth: { getSession: vi.fn(), onAuthStateChange: vi.fn() } }));
 vi.mock('../lib/supabase/client', () => ({ supabase: mocks }));
 vi.mock('../lib/featureFlags', () => ({
   get ENABLE_TODAY_V2_SCHEDULER() { return mocks.enabled; },
 }));
-import { loadSchedules, replaceSchedule } from '../v2/services/scheduling';
+import { loadSchedules, replaceSchedule, updateDaySchedule } from '../v2/services/scheduling';
+import { getScheduleSyncFailure, syncSavedSchedule } from '../v2/services/calendarScheduleSync';
 import { replaceTomorrowActions, loadTodayReviewState, loadTodayV2HomeState } from '../v2/services/todayReview';
 
 function builder(result) {
@@ -25,6 +27,7 @@ describe('optional schedule repository', () => {
     mocks.enabled = true;
     mocks.rpc.mockResolvedValue({ data: [], error: null });
     mocks.from.mockImplementation(() => builder({ data: [], error: null }));
+    mocks.auth.getSession.mockResolvedValue({ data: { session: null } });
   });
   it('loads today and tomorrow from one dataset', async () => {
     mocks.from.mockReturnValue(builder({ data: [
@@ -38,6 +41,66 @@ describe('optional schedule repository', () => {
     expect(state.todaySchedules[0]).toMatchObject({ source_type: 'action', source_id: 'action-id' });
     expect(state.tomorrowSchedules[0]).toMatchObject({ source_type: 'habit', source_id: 'habit-id' });
     expect(mocks.from).toHaveBeenCalledTimes(1);
+  });
+  it('syncs only after local persistence, retains saved rows on remote failure, and retries persisted state', async () => {
+    const userId = 'service-sync-user';
+    const targetLocalDate = '2026-10-07';
+    const row = { user_id: userId, commitment_fragment_id: '11111111-1111-4111-8111-111111111111' };
+    mocks.auth.getSession.mockResolvedValue({ data: { session: { user: { id: userId }, access_token: 'session-value' } } });
+    mocks.rpc.mockResolvedValue({ data: [row], error: null });
+    const fetchMock = vi.fn(async () => {
+      expect(mocks.rpc).toHaveBeenCalled();
+      return { ok: false, json: async () => ({ error: 'Try later' }) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const saved = await replaceSchedule({ userId, targetLocalDate, timezoneName: 'UTC', blocks: [] });
+      expect(saved[0].commitment_fragment_id).toBe(row.commitment_fragment_id);
+      expect(getScheduleSyncFailure(userId, targetLocalDate)).toContain('Saved locally');
+      expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ targetLocalDate });
+      fetchMock.mockResolvedValue({ ok: true, json: async () => ({ connected: true, synced: true }) });
+      await syncSavedSchedule({ userId, targetLocalDate });
+      expect(getScheduleSyncFailure(userId, targetLocalDate)).toBeNull();
+      await updateDaySchedule({ userId, targetLocalDate, timezoneName: 'UTC', sourceType: 'action',
+        sourceId: row.commitment_fragment_id, startsAt: null, endsAt: null });
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      await replaceTomorrowActions({ userId, targetLocalDate, sourceLocalDate: '2026-10-06', timezoneName: 'UTC',
+        rawPlanText: 'Renamed', actionTexts: ['Renamed'], scheduleAvailable: true });
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+    } finally { vi.unstubAllGlobals(); }
+  });
+  it('does not sync a failed local write or a stale account identity', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      mocks.rpc.mockResolvedValueOnce({ data: null, error: new Error('Local failed') });
+      await expect(replaceSchedule({ userId: 'old', targetLocalDate: '2026-10-07', timezoneName: 'UTC', blocks: [] })).rejects.toThrow('Local failed');
+      mocks.auth.getSession.mockResolvedValue({ data: { session: { user: { id: 'new' }, access_token: 'value' } } });
+      await replaceSchedule({ userId: 'old', targetLocalDate: '2026-10-07', timezoneName: 'UTC', blocks: [] });
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally { vi.unstubAllGlobals(); }
+  });
+  it('ignores a late remote response after switching accounts', async () => {
+    let finish;
+    const userId = 'old-inflight-user';
+    const date = '2026-10-07';
+    mocks.auth.getSession.mockResolvedValueOnce({ data: { session: { user: { id: userId }, access_token: 'value' } } })
+      .mockResolvedValue({ data: { session: { user: { id: 'another' }, access_token: 'other-value' } } });
+    const fetchMock = vi.fn(() => new Promise((resolve) => { finish = resolve; }));
+    const listener = vi.fn();
+    window.addEventListener('retaliate-schedule-calendar-sync', listener);
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const pending = syncSavedSchedule({ userId, targetLocalDate: date });
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      const before = listener.mock.calls.length;
+      finish({ ok: true, json: async () => ({ connected: true, synced: true }) });
+      await pending;
+      expect(listener.mock.calls.length).toBe(before);
+    } finally {
+      window.removeEventListener('retaliate-schedule-calendar-sync', listener);
+      vi.unstubAllGlobals();
+    }
   });
   it('does not probe scheduling when the feature is disabled', async () => {
     mocks.enabled = false;

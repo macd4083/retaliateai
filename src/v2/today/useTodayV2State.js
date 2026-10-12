@@ -781,6 +781,7 @@ export function useTodayV2State(userId) {
         });
         setScheduleSaveStatus('saving');
         const rows = await replaceSchedule({
+          userId: ownerId,
           targetLocalDate: currentState.planningLocalDate || currentState.tomorrowLocalDate, timezoneName: currentState.timezoneName, blocks,
         });
         if (generation !== loadGenerationRef.current || currentUserRef.current !== ownerId || !isCurrentDateScope(stateRef.current)) return;

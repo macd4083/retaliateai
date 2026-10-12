@@ -103,6 +103,7 @@ describe('scheduled Home calendar', () => {
     await act(async () => container.querySelector('[data-scheduler-edit-key="action:commitment"]').click());
     await act(async () => [...document.querySelectorAll('button')].find((button) => button.textContent === 'Save time').click());
     expect(mocks.schedule).toHaveBeenCalledWith({
+      userId: 'user',
       targetLocalDate: '2026-10-07', timezoneName: 'UTC', sourceType: 'action', sourceId: 'commitment',
       startsAt: '2026-10-07T09:00:00.000Z', endsAt: '2026-10-07T09:30:00.000Z',
     });
@@ -110,6 +111,7 @@ describe('scheduled Home calendar', () => {
     await act(async () => container.querySelector('[data-scheduler-edit-key="action:commitment"]').click());
     await act(async () => [...document.querySelectorAll('button')].find((button) => button.textContent === 'Unschedule').click());
     expect(mocks.schedule).toHaveBeenLastCalledWith({
+      userId: 'user',
       targetLocalDate: '2026-10-07', timezoneName: 'UTC', sourceType: 'action', sourceId: 'commitment', startsAt: null, endsAt: null,
     });
     expect(container.querySelector('[data-schedule-key="action:commitment"]')).toBeNull();

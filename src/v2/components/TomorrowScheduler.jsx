@@ -148,7 +148,9 @@ export default function TomorrowScheduler({
     && !visibleBlocks.some((existing) => (block.id && existing.id === block.id) || (blockKey(block) && blockKey(existing) === blockKey(block) && existing.starts_at === block.starts_at)))
     .map((block) => ({ ...block, read_only_context: true }));
   const sortedBlocks = [...visibleBlocks, ...carryoverBlocks].sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at));
-  const timedGoogle = googleEvents.filter((event) => !event.all_day && !event.allDay && !(event.start?.date)).map((event) => ({
+  const importedEvents = googleEvents.filter((event) => !event.localSource || ![...blocks, ...contextBlocks].some((block) =>
+    `${block.source_type}:${block.source_id}` === event.localSource && (block.target_local_date || localDate) === event.localDate));
+  const timedGoogle = importedEvents.filter((event) => !event.all_day && !event.allDay && !(event.start?.date)).map((event) => ({
     ...previewBlock({ ...event, starts_at: event.starts_at || event.start?.dateTime || event.start, ends_at: event.ends_at || event.end?.dateTime || event.end }, true),
   })).filter((event) => event.starts_at && event.ends_at).sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at));
   const lanes = layoutScheduleBlocks([
@@ -158,7 +160,7 @@ export default function TomorrowScheduler({
   const localLanes = lanes.filter((block) => !block.imported);
   const googleLanes = lanes.filter((block) => block.imported);
   const laneCount = Math.max(1, ...lanes.map((block) => block.lane + 1));
-  const allDayEvents = googleEvents.filter((event) => event.all_day || event.allDay || event.start?.date);
+  const allDayEvents = importedEvents.filter((event) => event.all_day || event.allDay || event.start?.date);
   const allDay = allDayEvents.filter((event) => (event.start?.date || event.start || event.starts_at) <= localDate && (event.end?.date || event.end || event.ends_at) > localDate);
 
   React.useEffect(() => {
@@ -359,7 +361,7 @@ export default function TomorrowScheduler({
       <div>
         <h3 id="tomorrow-scheduler-title" className="font-semibold text-white">{title}</h3>
         <p className="mt-1 text-sm text-zinc-400">{readOnly ? 'Your actions and habits, in one calendar. Review & Plan is where you update your ROI action checklist.' : 'Give your actions a place in the day. Scheduling is optional.'}</p>
-        <p className="mt-1 text-xs text-zinc-400">{readOnly ? 'Read-only calendar. Your calendar works without connecting Google.' : showUnscheduledTray ? 'Your calendar works without connecting Google. Drag actions and habits into your day. Drag a block’s top or bottom to resize, then save the preview; click it to edit exact times. Private commitments are never automatically exported.' : 'Your calendar works without connecting Google. Click a saved block to edit its time, drag it to move it, or drag its top or bottom to resize and save the preview. Private commitments are never automatically exported.'}</p>
+        <p className="mt-1 text-xs text-zinc-400">{readOnly ? 'Read-only calendar. Your calendar works without connecting Google.' : showUnscheduledTray ? 'Your calendar works without connecting Google. Drag actions and habits into your day. Drag a block’s top or bottom to resize, then save the preview; click it to edit exact times. When connected, saved schedules also sync to your primary Google Calendar.' : 'Your calendar works without connecting Google. Click a saved block to edit its time, drag it to move it, or drag its top or bottom to resize and save the preview. When connected, saved schedules also sync to your primary Google Calendar.'}</p>
         <p className="mt-2 text-xs text-zinc-400">{localDate} · {timezone} · Times are optional</p>
       </div>
       {(!available || !timelineAvailable) && <div role="status" className="space-y-2 rounded-xl bg-amber-950/30 p-3 text-sm text-amber-200">{dayBounds.error && <><p>Timeline unavailable for this date or timezone. Your review is still available.</p><p>{dayBounds.error}</p></>}{availabilityError && <p>{availabilityError}</p>}{saveError ? <><p>{typeof saveError === 'string' ? saveError : saveError.message}</p><p>Your local schedule changes are preserved. Retry scheduling before completing your review.</p></> : !dayBounds.error && <p>Scheduling is currently unavailable. You can still save your actions and complete your review. Retry after database setup or connectivity is restored.</p>}{onRetry && <button type="button" onClick={onRetry} className={buttonClass}>Retry scheduling</button>}</div>}

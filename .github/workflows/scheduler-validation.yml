@@ -61,11 +61,13 @@ jobs:
             -f supabase/migrations/20261008_today_v2_schedule_review_lock.sql \
             -f supabase/migrations/20261008_today_v2_schedule_review_lock.sql \
             -f supabase/migrations/20261009_today_v2_completion_release_guard.sql \
-            -f supabase/migrations/20261009_today_v2_completion_release_guard.sql
+            -f supabase/migrations/20261009_today_v2_completion_release_guard.sql \
+            -f supabase/migrations/20261012_google_schedule_sync_locks.sql
           psql -v ON_ERROR_STOP=1 \
             -f supabase/tests/today_v2_scheduling.sql \
             -f supabase/tests/today_v2_schedule_review_lock.sql \
-            -f supabase/tests/today_v2_schedule_review_upgrade.sql
+            -f supabase/tests/today_v2_schedule_review_upgrade.sql \
+            -f supabase/tests/google_schedule_sync_locks.sql
       - name: Scheduler and Calendar regressions (serial)
         timeout-minutes: 3
         run: npm run test:scheduler

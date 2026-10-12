@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 
 export const GOOGLE_CALENDAR_SCOPES = [
@@ -13,7 +13,7 @@ const MAX_CALENDARS = 10;
 const MAX_PAGES = 5;
 const STATE_LIFETIME = 10 * 60 * 1000;
 const METHODS = { status: 'GET', connect: 'POST', callback: 'GET', calendars: 'GET', select: 'POST', events: 'GET', disconnect: 'POST',
-  create: 'POST', update: 'POST', delete: 'POST' };
+  create: 'POST', update: 'POST', delete: 'POST', sync: 'POST' };
 
 class CalendarError extends Error {
   constructor(status, code, message) {
@@ -24,6 +24,17 @@ class CalendarError extends Error {
 }
 const fail = (status, code, message) => { throw new CalendarError(status, code, message); };
 const hash = (value) => createHash('sha256').update(value).digest('base64url');
+const scheduleOwner = (userId) => hash(`schedule:${userId}`);
+const scheduleEventId = (userId, date, source, generation) => `s${createHash('sha256')
+  .update(JSON.stringify([userId, date, source, generation])).digest('hex')}`;
+function scheduleMarker(event, userId) {
+  const marker = event.extendedProperties?.private;
+  if (marker?.retaliateOwner !== scheduleOwner(userId) || !validDate(marker.retaliateDate)
+    || !/^(action|habit):[0-9a-f-]{36}$/i.test(marker.retaliateSource || '')
+    || !/^\d{1,3}$/.test(marker.retaliateGeneration || '')) return null;
+  return event.id === scheduleEventId(userId, marker.retaliateDate, marker.retaliateSource,
+    Number(marker.retaliateGeneration)) ? marker : null;
+}
 const equal = (a, b) => typeof a === 'string' && typeof b === 'string' &&
   a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
@@ -450,6 +461,141 @@ export function createGoogleCalendarHandler({ env = process.env, supabase, fetch
     return { event: model(updated) };
   }
 
+  async function syncSchedule(body, userId, row, config, deadline) {
+    const date = body?.targetLocalDate;
+    if (!validDate(date)) fail(400, 'invalid_date', 'Supply a real schedule date.');
+    if (!canWrite(userId, row, config)) fail(403, 'permission_upgrade_required', 'Reconnect Google Calendar and grant event editing permission.');
+    const available = await calendars(userId, row, config, deadline);
+    const primary = available.find((calendar) => calendar.primary);
+    if (!primary?.canWrite) fail(403, 'calendar_read_only', 'Your primary Google calendar must allow event editing.');
+    const read = async (table, fields, dated = false) => {
+      let query = database().from(table).select(fields).eq('user_id', userId);
+      if (dated) query = query.eq('target_local_date', date);
+      const result = await query;
+      if (result.error) fail(503, 'storage_unavailable', 'Saved schedules could not be loaded. Retry Google sync.');
+      return result.data || [];
+    };
+    const blocks = await read('today_v2_schedule_blocks', '*', true);
+    const scheduleRevision = (rows) => JSON.stringify(rows.map((block) => [
+      block.commitment_fragment_id || block.habit_definition_id,
+      block.starts_at, block.ends_at, block.timezone_name,
+    ]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))));
+    const fragments = await read('today_v2_commitment_fragments', 'id,fragment_text,fragment_order', true);
+    const plans = await read('today_v2_plan_inputs', 'first_five_minutes', true);
+    const starts = String(plans[0]?.first_five_minutes || '').split(/\r?\n/);
+    const labelPart = (value) => {
+      const text = String(value || '').replace(/\s+/g, ' ').trim();
+      if (text.length <= 80) return text;
+      const excerpt = text.slice(0, 77);
+      const space = excerpt.lastIndexOf(' ');
+      return `${space > 0 ? excerpt.slice(0, space) : excerpt}…`;
+    };
+    const habits = await read('today_v2_habit_definitions', 'id,name');
+    const persistedRevision = (scheduleRows, fragmentRows, planRows, habitRows) => JSON.stringify([
+      scheduleRevision(scheduleRows),
+      fragmentRows.map((item) => [item.id, item.fragment_text, item.fragment_order])
+        .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+      planRows.map((item) => item.first_five_minutes),
+      habitRows.filter((item) => scheduleRows.some((block) => block.habit_definition_id === item.id))
+        .map((item) => [item.id, item.name]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+    ]);
+    const revision = persistedRevision(blocks, fragments, plans, habits);
+    const requireFreshSnapshot = async () => {
+      const latestBlocks = await read('today_v2_schedule_blocks', '*', true);
+      const latestFragments = await read('today_v2_commitment_fragments', 'id,fragment_text,fragment_order', true);
+      const latestPlans = await read('today_v2_plan_inputs', 'first_five_minutes', true);
+      const latestHabits = await read('today_v2_habit_definitions', 'id,name');
+      if (persistedRevision(latestBlocks, latestFragments, latestPlans, latestHabits) !== revision) {
+        fail(409, 'sync_changed', 'Your saved schedule changed during Google sync. Retry sync to use its latest version.');
+      }
+    };
+    const desired = new Map(blocks.map((block) => {
+      const action = Boolean(block.commitment_fragment_id);
+      const sourceId = block.commitment_fragment_id || block.habit_definition_id;
+      const label = (action ? fragments : habits).find((item) => item.id === sourceId);
+      if (!label) fail(503, 'storage_unavailable', 'Saved schedule labels could not be loaded.');
+      return [`${action ? 'action' : 'habit'}:${sourceId}`, eventPayload({
+        summary: action ? [labelPart(label.fragment_text), labelPart(starts[label.fragment_order])].filter(Boolean).join(', ') : label.name,
+        start: { dateTime: new Date(block.starts_at).toISOString(), timeZone: block.timezone_name },
+        end: { dateTime: new Date(block.ends_at).toISOString(), timeZone: block.timezone_name },
+      })];
+    }));
+    const base = `calendars/${encodeURIComponent(primary.id)}/events`;
+    const events = await paginated(base, { privateExtendedProperty: `retaliateSchedule=${hash(`${userId}:${date}`)}`,
+      showDeleted: 'false' }, userId, row, config, deadline);
+    const send = (path, options) => authorizedRequest(path, options, userId, row, config, deadline);
+    const change = async (event, payload) => {
+      if (!scheduleMarker(event, userId) || !mutableEvent(event) || event.recurringEventId ||
+        typeof event.etag !== 'string' || !/^"[^"\u0000-\u001f\u007f]{1,250}"$/.test(event.etag)) {
+        fail(409, 'event_not_editable', 'A synced event is no longer safely editable. Restore it in Google Calendar, then retry.');
+      }
+      if (payload && event.summary === payload.summary &&
+        Date.parse(event.start?.dateTime) === Date.parse(payload.start.dateTime) &&
+        Date.parse(event.end?.dateTime) === Date.parse(payload.end.dateTime) &&
+        event.start?.timeZone === payload.start.timeZone && event.end?.timeZone === payload.end.timeZone) {
+        return;
+      }
+      // Local RPCs can save while this worker holds the remote-sync lease.
+      // Recheck source timings and labels immediately before any remote write.
+      await requireFreshSnapshot();
+      await send(`${base}/${encodeURIComponent(event.id)}`, {
+        method: payload ? 'PATCH' : 'DELETE',
+        headers: { 'If-Match': event.etag, ...(payload ? { 'Content-Type': 'application/json' } : {}) },
+        ...(payload ? { body: JSON.stringify(payload) } : {}),
+      });
+    };
+    const active = new Map();
+    for (const event of events) {
+      const marker = scheduleMarker(event, userId);
+      if (!marker || marker.retaliateDate !== date) continue;
+      const payload = desired.get(marker.retaliateSource);
+      if (!payload || active.has(marker.retaliateSource)) await change(event);
+      else {
+        await change(event, payload);
+        active.set(marker.retaliateSource, event);
+      }
+    }
+    for (const [source, payload] of desired) {
+      if (active.has(source)) continue;
+      // Deleted Google IDs cannot be reused. Probe a bounded deterministic chain so
+      // retries/reloads still converge after external deletion or unscheduling.
+      let saved = false;
+      for (let generation = 0; generation < 100; generation++) {
+        const id = scheduleEventId(userId, date, source, generation);
+        let existing;
+        try { existing = await send(`${base}/${id}`, { method: 'GET' }); }
+        catch (error) {
+          if (!['event_not_found', 'event_gone'].includes(error.code)) throw error;
+          if (error.code === 'event_gone') continue;
+        }
+        if (existing?.status === 'cancelled') continue;
+        if (existing) { await change(existing, payload); saved = true; break; }
+        try {
+          await requireFreshSnapshot();
+          await send(base, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...payload, id, extendedProperties: { private: {
+              retaliateOwner: scheduleOwner(userId), retaliateDate: date, retaliateSource: source,
+              retaliateGeneration: String(generation), retaliateSchedule: hash(`${userId}:${date}`),
+            } } }) });
+          saved = true;
+          break;
+        } catch (error) {
+          if (error.code !== 'request_conflict') throw error;
+          const concurrent = await send(`${base}/${id}`, { method: 'GET' });
+          if (concurrent.status === 'cancelled') continue;
+          await change(concurrent, payload);
+          saved = true;
+          break;
+        }
+      }
+      if (!saved) fail(409, 'sync_limit', 'This schedule exceeded the supported recreation limit.');
+    }
+    // A native save may land while the last Google request is in flight.
+    // Never claim success for a snapshot that is no longer authoritative.
+    await requireFreshSnapshot();
+    return { connected: true, synced: true, targetLocalDate: date, calendarId: primary.id };
+  }
+
   return async function handler(req, res) {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Referrer-Policy', 'no-referrer');
@@ -494,6 +640,8 @@ export function createGoogleCalendarHandler({ env = process.env, supabase, fetch
       }
       let config;
       let configError;
+      // Disconnected planners remain local-only, even without Google configuration.
+      if (action === 'sync' && !await connection(userId)) return res.status(200).json({ connected: false, synced: false });
       try { config = configuration(env); } catch (error) {
         if (action !== 'status') throw error;
         configError = error;
@@ -590,6 +738,24 @@ export function createGoogleCalendarHandler({ env = process.env, supabase, fetch
         return res.status(200).json({ authorizationUrl: url.href });
       }
       const row = await connection(userId);
+      if (action === 'sync') {
+        if (!row) return res.status(200).json({ connected: false, synced: false });
+        if (!validDate(req.body?.targetLocalDate)) fail(400, 'invalid_date', 'Supply a real schedule date.');
+        if (!canWrite(userId, row, config)) fail(403, 'permission_upgrade_required', 'Reconnect Google Calendar and grant event editing permission.');
+        const lease = { p_user_id: userId, p_target_local_date: req.body.targetLocalDate, p_lease_id: randomUUID() };
+        const acquired = await database().rpc('today_v2_acquire_google_schedule_sync', lease);
+        if (acquired.error) fail(503, 'storage_unavailable', 'Apply the Google schedule sync lock migration, then retry sync.');
+        if (acquired.data !== true) fail(409, 'sync_busy', 'Another Google schedule sync is in progress. Your local save is safe; retry sync.');
+        try {
+          // The lease spans all remote operations; its 60s expiry exceeds the
+          // bounded 20s request deadline, including a final in-flight HTTP call.
+          return res.status(200).json(await syncSchedule(req.body, userId, row, config, deadline));
+        } finally {
+          // Lease expiry repairs crashed workers. A failed release must not hide
+          // the actual synchronization result or release another worker's lease.
+          try { await database().rpc('today_v2_release_google_schedule_sync', lease); } catch { /* Bounded lease expiry is authoritative. */ }
+        }
+      }
       if (['create', 'update', 'delete'].includes(action)) {
         return res.status(200).json(await mutate(action, req.body, userId, row, config, deadline));
       }
@@ -623,9 +789,13 @@ export function createGoogleCalendarHandler({ env = process.env, supabase, fetch
         try {
           const metadata = {};
           const items = await paginated(`calendars/${encodeURIComponent(id)}/events`, { ...range, singleEvents: 'true', showDeleted: 'true',
-            fields: 'nextPageToken,accessRole,timeZone,items(id,etag,recurringEventId,originalStartTime,start,end,summary,status,transparency,locked,eventType,recurrence,organizer(self),guestsCanModify)' },
+            fields: 'nextPageToken,accessRole,timeZone,items(id,etag,recurringEventId,originalStartTime,start,end,summary,status,transparency,locked,eventType,recurrence,organizer(self),guestsCanModify,extendedProperties)' },
           userId, row, config, deadline, metadata);
-          events.push(...items.map((event) => normalizeEvent(event, id, { ...metadata, canWrite: canWrite(userId, row, config) })).filter(Boolean));
+          events.push(...items.map((event) => {
+            const normalized = normalizeEvent(event, id, { ...metadata, canWrite: canWrite(userId, row, config) });
+            const marker = scheduleMarker(event, userId);
+            return normalized && { ...normalized, ...(marker ? { localSource: marker.retaliateSource, localDate: marker.retaliateDate } : {}) };
+          }).filter(Boolean));
           completed += 1;
         } catch (error) {
           if (!(error instanceof CalendarError) || ['reconnect_required', 'storage_unavailable', 'not_connected'].includes(error.code)) throw error;

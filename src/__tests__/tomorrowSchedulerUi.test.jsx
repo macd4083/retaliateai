@@ -64,6 +64,18 @@ describe('TomorrowScheduler UI', () => {
     expect(document.querySelector('[role="dialog"]')).toBeNull();
     expect(update).not.toHaveBeenCalled();
   });
+  it('suppresses only matching native synced overlays, not unrelated Google events', async () => {
+    const block = { source_type: 'action', source_id: 'persisted', source_key: 'action-1',
+      target_local_date: '2026-10-07', starts_at: '2026-10-07T09:00:00Z', ends_at: '2026-10-07T09:30:00Z' };
+    const imported = { id: 'synced-overlay', title: 'Duplicated native event',
+      start: block.starts_at, end: block.ends_at, localSource: 'action:persisted', localDate: '2026-10-07' };
+    await render({ blocks: [block], googleEvents: [imported, { ...imported, id: 'unrelated', title: 'Other event', localSource: 'action:other' }] });
+    expect(container.textContent).not.toContain('Duplicated native event');
+    expect(container.textContent).toContain('Other event');
+    expect(container.querySelector('[data-schedule-key="action-1"]')).not.toBeNull();
+    await render({ blocks: [], googleEvents: [imported] });
+    expect(container.textContent).toContain('Duplicated native event');
+  });
 
   it('exposes unavailable pending-schedule errors without claiming completion is allowed', async () => {
     await render({ available: false, saveError: new Error('Scheduling is unavailable. Pending schedule changes are saved locally; retry before completing.') });

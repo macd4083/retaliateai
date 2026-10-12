@@ -23,11 +23,24 @@ const googleResponse = (data, status = 200) => ({ ok: status >= 200 && status < 
 function mockDatabase() {
   const connections = new Map();
   const states = new Map();
+  const tables = new Map();
+  const syncLocks = new Map();
   const operations = [];
   const db = {
-    connections, states, operations,
+    connections, states, operations, tables, syncLocks,
     auth: { getUser: vi.fn(async () => ({ data: { user: { id: USER } }, error: null })) },
-    rpc: vi.fn(async (name, { p_state_hash: stateHash, p_tokens_encrypted: encrypted, p_selected_calendar_ids: selected }) => {
+    rpc: vi.fn(async (name, { p_state_hash: stateHash, p_tokens_encrypted: encrypted, p_selected_calendar_ids: selected,
+      p_user_id: userId, p_target_local_date: date, p_lease_id: leaseId }) => {
+      const key = `${userId}:${date}`;
+      if (name === 'today_v2_acquire_google_schedule_sync') {
+        if (syncLocks.has(key)) return { data: false, error: null };
+        syncLocks.set(key, leaseId);
+        return { data: true, error: null };
+      }
+      if (name === 'today_v2_release_google_schedule_sync') {
+        if (syncLocks.get(key) === leaseId) syncLocks.delete(key);
+        return { data: null, error: null };
+      }
       const row = states.get(stateHash);
       if (!row || Date.parse(row.expires_at) <= CLOCK) return { data: [], error: null };
       states.delete(stateHash);
@@ -40,7 +53,8 @@ function mockDatabase() {
       return { data: [row], error: null };
     }),
     from: vi.fn((table) => {
-      const rows = table === 'today_v2_google_connections' ? connections : states;
+      const rows = table === 'today_v2_google_connections' ? connections
+        : table === 'today_v2_google_oauth_states' ? states : tables.get(table) || new Map();
       const record = { table, filters: [], action: 'select', payload: null };
       operations.push(record);
       const builder = {
@@ -98,7 +112,7 @@ describe('secure Google Calendar backend', () => {
   async function call(action, { body = {}, query = {}, headers = {}, method } = {}) {
     const res = response();
     await handler({
-      method: method || (['connect', 'select', 'disconnect', 'create', 'update', 'delete'].includes(action) ? 'POST' : 'GET'),
+      method: method || (['connect', 'select', 'disconnect', 'create', 'update', 'delete', 'sync'].includes(action) ? 'POST' : 'GET'),
       query: { action, ...query }, body,
       headers: { authorization: ['Bearer', 'supabase-test-value'].join(' '), ...headers },
     }, res);
@@ -132,7 +146,7 @@ describe('secure Google Calendar backend', () => {
     expect(() => decrypt(one, Buffer.alloc(32, 8), `tokens:${USER}`)).toThrow();
     expect(() => encryptionKey('not-a-key')).toThrow();
   });
-  it.each(['status', 'connect', 'calendars', 'select', 'events', 'disconnect', 'create', 'update', 'delete'])('requires verified Supabase bearer auth for %s', async (action) => {
+  it.each(['status', 'connect', 'calendars', 'select', 'events', 'disconnect', 'create', 'update', 'delete', 'sync'])('requires verified Supabase bearer auth for %s', async (action) => {
     const res = await call(action, { headers: { authorization: '' } });
     expect(res.statusCode).toBe(401);
     expect(db.from).not.toHaveBeenCalled();
@@ -142,6 +156,226 @@ describe('secure Google Calendar backend', () => {
     const { authorization } = await flow();
     expect(db.auth.getUser).toHaveBeenCalledWith('supabase-test-value');
     expect(db.states.get(hash(authorization.searchParams.get('state'))).user_id).toBe(USER);
+  });
+  describe('saved native schedule sync', () => {
+    const date = '2026-10-07';
+    const actionId = '11111111-1111-4111-8111-111111111111';
+    const habitId = '22222222-2222-4222-8222-222222222222';
+    let google;
+    let deleted;
+    const sync = (extra = {}) => call('sync', { body: { targetLocalDate: date, userId: OTHER, ...extra } });
+    beforeEach(() => {
+      connected({ scopes: GOOGLE_CALENDAR_SCOPES, selected: ['some-import-calendar'] });
+      const set = (table, rows) => db.tables.set(table, new Map(rows.map((row, index) => [index, row])));
+      set('today_v2_schedule_blocks', [
+        { user_id: USER, target_local_date: date, commitment_fragment_id: actionId,
+          timezone_name: 'UTC', starts_at: '2026-10-07T09:00:00Z', ends_at: '2026-10-07T09:30:00Z' },
+        { user_id: USER, target_local_date: date, habit_definition_id: habitId,
+          timezone_name: 'UTC', starts_at: '2026-10-07T10:00:00Z', ends_at: '2026-10-07T10:30:00Z' },
+        { user_id: OTHER, target_local_date: date, habit_definition_id: habitId, starts_at: 'invalid' },
+      ]);
+      set('today_v2_commitment_fragments', [{ user_id: USER, target_local_date: date,
+        id: actionId, fragment_text: 'Write', fragment_order: 0 }]);
+      set('today_v2_plan_inputs', [{ user_id: USER, target_local_date: date, first_five_minutes: 'Open notes' }]);
+      set('today_v2_habit_definitions', [{ user_id: USER, id: habitId, name: 'Read' }]);
+      google = new Map();
+      deleted = new Set();
+      fetchImpl.mockImplementation(async (url, options = {}) => {
+        const parsed = new URL(url);
+        if (parsed.pathname.endsWith('/calendarList')) return googleResponse({ items: [
+          { id: 'personal', primary: true, accessRole: 'owner' },
+        ] });
+        const id = parsed.pathname.split('/').at(-1);
+        if (id === 'events' && !options.method) return googleResponse({ items: [...google.values()] });
+        if (options.method === 'GET') return googleResponse(google.get(id) || {},
+          google.has(id) ? 200 : deleted.has(id) ? 410 : 404);
+        if (options.method === 'POST') {
+          const input = JSON.parse(options.body);
+          if (google.has(input.id) || deleted.has(input.id)) return googleResponse({}, 409);
+          const result = { ...input, organizer: { self: true }, etag: '"version"' };
+          google.set(input.id, result);
+          return googleResponse(result);
+        }
+        if (options.method === 'PATCH') {
+          const result = { ...google.get(id), ...JSON.parse(options.body) };
+          google.set(id, result);
+          return googleResponse(result);
+        }
+        if (options.method === 'DELETE') {
+          google.delete(id); deleted.add(id);
+          return googleResponse({}, 204);
+        }
+        throw new Error(`Unexpected request ${url}`);
+      });
+    });
+    it('creates action/habit events from only verified owned persisted data, with stable primary destination', async () => {
+      expect((await sync({ event: { summary: 'untrusted' } })).body.synced).toBe(true);
+      expect([...google.values()].map((item) => item.summary)).toEqual(['Write, Open notes', 'Read']);
+      expect(fetchImpl.mock.calls.filter(([url, options]) => options?.method === 'POST')
+        .every(([url]) => new URL(url).pathname.includes('/calendars/personal/events'))).toBe(true);
+      for (const operation of db.operations.filter((item) => db.tables.has(item.table))) {
+        expect(operation.filters).toContainEqual(['user_id', USER]);
+      }
+      const ids = [...google.keys()];
+      db.connections.get(USER).selected_calendar_ids = [];
+      db.tables.get('today_v2_commitment_fragments').get(0).fragment_text = 'Publish';
+      db.tables.get('today_v2_plan_inputs').get(0).first_five_minutes = 'Open draft';
+      db.tables.get('today_v2_schedule_blocks').get(0).starts_at = '2026-10-07T09:15:00Z';
+      expect((await sync()).body.synced).toBe(true);
+      expect([...google.keys()]).toEqual(ids);
+      expect(google.get(ids[0])).toMatchObject({ summary: 'Publish, Open draft', start: { dateTime: '2026-10-07T09:15:00.000Z' } });
+    });
+    it('skips unchanged patches so retries reach unsynced blocks instead of exhausting the deadline', async () => {
+      await sync();
+      fetchImpl.mockClear();
+      await sync();
+      expect(fetchImpl.mock.calls.some(([, options]) => options?.method === 'PATCH')).toBe(false);
+      const habitEvent = [...google.values()].find((item) => item.summary === 'Read');
+      google.delete(habitEvent.id);
+      fetchImpl.mockClear();
+      expect((await sync()).body.synced).toBe(true);
+      expect(fetchImpl.mock.calls.some(([, options]) => options?.method === 'PATCH')).toBe(false);
+      expect(fetchImpl.mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(1);
+      expect(google.size).toBe(2);
+    });
+    it('rejects destructive cleanup after a newer native schedule save changes the snapshot', async () => {
+      await sync();
+      const removed = db.tables.get('today_v2_schedule_blocks').get(0);
+      db.tables.get('today_v2_schedule_blocks').delete(0);
+      const implementation = fetchImpl.getMockImplementation();
+      fetchImpl.mockImplementation(async (url, options) => {
+        const result = await implementation(url, options);
+        if (new URL(url).pathname.endsWith('/events') && !options?.method) {
+          db.tables.get('today_v2_schedule_blocks').set(0, removed);
+        }
+        return result;
+      });
+      const result = await sync();
+      expect(result.body.code).toBe('sync_changed');
+      expect(google.size).toBe(2);
+      expect(fetchImpl.mock.calls.some(([, options]) => options?.method === 'DELETE')).toBe(false);
+      expect(db.syncLocks.size).toBe(0);
+    });
+    it.each(['create', 'update'])('rejects stale source labels before a Google %s', async (operation) => {
+      if (operation === 'update') {
+        await sync();
+        db.tables.get('today_v2_commitment_fragments').get(0).fragment_text = 'Earlier rename';
+      }
+      fetchImpl.mockClear();
+      const implementation = fetchImpl.getMockImplementation();
+      fetchImpl.mockImplementation(async (url, options) => {
+        const result = await implementation(url, options);
+        if (new URL(url).pathname.endsWith('/events') && !options?.method) {
+          db.tables.get('today_v2_commitment_fragments').get(0).fragment_text = 'Latest saved rename';
+        }
+        return result;
+      });
+      const result = await sync();
+      expect(result.body.code).toBe('sync_changed');
+      expect(fetchImpl.mock.calls.some(([, options]) => ['POST', 'PATCH', 'DELETE'].includes(options?.method))).toBe(false);
+      expect(db.syncLocks.size).toBe(0);
+    });
+    it('reports retryable conflict rather than synced success when the final write overlaps a native save', async () => {
+      const implementation = fetchImpl.getMockImplementation();
+      let changed = false;
+      fetchImpl.mockImplementation(async (url, options) => {
+        const result = await implementation(url, options);
+        if (!changed && options?.method === 'POST' && JSON.parse(options.body).summary === 'Read') {
+          changed = true;
+          db.tables.get('today_v2_schedule_blocks').get(0).starts_at = '2026-10-07T09:15:00Z';
+        }
+        return result;
+      });
+      const result = await sync();
+      expect(result.body.code).toBe('sync_changed');
+      expect(result.body.synced).not.toBe(true);
+      expect(db.syncLocks.size).toBe(0);
+      expect((await sync()).body.synced).toBe(true);
+      expect(google.size).toBe(2);
+      expect([...google.values()].find((item) => item.summary === 'Write, Open notes').start.dateTime)
+        .toBe('2026-10-07T09:15:00.000Z');
+    });
+    it('removes unscheduled/deleted sources and recreates after Google deletion without reusing tombstones', async () => {
+      await sync();
+      const oldIds = [...google.keys()];
+      db.tables.get('today_v2_schedule_blocks').delete(0);
+      await sync();
+      expect(google.size).toBe(1);
+      expect(deleted.has(oldIds[0])).toBe(true);
+      google.delete(oldIds[1]); deleted.add(oldIds[1]);
+      await sync();
+      expect(google.size).toBe(1);
+      expect([...google.keys()][0]).not.toBe(oldIds[1]);
+      db.tables.get('today_v2_schedule_blocks').clear();
+      await sync();
+      expect(google.size).toBe(0);
+    });
+    it('converges after a lost creation response without duplicating events', async () => {
+      const implementation = fetchImpl.getMockImplementation();
+      let lost = true;
+      fetchImpl.mockImplementation(async (url, options) => {
+        const result = await implementation(url, options);
+        if (lost && options?.method === 'POST') { lost = false; throw new Error('lost response'); }
+        return result;
+      });
+      expect((await sync()).statusCode).toBe(502);
+      expect(google.size).toBe(1);
+      expect((await sync()).body.synced).toBe(true);
+      expect(google.size).toBe(2);
+    });
+    it('serializes concurrent reconciliations before reading source schedules', async () => {
+      const implementation = fetchImpl.getMockImplementation();
+      let resume;
+      fetchImpl.mockImplementation(async (url, options) => {
+        if (new URL(url).pathname.endsWith('/calendarList')) await new Promise((resolve) => { resume = resolve; });
+        return implementation(url, options);
+      });
+      const first = sync();
+      await vi.waitFor(() => expect(resume).toBeTypeOf('function'));
+      const readsBefore = db.operations.filter((item) => db.tables.has(item.table)).length;
+      const concurrent = await sync();
+      expect(concurrent.body.code).toBe('sync_busy');
+      expect(db.operations.filter((item) => db.tables.has(item.table))).toHaveLength(readsBefore);
+      db.tables.get('today_v2_commitment_fragments').get(0).fragment_text = 'Latest saved name';
+      resume();
+      expect((await first).body.synced).toBe(true);
+      expect([...google.values()][0].summary).toBe('Latest saved name, Open notes');
+      expect(db.syncLocks.size).toBe(0);
+    });
+    it('fails safely without the lock migration and releases leases after Google failures', async () => {
+      db.rpc.mockResolvedValueOnce({ data: null, error: { code: 'PGRST202' } });
+      expect((await sync()).body.code).toBe('storage_unavailable');
+      expect(fetchImpl).not.toHaveBeenCalled();
+      fetchImpl.mockRejectedValueOnce(new Error('offline'));
+      expect((await sync()).body.code).toBe('google_unavailable');
+      expect(db.syncLocks.size).toBe(0);
+      expect(db.rpc).toHaveBeenLastCalledWith('today_v2_release_google_schedule_sync',
+        expect.objectContaining({ p_user_id: USER, p_target_local_date: date }));
+    });
+    it('rejects legacy permission and read-only primary calendars without mutating', async () => {
+      connected();
+      expect((await sync()).body.code).toBe('permission_upgrade_required');
+      connected({ scopes: GOOGLE_CALENDAR_SCOPES });
+      fetchImpl.mockResolvedValue(googleResponse({ items: [{ id: 'personal', primary: true, accessRole: 'reader' }] }));
+      expect((await sync()).body.code).toBe('calendar_read_only');
+      expect(google.size).toBe(0);
+    });
+    it('preserves recurring/locked marked events instead of changing a series', async () => {
+      await sync();
+      [...google.values()][0].recurrence = ['RRULE:FREQ=DAILY'];
+      expect((await sync()).body.code).toBe('event_not_editable');
+      expect(google.size).toBe(2);
+    });
+    it('keeps disconnected users local-only even without Google configuration', async () => {
+      db.connections.clear();
+      handler = createGoogleCalendarHandler({ env: {}, supabase: db, fetchImpl });
+      expect((await sync()).body).toEqual({ connected: false, synced: false });
+      expect(fetchImpl).not.toHaveBeenCalled();
+    });
+    it('rejects malformed target dates before reading schedules', async () => {
+      expect((await sync({ targetLocalDate: '2026-02-30' })).statusCode).toBe(400);
+      expect(fetchImpl).not.toHaveBeenCalled();
+    });
   });
   it('returns a useful safe missing-configuration status', async () => {
     handler = createGoogleCalendarHandler({ env: { ...ENV, GOOGLE_CALENDAR_CLIENT_SECRET: '' }, supabase: db });
