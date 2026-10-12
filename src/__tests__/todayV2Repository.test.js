@@ -240,6 +240,67 @@ describe('TodayV2 repository', () => {
     expect(commitmentTrackers[1].eq).toContainEqual(['target_local_date', '2026-09-29']);
   });
 
+  it('keeps a saved 2AM plan on its target date when loading the following evening', async () => {
+    const plans = new Map();
+    const fragments = new Map();
+    supabaseMock.rpc.mockImplementation(async (name, params) => {
+      if (name === TODAY_V2_RPCS.REPLACE_PLAN) {
+        plans.set(params.p_target_local_date, {
+          raw_plan_text: params.p_raw_plan_text, first_five_minutes: params.p_first_five_minutes,
+          target_local_date: params.p_target_local_date, source_local_date: params.p_source_local_date,
+        });
+        fragments.set(params.p_target_local_date, params.p_fragment_texts.map((text, index) => ({
+          id: `fragment-${index}`, fragment_text: text, normalized_fragment_text: text,
+          target_local_date: params.p_target_local_date,
+        })));
+      }
+      return { data: [], error: null };
+    });
+    supabaseMock.from.mockImplementation((tableName) => {
+      const result = { data: [], error: null };
+      const query = createThenableBuilder(result);
+      const eq = query.eq;
+      query.eq = function (column, date) {
+        eq.call(this, column, date);
+        if (column === 'target_local_date') {
+          if (tableName === TODAY_V2_TABLES.PLAN_INPUTS) result.data = plans.get(date) || null;
+          if (tableName === TODAY_V2_TABLES.COMMITMENT_FRAGMENTS) result.data = fragments.get(date) || [];
+        }
+        return this;
+      };
+      query.upsert = function (payload) {
+        result.data = { id: `review-${payload.local_date}`, ...payload };
+        return this;
+      };
+      return query;
+    });
+    const options = { timezoneName: 'UTC', dayBoundaryHour: 4 };
+    const lateNight = await loadTodayReviewState('user-1', {
+      ...options, now: new Date('2026-10-11T02:00:00Z'),
+    });
+    expect(lateNight.planningLocalDate).toBe('2026-10-11');
+    await replaceTomorrowActions({
+      userId: 'user-1', timezoneName: 'UTC', sourceLocalDate: lateNight.planningSourceLocalDate,
+      targetLocalDate: lateNight.planningLocalDate, rawPlanText: 'Write',
+      actionTexts: ['Write'], firstFiveMinutes: 'Open notes',
+    });
+    const savedPlan = { ...plans.get('2026-10-11') };
+    const lateNightReturn = await loadTodayReviewState('user-1', {
+      ...options, now: new Date('2026-10-11T03:00:00Z'),
+    });
+    expect(lateNightReturn.tomorrowPlanInput).toBe('Write');
+    const evening = await loadTodayReviewState('user-1', {
+      ...options, now: new Date('2026-10-11T18:00:00Z'),
+    });
+    expect(evening.planningLocalDate).toBe('2026-10-12');
+    expect(evening.tomorrowPlanInput).toBe('');
+    expect(evening.firstFiveMinutes).toBe('');
+    expect(evening.followThroughItems).toEqual(fragments.get('2026-10-11'));
+    expect(evening.todayFirstFiveMinutes).toBe('Open notes');
+    expect(plans.get('2026-10-11')).toEqual(savedPlan);
+    expect(plans.has('2026-10-12')).toBe(false);
+  });
+
   it('saves tomorrow plans through the isolated replace RPC', async () => {
     supabaseMock.rpc.mockResolvedValue({ error: null });
     const savedFragments = [
