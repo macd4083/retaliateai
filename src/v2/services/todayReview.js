@@ -100,10 +100,8 @@ async function loadHabitDefinitions(userId) {
 export async function loadTodayReviewState(userId, options = {}) {
   const now = options.now instanceof Date ? options.now : new Date();
   const dateContext = getTodayV2DateContext({ ...options, now });
-  const planningSourceLocalDate = getTodayV2DateContext({
-    ...options, now, timezoneName: dateContext.timezoneName, dayBoundaryHour: 0,
-  }).todayLocalDate;
-  const planningLocalDate = addDaysToLocalDate(planningSourceLocalDate, 1);
+  const planningSourceLocalDate = dateContext.todayLocalDate;
+  const planningLocalDate = dateContext.tomorrowLocalDate;
   const seedResult = await seedDefaultHabits(userId);
 
   const review = await ensureTodayV2DailyReview(
@@ -180,18 +178,14 @@ export async function loadTodayReviewState(userId, options = {}) {
       dateContext.todayLocalDate, planningLocalDate, dateContext.timezoneName
     ) : null;
   const scheduleState = await loadSchedules(userId, dateContext.todayLocalDate, dateContext.tomorrowLocalDate, dateContext.timezoneName);
-  const planningScheduleState = planningLocalDate === dateContext.tomorrowLocalDate ? scheduleState
-    : await loadSchedules(userId, planningSourceLocalDate, planningLocalDate, dateContext.timezoneName);
 
   return {
     ...dateContext,
     planningSourceLocalDate,
     planningLocalDate,
     ...scheduleState,
-    scheduleAvailable: scheduleState.scheduleAvailable && planningScheduleState.scheduleAvailable,
-    scheduleDiagnostic: scheduleState.scheduleDiagnostic || planningScheduleState.scheduleDiagnostic,
-    planningSchedules: planningScheduleState.tomorrowSchedules,
-    planningContextSchedules: planningScheduleState.todaySchedules,
+    planningSchedules: scheduleState.tomorrowSchedules,
+    planningContextSchedules: scheduleState.todaySchedules,
     review,
     routeTarget: getTodayV2DefaultPath(review),
     draftStorageKey: buildTodayV2DraftStorageKey(userId, planningSourceLocalDate),
@@ -213,7 +207,9 @@ export async function loadTodayReviewState(userId, options = {}) {
 
 export async function loadTodayV2HomeState(userId, options = {}) {
   const current = await loadTodayReviewState(userId, options);
-  const civilScheduleLocalDate = current.planningSourceLocalDate;
+  const civilScheduleLocalDate = getTodayV2DateContext({
+    ...options, timezoneName: current.timezoneName, dayBoundaryHour: 0,
+  }).todayLocalDate;
   let civilHabitOccurrences = current.habitOccurrences;
   let civilReview = current.review;
   let civilFollowThroughItems = current.followThroughItems;

@@ -130,26 +130,25 @@ describe('optional schedule repository', () => {
     expect(state.civilSchedules.map((row) => row.id)).toEqual(['carryover', 'civil-day']);
     expect(state.todaySchedules.map((row) => row.id)).toEqual(['carryover']);
     expect(state.review.id).toBe('prior-review');
-    expect(state.planningSourceLocalDate).toBe('2026-09-29');
-    expect(state.planningLocalDate).toBe('2026-09-30');
+    expect(state.planningSourceLocalDate).toBe('2026-09-28');
+    expect(state.planningLocalDate).toBe('2026-09-29');
     expect(state.tomorrowLocalDate).toBe('2026-09-29');
     expect(state.civilFollowThroughItems.map((row) => row.id)).toEqual(['fragment-2026-09-29']);
-    expect(state.tomorrowFragments.map((row) => row.id)).toEqual(['fragment-2026-09-30']);
+    expect(state.tomorrowFragments.map((row) => row.id)).toEqual(['fragment-2026-09-29']);
     expect(state.tomorrowSchedules.map((row) => row.id)).toEqual(['carryover', 'civil-day']);
-    expect(state.planningSchedules).toEqual([]);
-    expect(state.planningContextSchedules.map((row) => row.id)).toEqual(['carryover', 'civil-day']);
+    expect(state.planningSchedules.map((row) => row.id)).toEqual(['carryover', 'civil-day']);
+    expect(state.planningContextSchedules.map((row) => row.id)).toEqual(['carryover']);
     expect(state.civilFirstFiveMinutes).toBe('Start 2026-09-29');
-    expect(state.firstFiveMinutes).toBe('Start 2026-09-30');
+    expect(state.firstFiveMinutes).toBe('Start 2026-09-29');
     expect(state.todayFirstFiveMinutes).toBe('Start 2026-09-28');
     expect(mocks.rpc).toHaveBeenCalledWith('today_v2_seed_habit_schedules', {
-      p_start_local_date: '2026-09-28', p_end_local_date: '2026-09-30', p_timezone_name: 'UTC',
+      p_start_local_date: '2026-09-28', p_end_local_date: '2026-09-29', p_timezone_name: 'UTC',
     });
     expect(state.civilHabitOccurrences).toEqual([]);
   });
-  it('propagates a failed planning-context schedule load even when legacy schedules loaded', async () => {
-    let scheduleLoads = 0;
+  it('propagates a failed shared review and planning schedule load', async () => {
     mocks.from.mockImplementation((table) => {
-      if (table === 'today_v2_schedule_blocks' && ++scheduleLoads === 2) {
+      if (table === 'today_v2_schedule_blocks') {
         return builder({ error: { code: 'PGRST205', message: 'civil scheduling unavailable' } });
       }
       const query = builder({ data: [], error: null });

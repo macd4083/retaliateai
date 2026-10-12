@@ -132,6 +132,26 @@ describe('scheduled Home calendar', () => {
     expect(mocks.schedule).not.toHaveBeenCalled();
   });
 
+  it('shows the late-night review contract without shifting the editable civil-day calendar', async () => {
+    vi.setSystemTime(new Date('2026-10-08T02:00:00Z'));
+    const base = await mocks.load();
+    const action = { id: 'current-action', normalized_fragment_text: 'Write today' };
+    mocks.load.mockResolvedValue({
+      ...base, review: { completed_at: '2026-10-08T02:00:00Z' },
+      planningSourceLocalDate: '2026-10-07', planningLocalDate: '2026-10-08',
+      tomorrowLocalDate: '2026-10-08', tomorrowFragments: [action],
+      firstFiveMinutes: 'Open notes', planningSchedules: [],
+      civilScheduleLocalDate: '2026-10-08', civilSchedules: [],
+      civilFollowThroughItems: [action], civilHabitOccurrences: [], civilReview: { completed_at: null },
+    });
+    await render();
+    expect(container.textContent).toContain('Planning date 2026-10-08');
+    expect(container.textContent).toContain('Start with: Open notes');
+    expect(container.querySelector('[aria-label^="24-hour timeline"]').getAttribute('aria-label')).toContain('2026-10-08');
+    expect(container.querySelector('[data-scheduler-edit-key="action:current-action"]').disabled).toBe(false);
+    expect(mocks.completion).not.toHaveBeenCalled();
+  });
+
   it('refreshes the displayed calendar at civil midnight instead of waiting for the review boundary', async () => {
     await render();
     const before = mocks.load.mock.calls.length;

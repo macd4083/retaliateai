@@ -167,39 +167,39 @@ describe('useTodayV2State', () => {
     }));
   });
 
-  it('plans civil tomorrow before 4AM while preserving the prior review and check-ins', async () => {
+  it('plans the next waking day before 4AM while preserving the prior review and check-ins', async () => {
       vi.setSystemTime(new Date('2026-09-29T01:00:00Z'));
       serviceMocks.loadTodayReviewState.mockResolvedValue({
-        ...makeState(), planningSourceLocalDate: '2026-09-29', planningLocalDate: '2026-09-30', scheduleAvailable: true,
+        ...makeState(), planningSourceLocalDate: '2026-09-28', planningLocalDate: '2026-09-29', scheduleAvailable: true,
         habitDefinitions: [
           { id: 'tuesday', name: 'Tuesday', schedule_weekdays: [2] },
           { id: 'wednesday', name: 'Wednesday', schedule_weekdays: [3] },
         ],
       });
       await renderHook();
-      expect(latest.schedulerItems.filter((item) => item.type === 'habit').map((item) => item.source_id)).toEqual(['wednesday']);
+      expect(latest.schedulerItems.filter((item) => item.type === 'habit').map((item) => item.source_id)).toEqual(['tuesday']);
       await act(async () => {
         latest.setControllableFocus('Finish Monday');
         latest.setTomorrowInput('Write');
         latest.setFirstFiveMinutes('Open notes');
-        latest.updateSchedule('habit:wednesday', {
-          starts_at: '2026-09-30T10:00:00Z', ends_at: '2026-09-30T10:30:00Z',
+        latest.updateSchedule('habit:tuesday', {
+          starts_at: '2026-09-29T10:00:00Z', ends_at: '2026-09-29T10:30:00Z',
         });
       });
       await act(async () => latest.flushAll());
       expect(serviceMocks.updateControllableFocus).toHaveBeenCalledWith('review-2026-09-28', 'Finish Monday');
       expect(serviceMocks.replaceTomorrowActions).toHaveBeenCalledWith(expect.objectContaining({
-        targetLocalDate: '2026-09-30', sourceLocalDate: '2026-09-29',
+        targetLocalDate: '2026-09-29', sourceLocalDate: '2026-09-28',
       }));
       expect(latest.state.tomorrowPlanMeta).toMatchObject({
-        target_local_date: '2026-09-30', source_local_date: '2026-09-29',
+        target_local_date: '2026-09-29', source_local_date: '2026-09-28',
       });
-      expect(scheduleMocks.replaceSchedule).toHaveBeenCalledWith(expect.objectContaining({ targetLocalDate: '2026-09-30' }));
-      expect(JSON.parse(window.localStorage.getItem('today-v2-draft:user-1:2026-09-29')).planningLocalDate).toBe('2026-09-30');
+      expect(scheduleMocks.replaceSchedule).toHaveBeenCalledWith(expect.objectContaining({ targetLocalDate: '2026-09-29' }));
+      expect(JSON.parse(window.localStorage.getItem('today-v2-draft:user-1:2026-09-28')).planningLocalDate).toBe('2026-09-29');
     });
 
-    it('rolls planning scope at civil midnight without changing review identity or applying late plan responses', async () => {
-      vi.setSystemTime(new Date('2026-09-28T23:59:00Z'));
+    it('rolls review and planning scope at 4AM without applying late plan responses', async () => {
+      vi.setSystemTime(new Date('2026-09-29T03:59:00Z'));
       serviceMocks.loadTodayReviewState.mockResolvedValue({
         ...makeState(), planningSourceLocalDate: '2026-09-28', planningLocalDate: '2026-09-29',
       });
@@ -209,27 +209,28 @@ describe('useTodayV2State', () => {
       await act(async () => latest.setTomorrowInput('Old plan'));
       let pending;
       await act(async () => { pending = latest.saveTomorrowPlan(); });
-      vi.setSystemTime(new Date('2026-09-29T00:01:00Z'));
+      vi.setSystemTime(new Date('2026-09-29T04:01:00Z'));
       serviceMocks.loadTodayReviewState.mockResolvedValue({
-        ...makeState(), planningSourceLocalDate: '2026-09-29', planningLocalDate: '2026-09-30',
-        tomorrowPlanInput: 'New civil tomorrow plan',
-        tomorrowFragments: [{ id: 'new-id', fragment_text: 'New civil tomorrow plan' }],
+        ...makeState({ todayLocalDate: '2026-09-29', tomorrowLocalDate: '2026-09-30' }),
+        planningSourceLocalDate: '2026-09-29', planningLocalDate: '2026-09-30',
+        tomorrowPlanInput: 'New waking day plan',
+        tomorrowFragments: [{ id: 'new-id', fragment_text: 'New waking day plan' }],
       });
       await act(async () => window.dispatchEvent(new Event('focus')));
-      expect(latest.state.review.id).toBe('review-2026-09-28');
+      expect(latest.state.review.id).toBe('review-2026-09-29');
       expect(latest.state.planningLocalDate).toBe('2026-09-30');
       await act(async () => {
         resolvePlan({ rawPlanText: 'Old plan', savedFragments: [{ id: 'old-id', fragment_text: 'Old plan' }] });
         await pending;
       });
-      expect(latest.tomorrowInput).toBe('New civil tomorrow plan');
+      expect(latest.tomorrowInput).toBe('New waking day plan');
       expect(latest.tomorrowActionItems[0].persistedId).toBe('new-id');
     });
 
-  it('rejects stale midnight writes before focus reload and completes only the active 4AM review', async () => {
+  it('rejects stale boundary writes before focus reload and completes only the active 4AM review', async () => {
     vi.setSystemTime(new Date('2026-09-29T01:00:00Z'));
     const initial = {
-      ...makeState(), planningSourceLocalDate: '2026-09-29', planningLocalDate: '2026-09-30',
+      ...makeState(), planningSourceLocalDate: '2026-09-28', planningLocalDate: '2026-09-29',
     };
     serviceMocks.loadTodayReviewState.mockResolvedValue(initial);
     serviceMocks.completeTodayV2Review.mockResolvedValue({ ...initial.review, completed_at: '2026-09-29T01:00:00Z' });
@@ -237,17 +238,144 @@ describe('useTodayV2State', () => {
     await act(async () => latest.completeReview());
     expect(serviceMocks.completeTodayV2Review).toHaveBeenCalledExactlyOnceWith('review-2026-09-28');
     expect(latest.isCompleted).toBe(true);
-    expect(latest.state.planningLocalDate).toBe('2026-09-30');
+    expect(latest.state.planningLocalDate).toBe('2026-09-29');
     serviceMocks.reopenTodayV2Review.mockResolvedValue(initial.review);
     await act(async () => latest.reopenReview());
     await act(async () => latest.setTomorrowInput('Unsaved future plan'));
-    vi.setSystemTime(new Date('2026-09-30T00:01:00Z'));
+    vi.setSystemTime(new Date('2026-09-29T04:00:00Z'));
     await act(async () => {
       await expect(latest.saveTomorrowPlan()).rejects.toThrow('Planning date changed');
       await expect(latest.flushSchedule()).rejects.toThrow('Planning date changed');
     });
     expect(serviceMocks.replaceTomorrowActions).not.toHaveBeenCalled();
     expect(serviceMocks.reopenTodayV2Review).toHaveBeenCalledExactlyOnceWith('review-2026-09-28');
+  });
+
+  it('keeps the same planning scope and accepts delayed saves across midnight', async () => {
+    vi.setSystemTime(new Date('2026-09-28T23:59:00Z'));
+    serviceMocks.loadTodayReviewState.mockResolvedValue({
+      ...makeState(), planningSourceLocalDate: '2026-09-28', planningLocalDate: '2026-09-29',
+    });
+    await renderHook();
+    let resolvePlan;
+    serviceMocks.replaceTomorrowActions.mockImplementation(() => new Promise((resolve) => { resolvePlan = resolve; }));
+    await act(async () => latest.setTomorrowInput('Write'));
+    let pending;
+    await act(async () => { pending = latest.saveTomorrowPlan(); });
+    vi.setSystemTime(new Date('2026-09-29T02:00:00Z'));
+    await act(async () => window.dispatchEvent(new Event('focus')));
+    expect(serviceMocks.loadTodayReviewState).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      resolvePlan({ rawPlanText: 'Write', savedFragments: [{ id: 'write-id', fragment_text: 'Write' }] });
+      await pending;
+    });
+    expect(latest.state.planningLocalDate).toBe('2026-09-29');
+    expect(latest.tomorrowActionItems[0].persistedId).toBe('write-id');
+    await act(async () => latest.setFirstFiveMinutes('Open notes'));
+    expect(latest.firstFiveMinutes).toBe('Open notes');
+  });
+
+  it('restores pre-midnight offline review, plan, starts, and schedules at 2AM', async () => {
+    vi.setSystemTime(new Date('2026-09-28T23:59:00Z'));
+    serviceMocks.loadTodayReviewState.mockResolvedValue({
+      ...makeState(), planningSourceLocalDate: '2026-09-28', planningLocalDate: '2026-09-29', scheduleAvailable: true,
+    });
+    await renderHook();
+    await act(async () => {
+      latest.setDesiredDirection('Builder');
+      latest.setControllableFocus('Protect the first block');
+      latest.setTomorrowInput('Write');
+      latest.setFirstFiveMinutes('Open notes');
+    });
+    const key = latest.tomorrowActionKeys[0];
+    await act(async () => latest.updateSchedule(key, {
+      starts_at: '2026-09-29T09:00:00Z', ends_at: '2026-09-29T09:30:00Z',
+    }));
+    await act(async () => root.unmount());
+    vi.setSystemTime(new Date('2026-09-29T02:00:00Z'));
+    root = createRoot(container);
+    await renderHook();
+    expect(latest.desiredDirection).toBe('Builder');
+    expect(latest.controllableFocus).toBe('Protect the first block');
+    expect(latest.tomorrowActions).toEqual(['Write']);
+    expect(latest.firstFiveMinutes).toBe('Open notes');
+    expect(latest.scheduleBlocks[0].source_key).toBe(key);
+    expect(latest.tomorrowPlanSaveStatus).toBe('saving');
+    expect(JSON.parse(window.localStorage.getItem('today-v2-draft:user-1:2026-09-28')).tomorrowPlanNeedsSync).toBe(true);
+    expect(latest.state.planningLocalDate).toBe('2026-09-29');
+  });
+
+  it.each(['2026-09-30', undefined])('rejects a planning draft with target %s while restoring matching review answers', async (planningLocalDate) => {
+    vi.setSystemTime(new Date('2026-09-29T02:00:00Z'));
+    serviceMocks.loadTodayReviewState.mockResolvedValue({
+      ...makeState(), planningSourceLocalDate: '2026-09-28', planningLocalDate: '2026-09-29', scheduleAvailable: true,
+    });
+    window.localStorage.setItem('today-v2-draft:user-1:2026-09-28', JSON.stringify({
+      reviewLocalDate: '2026-09-28', planningLocalDate,
+      desiredDirection: 'Builder', desiredDirectionNeedsSync: true,
+      controllableFocus: 'Protect the first block', controllableFocusNeedsSync: true,
+      tomorrowInput: 'Stale plan', tomorrowActions: ['Stale plan'], tomorrowPlanNeedsSync: true,
+      firstFiveMinutes: 'Stale start', actionIdentities: [{ key: 'stale-key', text: 'Stale plan' }],
+      scheduleNeedsSync: true, scheduleBlocks: [{ source_key: 'stale-key', source_type: 'action' }],
+    }));
+    await renderHook();
+    expect(latest.desiredDirection).toBe('Builder');
+    expect(latest.controllableFocus).toBe('Protect the first block');
+    expect(latest.tomorrowInput).toBe('');
+    expect(latest.tomorrowActions).toEqual([]);
+    expect(latest.firstFiveMinutes).toBe('');
+    expect(latest.scheduleBlocks).toEqual([]);
+    expect(latest.tomorrowPlanSaveStatus).toBe('saved');
+  });
+
+  it('preserves the 2AM plan for today after logout and an evening return without prefilling the next plan', async () => {
+    vi.setSystemTime(new Date('2026-10-11T02:00:00Z'));
+    serviceMocks.loadTodayReviewState.mockResolvedValue({
+      ...makeState({ todayLocalDate: '2026-10-10', tomorrowLocalDate: '2026-10-11' }),
+      planningSourceLocalDate: '2026-10-10', planningLocalDate: '2026-10-11',
+    });
+    await renderHook();
+    await act(async () => {
+      latest.setTomorrowInput('Write');
+      latest.setFirstFiveMinutes('Open notes');
+    });
+    await act(async () => latest.flushAll());
+    const saved = latest.state.tomorrowFragments;
+    expect(serviceMocks.replaceTomorrowActions).toHaveBeenCalledWith(expect.objectContaining({
+      sourceLocalDate: '2026-10-10', targetLocalDate: '2026-10-11', firstFiveMinutes: 'Open notes',
+    }));
+    const savedDraft = window.localStorage.getItem('today-v2-draft:user-1:2026-10-10');
+    await act(async () => root.render(<HookProbe userId={null} onRender={(value) => { latest = value; }} />));
+    vi.setSystemTime(new Date('2026-10-11T18:00:00Z'));
+    serviceMocks.loadTodayReviewState.mockResolvedValue({
+      ...makeState({ todayLocalDate: '2026-10-11', tomorrowLocalDate: '2026-10-12' }),
+      planningSourceLocalDate: '2026-10-11', planningLocalDate: '2026-10-12',
+      followThroughItems: saved, todayFirstFiveMinutes: 'Open notes',
+    });
+    await renderHook();
+    expect(latest.state.followThroughItems).toEqual(saved);
+    expect(latest.state.todayFirstFiveMinutes).toBe('Open notes');
+    expect(latest.tomorrowInput).toBe('');
+    expect(latest.tomorrowActions).toEqual([]);
+    expect(latest.firstFiveMinutes).toBe('');
+    expect(window.localStorage.getItem('today-v2-draft:user-1:2026-10-10')).toBe(savedDraft);
+    expect(serviceMocks.replaceTomorrowActions).toHaveBeenCalledTimes(1);
+  });
+
+  it('refreshes explicit review and planning date labels at the configured boundary', async () => {
+    vi.setSystemTime(new Date('2026-10-11T02:00:00Z'));
+    serviceMocks.loadTodayReviewState.mockResolvedValue({
+      ...makeState({ todayLocalDate: '2026-10-10', tomorrowLocalDate: '2026-10-11' }),
+      planningSourceLocalDate: '2026-10-10', planningLocalDate: '2026-10-11',
+    });
+    await act(async () => root.render(<TodayV2Page />));
+    expect(container.textContent).toContain('Review 2026-10-10 · Plan 2026-10-11');
+    serviceMocks.loadTodayReviewState.mockResolvedValue({
+      ...makeState({ todayLocalDate: '2026-10-11', tomorrowLocalDate: '2026-10-12' }),
+      planningSourceLocalDate: '2026-10-11', planningLocalDate: '2026-10-12',
+    });
+    await act(async () => vi.advanceTimersByTime(2 * 60 * 60 * 1000 + 1000));
+    expect(container.textContent).toContain('Review 2026-10-11 · Plan 2026-10-12');
   });
 
   it('reconciles newly typed commitments after persisted explicit edits without refresh', async () => {
@@ -747,6 +875,7 @@ describe('useTodayV2State', () => {
       ],
     });
     window.localStorage.setItem('today-v2-draft:user-1:2026-09-28', JSON.stringify({
+      planningLocalDate: '2026-09-29',
       tomorrowInput: 'Write and Walk', tomorrowActions: ['Walk', 'Walk'], tomorrowPlanNeedsSync: true,
       actionIdentities: [
         { key: 'key1', text: 'Walk', persistedId: 'id1' },

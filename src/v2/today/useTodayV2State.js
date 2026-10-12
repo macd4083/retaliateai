@@ -79,9 +79,10 @@ function isCurrentDateScope(state) {
   if (!state) return false;
   if (!state.planningSourceLocalDate) return true;
   const options = { timezoneName: state.timezoneName, dayBoundaryHour: state.dayBoundaryHour };
-  return getTodayV2DateContext(options).todayLocalDate === state.todayLocalDate
-    && (!state.planningSourceLocalDate
-      || getTodayV2DateContext({ ...options, dayBoundaryHour: 0 }).todayLocalDate === state.planningSourceLocalDate);
+  const dateContext = getTodayV2DateContext(options);
+  return dateContext.todayLocalDate === state.todayLocalDate
+    && dateContext.todayLocalDate === state.planningSourceLocalDate
+    && dateContext.tomorrowLocalDate === state.planningLocalDate;
 }
 
 export function useTodayV2State(userId) {
@@ -311,7 +312,9 @@ export function useTodayV2State(userId) {
       const next = await loadTodayReviewState(userId);
       if (generation !== loadGenerationRef.current || revision !== planRevisionRef.current
         || scheduleRevision !== scheduleRevisionRef.current || editRevision !== editRevisionRef.current) return;
-      const draft = next.review?.completed_at ? null : readDraft(userId, next.planningSourceLocalDate || next.todayLocalDate);
+      const storedPlanningDraft = next.review?.completed_at ? null : readDraft(userId, next.planningSourceLocalDate || next.todayLocalDate);
+      const draft = storedPlanningDraft?.planningLocalDate === (next.planningLocalDate || next.tomorrowLocalDate)
+        ? storedPlanningDraft : null;
       const storedReviewDraft = next.review?.completed_at ? null : readDraft(userId, next.todayLocalDate);
       const reviewDraft = storedReviewDraft && (storedReviewDraft.reviewLocalDate || next.todayLocalDate) === next.todayLocalDate
         ? storedReviewDraft : null;
@@ -893,10 +896,7 @@ export function useTodayV2State(userId) {
 
     const timeoutId = window.setTimeout(() => {
       void checkForDayRollover();
-    }, Math.min(
-      getTodayV2MsUntilNextBoundary({ dayBoundaryHour: state?.dayBoundaryHour }),
-      getTodayV2MsUntilNextBoundary({ dayBoundaryHour: 0 })
-    ) + 1_000);
+    }, getTodayV2MsUntilNextBoundary({ dayBoundaryHour: state?.dayBoundaryHour }) + 1_000);
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('focus', handleFocus);
@@ -913,7 +913,7 @@ export function useTodayV2State(userId) {
       window.removeEventListener('pagehide', handlePageHide);
       window.removeEventListener('online', handleOnline);
     };
-  }, [checkForDayRollover, flushAll, state?.dayBoundaryHour, userId]);
+  }, [checkForDayRollover, flushAll, state?.dayBoundaryHour, state?.todayLocalDate, userId]);
 
   React.useEffect(() => {
     if (!state || !desiredDirectionDirty) return undefined;
