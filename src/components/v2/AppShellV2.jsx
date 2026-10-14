@@ -7,6 +7,7 @@ import { isAnonymousGuestUser } from '../../lib/guestSession';
 import { usePWAInstall } from '../../hooks/usePWAInstall';
 import PWAInstallBanner from '../pwa/PWAInstallBanner';
 import { safeGetStorageItem, safeSetStorageItem, safeRemoveStorageItem } from '../../lib/browserStorage';
+import { BUILD_VERSION } from '../../lib/buildVersion';
 
 const NAV_LINKS = [
   { label: 'Today', path: '/home', icon: House },
@@ -350,6 +351,7 @@ export default function AppShellV2({ title, children, adminAction = null, shellM
 
         {/* Sign out / Home */}
         <div className="px-3 py-4 border-t border-zinc-800">
+          <p className="px-3 pb-2 text-xs text-zinc-500">Build {BUILD_VERSION}</p>
           {isGuest ? (
             <button
               onClick={() => { navigate('/'); setDrawerOpen(false); }}

@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createClient } from '@supabase/supabase-js';
 
 const mocks = vi.hoisted(() => ({ from: vi.fn(), rpc: vi.fn() }));
 vi.mock('../lib/supabase/client', () => ({ supabase: mocks }));
-import { diagnoseTodayV2Schema, TODAY_V2_SCHEMA_PROBES } from '../v2/services/schemaDiagnostics';
+import { diagnoseTodayV2Schema, probeDayScheduleMetadata, TODAY_V2_SCHEMA_PROBES } from '../v2/services/schemaDiagnostics';
 
 function clientWithError(failure) {
   const queries = [];
@@ -20,6 +21,116 @@ function clientWithError(failure) {
   return queries;
 }
 
+describe('nonexecuting day-schedule RPC metadata fallback', () => {
+    let client;
+    let options;
+    const response = (status, allow, body = {}) => ({
+      ok: status >= 200 && status < 300, status,
+      headers: new Headers(allow ? { Allow: allow } : {}),
+      json: async () => body,
+    });
+
+    it('preserves missing-schema errors through real Supabase GET parsing and never executes an RPC', async () => {
+      const fetchRequest = vi.fn(async (address, request) => {
+        const url = new URL(address);
+        if (request.method === 'OPTIONS') {
+          return new Response(JSON.stringify({ code: 'PGRST202', message: 'Could not find the function in the schema cache' }), { status: 404 });
+        }
+        if (url.searchParams.get('select')?.includes('planning_mode')) {
+          return new Response(JSON.stringify({ code: '42703', message: 'column planning_mode does not exist' }), { status: 400 });
+        }
+        if (url.pathname.endsWith('/today_v2_day_schedule_writes')) {
+          return new Response(JSON.stringify({ code: 'PGRST205', message: 'Could not find the table in the schema cache' }), { status: 404 });
+        }
+        return new Response('[]', { status: 200 });
+      });
+      const client = createClient('https://example.invalid', 'test-api-key', {
+        global: { fetch: fetchRequest },
+        auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+      });
+      vi.spyOn(client.auth, 'getSession').mockResolvedValue({ data: { session: { access_token: 'test-session' } }, error: null });
+      const result = await diagnoseTodayV2Schema(client, {
+        url: 'https://example.invalid', apiKey: 'test-api-key', fetchRequest,
+      });
+      expect(result.missingMigrations).toEqual([
+        '20261010_today_v2_habit_recurrence.sql', '20261011_today_v2_day_schedule.sql',
+      ]);
+      expect(fetchRequest.mock.calls).toHaveLength(TODAY_V2_SCHEMA_PROBES.length + 1);
+      for (const [address, request] of fetchRequest.mock.calls) {
+        const url = new URL(address);
+        if (url.pathname.includes('/rpc/')) expect(request.method).toBe('OPTIONS');
+        else {
+          expect(request.method).toBe('GET');
+          expect(url.searchParams.get('limit')).toBe('0');
+        }
+      }
+    });
+    beforeEach(() => {
+      vi.clearAllMocks();
+      client = { ...mocks, auth: { getSession: vi.fn().mockResolvedValue({ data: { session: { access_token: 'test-session' } } }) } };
+      options = { url: 'https://example.invalid', apiKey: 'test-api-key', fetchRequest: vi.fn() };
+    });
+
+    it('uses authenticated OPTIONS with the exact signature, never mutation POST or executing GET/HEAD', async () => {
+      options.fetchRequest.mockResolvedValue(response(200, 'OPTIONS,POST'));
+      expect(await probeDayScheduleMetadata(client, options)).toEqual({ status: 'available', code: null });
+      const [address, request] = options.fetchRequest.mock.calls[0];
+      const url = new URL(address);
+      expect(url.pathname).toBe('/rest/v1/rpc/today_v2_update_day_schedule');
+      expect([...url.searchParams.keys()].sort()).toEqual([
+        'p_ends_at', 'p_source_id', 'p_source_type', 'p_starts_at', 'p_target_local_date', 'p_timezone_name',
+      ]);
+      expect(request).toMatchObject({
+        method: 'OPTIONS',
+        headers: { apikey: options.apiKey, Authorization: ['Bearer', 'test-session'].join(' '), 'Accept-Profile': 'public' },
+      });
+      expect(request.body).toBeUndefined();
+      expect(mocks.rpc).not.toHaveBeenCalled();
+    });
+
+    it('detects an actually missing day RPC even when its private table is hidden', async () => {
+      clientWithError((table) => table === 'today_v2_day_schedule_writes' ? { code: 'PGRST205' } : null);
+      options.fetchRequest.mockResolvedValue(response(404, null, { code: 'PGRST202' }));
+      expect(await diagnoseTodayV2Schema(client, options)).toMatchObject({
+        status: 'missing', missingMigrations: ['20261011_today_v2_day_schedule.sql'],
+      });
+    });
+
+    it('verifies installed day migration through safe metadata despite revoked table SELECT', async () => {
+      clientWithError((table) => table === 'today_v2_day_schedule_writes' ? { code: '42501' } : null);
+      options.fetchRequest.mockResolvedValue(response(200, 'OPTIONS,POST'));
+      expect(await diagnoseTodayV2Schema(client, options)).toMatchObject({
+        status: 'available', missingMigrations: [], unresolvedChecks: [],
+      });
+    });
+
+    it.each([
+      response(204, null),
+      response(200, 'GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS'),
+      response(404, null, {}),
+      response(405, null, { code: 'PGRST101' }),
+    ])('does not accept gateway preflight or unrelated method errors as existence proof: %j', async (result) => {
+      options.fetchRequest.mockResolvedValue(result);
+      expect((await probeDayScheduleMetadata(client, options)).status).toBe('unknown');
+    });
+
+    it.each([401, 403])('keeps RPC metadata permission failure separate from missing schema: %s', async (status) => {
+      options.fetchRequest.mockResolvedValue(response(status, null, { code: 'PGRST202' }));
+      expect((await probeDayScheduleMetadata(client, options)).status).toBe('permission');
+    });
+
+    it('does not issue metadata requests without an authenticated session', async () => {
+      client.auth.getSession.mockResolvedValue({ data: { session: null } });
+      expect((await probeDayScheduleMetadata(client, options)).status).toBe('permission');
+      expect(options.fetchRequest).not.toHaveBeenCalled();
+    });
+
+    it('classifies network failure without declaring migration absent', async () => {
+      options.fetchRequest.mockRejectedValue(new TypeError('Failed to fetch'));
+      expect((await probeDayScheduleMetadata(client, options)).status).toBe('network');
+    });
+});
+
 describe('read-only Today V2 schema diagnostics', () => {
   beforeEach(() => vi.clearAllMocks());
 
@@ -27,7 +138,8 @@ describe('read-only Today V2 schema diagnostics', () => {
     const queries = clientWithError(() => null);
     expect(await diagnoseTodayV2Schema()).toMatchObject({ status: 'available', missingMigrations: [], unresolvedChecks: [] });
     expect(queries).toHaveLength(TODAY_V2_SCHEMA_PROBES.length);
-    expect(queries.every(({ columns, options }) => columns !== '*' && options.head === true)).toBe(true);
+    expect(queries.every(({ columns, options }) => columns !== '*' && options === undefined)).toBe(true);
+    mocks.from.mock.results.forEach(({ value }) => expect(value.limit).toHaveBeenCalledWith(0));
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
 

@@ -26,7 +26,7 @@ export default function SchemaDiagnostics() {
   const unresolvedMigrations = [...new Set(result?.unresolvedChecks.map((check) => check.migration))];
   return (
     <aside role={result?.status === 'missing' ? 'alert' : 'status'} aria-label="Database schema diagnostics"
-      className="relative z-50 border-b border-amber-400 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+      className="border-b border-amber-400 bg-amber-50 px-4 py-3 text-sm text-amber-950">
       <strong>{state.loading ? 'Checking database schema…'
         : result?.status === 'missing' ? 'Database schema update required' : 'Database schema could not be fully verified'}</strong>
       {!!result?.missingMigrations.length && (
@@ -42,13 +42,17 @@ export default function SchemaDiagnostics() {
         <>
           <p>Unverified migrations (not confirmed missing):</p>
           <ul>{unresolvedMigrations.map((migration) => <li key={migration}><code className="break-all">{migration}</code></li>)}</ul>
-          <p>Permissions, network failures, or API visibility may prevent this read-only check.
-            The day-schedule capability table is intentionally private; an administrator must verify its migration in SQL.</p>
-          <p>Check results: {[...new Set(result.unresolvedChecks.map((check) => check.status))].join(', ')}.</p>
+          <details>
+            <summary className="cursor-pointer">Why verification is incomplete</summary>
+            <p>Permissions, network failures, or API visibility may prevent this read-only check.
+              The day-schedule capability table is intentionally private. If the API also hides its read-only
+              RPC metadata, an administrator must verify its migration in SQL.</p>
+            <p>Check results: {[...new Set(result.unresolvedChecks.map((check) => check.status))].join(', ')}.</p>
+            <p>This read-only check does not execute scheduling RPCs or verify function/trigger bodies.</p>
+          </details>
         </>
       )}
       {state.failed && <p>Schema check failed. No migration is confirmed missing. Check your connection and permissions, then retry.</p>}
-      {!state.loading && <p>This read-only check does not execute scheduling RPCs or verify function/trigger bodies.</p>}
       <button type="button" disabled={state.loading} onClick={() => setAttempt((value) => value + 1)}
         className="mt-2 rounded border border-amber-700 px-3 py-1 disabled:opacity-50">
         {state.loading ? 'Checking…' : 'Retry schema check'}

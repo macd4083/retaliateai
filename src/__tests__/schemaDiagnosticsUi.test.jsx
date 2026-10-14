@@ -76,6 +76,18 @@ describe('global authenticated schema diagnostics', () => {
     expect(container.querySelector('button').disabled).toBe(false);
   });
 
+  it('keeps diagnostics nonmodal and does not block unrelated saves', async () => {
+    const save = vi.fn();
+    mocks.diagnose.mockResolvedValue(missing);
+    await act(async () => root.render(<><SchemaDiagnostics /><button onClick={save}>Save review</button></>));
+    const button = [...container.querySelectorAll('button')].find((node) => node.textContent === 'Save review');
+    expect(button.disabled).toBe(false);
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(container.querySelector('aside').className).not.toMatch(/fixed|absolute|z-50/);
+    await act(async () => button.click());
+    expect(save).toHaveBeenCalledOnce();
+  });
+
   it('ignores stale probes and clears account diagnostics immediately on signout', async () => {
     let resolve;
     mocks.diagnose.mockReturnValueOnce(new Promise((done) => { resolve = done; }));

@@ -24,7 +24,7 @@ vi.mock('../lib/supabase/client', () => ({ supabase }));
 vi.mock('../lib/supabase', () => ({ supabase }));
 vi.mock('../lib/analytics', () => ({ trackEvent: vi.fn(), identifyUser: vi.fn() }));
 vi.mock('../components/v2/AppShellV2', () => ({ default: ({ children }) => <>{children}</> }));
-vi.mock('@stripe/stripe-js', () => ({ loadStripe: vi.fn() }));
+vi.mock('@stripe/stripe-js/pure', () => ({ loadStripe: vi.fn() }));
 vi.mock('react-hot-toast', () => ({
   default: { error: toastError, success: vi.fn() },
   Toaster: () => null,

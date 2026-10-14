@@ -45,17 +45,66 @@ function classifyError(error, check) {
   return 'unknown';
 }
 
-export async function diagnoseTodayV2Schema(client = supabase) {
+export async function probeDayScheduleMetadata(client = supabase, options = {}) {
+  const url = options.url ?? import.meta.env.VITE_SUPABASE_URL;
+  const apiKey = options.apiKey ?? import.meta.env.VITE_SUPABASE_ANON_KEY;
+  const fetchRequest = options.fetchRequest ?? globalThis.fetch;
+  if (!url || !apiKey || !client.auth?.getSession) return { status: 'unknown', code: null };
+  try {
+    const { data, error: sessionError } = await client.auth.getSession();
+    if (sessionError) return { status: classifyError(sessionError, {}), code: sessionError.code || null };
+    if (!data?.session?.access_token) return { status: 'permission', code: null };
+    const endpoint = new URL(`${url.replace(/\/$/, '')}/rest/v1/rpc/today_v2_update_day_schedule`);
+    const args = {
+      p_target_local_date: '2000-01-01',
+      p_timezone_name: 'UTC',
+      p_source_type: 'action',
+      p_source_id: '00000000-0000-0000-0000-000000000000',
+      p_starts_at: '2000-01-01T00:00:00Z',
+      p_ends_at: '2000-01-01T00:30:00Z',
+    };
+    Object.entries(args).forEach(([key, value]) => endpoint.searchParams.set(key, value));
+    // PostgREST OPTIONS builds a NoDb RoutineInfoPlan; GET/HEAD would execute
+    // the volatile function in a read-only transaction and are NOT safe probes.
+    const response = await fetchRequest(endpoint.toString(), {
+      method: 'OPTIONS',
+      headers: { apikey: apiKey, Authorization: ['Bearer', data.session.access_token].join(' '), 'Accept-Profile': 'public' },
+    });
+    const allow = response.headers.get('Allow');
+    if (response.ok && /^OPTIONS\s*,\s*POST$/i.test(allow || '')) {
+      return { status: 'available', code: null };
+    }
+    if (response.ok) return { status: 'unknown', code: null };
+    const error = await response.json().catch(() => ({}));
+    if (response.status === 401 || response.status === 403) return { status: 'permission', code: error.code || null };
+    if (error.code === 'PGRST202') return { status: 'missing', code: error.code };
+    return { status: classifyError(error, { protectedRelation: true }), code: error.code || null };
+  } catch (error) {
+    return { status: classifyError(error, {}), code: error.code || null };
+  }
+}
+
+export async function diagnoseTodayV2Schema(client = supabase, options = {}) {
   const checks = await Promise.all(TODAY_V2_SCHEMA_PROBES.map(async (check) => {
     let error;
     try {
-      ({ error } = await client.from(check.table).select(check.columns, { head: true }).limit(0));
+      ({ error } = await client.from(check.table).select(check.columns).limit(0));
     } catch (caught) {
       error = caught;
     }
-    const status = error ? classifyError(error, check) : 'available';
+    let status = error ? classifyError(error, check) : 'available';
+    let code = error?.code || null;
+    if (check.protectedRelation && error && ['permission', 'unknown'].includes(status)) {
+      const metadata = await probeDayScheduleMetadata(client, options);
+      // Gateway preflight responses may hide PostgREST's metadata response.
+      // Keep the original permission failure unless the route gives evidence.
+      if (metadata.status !== 'unknown') {
+        status = metadata.status;
+        code = metadata.code;
+      }
+    }
     const migration = ['42P01', 'PGRST205'].includes(error?.code) ? check.tableMigration : check.migration;
-    return { ...check, migration, status, code: error?.code || null };
+    return { ...check, migration, status, code };
   }));
   const missingMigrations = TODAY_V2_MIGRATIONS.filter((migration) =>
     checks.some((check) => check.status === 'missing' && check.migration === migration));

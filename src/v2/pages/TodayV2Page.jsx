@@ -644,7 +644,7 @@ export default function TodayV2Page() {
             })}
             available={scheduleAvailable}
             availabilityError={isMissingScheduleSchema(scheduleDiagnostic)
-              ? 'Calendar database setup is incomplete. Apply the Today V2 scheduling migrations in order through 20261009_today_v2_completion_release_guard.sql, then retry scheduling.'
+              ? 'Calendar database setup is incomplete. Apply the Today V2 scheduling migrations in order through 20261011_today_v2_day_schedule.sql, then retry scheduling.'
               : scheduleDiagnostic?.message}
             readOnly={readOnly}
             saveStatus={scheduleSaveStatus}
