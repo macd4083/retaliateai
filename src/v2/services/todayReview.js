@@ -271,8 +271,14 @@ export async function loadTodayV2HomeState(userId, options = {}) {
 
   const reviewHistory = reviewsResult.data || [];
 
+  // A completed review is always the active review day, so the next boundary has not passed yet.
+  // Between midnight and the boundary the plan date is already the civil date and Today's calendar shows it.
+  const tomorrowCalendarLocalDate = current.review?.completed_at && current.planningLocalDate !== civilScheduleLocalDate
+    ? current.planningLocalDate : null;
+
   return {
     ...current,
+    tomorrowCalendarLocalDate,
     civilScheduleLocalDate,
     civilSchedules,
     civilFirstFiveMinutes,
