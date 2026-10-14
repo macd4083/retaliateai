@@ -57,9 +57,31 @@ function writeDraft(userId, localDate, value) {
   if (typeof window === 'undefined' || !userId || !localDate) return;
 
   try {
+    const existing = readDraft(userId, localDate);
+    if (existing && (existing.reviewLocalDate !== value.reviewLocalDate
+      || existing.planningLocalDate !== value.planningLocalDate)
+      && !archiveDraft(userId, localDate, existing)) return;
     window.localStorage.setItem(buildTodayV2DraftStorageKey(userId, localDate), JSON.stringify(value));
   } catch {
     // Best-effort local fallback only.
+  }
+}
+
+function archiveDraft(userId, localDate, draft) {
+  try {
+    const value = JSON.stringify(draft);
+    const prefix = `${buildTodayV2DraftStorageKey(userId, localDate)}:archived`;
+    let key = prefix;
+    let suffix = 0;
+    while (window.localStorage.getItem(key) !== null) {
+      if (window.localStorage.getItem(key) === value) return true;
+      key = `${prefix}:${++suffix}`;
+    }
+    window.localStorage.setItem(key, value);
+    return true;
+  } catch {
+    // Best-effort local fallback only.
+    return false;
   }
 }
 
@@ -313,8 +335,12 @@ export function useTodayV2State(userId) {
       if (generation !== loadGenerationRef.current || revision !== planRevisionRef.current
         || scheduleRevision !== scheduleRevisionRef.current || editRevision !== editRevisionRef.current) return;
       const storedPlanningDraft = next.review?.completed_at ? null : readDraft(userId, next.planningSourceLocalDate || next.todayLocalDate);
-      const draft = storedPlanningDraft?.planningLocalDate === (next.planningLocalDate || next.tomorrowLocalDate)
+      const draft = storedPlanningDraft?.reviewLocalDate === next.todayLocalDate
+        && storedPlanningDraft?.planningLocalDate === next.planningLocalDate
         ? storedPlanningDraft : null;
+      if (storedPlanningDraft && !draft) {
+        archiveDraft(userId, next.planningSourceLocalDate || next.todayLocalDate, storedPlanningDraft);
+      }
       const storedReviewDraft = next.review?.completed_at ? null : readDraft(userId, next.todayLocalDate);
       const reviewDraft = storedReviewDraft && (storedReviewDraft.reviewLocalDate || next.todayLocalDate) === next.todayLocalDate
         ? storedReviewDraft : null;
