@@ -54,6 +54,7 @@ function makeState({ todayLocalDate = '2026-09-28', tomorrowLocalDate = '2026-09
     yesterdayLocalDate: '2026-09-27',
     todayLocalDate,
     tomorrowLocalDate,
+    planningLocalDate: tomorrowLocalDate,
     review: {
       id: `review-${todayLocalDate}`,
       local_date: todayLocalDate,
@@ -328,6 +329,42 @@ describe('useTodayV2State', () => {
     expect(latest.state.planningLocalDate).toBe('2026-09-29');
   });
 
+    it.each(['2026-10-10', undefined])('archives a midnight-era draft with review date %s instead of restoring its plan or schedule', async (reviewLocalDate) => {
+      vi.setSystemTime(new Date('2026-10-11T18:00:00Z'));
+      serviceMocks.loadTodayReviewState.mockResolvedValue({
+        ...makeState({ todayLocalDate: '2026-10-11', tomorrowLocalDate: '2026-10-12' }),
+        scheduleAvailable: true,
+        habitDefinitions: [{ id: 'daily', name: 'Daily', schedule_weekdays: [0, 1, 2, 3, 4, 5, 6] }],
+      });
+      const key = 'today-v2-draft:user-1:2026-10-11';
+      const oldDraft = {
+        reviewLocalDate, planningLocalDate: '2026-10-12', updatedAt: '2026-10-11T00:30:00Z',
+        tomorrowInput: 'Last night plan', tomorrowActions: ['Last night plan'],
+        firstFiveMinutes: 'Old start', tomorrowPlanNeedsSync: true,
+        desiredDirection: 'Old direction', desiredDirectionNeedsSync: true,
+        scheduleNeedsSync: true,
+        scheduleBlocks: [{ source_key: 'habit:daily', source_type: 'habit', source_id: 'daily',
+          starts_at: '2026-10-12T09:00:00Z', ends_at: '2026-10-12T09:30:00Z' }],
+      };
+      window.localStorage.setItem(key, JSON.stringify(oldDraft));
+      window.localStorage.setItem(`${key}:archived`, JSON.stringify({ earlier: 'recoverable draft' }));
+      await renderHook();
+      expect(latest.tomorrowInput).toBe('');
+      expect(latest.tomorrowActions).toEqual([]);
+      expect(latest.firstFiveMinutes).toBe('');
+      expect(latest.scheduleBlocks).toEqual([]);
+      expect(latest.scheduleSaveStatus).toBe('saved');
+      expect(JSON.parse(window.localStorage.getItem(key)).scheduleNeedsSync).toBe(false);
+      expect(JSON.parse(window.localStorage.getItem(`${key}:archived:1`))).toEqual(oldDraft);
+      expect(JSON.parse(window.localStorage.getItem(`${key}:archived`))).toEqual({ earlier: 'recoverable draft' });
+      await act(async () => {
+        vi.advanceTimersByTime(801);
+        await latest.flushAll();
+      });
+      expect(serviceMocks.replaceTomorrowActions).not.toHaveBeenCalled();
+      expect(scheduleMocks.replaceSchedule).not.toHaveBeenCalled();
+    });
+
   it.each(['2026-09-30', undefined])('rejects a planning draft with target %s while restoring matching review answers', async (planningLocalDate) => {
     vi.setSystemTime(new Date('2026-09-29T02:00:00Z'));
     serviceMocks.loadTodayReviewState.mockResolvedValue({
@@ -349,6 +386,28 @@ describe('useTodayV2State', () => {
     expect(latest.firstFiveMinutes).toBe('');
     expect(latest.scheduleBlocks).toEqual([]);
     expect(latest.tomorrowPlanSaveStatus).toBe('saved');
+  });
+
+  it('keeps a rejected draft intact when localStorage cannot archive it', async () => {
+    const key = 'today-v2-draft:user-1:2026-09-28';
+    const raw = JSON.stringify({
+      reviewLocalDate: '2026-09-27', planningLocalDate: '2026-09-29',
+      tomorrowInput: 'Recover me', tomorrowPlanNeedsSync: true,
+    });
+    window.localStorage.setItem(key, raw);
+    const setItem = Storage.prototype.setItem;
+    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (storageKey, value) {
+      if (storageKey.includes(':archived')) throw new Error('Storage full');
+      return setItem.call(this, storageKey, value);
+    });
+    try {
+      await renderHook();
+      expect(latest.tomorrowInput).toBe('');
+      expect(window.localStorage.getItem(key)).toBe(raw);
+      expect(latest.draftStorageUnavailable).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('preserves the 2AM plan for today after logout and an evening return without prefilling the next plan', async () => {
@@ -898,6 +957,7 @@ describe('useTodayV2State', () => {
       ],
     });
     window.localStorage.setItem('today-v2-draft:user-1:2026-09-28', JSON.stringify({
+      reviewLocalDate: '2026-09-28',
       planningLocalDate: '2026-09-29',
       tomorrowInput: 'Write and Walk', tomorrowActions: ['Walk', 'Walk'], tomorrowPlanNeedsSync: true,
       actionIdentities: [
