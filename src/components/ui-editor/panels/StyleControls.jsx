@@ -12,7 +12,7 @@ import {
 } from '@/components/ui/select';
 
 function normalizeColor(value, fallback = '#000000') {
-  if (!value) return fallback;
+  if (typeof value !== 'string' || !value) return fallback;
   if (value.startsWith('#') && (value.length === 7 || value.length === 4)) return value;
 
   const rgbMatch = value.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);

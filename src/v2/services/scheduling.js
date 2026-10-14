@@ -4,6 +4,8 @@ import { addDaysToLocalDate } from '../today/model';
 import { getScheduleDateBounds } from '../today/scheduling';
 
 export function isMissingScheduleSchema(error) {
+  if (['42501', 'PGRST301', 'PGRST302'].includes(error?.code)
+    || /permission denied|not authorized|JWT|access denied/i.test(error?.message || '')) return false;
   return ['42P01', '42883', 'PGRST202', 'PGRST205'].includes(error?.code)
     || /schema cache|does not exist|could not find.*(?:table|function)/i.test(error?.message || '');
 }

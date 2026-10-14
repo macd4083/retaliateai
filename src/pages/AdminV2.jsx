@@ -18,6 +18,7 @@ import {
   normalizeLiveDemoData,
 } from '../lib/liveDemo';
 import { buildCommitmentFragments } from '../lib/commitmentFragments';
+import { safeGetStorageItem, safeSetStorageItem } from '../lib/browserStorage';
 
 const ADMIN_SECRET = import.meta.env.VITE_ADMIN_SECRET;
 const GUEST_GUARDRAILS_DESCRIPTION =
@@ -417,14 +418,14 @@ export default function AdminV2() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const saved = window.localStorage.getItem(LIVE_DEMO_SCRIPT_KEY);
+    const saved = safeGetStorageItem(LIVE_DEMO_SCRIPT_KEY);
     if (saved) {
       setDemoScript(saved);
     } else {
       setDemoScript(JSON.stringify(DEFAULT_LIVE_DEMO_SCRIPT, null, 2));
     }
     try {
-      const savedData = window.localStorage.getItem(LIVE_DEMO_DATA_KEY);
+      const savedData = safeGetStorageItem(LIVE_DEMO_DATA_KEY);
       if (savedData) {
         const parsedDemoData = normalizeLiveDemoData(JSON.parse(savedData));
         setDemoData({
@@ -846,7 +847,7 @@ export default function AdminV2() {
       setCommitmentMsg('Date is required');
       return;
     }
-    const dateParts = newSession.date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    const dateParts = String(newSession.date ?? '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
     if (!dateParts) {
       setCommitmentMsg('Date must be a valid YYYY-MM-DD value');
       return;
@@ -936,7 +937,10 @@ export default function AdminV2() {
 
   function saveDemoData(data) {
     const toSave = normalizeLiveDemoData(data);
-    window.localStorage.setItem(LIVE_DEMO_DATA_KEY, JSON.stringify(toSave));
+    if (!safeSetStorageItem(LIVE_DEMO_DATA_KEY, JSON.stringify(toSave))) {
+      setDemoDataMsg('⚠ Browser storage unavailable — changes were not saved');
+      return;
+    }
     try {
       const ch = new BroadcastChannel(LIVE_DEMO_CHANNEL_NAME);
       ch.postMessage({ type: 'UPDATE_DEMO_DATA' });
@@ -1147,7 +1151,10 @@ export default function AdminV2() {
                     if (isNewFormat && parsed.stageOrder !== undefined && !Array.isArray(parsed.stageOrder)) {
                       throw new Error('Invalid stageOrder format — must be an array');
                     }
-                    window.localStorage.setItem(LIVE_DEMO_SCRIPT_KEY, demoScript);
+                    if (!safeSetStorageItem(LIVE_DEMO_SCRIPT_KEY, demoScript)) {
+                      setDemoScriptMsg('⚠ Browser storage unavailable — script was not saved');
+                      return;
+                    }
                     liveDemoChannelRef.current?.postMessage({ type: 'UPDATE_DEMO_SCRIPT' });
                     setDemoScriptMsg('✓ Script saved');
                     setTimeout(() => setDemoScriptMsg(''), 2000);

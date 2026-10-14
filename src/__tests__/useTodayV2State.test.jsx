@@ -130,6 +130,7 @@ describe('useTodayV2State', () => {
       root.unmount();
     });
     container.remove();
+    vi.restoreAllMocks();
     vi.useRealTimers();
   });
 
@@ -139,6 +140,28 @@ describe('useTodayV2State', () => {
     });
     await waitForCondition(() => latest && latest.loading === false, 'initial hook load');
   }
+
+  it('loads and edits when storage is blocked while reporting draft persistence failure', async () => {
+    vi.spyOn(window, 'localStorage', 'get').mockImplementation(() => {
+      throw new DOMException('Blocked', 'SecurityError');
+    });
+    await renderHook();
+    expect(latest.error).toBeNull();
+    expect(latest.draftStorageUnavailable).toBe(true);
+    await act(async () => latest.setTomorrowInput('Write notes'));
+    expect(latest.tomorrowActions).toEqual(['Write notes']);
+    expect(latest.draftStorageUnavailable).toBe(true);
+  });
+
+  it('does not pretend drafts persisted when storage quota is exhausted', async () => {
+    vi.spyOn(Object.getPrototypeOf(window.localStorage), 'setItem').mockImplementation(() => {
+      throw new DOMException('Full', 'QuotaExceededError');
+    });
+    await renderHook();
+    await act(async () => latest.setTomorrowInput('Write notes'));
+    expect(latest.draftStorageUnavailable).toBe(true);
+    expect(window.localStorage.getItem('today-v2-draft:user-1:2026-09-28')).toBeNull();
+  });
 
   it('autosaves desired direction and tomorrow plans after the debounce window', async () => {
     await renderHook();
@@ -381,6 +404,7 @@ describe('useTodayV2State', () => {
       await renderHook();
       expect(latest.tomorrowInput).toBe('');
       expect(window.localStorage.getItem(key)).toBe(raw);
+      expect(latest.draftStorageUnavailable).toBe(true);
     } finally {
       spy.mockRestore();
     }

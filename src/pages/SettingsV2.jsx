@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Check } from 'lucide-react';
 import { CardElement, Elements, useElements, useStripe } from '@stripe/react-stripe-js';
-import { loadStripe } from '@stripe/stripe-js';
+import { loadStripe } from '@stripe/stripe-js/pure';
 import toast, { Toaster } from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
@@ -46,7 +46,11 @@ const DEFAULT_LIFE_AREA_OPTIONS = [
   { emoji: '🙏', label: 'Spirituality' },
 ];
 
-const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
+const configuredStripeKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
+const stripePublishableKey = typeof configuredStripeKey === 'string' ? configuredStripeKey.trim() : '';
+const stripePromise = /^pk_(test|live)_[A-Za-z0-9]+$/.test(stripePublishableKey)
+  ? loadStripe(stripePublishableKey).catch(() => null)
+  : null;
 
 const cardElementOptions = {
   style: {
@@ -179,8 +183,17 @@ export default function SettingsV2() {
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [cancelLoading, setCancelLoading] = useState(false);
   const [showPaymentUpdate, setShowPaymentUpdate] = useState(false);
+  const [stripeUnavailable, setStripeUnavailable] = useState(!stripePromise);
   const [invoices, setInvoices] = useState([]);
   const [invoicesLoading, setInvoicesLoading] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    stripePromise?.then((stripe) => {
+      if (active) setStripeUnavailable(!stripe);
+    });
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -612,11 +625,15 @@ export default function SettingsV2() {
               <div className="mb-4">
                 <button
                   onClick={() => setShowPaymentUpdate((v) => !v)}
-                  className="w-full text-left px-3 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-sm transition-colors"
+                  disabled={stripeUnavailable}
+                  className="w-full text-left px-3 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed text-zinc-200 text-sm transition-colors"
                 >
                   Update Payment Method
                 </button>
-                {showPaymentUpdate && (
+                {stripeUnavailable && (
+                  <p role="status" className="mt-2 text-xs text-amber-300">Payment method updates are temporarily unavailable. Your other settings still work.</p>
+                )}
+                {showPaymentUpdate && !stripeUnavailable && (
                   <div className="mt-3">
                     <Elements stripe={stripePromise}>
                       <PaymentMethodForm userId={user?.id} getAuthHeaders={getAuthHeaders} onUpdated={loadProfile} />

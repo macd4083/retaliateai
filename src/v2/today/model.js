@@ -1,4 +1,5 @@
 import { splitCommitmentIntoTasks } from '../../shared/commitmentFragmentation';
+import { safeGetStorageItem } from '../../lib/browserStorage';
 import {
   TODAY_V2_COMMITMENT_STATES,
   TODAY_V2_PARSER_VERSION,
@@ -21,9 +22,7 @@ function coerceTodayV2BoundaryHour(value) {
 }
 
 export function getTodayV2DayBoundaryHour() {
-  const storageOverride = typeof window !== 'undefined'
-    ? coerceTodayV2BoundaryHour(window.localStorage.getItem('today_v2_day_boundary_hour'))
-    : null;
+  const storageOverride = coerceTodayV2BoundaryHour(safeGetStorageItem('today_v2_day_boundary_hour'));
   if (storageOverride != null) return storageOverride;
 
   const envOverride = coerceTodayV2BoundaryHour(import.meta?.env?.VITE_TODAY_V2_DAY_BOUNDARY_HOUR);

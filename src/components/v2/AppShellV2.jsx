@@ -6,6 +6,8 @@ import { supabase } from '../../lib/supabase/client';
 import { isAnonymousGuestUser } from '../../lib/guestSession';
 import { usePWAInstall } from '../../hooks/usePWAInstall';
 import PWAInstallBanner from '../pwa/PWAInstallBanner';
+import { safeGetStorageItem, safeSetStorageItem, safeRemoveStorageItem } from '../../lib/browserStorage';
+import { BUILD_VERSION } from '../../lib/buildVersion';
 
 const NAV_LINKS = [
   { label: 'Today', path: '/home', icon: House },
@@ -76,7 +78,7 @@ export default function AppShellV2({ title, children, adminAction = null, shellM
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    setAdminTimeOverride(window.localStorage.getItem('admin_time_override'));
+    setAdminTimeOverride(safeGetStorageItem('admin_time_override'));
   }, []);
 
   const handleSignOut = async () => {
@@ -317,7 +319,7 @@ export default function AppShellV2({ title, children, adminAction = null, shellM
             <div className="flex gap-1.5">
               <button
                 onClick={() => {
-                  window.localStorage.setItem('admin_time_override', 'afternoon');
+                  if (!safeSetStorageItem('admin_time_override', 'afternoon')) return;
                   setAdminTimeOverride('afternoon');
                   window.dispatchEvent(new Event('admin-time-override-changed'));
                 }}
@@ -331,7 +333,7 @@ export default function AppShellV2({ title, children, adminAction = null, shellM
               </button>
               <button
                 onClick={() => {
-                  window.localStorage.removeItem('admin_time_override');
+                  if (!safeRemoveStorageItem('admin_time_override')) return;
                   setAdminTimeOverride(null);
                   window.dispatchEvent(new Event('admin-time-override-changed'));
                 }}
@@ -349,6 +351,7 @@ export default function AppShellV2({ title, children, adminAction = null, shellM
 
         {/* Sign out / Home */}
         <div className="px-3 py-4 border-t border-zinc-800">
+          <p className="px-3 pb-2 text-xs text-zinc-500">Build {BUILD_VERSION}</p>
           {isGuest ? (
             <button
               onClick={() => { navigate('/'); setDrawerOpen(false); }}

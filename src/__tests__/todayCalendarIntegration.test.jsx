@@ -133,7 +133,7 @@ describe('Review & Plan calendar integration', () => {
     review.scheduleDiagnostic = { code: '42P01', message: 'relation does not exist' };
     await render();
     expect(container.textContent).toContain('Calendar database setup is incomplete');
-    expect(container.textContent).toContain('20261009_today_v2_completion_release_guard.sql');
+    expect(container.textContent).toContain('20261011_today_v2_day_schedule.sql');
     expect(container.textContent).toContain('You can still save your actions and complete your review');
     expect(container.querySelectorAll('[data-slot-timestamp]')).toHaveLength(96);
     expect(container.querySelector('[data-scheduler-edit-key="action:write"]').disabled).toBe(true);
