@@ -17,6 +17,24 @@ Drafts are keyed by review date. Review answers restore only for their review da
 
 - Apply `supabase/migrations/20261011_today_v2_day_schedule.sql` after the habit recurrence migration to enable Today timing edits. Its `today_v2_update_day_schedule` RPC changes one owned schedule source at a time without rewriting the plan, reopening yesterday's review, or replacing other blocks. Habit edits and removals retain recurrence overrides. Completed target days and historical carryover stay locked.
 
+## Production schema deployment and diagnostics
+
+Apply the existing Today V2 migrations in this exact dependency order (paths relative to `supabase/migrations/`):
+
+1. `20260928_today_v2_workflow.sql`
+2. `20261006_today_v2_controllable_and_first_five.sql`
+3. `20261007_today_v2_scheduling.sql`
+4. `20261008_today_v2_schedule_review_lock.sql`
+5. `20261009_today_v2_completion_release_guard.sql`
+6. `20261010_today_v2_habit_recurrence.sql`
+7. `20261011_today_v2_day_schedule.sql`
+
+These extend the existing production auth/application schema; do not replace them with `supabase/sql/today_v2_isolated_workflow.sql` or run retired generic V2 SQL. Google connection credential tables ship in `20261007_today_v2_scheduling.sql`; credentials remain backend-only.
+
+`SchemaDiagnostics`, mounted globally inside `AuthProvider`, independently checks named app-required tables and columns with read-only, zero-row HEAD selects for authenticated users, regardless of scheduler feature flags or the old habit-query fallback. It maps missing schema to exact migration filenames, distinguishes permissions/network/unknown failures, and provides retry after deployment or connection recovery. A missing API-cache entry can require a cache reload rather than a migration rerun.
+
+The day-schedule migration adds only a private capability relation, `today_v2_day_schedule_writes`: all access is revoked from public, anon, authenticated **and service_role**. An API-cache miss for that relation therefore means **unverified**, not confirmed missing. The global diagnostic names `20261011_today_v2_day_schedule.sql` explicitly for administrator verification. Do not grant access to this table to make diagnostics pass. Read-only table/column probes cannot attest RPC/trigger bodies, including the function-only completion guard migration; administrators must verify those deployments from SQL/migration history. No mutation RPC is called by the diagnostic, and no new migration is required.
+
 ## Boundary map
 
 ### Today V2-only client modules
@@ -219,10 +237,9 @@ check-ins. Execute the complete file as one transaction; for `psql`, use
 Do not execute selected lines individually. Run it in staging first and verify
 below.
 
-For installations managed by timestamped migrations, the ordered prerequisites
-are `20260928_today_v2_workflow.sql`,
-`20261006_today_v2_controllable_and_first_five.sql`,
-`20261007_today_v2_scheduling.sql`, then the new
+For production installations managed by timestamped migrations, use the complete
+seven-file order in **Production schema deployment and diagnostics** above,
+including the completion guard, recurrence, and day-schedule migrations after
 `20261008_today_v2_schedule_review_lock.sql`. Do not edit/reapply old migration
 history as a substitute for the repair. Do not run superseded generic V2 or
 legacy journal SQL. Migration runners must wrap the repair in a transaction

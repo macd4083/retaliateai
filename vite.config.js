@@ -4,6 +4,11 @@ import path from 'path';
 import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
+  define: {
+    'import.meta.env.VITE_BUILD_VERSION': JSON.stringify(
+      process.env.VITE_BUILD_VERSION || process.env.VERCEL_GIT_COMMIT_SHA || process.env.GITHUB_SHA || new Date().toISOString()
+    ),
+  },
   plugins: [
     react(),
     VitePWA({
@@ -43,6 +48,7 @@ export default defineConfig({
     exclude: ['web-push', 'resend'],
   },
   build: {
+    sourcemap: 'hidden',
     rollupOptions: {
       external: ['web-push', 'resend'],
     },

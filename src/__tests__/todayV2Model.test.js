@@ -33,6 +33,19 @@ describe('TodayV2 model helpers', () => {
     expect(normalizeTodayV2ActionStarts(' \n ')).toBe('');
   });
 
+  it('uses the configured default boundary when browser storage is blocked', () => {
+    const getter = vi.spyOn(window, 'localStorage', 'get').mockImplementation(() => {
+      throw new DOMException('Blocked', 'SecurityError');
+    });
+    try {
+      expect(getTodayV2DayBoundaryHour()).toBe(4);
+      expect(getTodayV2DateContext({ now: new Date('2026-09-29T01:00:00Z'), timezoneName: 'UTC' }).todayLocalDate)
+        .toBe('2026-09-28');
+    } finally {
+      getter.mockRestore();
+    }
+  });
+
   beforeEach(() => {
     vi.useFakeTimers();
   });

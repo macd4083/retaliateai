@@ -1,3 +1,5 @@
+import { safeGetStorageItem, safeSetStorageItem } from './browserStorage';
+
 /**
  * lib/guestSession.js
  *
@@ -124,7 +126,7 @@ export function buildSignupPath(attribution = {}, extraParams = {}) {
 /** Persist attribution to sessionStorage. */
 export function saveAttribution(attribution) {
   try {
-    sessionStorage.setItem(GUEST_ATTRIBUTION_KEY, JSON.stringify(sanitizeAttribution(attribution)));
+    safeSetStorageItem(GUEST_ATTRIBUTION_KEY, JSON.stringify(sanitizeAttribution(attribution)), 'sessionStorage');
   } catch (_e) {
     // sessionStorage unavailable (e.g. private browsing with restrictions) — fail silently
   }
@@ -133,7 +135,7 @@ export function saveAttribution(attribution) {
 /** Read back persisted attribution. Returns {} if nothing stored. */
 export function readAttribution() {
   try {
-    const raw = sessionStorage.getItem(GUEST_ATTRIBUTION_KEY);
+    const raw = safeGetStorageItem(GUEST_ATTRIBUTION_KEY, 'sessionStorage');
     return raw ? sanitizeAttribution(JSON.parse(raw)) : {};
   } catch (_e) {
     return {};
