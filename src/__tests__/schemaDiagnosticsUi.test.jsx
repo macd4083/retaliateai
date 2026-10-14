@@ -45,6 +45,7 @@ describe('global authenticated schema diagnostics', () => {
     mocks.diagnose.mockResolvedValue(missing);
     await render();
     expect(container.querySelector('[role="alert"]')).toBeTruthy();
+    expect(container.querySelector('details').open).toBe(true);
     expect([...container.querySelectorAll('ol code')].map((node) => node.textContent)).toEqual(missing.missingMigrations);
     expect(container.textContent).toContain('Habit fallback does not restore scheduling support');
   });
@@ -67,6 +68,8 @@ describe('global authenticated schema diagnostics', () => {
     expect(container.textContent).toContain('20261011_today_v2_day_schedule.sql');
     expect(container.textContent).toContain('permission');
     expect(container.querySelector('ol')).toBeNull();
+    expect(container.querySelector('details').open).toBe(false);
+    expect(container.querySelector('summary code').textContent).toContain('20261011_today_v2_day_schedule.sql');
   });
 
   it('does not mislabel unexpected probe failure as missing schema', async () => {
@@ -79,11 +82,20 @@ describe('global authenticated schema diagnostics', () => {
   it('keeps diagnostics nonmodal and does not block unrelated saves', async () => {
     const save = vi.fn();
     mocks.diagnose.mockResolvedValue(missing);
-    await act(async () => root.render(<><SchemaDiagnostics /><button onClick={save}>Save review</button></>));
+    await act(async () => root.render(<>
+      <div className="fixed top-14 left-0 right-0 z-[90] max-h-[50vh] overflow-y-auto"><SchemaDiagnostics /></div>
+      <button onClick={save}>Save review</button>
+    </>));
     const button = [...container.querySelectorAll('button')].find((node) => node.textContent === 'Save review');
     expect(button.disabled).toBe(false);
     expect(container.querySelector('[role="dialog"]')).toBeNull();
-    expect(container.querySelector('aside').className).not.toMatch(/fixed|absolute|z-50/);
+    const panelClasses = container.firstElementChild.className;
+    expect(container.querySelector('aside').className).not.toContain('fixed');
+    expect(panelClasses).toContain('fixed');
+    expect(panelClasses).toContain('top-14');
+    expect(panelClasses).toContain('z-[90]');
+    expect(panelClasses).toContain('max-h-[50vh]');
+    expect(panelClasses).toContain('overflow-y-auto');
     await act(async () => button.click());
     expect(save).toHaveBeenCalledOnce();
   });

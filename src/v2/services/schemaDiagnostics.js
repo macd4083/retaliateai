@@ -11,8 +11,8 @@ export const TODAY_V2_MIGRATIONS = [
 ];
 
 const [workflow, firstFive, scheduling, reviewLock, , recurrence, daySchedule] = TODAY_V2_MIGRATIONS;
-const probe = (table, columns, migration, tableMigration = workflow, protectedRelation = false) => ({
-  table, columns, migration, tableMigration, protectedRelation,
+const probe = (table, columns, migration, tableMigration = workflow) => ({
+  table, columns, migration, tableMigration,
 });
 
 export const TODAY_V2_SCHEMA_PROBES = [
@@ -28,20 +28,16 @@ export const TODAY_V2_SCHEMA_PROBES = [
   probe('today_v2_habit_definitions', 'planning_mode,schedule_times', recurrence),
   probe('today_v2_schedule_blocks', 'is_automatic', recurrence, scheduling),
   probe('today_v2_habit_schedule_overrides', 'user_id,target_local_date,habit_definition_id', recurrence, recurrence),
-  probe('today_v2_day_schedule_writes', 'backend_pid,transaction_id,user_id,target_local_date,timezone_name,source_id,source_type,schedule_id,starts_at,ends_at', daySchedule, daySchedule, true),
 ];
 
-function classifyError(error, check) {
+function classifyError(error, schemaErrors = true) {
   const code = String(error?.code || '');
   const message = String(error?.message || '');
   if (code === '42501' || code === 'PGRST301' || code === 'PGRST302'
-    || /permission denied|not authorized|JWT|access denied/i.test(message)) return 'permission';
+    || /permission denied|not authorized|JWT|access denied|authentication required/i.test(message)) return 'permission';
   if (/fetch|network|offline|timeout|timed out|connection/i.test(message)
     || ['PGRST000', 'PGRST001', 'PGRST002', 'PGRST003', '57014'].includes(code)) return 'network';
-  // PostgREST can hide this deliberately ungranted relation from its cache.
-  // Its absence from the API is not proof that the day-schedule migration is missing.
-  if (check.protectedRelation && code === 'PGRST205') return 'unknown';
-  if (['42P01', '42703', 'PGRST204', 'PGRST205'].includes(code)) return 'missing';
+  if (schemaErrors && ['42P01', '42703', 'PGRST204', 'PGRST205'].includes(code)) return 'missing';
   return 'unknown';
 }
 
@@ -52,60 +48,63 @@ export async function probeDayScheduleMetadata(client = supabase, options = {}) 
   if (!url || !apiKey || !client.auth?.getSession) return { status: 'unknown', code: null };
   try {
     const { data, error: sessionError } = await client.auth.getSession();
-    if (sessionError) return { status: classifyError(sessionError, {}), code: sessionError.code || null };
+    if (sessionError) return { status: classifyError(sessionError, false), code: sessionError.code || null };
     if (!data?.session?.access_token) return { status: 'permission', code: null };
-    const endpoint = new URL(`${url.replace(/\/$/, '')}/rest/v1/rpc/today_v2_update_day_schedule`);
-    const args = {
-      p_target_local_date: '2000-01-01',
-      p_timezone_name: 'UTC',
-      p_source_type: 'action',
-      p_source_id: '00000000-0000-0000-0000-000000000000',
-      p_starts_at: '2000-01-01T00:00:00Z',
-      p_ends_at: '2000-01-01T00:30:00Z',
-    };
-    Object.entries(args).forEach(([key, value]) => endpoint.searchParams.set(key, value));
-    // PostgREST OPTIONS builds a NoDb RoutineInfoPlan; GET/HEAD would execute
-    // the volatile function in a read-only transaction and are NOT safe probes.
-    const response = await fetchRequest(endpoint.toString(), {
-      method: 'OPTIONS',
-      headers: { apikey: apiKey, Authorization: ['Bearer', data.session.access_token].join(' '), 'Accept-Profile': 'public' },
+    // Inspect API documentation only; never invoke the scheduling routine.
+    const response = await fetchRequest(`${url.replace(/\/$/, '')}/rest/v1/`, {
+      method: 'GET',
+      headers: {
+        apikey: apiKey,
+        Authorization: ['Bearer', data.session.access_token].join(' '),
+        'Accept-Profile': 'public',
+        Accept: 'application/openapi+json',
+      },
     });
-    const allow = response.headers.get('Allow');
-    if (response.ok && /^OPTIONS\s*,\s*POST$/i.test(allow || '')) {
-      return { status: 'available', code: null };
+    const document = await response.json().catch(() => null);
+    if (response.status === 401 || response.status === 403) return { status: 'permission', code: document?.code || null };
+    if (!response.ok) return { status: classifyError(document || {}, false), code: document?.code || null };
+    if (!(document?.swagger === '2.0' || /^3\./.test(document?.openapi || ''))
+      || !document.paths || typeof document.paths !== 'object' || Array.isArray(document.paths)) {
+      return { status: 'unknown', code: null };
     }
-    if (response.ok) return { status: 'unknown', code: null };
-    const error = await response.json().catch(() => ({}));
-    if (response.status === 401 || response.status === 403) return { status: 'permission', code: error.code || null };
-    if (error.code === 'PGRST202') return { status: 'missing', code: error.code };
-    return { status: classifyError(error, { protectedRelation: true }), code: error.code || null };
+    const operation = document.paths['/rpc/today_v2_update_day_schedule']?.post;
+    // Documentation omits installed functions without the caller's EXECUTE grant.
+    if (!operation) return { status: 'unknown', code: 'OPENAPI_RPC_UNAVAILABLE' };
+    let schema = operation.parameters?.find((parameter) => parameter.in === 'body')?.schema
+      || operation.requestBody?.content?.['application/json']?.schema;
+    for (let depth = 0; schema?.$ref && depth < 8; depth += 1) {
+      if (!schema.$ref.startsWith('#/')) return { status: 'unknown', code: null };
+      schema = schema.$ref.slice(2).split('/').reduce((value, key) => {
+        const decoded = key.replace(/~1/g, '/').replace(/~0/g, '~');
+        return value && Object.hasOwn(value, decoded) ? value[decoded] : undefined;
+      }, document);
+    }
+    if (!schema?.properties || schema.$ref) return { status: 'unknown', code: null };
+    const expected = ['p_target_local_date', 'p_timezone_name', 'p_source_type', 'p_source_id', 'p_starts_at', 'p_ends_at'];
+    return expected.every((name) => Object.hasOwn(schema.properties, name))
+      && (!Array.isArray(schema.required) || schema.required.every((name) => expected.includes(name)))
+      ? { status: 'available', code: null }
+      : { status: 'missing', code: 'OPENAPI_RPC_SIGNATURE_MISSING' };
   } catch (error) {
-    return { status: classifyError(error, {}), code: error.code || null };
+    return { status: classifyError(error, false), code: error.code || null };
   }
 }
 
 export async function diagnoseTodayV2Schema(client = supabase, options = {}) {
-  const checks = await Promise.all(TODAY_V2_SCHEMA_PROBES.map(async (check) => {
+  const checks = await Promise.all([...TODAY_V2_SCHEMA_PROBES.map(async (check) => {
     let error;
     try {
       ({ error } = await client.from(check.table).select(check.columns).limit(0));
     } catch (caught) {
       error = caught;
     }
-    let status = error ? classifyError(error, check) : 'available';
-    let code = error?.code || null;
-    if (check.protectedRelation && error && ['permission', 'unknown'].includes(status)) {
-      const metadata = await probeDayScheduleMetadata(client, options);
-      // Gateway preflight responses may hide PostgREST's metadata response.
-      // Keep the original permission failure unless the route gives evidence.
-      if (metadata.status !== 'unknown') {
-        status = metadata.status;
-        code = metadata.code;
-      }
-    }
+    const status = error ? classifyError(error) : 'available';
+    const code = error?.code || null;
     const migration = ['42P01', 'PGRST205'].includes(error?.code) ? check.tableMigration : check.migration;
     return { ...check, migration, status, code };
-  }));
+  }), probeDayScheduleMetadata(client, options).then((result) => ({
+    rpc: 'today_v2_update_day_schedule', migration: daySchedule, ...result,
+  }))]);
   const missingMigrations = TODAY_V2_MIGRATIONS.filter((migration) =>
     checks.some((check) => check.status === 'missing' && check.migration === migration));
   const unresolvedChecks = checks.filter((check) => !['available', 'missing'].includes(check.status));
