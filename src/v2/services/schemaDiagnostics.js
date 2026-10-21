@@ -41,6 +41,13 @@ function classifyError(error, schemaErrors = true) {
   return 'unknown';
 }
 
+function errorContext(error) {
+  return {
+    ...(error?.message ? { message: error.message } : typeof error === 'string' ? { message: error } : {}),
+    ...(error?.stack ? { stack: error.stack } : {}),
+  };
+}
+
 export async function probeDayScheduleMetadata(client = supabase, options = {}) {
   const url = options.url ?? import.meta.env.VITE_SUPABASE_URL;
   const apiKey = options.apiKey ?? import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -48,7 +55,7 @@ export async function probeDayScheduleMetadata(client = supabase, options = {}) 
   if (!url || !apiKey || !client.auth?.getSession) return { status: 'unknown', code: null };
   try {
     const { data, error: sessionError } = await client.auth.getSession();
-    if (sessionError) return { status: classifyError(sessionError, false), code: sessionError.code || null };
+    if (sessionError) return { status: classifyError(sessionError, false), code: sessionError.code || null, ...errorContext(sessionError) };
     if (!data?.session?.access_token) return { status: 'permission', code: null };
     // Inspect API documentation only; never invoke the scheduling routine.
     const response = await fetchRequest(`${url.replace(/\/$/, '')}/rest/v1/`, {
@@ -61,15 +68,18 @@ export async function probeDayScheduleMetadata(client = supabase, options = {}) 
       },
     });
     const document = await response.json().catch(() => null);
-    if (response.status === 401 || response.status === 403) return { status: 'permission', code: document?.code || null };
-    if (!response.ok) return { status: classifyError(document || {}, false), code: document?.code || null };
+    if (response.status === 401 || response.status === 403) return { status: 'permission', code: document?.code || null, ...errorContext(document) };
+    if (!response.ok) return { status: classifyError(document || {}, false), code: document?.code || null, ...errorContext(document) };
     if (!(document?.swagger === '2.0' || /^3\./.test(document?.openapi || ''))
       || !document.paths || typeof document.paths !== 'object' || Array.isArray(document.paths)) {
       return { status: 'unknown', code: null };
     }
     const operation = document.paths['/rpc/today_v2_update_day_schedule']?.post;
     // Documentation omits installed functions without the caller's EXECUTE grant.
-    if (!operation) return { status: 'unknown', code: 'OPENAPI_RPC_UNAVAILABLE' };
+    if (!operation) return {
+      status: 'unknown', code: 'OPENAPI_RPC_UNAVAILABLE',
+      message: 'Day-schedule RPC is absent from API documentation; EXECUTE permissions may hide an installed function.',
+    };
     let schema = operation.parameters?.find((parameter) => parameter.in === 'body')?.schema
       || operation.requestBody?.content?.['application/json']?.schema;
     for (let depth = 0; schema?.$ref && depth < 8; depth += 1) {
@@ -86,7 +96,7 @@ export async function probeDayScheduleMetadata(client = supabase, options = {}) 
       ? { status: 'available', code: null }
       : { status: 'missing', code: 'OPENAPI_RPC_SIGNATURE_MISSING' };
   } catch (error) {
-    return { status: classifyError(error, false), code: error.code || null };
+    return { status: classifyError(error, false), code: error?.code || null, ...errorContext(error) };
   }
 }
 
@@ -101,7 +111,7 @@ export async function diagnoseTodayV2Schema(client = supabase, options = {}) {
     const status = error ? classifyError(error) : 'available';
     const code = error?.code || null;
     const migration = ['42P01', 'PGRST205'].includes(error?.code) ? check.tableMigration : check.migration;
-    return { ...check, migration, status, code };
+    return { ...check, migration, status, code, ...errorContext(error) };
   }), probeDayScheduleMetadata(client, options).then((result) => ({
     rpc: 'today_v2_update_day_schedule', migration: daySchedule, ...result,
   }))]);
