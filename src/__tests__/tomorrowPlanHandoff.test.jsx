@@ -148,7 +148,7 @@ describe('completed review hands tomorrow’s plan from Home to the next morning
         persistence.tables.today_v2_commitment_fragments = rows;
         return { data: rows, error: null };
       }
-      if (name === 'today_v2_replace_schedule') {
+      if (name === 'today_v2_replace_schedule_checked') {
         const rows = args.p_blocks.map((block, index) => ({
           id: `schedule-${index}`, user_id: 'flow-user', target_local_date: args.p_target_local_date,
           timezone_name: args.p_timezone_name, ...block,

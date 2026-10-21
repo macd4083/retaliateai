@@ -49,8 +49,8 @@ export async function loadSchedules(userId, todayLocalDate, tomorrowLocalDate, t
   }
 }
 
-export async function replaceSchedule({ targetLocalDate, timezoneName, blocks, userId }) {
-  const { data, error } = await supabase.rpc('today_v2_replace_schedule', {
+export async function replaceSchedule({ targetLocalDate, timezoneName, blocks, expectedBlocks = [], userId }) {
+  const { data, error } = await supabase.rpc('today_v2_replace_schedule_checked', {
     p_target_local_date: targetLocalDate,
     p_timezone_name: timezoneName,
     p_blocks: blocks.map((block) => ({
@@ -60,8 +60,21 @@ export async function replaceSchedule({ targetLocalDate, timezoneName, blocks, u
       starts_at: block.starts_at,
       ends_at: block.ends_at,
     })),
+    p_expected_blocks: expectedBlocks.map((block) => ({
+      ...(block.commitment_fragment_id || block.source_type === 'action'
+        ? { commitment_fragment_id: block.commitment_fragment_id || block.source_id }
+        : { habit_definition_id: block.habit_definition_id || block.source_id }),
+      starts_at: block.starts_at,
+      ends_at: block.ends_at,
+      timezone_name: block.timezone_name || timezoneName,
+    })),
   });
-  if (error) throw error;
+  if (error) {
+    if (isMissingScheduleSchema(error)) {
+      throw { ...error, message: 'Safe calendar saving needs the 20261013_today_v2_schedule_conflicts.sql migration. Your pending calendar changes are preserved locally.' };
+    }
+    throw error;
+  }
   await syncSavedSchedule({ userId, targetLocalDate });
   return (data || []).map(normalizeSavedSchedule);
 }
