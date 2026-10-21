@@ -6,7 +6,7 @@ vi.mock('../lib/supabase/client', () => ({ supabase: mocks }));
 vi.mock('../lib/featureFlags', () => ({
   get ENABLE_TODAY_V2_SCHEDULER() { return mocks.enabled; },
 }));
-import { loadSchedules, replaceSchedule, updateDaySchedule } from '../v2/services/scheduling';
+import { isMissingScheduleSchema, loadSchedules, replaceSchedule, updateDaySchedule } from '../v2/services/scheduling';
 import { getScheduleSyncFailure, syncSavedSchedule } from '../v2/services/calendarScheduleSync';
 import { replaceTomorrowActions, loadTodayReviewState, loadTodayV2HomeState } from '../v2/services/todayReview';
 
@@ -22,6 +22,11 @@ function builder(result) {
 }
 
 describe('optional schedule repository', () => {
+  it('does not mistake a permission failure mentioning schema cache for missing schema', () => {
+    expect(isMissingScheduleSchema({ code: '42501', message: 'permission denied accessing schema cache' })).toBe(false);
+    expect(isMissingScheduleSchema({ code: 'PGRST301', message: 'JWT could not find function in schema cache' })).toBe(false);
+    expect(isMissingScheduleSchema({ code: 'PGRST205', message: 'Could not find table in schema cache' })).toBe(true);
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.enabled = true;

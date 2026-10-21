@@ -15,7 +15,39 @@ At 02:00 on Oct 11 with a 04:00 boundary, the review date is Oct 10 and the plan
 
 Drafts are keyed by review date. Review answers restore only for their review date, and Part 2 actions, starts, identities, and schedules restore only when the draft's `planningLocalDate` matches the session target. This preserves pre-midnight drafts during late-night review and rejects stale targets. Completing the source review locks its plan; no other review is silently completed or reopened. `planningLocalDate`/`planningSchedules` describe the next review-day date, and `planningContextSchedules` describes the active review day's carryover context. Home keeps its independent civil-date calendar and `civilFirstFiveMinutes`.
 
+After the active review is completed (necessarily before the next boundary), Home also shows a read-only **Tomorrow · {planningLocalDate}** calendar built from `planningSchedules`, `tomorrowFragments`, and `firstFiveMinutes`, stacked above Today's calendar (titled **Today's calendar · {civil date}**). `loadTodayV2HomeState` exposes this as `tomorrowCalendarLocalDate`. Between midnight and the boundary the plan date equals the civil date, so no separate Tomorrow calendar is shown and Today's calendar carries the plan. After the boundary the same fragments and blocks are Today's calendar and Review & Plan Part 1, and Part 2 plans the following day.
+
 - Apply `supabase/migrations/20261011_today_v2_day_schedule.sql` after the habit recurrence migration to enable Today timing edits. Its `today_v2_update_day_schedule` RPC changes one owned schedule source at a time without rewriting the plan, reopening yesterday's review, or replacing other blocks. Habit edits and removals retain recurrence overrides. Completed target days and historical carryover stay locked.
+
+## Production schema deployment and diagnostics
+
+Apply the existing Today V2 migrations in this exact dependency order (paths relative to `supabase/migrations/`):
+
+1. `20260928_today_v2_workflow.sql`
+2. `20261006_today_v2_controllable_and_first_five.sql`
+3. `20261007_today_v2_scheduling.sql`
+4. `20261008_today_v2_schedule_review_lock.sql`
+5. `20261009_today_v2_completion_release_guard.sql`
+6. `20261010_today_v2_habit_recurrence.sql`
+7. `20261011_today_v2_day_schedule.sql`
+
+These extend the existing production auth/application schema; do not replace them with `supabase/sql/today_v2_isolated_workflow.sql` or run retired generic V2 SQL. Google connection credential tables ship in `20261007_today_v2_scheduling.sql`; credentials remain backend-only.
+
+`SchemaDiagnostics`, mounted globally inside `AuthProvider`, independently checks named app-required tables and columns with read-only, zero-row GET selects for authenticated users, regardless of scheduler feature flags or the old habit-query fallback. GET preserves PostgREST error codes; HEAD would suppress the error body needed to distinguish missing schema from permissions. It maps missing schema to exact migration filenames, distinguishes permissions/network/unknown failures, and provides retry after deployment or connection recovery. A missing API-cache entry can require a cache reload rather than a migration rerun.
+
+The day-schedule migration adds only a private capability relation, `today_v2_day_schedule_writes`: all access is revoked from public, anon, authenticated **and service_role**. The diagnostic does **not** probe this inaccessible relation or invoke its scheduling RPC. Instead, an authenticated GET of `/rest/v1/` with `Accept: application/openapi+json` reads recognized Swagger 2/OpenAPI documentation and inspects `paths['/rpc/today_v2_update_day_schedule'].post` for the six expected argument properties. Only local schema references are resolved; external references are never fetched. An incompatible documented argument schema maps to `20261011_today_v2_day_schedule.sql` for migration/API-cache verification. An omitted route is **unverified**, because OpenAPI hides installed functions without the caller's EXECUTE grant. Unavailable documentation, permissions, network failures, and unrecognized responses also remain unverified, with the migration named for administrator verification. Healthy public tables and the documented signature clear the warning. Do not grant access to the private table to make diagnostics pass.
+
+Do **not** use RPC GET/HEAD/POST probes: GET/HEAD can execute volatile function bodies, and HEAD strips error bodies. OPTIONS is unsuitable because argument query parameters can be parsed as filters and its `Allow` header is not exposed to cross-origin JavaScript. Only the API-root documentation is fetched; no scheduling RPC is executed.
+
+Read-only existence/table/column probes cannot attest complete RPC/trigger bodies, including the function-only completion guard migration; administrators must verify those deployments from SQL/migration history. No mutation request is executed by the diagnostic, and no new migration is required.
+
+The global diagnostic panel uses relative positioning inside a shared fixed notices wrapper below the navigation header (`top-14`, z-index 90, maximum height half the viewport, vertical scrolling). Schema and storage notices stack without overlap and remain visible even when the routed app fills the screen. Missing-schema details start expanded; unverified details start collapsed, with exact migration filenames still visible in the summary. It is nonmodal and does not disable saving.
+
+## Client rollout and runtime support
+
+- **First PWA update rollout:** old installed builds do not contain the new reload prompt. Save pending work, close **all** app windows/tabs (including the installed PWA), then reopen once so the waiting worker can activate. During support troubleshooting, unregister the origin's service worker if closing/reopening does not recover the current build; avoid clearing account storage or drafts unnecessarily. Subsequent builds show **“New version available — reload”** with an explicit Reload button. Users should save before accepting; updates do not automatically reload an active editing session.
+- **Stack-trace artifacts:** production builds use `build.sourcemap: 'hidden'` and emit `.map` artifacts without a `sourceMappingURL` reference in JavaScript. Hidden does not mean the artifacts are absent. Retain the matching JavaScript and source maps securely for each build/version so minified production stack locations can be traced against the exact deployed artifact, not the latest local source. Record the build version with the reported error.
+- **Stripe configuration:** set `VITE_STRIPE_PUBLISHABLE_KEY` to the appropriate Stripe **publishable** key in the deployment's build environment and rebuild/redeploy after changes. Never put a Stripe secret key in a `VITE_*` variable. An undefined key passed from Settings initialization reaches the dependency's unguarded `pk.match(/^pk_test/)`; this reproduces a possible source of the reported error, but the production stack must be correlated with the retained build artifacts to confirm the incident. `SettingsV2` now validates the key before `loadStripe` and tolerates SDK-load failure; unavailable billing must not crash the app. Confirm missing-key behavior and correctly configured billing in staging.
 
 ## Boundary map
 
@@ -219,10 +251,9 @@ check-ins. Execute the complete file as one transaction; for `psql`, use
 Do not execute selected lines individually. Run it in staging first and verify
 below.
 
-For installations managed by timestamped migrations, the ordered prerequisites
-are `20260928_today_v2_workflow.sql`,
-`20261006_today_v2_controllable_and_first_five.sql`,
-`20261007_today_v2_scheduling.sql`, then the new
+For production installations managed by timestamped migrations, use the complete
+seven-file order in **Production schema deployment and diagnostics** above,
+including the completion guard, recurrence, and day-schedule migrations after
 `20261008_today_v2_schedule_review_lock.sql`. Do not edit/reapply old migration
 history as a substitute for the repair. Do not run superseded generic V2 or
 legacy journal SQL. Migration runners must wrap the repair in a transaction

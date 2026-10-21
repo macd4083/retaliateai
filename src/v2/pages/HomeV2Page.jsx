@@ -235,6 +235,32 @@ export default function HomeV2Page() {
     const label = schedule.label || source?.normalized_fragment_text || source?.fragment_text || habit?.name || snapshot?.snapshot_name || (isCarryover(schedule, date) ? 'Previous-day plan' : 'Calendar-day plan');
     return <div key={schedule.id || `${sourceId}:${schedule.starts_at}`} data-carryover-schedule-id={isCarryover(schedule, date) ? schedule.id : undefined} className="mt-2 rounded-lg border border-indigo-800/60 p-2 text-sm text-zinc-300">{label}<ScheduleTime schedule={schedule} timezone={homeState.timezoneName} localDate={date} /><span className="block text-xs text-indigo-300">{isCarryover(schedule, date) ? 'Previous-day plan' : 'Calendar-day plan'} · read-only</span></div>;
   });
+  const reviewCompleted = Boolean(homeState.review?.completed_at);
+  // Between midnight and the review boundary the plan date is the calendar date, so Today's calendar already shows it.
+  const planIsCalendarDay = reviewCompleted && Boolean(tomorrowDate) && tomorrowDate === civilDate;
+  const tomorrowCalendarDate = !ENABLE_TODAY_V2_SCHEDULER ? null
+    : homeState.tomorrowCalendarLocalDate !== undefined
+      ? homeState.tomorrowCalendarLocalDate
+      : (reviewCompleted && tomorrowDate && !planIsCalendarDay ? tomorrowDate : null);
+  const tomorrowCalendarItems = tomorrowCalendarDate ? [
+    ...(homeState.tomorrowFragments || []).map((item) => ({
+      key: `action:${item.id}`, source_id: item.id, type: 'action', label: item.normalized_fragment_text || item.fragment_text,
+    })),
+    ...(homeState.habitDefinitions || [])
+      .filter((habit) => tomorrowVisible.some((block) => (block.habit_definition_id || (block.source_type === 'habit' && block.source_id)) === habit.id))
+      .map((habit) => ({ key: `habit:${habit.id}`, source_id: habit.id, type: 'habit', label: habit.name })),
+  ] : [];
+  const tomorrowCalendarBlocks = tomorrowCalendarDate ? tomorrowVisible.map((block) => {
+    const sourceId = block.source_id || block.commitment_fragment_id || block.habit_definition_id;
+    const type = block.source_type || (block.habit_definition_id ? 'habit' : 'action');
+    const sourceKey = block.source_key || `${type}:${sourceId}`;
+    const item = tomorrowCalendarItems.find((candidate) => candidate.key === sourceKey);
+    const snapshot = todayHabits.find((candidate) => candidate.habit_definition_id === sourceId);
+    return {
+      ...block, source_key: sourceKey, label: block.label || item?.label || snapshot?.snapshot_name,
+      ...(isCarryover(block, tomorrowCalendarDate) ? { read_only_context: true } : {}),
+    };
+  }) : [];
 
   return (
     <AppShellV2 title="Today">
@@ -247,8 +273,9 @@ export default function HomeV2Page() {
         </section>
 
         <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
-          <h2 className="font-semibold text-white">Tomorrow you said you&apos;d prove it by:</h2>
+          <h2 className="font-semibold text-white">{planIsCalendarDay ? 'Today you said you\'d prove it by:' : 'Tomorrow you said you\'d prove it by:'}</h2>
           {ENABLE_TODAY_V2_SCHEDULER && <p className="mt-1 text-xs text-zinc-400">Planning date {tomorrowDate} · {homeState.timezoneName}</p>}
+          {ENABLE_TODAY_V2_SCHEDULER && planIsCalendarDay && <p className="mt-1 text-xs text-zinc-400">This plan is for today, {civilDate}. Its times and start focus are in Today&apos;s calendar below.</p>}
           {homeState.review?.controllable_focus && (
             <p className="mt-3 text-sm text-zinc-300">
               <span className="font-medium text-white">Under your control:</span> {homeState.review.controllable_focus}
@@ -259,34 +286,54 @@ export default function HomeV2Page() {
               {contractItems.map((item) => (
                 <li key={item.id} className="rounded-xl border border-zinc-800 px-3 py-2 text-sm text-zinc-200">
                   {item.normalized_fragment_text || item.fragment_text}
-                  <ScheduleTime schedule={findSchedule(tomorrowSchedules, item.id)} timezone={homeState.timezoneName} localDate={tomorrowDate} />
+                  {!(ENABLE_TODAY_V2_SCHEDULER && planIsCalendarDay) && <ScheduleTime schedule={findSchedule(tomorrowSchedules, item.id)} timezone={homeState.timezoneName} localDate={tomorrowDate} />}
                 </li>
               ))}
             </ul>
           ) : (
             <p className="mt-3 text-sm text-zinc-500">Finish tonight&apos;s review to lock in tomorrow&apos;s contract.</p>
           )}
-          {homeState.review?.completed_at && homeState.firstFiveMinutes && (
+          {homeState.review?.completed_at && homeState.firstFiveMinutes && !tomorrowCalendarDate && !(ENABLE_TODAY_V2_SCHEDULER && planIsCalendarDay) && (
             <p className="mt-3 text-sm text-zinc-300">
               <span className="font-medium text-white">Start with:</span> {homeState.firstFiveMinutes}
             </p>
           )}
-          {ENABLE_TODAY_V2_SCHEDULER && homeState.review?.completed_at && tomorrowSchedules.filter((schedule) => schedule.habit_definition_id || schedule.source_type === 'habit').map((schedule) => {
+          {ENABLE_TODAY_V2_SCHEDULER && homeState.review?.completed_at && !planIsCalendarDay && tomorrowSchedules.filter((schedule) => schedule.habit_definition_id || schedule.source_type === 'habit').map((schedule) => {
             const sourceId = schedule.habit_definition_id || schedule.source_id;
             const habit = (homeState.habitDefinitions || []).find((candidate) => candidate.id === sourceId);
             const snapshot = todayHabits.find((candidate) => candidate.habit_definition_id === sourceId);
             return <div key={schedule.id || sourceId} className="mt-2 rounded-lg border border-zinc-800 p-2 text-sm text-zinc-300">{habit?.name || snapshot?.snapshot_name || 'Scheduled habit'} · Habit<ScheduleTime schedule={schedule} timezone={homeState.timezoneName} localDate={tomorrowDate} /></div>;
           })}
-          {ENABLE_TODAY_V2_SCHEDULER && homeState.review?.completed_at && carryover(tomorrowVisible, tomorrowDate)}
+          {ENABLE_TODAY_V2_SCHEDULER && homeState.review?.completed_at && !planIsCalendarDay && carryover(tomorrowVisible, tomorrowDate)}
         </section>
 
-        {ENABLE_TODAY_V2_SCHEDULER && <div className="space-y-3">
+        {tomorrowCalendarDate && <section aria-label={`Tomorrow's calendar for ${tomorrowCalendarDate}`} data-home-calendar="tomorrow" className="space-y-3">
+          <p className="text-xs text-zinc-400">Tomorrow&apos;s plan · {tomorrowCalendarDate} · {homeState.timezoneName} · locked by tonight&apos;s review</p>
+          {homeState.firstFiveMinutes && <p className="text-sm text-zinc-300"><span className="font-medium text-white">Start with:</span> {homeState.firstFiveMinutes}</p>}
+          <TomorrowScheduler
+            title={`Tomorrow · ${tomorrowCalendarDate}`}
+            headingId="home-tomorrow-calendar-title"
+            preserveUnmatchedBlocks
+            userId={user?.id}
+            localDate={tomorrowCalendarDate}
+            timezone={homeState.timezoneName}
+            items={tomorrowCalendarItems}
+            blocks={tomorrowCalendarBlocks}
+            available={homeState.scheduleAvailable !== false}
+            availabilityError={homeState.scheduleDiagnostic?.message}
+            onRetry={load}
+            readOnly
+          />
+          <p className="text-xs text-zinc-500">This plan becomes Today&apos;s calendar and your Review &amp; Plan check-in after {formatBoundaryTime(homeState.dayBoundaryHour)}.</p>
+        </section>}
+
+        {ENABLE_TODAY_V2_SCHEDULER && <section aria-label={`Today's calendar for ${civilDate}`} data-home-calendar="today" className="space-y-3">
           <p className="text-xs text-zinc-400">Review day {todayDate} · {homeState.timezoneName}</p>
           {civilDiffers && <p className="text-xs text-zinc-400">Your checklist still belongs to review day {todayDate}; calendar days change at midnight.</p>}
           {calendarStarts && <p className="text-sm text-zinc-300"><span className="font-medium text-white">Start with:</span> {calendarStarts}</p>}
           <GoogleCalendarConnection userId={user?.id} localDate={civilDate} timezone={homeState.timezoneName} onEvents={setGoogleEvents} onControls={setGoogleControls} onWritePending={setGoogleWriting} returnPath="/home" completionSaving={scheduleSaveStatus === 'saving'} readOnly={Boolean(calendarReview?.completed_at)} />
           <TomorrowScheduler
-            title="Today's calendar"
+            title={`Today's calendar · ${civilDate}`}
             preserveUnmatchedBlocks
             userId={user?.id}
             localDate={civilDate}
@@ -308,7 +355,7 @@ export default function HomeV2Page() {
             completionSaving={googleWriting}
           />
           <button type="button" onClick={() => navigate('/today')} className="rounded-lg border border-zinc-700 px-3 py-2 text-sm">Open Review &amp; Plan</button>
-        </div>}
+        </section>}
 
         <section className="grid grid-cols-2 gap-3">
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">

@@ -16,6 +16,7 @@ import {
   reconcileTodayV2InputActions,
 } from './model';
 import { getHabitScheduleForDate } from './recurrence';
+import { safeGetStorageItem, safeSetStorageItem } from '../../lib/browserStorage';
 import { ENABLE_TODAY_V2_SCHEDULER } from '../../lib/featureFlags';
 import { createActionIdentity, reconcileActionIdentities, normalizeScheduleBlock } from './scheduling';
 import { replaceSchedule, isMissingScheduleSchema } from '../services/scheduling';
@@ -46,7 +47,7 @@ function readDraft(userId, localDate) {
   if (typeof window === 'undefined' || !userId || !localDate) return null;
 
   try {
-    const raw = window.localStorage.getItem(buildTodayV2DraftStorageKey(userId, localDate));
+    const raw = safeGetStorageItem(buildTodayV2DraftStorageKey(userId, localDate));
     return raw ? JSON.parse(raw) : null;
   } catch {
     return null;
@@ -54,12 +55,33 @@ function readDraft(userId, localDate) {
 }
 
 function writeDraft(userId, localDate, value) {
-  if (typeof window === 'undefined' || !userId || !localDate) return;
+  if (typeof window === 'undefined' || !userId || !localDate) return false;
 
   try {
-    window.localStorage.setItem(buildTodayV2DraftStorageKey(userId, localDate), JSON.stringify(value));
+    const existing = readDraft(userId, localDate);
+    if (existing && (existing.reviewLocalDate !== value.reviewLocalDate
+      || existing.planningLocalDate !== value.planningLocalDate)
+      && !archiveDraft(userId, localDate, existing)) return false;
+    return safeSetStorageItem(buildTodayV2DraftStorageKey(userId, localDate), JSON.stringify(value));
+  } catch {
+    return false;
+  }
+}
+
+function archiveDraft(userId, localDate, draft) {
+  try {
+    const value = JSON.stringify(draft);
+    const prefix = `${buildTodayV2DraftStorageKey(userId, localDate)}:archived`;
+    let key = prefix;
+    let suffix = 0;
+    while (safeGetStorageItem(key) !== null) {
+      if (safeGetStorageItem(key) === value) return true;
+      key = `${prefix}:${++suffix}`;
+    }
+    return safeSetStorageItem(key, value);
   } catch {
     // Best-effort local fallback only.
+    return false;
   }
 }
 
@@ -90,6 +112,7 @@ export function useTodayV2State(userId) {
   const [error, setError] = React.useState(null);
   const [state, setState] = React.useState(null);
   const [seedDiagnostic, setSeedDiagnostic] = React.useState(null);
+  const [draftStorageUnavailable, setDraftStorageUnavailable] = React.useState(false);
   const [desiredDirection, setDesiredDirectionState] = React.useState('');
   const [controllableFocus, setControllableFocusState] = React.useState('');
   const [tomorrowInput, setTomorrowInputState] = React.useState('');
@@ -313,8 +336,12 @@ export function useTodayV2State(userId) {
       if (generation !== loadGenerationRef.current || revision !== planRevisionRef.current
         || scheduleRevision !== scheduleRevisionRef.current || editRevision !== editRevisionRef.current) return;
       const storedPlanningDraft = next.review?.completed_at ? null : readDraft(userId, next.planningSourceLocalDate || next.todayLocalDate);
-      const draft = storedPlanningDraft?.planningLocalDate === (next.planningLocalDate || next.tomorrowLocalDate)
+      const draft = storedPlanningDraft?.reviewLocalDate === next.todayLocalDate
+        && storedPlanningDraft?.planningLocalDate === next.planningLocalDate
         ? storedPlanningDraft : null;
+      if (storedPlanningDraft && !draft) {
+        archiveDraft(userId, next.planningSourceLocalDate || next.todayLocalDate, storedPlanningDraft);
+      }
       const storedReviewDraft = next.review?.completed_at ? null : readDraft(userId, next.todayLocalDate);
       const reviewDraft = storedReviewDraft && (storedReviewDraft.reviewLocalDate || next.todayLocalDate) === next.todayLocalDate
         ? storedReviewDraft : null;
@@ -429,8 +456,9 @@ export function useTodayV2State(userId) {
   React.useEffect(() => {
     if (!userId || loadedUserRef.current !== userId || !state?.todayLocalDate) return;
 
+    let reviewDraftSaved = true;
     if (state.planningSourceLocalDate && state.planningSourceLocalDate !== state.todayLocalDate) {
-      writeDraft(userId, state.todayLocalDate, {
+      reviewDraftSaved = writeDraft(userId, state.todayLocalDate, {
         ...readDraft(userId, state.todayLocalDate),
         reviewLocalDate: state.todayLocalDate,
         desiredDirection,
@@ -439,7 +467,7 @@ export function useTodayV2State(userId) {
         controllableFocusNeedsSync: controllableFocusDirty,
       });
     }
-    writeDraft(userId, state.planningSourceLocalDate || state.todayLocalDate, {
+    const planningDraftSaved = writeDraft(userId, state.planningSourceLocalDate || state.todayLocalDate, {
       reviewLocalDate: state.todayLocalDate,
       planningLocalDate: state.planningLocalDate || state.tomorrowLocalDate,
       desiredDirection,
@@ -456,6 +484,7 @@ export function useTodayV2State(userId) {
       tomorrowPlanNeedsSync: tomorrowPlanDirty,
       updatedAt: new Date().toISOString(),
     });
+    setDraftStorageUnavailable(!reviewDraftSaved || !planningDraftSaved);
   }, [tomorrowActions, customTomorrowActions, actionIdentities, scheduleBlocks, scheduleSaveStatus, controllableFocus, controllableFocusDirty, desiredDirection, desiredDirectionDirty, firstFiveMinutes, normalizedTomorrowActions, state?.todayLocalDate, state?.planningSourceLocalDate, state?.planningLocalDate, tomorrowInput, tomorrowPlanDirty, userId]);
 
   const flushDesiredDirection = React.useCallback(async () => {
@@ -1135,6 +1164,7 @@ export function useTodayV2State(userId) {
     error,
     state,
     seedDiagnostic,
+    draftStorageUnavailable,
     desiredDirection,
     setDesiredDirection,
     controllableFocus,

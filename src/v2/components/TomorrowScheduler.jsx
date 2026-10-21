@@ -79,6 +79,7 @@ export default function TomorrowScheduler({
   userId, localDate, timezone = 'UTC', items = [], blocks = [], contextBlocks = [], googleEvents = [], available = true, readOnly = false, completionSaving = false,
   saveStatus, saveError, availabilityError, onUpdate, onUnschedule, onRetry, onGoogleEdit, onGoogleUpdate, resolveTime = resolveScheduleTime,
   title = 'Schedule tomorrow',
+  headingId = 'tomorrow-scheduler-title',
   preserveUnmatchedBlocks = false,
   showUnscheduledTray = true,
 }) {
@@ -357,9 +358,9 @@ export default function TomorrowScheduler({
   };
 
   return (
-    <section ref={schedulerRoot} aria-labelledby="tomorrow-scheduler-title" className="space-y-4 rounded-2xl border border-zinc-700 bg-zinc-900 p-4">
+    <section ref={schedulerRoot} aria-labelledby={headingId} className="space-y-4 rounded-2xl border border-zinc-700 bg-zinc-900 p-4">
       <div>
-        <h3 id="tomorrow-scheduler-title" className="font-semibold text-white">{title}</h3>
+        <h3 id={headingId} className="font-semibold text-white">{title}</h3>
         <p className="mt-1 text-sm text-zinc-400">{readOnly ? 'Your actions and habits, in one calendar. Review & Plan is where you update your ROI action checklist.' : 'Give your actions a place in the day. Scheduling is optional.'}</p>
         <p className="mt-1 text-xs text-zinc-400">{readOnly ? 'Read-only calendar. Your calendar works without connecting Google.' : showUnscheduledTray ? 'Your calendar works without connecting Google. Drag actions and habits into your day. Drag a block’s top or bottom to resize, then save the preview; click it to edit exact times. When connected, saved schedules also sync to your primary Google Calendar.' : 'Your calendar works without connecting Google. Click a saved block to edit its time, drag it to move it, or drag its top or bottom to resize and save the preview. When connected, saved schedules also sync to your primary Google Calendar.'}</p>
         <p className="mt-2 text-xs text-zinc-400">{localDate} · {timezone} · Times are optional</p>

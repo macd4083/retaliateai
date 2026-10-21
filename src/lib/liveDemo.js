@@ -1,3 +1,5 @@
+import { safeGetStorageItem } from './browserStorage';
+
 export const LIVE_DEMO_DATA_KEY = 'retaliateai_live_demo_data';
 export const LIVE_DEMO_SCRIPT_KEY = 'retaliateai_live_demo_script';
 export const LIVE_DEMO_CHANNEL_NAME = 'retaliateai-live-demo';
@@ -272,7 +274,7 @@ export function readLiveDemoScript() {
   if (typeof window === 'undefined') return DEFAULT_LIVE_DEMO_SCRIPT;
 
   try {
-    const raw = window.localStorage.getItem(LIVE_DEMO_SCRIPT_KEY);
+    const raw = safeGetStorageItem(LIVE_DEMO_SCRIPT_KEY);
     if (!raw) return DEFAULT_LIVE_DEMO_SCRIPT;
     return normalizeLiveDemoScript(JSON.parse(raw));
   } catch {
@@ -284,7 +286,7 @@ export function readLiveDemoData() {
   if (typeof window === 'undefined') return normalizeLiveDemoData(null);
 
   try {
-    const raw = window.localStorage.getItem(LIVE_DEMO_DATA_KEY);
+    const raw = safeGetStorageItem(LIVE_DEMO_DATA_KEY);
     const parsed = raw ? JSON.parse(raw) : null;
     return normalizeLiveDemoData(parsed);
   } catch {

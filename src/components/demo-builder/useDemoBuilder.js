@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useReducer } from 'react';
 import { createDemoProject, createDemoStep } from '../../utils/demoSchema';
 import { generateJSON } from '../../utils/embedGenerator';
+import { safeGetStorageItem, safeSetStorageItem } from '../../lib/browserStorage';
 
 const STORAGE_KEY = 'retaliateai_demo_builder';
 
@@ -17,7 +18,7 @@ function loadInitialDemo() {
   }
 
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = safeGetStorageItem(STORAGE_KEY);
     if (!raw) return createDemoProject();
     const parsed = JSON.parse(raw);
     return createDemoProject(parsed);
@@ -194,16 +195,16 @@ export function useDemoBuilder() {
 
   const saveToLocalStorage = useCallback(() => {
     if (typeof window === 'undefined') return;
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state.demo));
+    if (!safeSetStorageItem(STORAGE_KEY, JSON.stringify(state.demo))) return;
     if (state.demo?.id) {
-      window.localStorage.setItem(`retaliateai_demo_${state.demo.id}`, JSON.stringify(state.demo));
+      if (!safeSetStorageItem(`retaliateai_demo_${state.demo.id}`, JSON.stringify(state.demo))) return;
     }
     dispatch({ type: 'MARK_SAVED' });
   }, [dispatch, state.demo]);
 
   const loadFromLocalStorage = useCallback(() => {
     if (typeof window === 'undefined') return;
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = safeGetStorageItem(STORAGE_KEY);
     if (!raw) return;
     try {
       dispatch({ type: 'LOAD_DEMO', payload: JSON.parse(raw) });
