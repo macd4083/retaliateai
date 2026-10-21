@@ -102,8 +102,23 @@ describe('authenticated OpenAPI day-schedule diagnostics', () => {
   });
 
   it('keeps network failures unverified', async () => {
-    fetch.mockRejectedValue(new TypeError('Failed to fetch'));
-    expect((await probeDayScheduleMetadata()).status).toBe('network');
+    const error = new TypeError('Failed to fetch');
+    fetch.mockRejectedValue(error);
+    expect(await probeDayScheduleMetadata()).toMatchObject({
+      status: 'network', message: error.message, stack: error.stack,
+    });
+  });
+
+  it('retains API and session error messages without exposing authentication data', async () => {
+    fetch.mockImplementation(async () => response({ code: '42501', message: 'permission denied' }, 403));
+    expect(await probeDayScheduleMetadata()).toEqual({
+      status: 'permission', code: '42501', message: 'permission denied',
+    });
+    const error = new Error('session unavailable');
+    mocks.auth.getSession.mockResolvedValue({ data: { session: { access_token: 'test-session' } }, error });
+    expect(await probeDayScheduleMetadata()).toEqual({
+      status: 'unknown', code: null, message: error.message, stack: error.stack,
+    });
   });
 
   it('preserves actual Supabase GET error codes and reads only API-root metadata', async () => {
@@ -173,6 +188,16 @@ describe('read-only Today V2 table/column diagnostics', () => {
   it('maps missing base tables to their owner migration, not all subsequent migrations', async () => {
     clientWithError((table) => table === 'today_v2_habit_definitions' ? { code: '42P01' } : null);
     expect((await diagnoseTodayV2Schema()).missingMigrations).toEqual(['20260928_today_v2_workflow.sql']);
+  });
+
+  it('retains table probe error messages and stacks for console diagnostics', async () => {
+    const error = new Error('network connection failed');
+    clientWithError(() => error);
+    const result = await diagnoseTodayV2Schema();
+    expect(result.unresolvedChecks[0]).toMatchObject({
+      migration: '20260928_today_v2_workflow.sql',
+      status: 'network', message: error.message, stack: error.stack,
+    });
   });
 
   it('orders exact migration filenames by production dependencies', async () => {
