@@ -197,6 +197,7 @@ export default function HomeV2Page() {
     setScheduleError(null);
     try {
       const rows = await updateDaySchedule({
+        userId: user.id,
         targetLocalDate: civilDate, timezoneName: homeState.timezoneName,
         sourceType: item.type, sourceId: item.source_id,
         startsAt: times?.starts_at ?? null, endsAt: times?.ends_at ?? null,

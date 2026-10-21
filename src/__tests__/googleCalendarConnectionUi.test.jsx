@@ -5,6 +5,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 const auth = vi.hoisted(() => ({ getSession: vi.fn(), onAuthStateChange: vi.fn() }));
 vi.mock('../lib/supabase/client', () => ({ supabase: { auth } }));
 import GoogleCalendarConnection from '../v2/components/GoogleCalendarConnection';
+import { syncSavedSchedule } from '../v2/services/calendarScheduleSync';
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 describe('GoogleCalendarConnection UI contract', () => {
@@ -49,6 +50,27 @@ describe('GoogleCalendarConnection UI contract', () => {
     expect(eventRequest[1].credentials).toBe('same-origin');
     expect(events.mock.calls.at(-1)[0][0].title).toBe('Meeting');
     expect(container.textContent).toContain('Choose calendars (1)');
+  });
+  it('shows saved-local sync failure with an explicit retry that refreshes the shared overlay', async () => {
+    auth.getSession.mockResolvedValue({ data: { session: { access_token: 'test-session', user: { id: `user-${sequence}` } } } });
+    const original = fetchMock.getMockImplementation();
+    let failing = true;
+    fetchMock.mockImplementation((url, options) => url.includes('action=sync')
+      ? response(failing ? { error: 'Google unavailable' } : { connected: true, synced: true }, failing ? 502 : 200)
+      : original(url, options));
+    await render();
+    await act(async () => syncSavedSchedule({ userId: `user-${sequence}`, targetLocalDate: '2026-11-01' }));
+    expect(container.textContent).toContain('Saved locally, but Google Calendar sync failed');
+    expect(container.textContent).toContain('your local plan is safe');
+    await render({ readOnly: true, completionSaving: true });
+    expect([...container.querySelectorAll('button')].find((button) => button.textContent === 'Retry Google sync').disabled).toBe(true);
+    await render({ readOnly: true });
+    expect([...container.querySelectorAll('button')].find((button) => button.textContent === 'Retry Google sync').disabled).toBe(false);
+    failing = false;
+    const previous = fetchMock.mock.calls.filter(([url]) => url.includes('action=events')).length;
+    await click('Retry Google sync');
+    expect(container.textContent).not.toContain('sync failed');
+    expect(fetchMock.mock.calls.filter(([url]) => url.includes('action=events')).length).toBeGreaterThan(previous);
   });
   const editableEvent = {
     id: 'google:primary:occurrence', eventId: 'occurrence', calendarId: 'primary', etag: '"version-1"',

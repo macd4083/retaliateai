@@ -2,6 +2,7 @@ import { supabase } from '../../lib/supabase/client';
 import { ENABLE_TODAY_V2_SCHEDULER } from '../../lib/featureFlags';
 import { addDaysToLocalDate } from '../today/model';
 import { getScheduleDateBounds } from '../today/scheduling';
+import { syncSavedSchedule } from './calendarScheduleSync';
 
 export function isMissingScheduleSchema(error) {
   if (['42501', 'PGRST301', 'PGRST302'].includes(error?.code)
@@ -48,7 +49,7 @@ export async function loadSchedules(userId, todayLocalDate, tomorrowLocalDate, t
   }
 }
 
-export async function replaceSchedule({ targetLocalDate, timezoneName, blocks }) {
+export async function replaceSchedule({ targetLocalDate, timezoneName, blocks, userId }) {
   const { data, error } = await supabase.rpc('today_v2_replace_schedule', {
     p_target_local_date: targetLocalDate,
     p_timezone_name: timezoneName,
@@ -61,10 +62,11 @@ export async function replaceSchedule({ targetLocalDate, timezoneName, blocks })
     })),
   });
   if (error) throw error;
+  await syncSavedSchedule({ userId, targetLocalDate });
   return (data || []).map(normalizeSavedSchedule);
 }
 
-export async function updateDaySchedule({ targetLocalDate, timezoneName, sourceType, sourceId, startsAt, endsAt }) {
+export async function updateDaySchedule({ targetLocalDate, timezoneName, sourceType, sourceId, startsAt, endsAt, userId }) {
   if (!['action', 'habit'].includes(sourceType)
     || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sourceId || '')) {
     throw new Error('A persisted action or habit UUID is required');
@@ -81,6 +83,7 @@ export async function updateDaySchedule({ targetLocalDate, timezoneName, sourceT
     p_ends_at: endsAt,
   });
   if (error) throw error;
+  await syncSavedSchedule({ userId, targetLocalDate });
   return (data || []).map(normalizeSavedSchedule);
 }
 

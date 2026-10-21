@@ -2,6 +2,7 @@ import React from 'react';
 import { supabase } from '../../lib/supabase/client';
 import { getScheduleDateBounds } from '../today/scheduling';
 import GoogleCalendarEventEditor from './GoogleCalendarEventEditor';
+import { getScheduleSyncFailure, SCHEDULE_SYNC_EVENT, syncSavedSchedule } from '../services/calendarScheduleSync';
 
 const memoryCache = new Map();
 let cacheOwner = null;
@@ -59,6 +60,8 @@ export default function GoogleCalendarConnection({ userId, localDate = null, tim
   const [stale, setStale] = React.useState(false);
   const [reconnect, setReconnect] = React.useState(false);
   const [warning, setWarning] = React.useState('');
+  const [syncError, setSyncError] = React.useState(null);
+  const [syncRetrying, setSyncRetrying] = React.useState(false);
   const [visibleEvents, setVisibleEvents] = React.useState([]);
   const visibleEventsRef = React.useRef(visibleEvents);
   visibleEventsRef.current = visibleEvents;
@@ -222,6 +225,7 @@ export default function GoogleCalendarConnection({ userId, localDate = null, tim
       setWarning('');
       setCalendarBusy(false);
       if (detail.reason === 'disconnect' || detail.reason === 'reconnect') {
+        setSyncError(null);
         setStatus((previous) => ({ ...previous, connected: false, selectedCalendarIds: [] }));
         setCalendars([]);
         setSelected([]);
@@ -261,6 +265,19 @@ export default function GoogleCalendarConnection({ userId, localDate = null, tim
     onControls?.(controls);
     return () => onControls?.(null);
   }, [onControls, controls]);
+
+  React.useEffect(() => {
+    setSyncError(getScheduleSyncFailure(userId, localDate));
+    setSyncRetrying(false);
+    const changed = (event) => {
+      const { detail } = event;
+      if (detail.userId !== userId) return;
+      if (detail.targetLocalDate === localDate) setSyncError(detail.error);
+      if (detail.synced) invalidateCalendarCache(userId, 'schedule_sync');
+    };
+    window.addEventListener(SCHEDULE_SYNC_EVENT, changed);
+    return () => window.removeEventListener(SCHEDULE_SYNC_EVENT, changed);
+  }, [userId, localDate]);
 
   const locked = readOnly || completionSaving || writing || busy;
   const writableCalendars = calendars.filter((calendar) => ['owner', 'writer'].includes(calendar.accessRole));
@@ -392,7 +409,8 @@ export default function GoogleCalendarConnection({ userId, localDate = null, tim
         </div>
       </div>
       <p className="text-xs text-zinc-500">Your local plan stays in Retaliate. Connecting or disconnecting does not change it.</p>
-      <p className="text-xs text-zinc-400">Google consent allows viewing calendars and creating, editing, or deleting events on writable calendars. It does not allow managing calendars or exporting commitments.</p>
+      <p className="text-xs text-zinc-400">When connected, saved action and habit schedules sync to your primary Google Calendar, regardless of calendars selected for import. Google Calendar consent is required even if you signed into Retaliate with Google.</p>
+      <p className="text-xs text-zinc-500">Consent does not allow managing calendars.</p>
       {status?.needsUpgrade && <p className="text-xs text-amber-300">Your existing connection can still show availability. Reconnect to grant event management permission.</p>}
       {canManage && visibleEvents.some(canEdit) && <details>
         <summary className="cursor-pointer text-xs text-zinc-300">Manage Google events</summary>
@@ -416,6 +434,12 @@ export default function GoogleCalendarConnection({ userId, localDate = null, tim
         </details>
       )}
       <div aria-live="polite" className="text-xs text-zinc-400">
+        {syncError && <p className="text-amber-300">{syncError} <button type="button" className={buttonClass} disabled={busy || writing || completionSaving || syncRetrying || !userId || !authIdentity.current.allowed} onClick={async () => {
+          const key = context.current;
+          setSyncRetrying(true);
+          await syncSavedSchedule({ userId, targetLocalDate: localDate });
+          if (context.current === key) setSyncRetrying(false);
+        }}>{syncRetrying ? 'Retrying sync…' : 'Retry Google sync'}</button></p>}
         {callbackResult === 'denied' && <p className="text-amber-300">Google connection was canceled. Your local plan is unchanged.</p>}
         {callbackResult === 'error' && <p className="text-amber-300">Google connection could not be completed. Retry connecting; your local plan is unchanged.</p>}
         {(busy || writing) && <p>Updating calendar…</p>}

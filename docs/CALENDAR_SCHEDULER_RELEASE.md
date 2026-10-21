@@ -3,8 +3,8 @@
 Status: **not cleared for production** until the owner records a successful Vercel
 deployment, dashboard configuration, and real-account/device checks below.
 Automated tests are not evidence of Google consent or iPhone/PWA behavior.
-Google event management and timed-block resizing are included. No weekly review,
-Apple sync, automatic commitment export, or legacy migration is included.
+Google event management, automatic saved-schedule sync, and timed-block resizing
+are included. No weekly review, Apple sync, or legacy migration is included.
 
 ## Historical deployment evidence (not a verified current failure)
 
@@ -97,6 +97,35 @@ before that evidence exists.
   API/SPA/crypto/timeout regressions harden repeatable deployment validation.
 
 ## Recovered Review & Plan integration
+
+Connected planners now create/update Google Calendar events after native action
+and habit schedules are saved (including drag/resize, unscheduling, and action
+title/deletion edits). The destination is always the connected account's primary
+calendar; import selections do not move synced events. Event-edit permission and
+primary-calendar writer/owner access are required, including when app sign-in
+already uses Google. This uses Calendar v3, not Drive.
+
+Private owner/date/source markers and deterministic event IDs prevent duplicate
+retry/reload creation. Deleted IDs use a bounded recreation chain (100 generations).
+Unscheduling/deletion removes only this user's marked events for the saved date;
+recurring/locked events are never modified. Matching native blocks suppress their
+Google overlay copies. Local saves survive Google failures: the Calendar panel
+shows a separate error and **Retry Google sync** reconciles the persisted date.
+There is no background retry loop or reverse sync from Google to native blocks.
+Existing unscheduled commitments are not exported; pre-existing scheduled dates
+sync on their next save or explicit retry, not via a historical backfill.
+Deploy browser/API changes together and apply
+`20261012_google_schedule_sync_locks.sql` in addition to the existing
+scheduler/Google connection migrations. Its server-only 60-second leases serialize
+same-user/date reconciliation across API workers (not just browser tabs).
+Unchanged Google events are not rewritten, so retries can reach remaining blocks;
+all remote writes recheck persisted schedules/labels and reject stale snapshots.
+A final fingerprint check prevents reporting synced success if a native save
+lands during the last Google request; retry reconciles its newest persisted state.
+Retry remains available for completed reviews because it reconciles saved data,
+not editable drafts (auth loss and pending writes/completion still disable it).
+Busy/failed sync remains explicitly retryable without losing the local save.
+No new dependency is required.
 
 The calendar work from merged PRs #359–361 and #365 is already in the live V2
 code path; it does not need copying from a legacy page. Previously, an unset
