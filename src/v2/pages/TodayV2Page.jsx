@@ -240,6 +240,7 @@ export default function TodayV2Page() {
     scheduleBlocks,
     scheduleSaveStatus,
     scheduleError,
+    reloadSavedSchedule,
     scheduleAvailable,
     scheduleDiagnostic,
     updateSchedule,
@@ -448,12 +449,13 @@ export default function TodayV2Page() {
           <div className="space-y-2">
             {visibleHabits.map((occurrence) => {
               const habitDefinition = habitDefinitionsById.get(occurrence.habit_definition_id) || occurrence;
+              const habitName = (!isCompleted && habitDefinition.name) || occurrence.snapshot_name;
               const booleanAnswer = getTodayV2BooleanAnswer(occurrence.boolean_response, occurrence.answered_at);
               return (
                 <div key={occurrence.id} className="rounded-xl border border-zinc-800 p-3">
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <p className="text-sm text-zinc-200">{occurrence.snapshot_name}</p>
+                      <p className="text-sm text-zinc-200">{habitName}</p>
                       <p className="mt-1 text-xs text-zinc-500">
                         {occurrence.snapshot_response_type === TODAY_V2_RESPONSE_TYPES.NUMBER
                           ? occurrence.snapshot_unit || 'units'
@@ -464,7 +466,7 @@ export default function TodayV2Page() {
                       <div className="relative">
                         <button
                           type="button"
-                          aria-label={`Habit options for ${occurrence.snapshot_name}`}
+                          aria-label={`Habit options for ${habitName}`}
                           onClick={() => setMenuOpenHabitId((current) => current === habitDefinition.id ? null : habitDefinition.id)}
                           className="text-zinc-400 hover:text-white"
                         >
@@ -683,7 +685,7 @@ export default function TodayV2Page() {
             })}
             available={scheduleAvailable}
             availabilityError={isMissingScheduleSchema(scheduleDiagnostic)
-              ? 'Calendar database setup is incomplete. Apply the Today V2 scheduling migrations in order through 20261011_today_v2_day_schedule.sql, then retry scheduling.'
+              ? 'Calendar database setup is incomplete. Apply the Today V2 scheduling migrations in order through 20261013_today_v2_schedule_conflicts.sql, then retry scheduling.'
               : scheduleDiagnostic?.message}
             readOnly={readOnly}
             saveStatus={scheduleSaveStatus}
@@ -695,6 +697,11 @@ export default function TodayV2Page() {
             onUnschedule={unschedule}
             onRetry={load}
           />
+          {scheduleError?.code === '40001' && (
+            <button type="button" disabled={readOnly} onClick={reloadSavedSchedule} className="rounded-lg border border-zinc-700 px-3 py-2 text-sm">
+              Archive pending calendar and load saved times
+            </button>
+          )}
           </div>
         )}
 

@@ -138,6 +138,7 @@ export function useTodayV2State(userId) {
   const [scheduleError, setScheduleError] = React.useState(null);
   const identitiesRef = React.useRef([]);
   const scheduleRef = React.useRef([]);
+  const scheduleBaseRef = React.useRef([]);
   const scheduleRevisionRef = React.useRef(0);
   const scheduleSavedRevisionRef = React.useRef(0);
   const schedulePromiseRef = React.useRef(null);
@@ -336,7 +337,7 @@ export function useTodayV2State(userId) {
     setFirstFiveMinutesState(value);
   }, [canEdit]);
 
-  const load = React.useCallback(async () => {
+  const load = React.useCallback(async ({ useSavedSchedule = false } = {}) => {
     const generation = ++loadGenerationRef.current;
     const revision = planRevisionRef.current;
     const scheduleRevision = scheduleRevisionRef.current;
@@ -421,7 +422,12 @@ export function useTodayV2State(userId) {
       identitiesRef.current = nextIdentities;
       setActionIdentities(nextIdentities);
       const sourceKeys = new Map(nextIdentities.filter((item) => item.persistedId).map((item) => [item.persistedId, item.key]));
-      const nextSchedules = draft?.scheduleNeedsSync && Array.isArray(draft.scheduleBlocks)
+      const recoverSchedule = !useSavedSchedule && draft?.scheduleNeedsSync;
+      scheduleBaseRef.current = recoverSchedule
+        ? (Array.isArray(draft.scheduleBaseBlocks) ? draft.scheduleBaseBlocks : [])
+        : (next.planningSchedules || next.tomorrowSchedules || [])
+          .filter((row) => !row.target_local_date || row.target_local_date === next.planningLocalDate);
+      const nextSchedules = recoverSchedule && Array.isArray(draft.scheduleBlocks)
         ? draft.scheduleBlocks
         : (next.planningSchedules || next.tomorrowSchedules || []).filter((row) => !row.target_local_date || row.target_local_date === (next.planningLocalDate || next.tomorrowLocalDate)).map((row) => ({
           ...row, source_key: row.source_type === 'habit' ? `habit:${row.source_id}` : sourceKeys.get(row.source_id),
@@ -430,9 +436,9 @@ export function useTodayV2State(userId) {
         ...(next.habitDefinitions || []).filter((habit) => isTodayV2HabitScheduledForDate(habit, next.planningLocalDate || next.tomorrowLocalDate)).map((habit) => `habit:${habit.id}`)]);
       scheduleRef.current = nextSchedules.filter((block) => validKeys.has(block.source_key));
       setScheduleBlocks(scheduleRef.current);
-      scheduleRevisionRef.current = draft?.scheduleNeedsSync ? 1 : 0;
+      scheduleRevisionRef.current = recoverSchedule ? 1 : 0;
       scheduleSavedRevisionRef.current = 0;
-      setScheduleSaveStatus(draft?.scheduleNeedsSync ? 'offline' : 'saved');
+      setScheduleSaveStatus(recoverSchedule ? 'offline' : 'saved');
       setScheduleError(null);
 
       writeErrorsRef.current.clear();
@@ -474,6 +480,25 @@ export function useTodayV2State(userId) {
     }
   }, [userId]);
 
+  const reloadSavedSchedule = React.useCallback(async () => {
+    if (!canEdit() || schedulePromiseRef.current) return;
+    const currentState = stateRef.current;
+    const localDate = currentState.planningSourceLocalDate || currentState.todayLocalDate;
+    const draft = {
+      ...readDraft(userId, localDate),
+      reviewLocalDate: currentState.todayLocalDate,
+      planningLocalDate: currentState.planningLocalDate || currentState.tomorrowLocalDate,
+      scheduleBlocks: scheduleRef.current,
+      scheduleBaseBlocks: scheduleBaseRef.current,
+      scheduleNeedsSync: scheduleRevisionRef.current !== scheduleSavedRevisionRef.current,
+    };
+    if (!archiveDraft(userId, localDate, draft)) {
+      setScheduleError(new Error('Could not archive your pending calendar. Free browser storage before retrying.'));
+      return;
+    }
+    await load({ useSavedSchedule: true });
+  }, [canEdit, load, userId]);
+
   React.useEffect(() => {
     load();
     return () => { loadGenerationRef.current += 1; };
@@ -509,6 +534,7 @@ export function useTodayV2State(userId) {
       customTomorrowActions,
       actionIdentities,
       scheduleBlocks,
+      scheduleBaseBlocks: scheduleBaseRef.current,
       scheduleNeedsSync: scheduleRevisionRef.current !== scheduleSavedRevisionRef.current,
       firstFiveMinutes,
       tomorrowPlanNeedsSync: tomorrowPlanDirty,
@@ -889,8 +915,10 @@ export function useTodayV2State(userId) {
         const rows = await replaceSchedule({
           userId: ownerId,
           targetLocalDate: currentState.planningLocalDate || currentState.tomorrowLocalDate, timezoneName: currentState.timezoneName, blocks,
+          expectedBlocks: scheduleBaseRef.current,
         });
         if (generation !== loadGenerationRef.current || currentUserRef.current !== ownerId || !isCurrentDateScope(stateRef.current)) return;
+        scheduleBaseRef.current = rows;
         scheduleSavedRevisionRef.current = revision;
         if (revision === scheduleRevisionRef.current) {
           scheduleRef.current = snapshot.map((block) => ({
@@ -1275,6 +1303,7 @@ export function useTodayV2State(userId) {
     scheduleSaveStatus,
     scheduleSaveLabel: SAVE_STATUS_LABELS[scheduleSaveStatus] || SAVE_STATUS_LABELS.idle,
     scheduleError,
+    reloadSavedSchedule,
     scheduleAvailable,
     scheduleDiagnostic: state?.scheduleDiagnostic || null,
     updateSchedule,

@@ -72,6 +72,58 @@ describe('Review & Plan calendar integration', () => {
     }));
   });
 
+  it.each(['exercise_movement', null])('displays a saved rename for a habit with seed key %s', async (seedKey) => {
+    const definition = {
+      id: 'exercise', seed_key: seedKey, name: 'Exercise/Movement',
+      response_type: 'boolean', schedule_weekdays: [1], unit: '',
+    };
+    const occurrence = {
+      id: 'exercise-occurrence', habit_definition_id: definition.id,
+      snapshot_name: definition.name, snapshot_response_type: 'boolean',
+      boolean_response: true, answered_at: '2026-10-07T10:00:00Z',
+    };
+    review.visibleHabits = [occurrence];
+    review.habitDefinitionsById = new Map([[definition.id, definition]]);
+    review.saveHabitDefinition = vi.fn(async (draft) => {
+      review.habitDefinitionsById = new Map([[definition.id, draft]]);
+    });
+    await render();
+    await act(async () => container.querySelector('[aria-label="Habit options for Exercise/Movement"]').click());
+    await act(async () => [...container.querySelectorAll('button')].find((node) => node.textContent === 'Edit').click());
+    await act(async () => {
+      const input = document.querySelector('[aria-label="Habit name"]');
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, 'Exercise/Movement (plank)');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => [...document.querySelectorAll('button')].find((node) => node.textContent === 'Save Habit').click());
+    expect(review.saveHabitDefinition).toHaveBeenCalledWith(expect.objectContaining({
+      id: definition.id, name: 'Exercise/Movement (plank)',
+    }));
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(container.querySelector('[aria-label="Habit options for Exercise/Movement (plank)"]')).not.toBeNull();
+    expect([...container.querySelectorAll('p')].some((node) => node.textContent === 'Exercise/Movement (plank)')).toBe(true);
+    expect(occurrence).toMatchObject({
+      snapshot_name: 'Exercise/Movement', boolean_response: true, answered_at: '2026-10-07T10:00:00Z',
+    });
+    await act(async () => container.querySelector('[aria-label="Habit options for Exercise/Movement (plank)"]').click());
+    await act(async () => [...container.querySelectorAll('button')].find((node) => node.textContent === 'Edit').click());
+    expect(document.querySelector('[aria-label="Habit name"]').value).toBe('Exercise/Movement (plank)');
+  });
+
+  it.each([false, true])('retains snapshot labels when a definition is missing or the review is completed (%s)', async (completed) => {
+    review.visibleHabits = [{
+      id: 'exercise-occurrence', habit_definition_id: 'exercise',
+      snapshot_name: 'Exercise/Movement', snapshot_response_type: 'boolean',
+    }];
+    review.isCompleted = completed;
+    review.habitDefinitionsById = completed
+      ? new Map([['exercise', { id: 'exercise', name: 'Exercise/Movement (plank)' }]])
+      : new Map();
+    await render();
+    expect([...container.querySelectorAll('p')].some((node) => node.textContent === 'Exercise/Movement')).toBe(true);
+    expect(container.textContent).not.toContain('Exercise/Movement (plank)');
+  });
+
   it.each([
     ['missing Google configuration', { connected: false, configured: false, schemaAvailable: true }],
     ['missing Google connection schema', { connected: false, configured: true, schemaAvailable: false }],
@@ -133,7 +185,7 @@ describe('Review & Plan calendar integration', () => {
     review.scheduleDiagnostic = { code: '42P01', message: 'relation does not exist' };
     await render();
     expect(container.textContent).toContain('Calendar database setup is incomplete');
-    expect(container.textContent).toContain('20261011_today_v2_day_schedule.sql');
+    expect(container.textContent).toContain('20261013_today_v2_schedule_conflicts.sql');
     expect(container.textContent).toContain('You can still save your actions and complete your review');
     expect(container.querySelectorAll('[data-slot-timestamp]')).toHaveLength(96);
     expect(container.querySelector('[data-scheduler-edit-key="action:write"]').disabled).toBe(true);

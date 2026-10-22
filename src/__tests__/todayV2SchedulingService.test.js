@@ -280,12 +280,40 @@ describe('optional schedule repository', () => {
   it('uses atomic schedule replacement and propagates failures for dirty recovery', async () => {
     const blocks = [{ source_type: 'habit', source_id: 'habit-id', starts_at: '2026-09-29T10:00:00Z', ends_at: '2026-09-29T10:30:00Z' }];
     await replaceSchedule({ targetLocalDate: '2026-09-29', timezoneName: 'UTC', blocks });
-    expect(mocks.rpc).toHaveBeenCalledWith('today_v2_replace_schedule', {
+    expect(mocks.rpc).toHaveBeenCalledWith('today_v2_replace_schedule_checked', {
       p_target_local_date: '2026-09-29', p_timezone_name: 'UTC',
       p_blocks: [{ habit_definition_id: 'habit-id', starts_at: blocks[0].starts_at, ends_at: blocks[0].ends_at }],
+      p_expected_blocks: [],
     });
     mocks.rpc.mockResolvedValue({ error: new Error('schedule failed') });
     await expect(replaceSchedule({ targetLocalDate: '2026-09-29', timezoneName: 'UTC', blocks })).rejects.toThrow('schedule failed');
+  });
+
+  it('sends the loaded schedule baseline and never falls back to an unchecked save', async () => {
+    const expectedBlocks = [{
+      commitment_fragment_id: 'action-id', source_type: 'action', source_id: 'action-id',
+      starts_at: '2026-09-29T09:00:00Z', ends_at: '2026-09-29T09:30:00Z', timezone_name: 'America/Chicago',
+    }];
+    const conflict = { code: '40001', message: 'Calendar changed; reload saved times.' };
+    mocks.rpc.mockResolvedValue({ error: conflict });
+    await expect(replaceSchedule({
+      targetLocalDate: '2026-09-29', timezoneName: 'UTC', blocks: [], expectedBlocks,
+    })).rejects.toEqual(conflict);
+    expect(mocks.rpc).toHaveBeenCalledExactlyOnceWith('today_v2_replace_schedule_checked', {
+      p_target_local_date: '2026-09-29', p_timezone_name: 'UTC', p_blocks: [],
+      p_expected_blocks: [{
+        commitment_fragment_id: 'action-id', starts_at: expectedBlocks[0].starts_at,
+        ends_at: expectedBlocks[0].ends_at, timezone_name: 'America/Chicago',
+      }],
+    });
+  });
+
+  it('requires the safe-save migration instead of silently using the old replacement RPC', async () => {
+    mocks.rpc.mockResolvedValue({ error: { code: 'PGRST202', message: 'Function not found' } });
+    await expect(replaceSchedule({
+      targetLocalDate: '2026-09-29', timezoneName: 'UTC', blocks: [],
+    })).rejects.toMatchObject({ code: 'PGRST202', message: expect.stringContaining('20261013_today_v2_schedule_conflicts.sql') });
+    expect(mocks.rpc).toHaveBeenCalledTimes(1);
   });
 
   it('maps actual SQL-shaped schedule results and sends exclusive native FK source columns', async () => {

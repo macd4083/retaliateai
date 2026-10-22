@@ -18,6 +18,7 @@ Drafts are keyed by review date. Review answers restore only for their review da
 After the active review is completed (necessarily before the next boundary), Home also shows a read-only **Tomorrow · {planningLocalDate}** calendar built from `planningSchedules`, `tomorrowFragments`, and `firstFiveMinutes`, stacked above Today's calendar (titled **Today's calendar · {civil date}**). `loadTodayV2HomeState` exposes this as `tomorrowCalendarLocalDate`. Between midnight and the boundary the plan date equals the civil date, so no separate Tomorrow calendar is shown and Today's calendar carries the plan. After the boundary the same fragments and blocks are Today's calendar and Review & Plan Part 1, and Part 2 plans the following day.
 
 - Apply `supabase/migrations/20261011_today_v2_day_schedule.sql` after the habit recurrence migration to enable Today timing edits. Its `today_v2_update_day_schedule` RPC changes one owned schedule source at a time without rewriting the plan, reopening yesterday's review, or replacing other blocks. Habit edits and removals retain recurrence overrides. Completed target days and historical carryover stay locked.
+- Apply `supabase/migrations/20261013_today_v2_schedule_conflicts.sql` before deploying checked Review & Plan schedule saves. `today_v2_replace_schedule_checked` compares the loaded calendar snapshot under the same review/target locks before replacing times. A newer Home or other-client edit rejects the save instead of silently overwriting it; the pending draft retains its original baseline across reloads. The conflict recovery button archives the pending draft before loading saved times. Older pending drafts without a baseline fail closed against a populated calendar. There is no fallback to unchecked replacement when the RPC is missing. This protects schedule replacement, not concurrent edits to action text or every write from an older installed client; it does not shift historical plan dates.
 
 ## Production schema deployment and diagnostics
 
@@ -30,7 +31,8 @@ Apply the existing Today V2 migrations in this exact dependency order (paths rel
 5. `20261009_today_v2_completion_release_guard.sql`
 6. `20261010_today_v2_habit_recurrence.sql`
 7. `20261011_today_v2_day_schedule.sql`
-8. `20261022_today_v2_becoming_rating.sql`
+8. `20261013_today_v2_schedule_conflicts.sql`
+9. `20261022_today_v2_becoming_rating.sql`
 
 These extend the existing production auth/application schema; do not replace them with `supabase/sql/today_v2_isolated_workflow.sql` or run retired generic V2 SQL. Google connection credential tables ship in `20261007_today_v2_scheduling.sql`; credentials remain backend-only.
 
@@ -182,6 +184,11 @@ Materialized daily habit checklist rows with immutable snapshots:
 - boolean or numeric response
 - `answered_at` distinguishes unanswered from explicit `false`
 - historical meaning survives later definition edits or archival
+
+The open Review & Plan checklist and Today calendar display the current definition name so saved
+renames appear immediately, falling back to the occurrence snapshot if the
+definition is unavailable. Completed reviews retain snapshot names. Response
+types, units, answers, and stored snapshots are unchanged by this display rule.
 
 ## Failure handling
 - Default seeding is optional. If `today_v2_seed_default_habits_for_user` is absent or fails, Today V2 still renders with an empty/addable habit state and a non-blocking diagnostic.

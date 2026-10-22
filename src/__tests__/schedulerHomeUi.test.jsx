@@ -82,6 +82,24 @@ describe('scheduled Home calendar', () => {
     }));
   });
 
+  it.each([
+    [false, true, 'Exercise/Movement (plank)'],
+    [true, true, 'Exercise/Movement'],
+    [false, false, 'Exercise/Movement'],
+  ])('labels calendar habits using saved names unless completed (%s) or missing definitions (%s)', async (completed, hasDefinition, expected) => {
+    const base = await mocks.load();
+    mocks.load.mockResolvedValue({
+      ...base,
+      review: { completed_at: completed ? '2026-10-07T12:00:00Z' : null },
+      habitOccurrences: [{ ...habit, snapshot_name: 'Exercise/Movement' }],
+      habitDefinitions: hasDefinition ? [{ id: 'definition', name: 'Exercise/Movement (plank)' }] : [],
+    });
+    await render();
+    const block = container.querySelector('[data-schedule-key="habit:definition"]');
+    expect(block.textContent).toContain(expected);
+    if (expected === 'Exercise/Movement') expect(block.textContent).not.toContain('(plank)');
+  });
+
   it('hides scheduler-only display when the feature flag is off', async () => {
     mocks.enabled = false;
     await render();
