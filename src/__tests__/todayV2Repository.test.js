@@ -16,11 +16,13 @@ import {
   completeTodayV2Review,
   getTodayV2RouteTarget,
   loadTodayReviewState,
+  loadTodayV2HomeState,
   reopenTodayV2Review,
   replaceTomorrowActions,
   setFollowThroughCompletion,
   seedDefaultHabits,
   updateControllableFocus,
+  updateBecomingRating,
   upsertHabitDefinition,
   ensureTodayV2AutomaticHabitSchedules,
 } from '../v2/services/todayReview';
@@ -106,6 +108,51 @@ describe('TodayV2 repository', () => {
   afterEach(() => {
     vi.useRealTimers();
   });
+
+    it.each([1, 10, null])('persists optional progress rating %s on the owned review', async (rating) => {
+      const tracker = {};
+      supabaseMock.from.mockImplementation(() => createThenableBuilder({ error: null }, tracker));
+      await updateBecomingRating('review-1', rating);
+      expect(supabaseMock.from).toHaveBeenCalledExactlyOnceWith(TODAY_V2_TABLES.DAILY_REVIEWS);
+      expect(tracker.update).toEqual({ becoming_rating: rating });
+      expect(tracker.eq).toEqual([['id', 'review-1']]);
+    });
+
+    it.each([0, 11, 1.5, '7', undefined, NaN])('rejects invalid progress rating %s before persistence', async (rating) => {
+      await expect(updateBecomingRating('review-1', rating)).rejects.toThrow(/integer from 1 to 10/);
+      expect(supabaseMock.from).not.toHaveBeenCalled();
+    });
+
+    it('returns nullable daily ratings in Home history without changing completion requirements', async () => {
+      const history = [
+        { local_date: '2026-09-28', becoming_rating: 8, completed_at: null },
+        { local_date: '2026-09-27', becoming_rating: null, completed_at: 'completed' },
+      ];
+      const trackers = [];
+      let reviews = 0;
+      supabaseMock.rpc.mockResolvedValue({ error: null });
+      supabaseMock.from.mockImplementation((table) => {
+        const tracker = { table };
+        trackers.push(tracker);
+        if (table === TODAY_V2_TABLES.DAILY_REVIEWS) {
+          reviews += 1;
+          return createThenableBuilder({
+            data: reviews === 1
+              ? { id: 'review-1', local_date: '2026-09-28', becoming_rating: 8, completed_at: null }
+              : reviews === 2 ? null : history,
+            error: null,
+          }, tracker);
+        }
+        return createThenableBuilder({ data: [], error: null }, tracker);
+      });
+      const home = await loadTodayV2HomeState('user-1', { timezoneName: 'UTC' });
+      expect(home.becomingRatings).toBe(history);
+      expect(home.review.becoming_rating).toBe(8);
+      const historyTracker = trackers.find((tracker) => tracker.selection?.startsWith('local_date, desired_direction'));
+      expect(historyTracker.selection).toContain('becoming_rating');
+      expect(historyTracker.eq).toContainEqual(['user_id', 'user-1']);
+      expect(historyTracker.lte).toContainEqual(['local_date', '2026-09-28']);
+    });
 
   it('treats a missing seed RPC as a non-blocking diagnostic', async () => {
     supabaseMock.rpc.mockResolvedValue({

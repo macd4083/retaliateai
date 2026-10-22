@@ -20,6 +20,7 @@ const serviceMocks = vi.hoisted(() => ({
   setFollowThroughCompletion: vi.fn(),
   updateDesiredDirection: vi.fn(),
   updateControllableFocus: vi.fn(),
+  updateBecomingRating: vi.fn(),
   upsertHabitDefinition: vi.fn(),
   upsertHabitLog: vi.fn(),
 }));
@@ -61,6 +62,7 @@ function makeState({ todayLocalDate = '2026-09-28', tomorrowLocalDate = '2026-09
       timezone_name: 'UTC',
       desired_direction: '',
       controllable_focus: null,
+      becoming_rating: null,
       completed_at: null,
       updated_at: `${todayLocalDate}T12:00:00.000Z`,
     },
@@ -111,6 +113,7 @@ describe('useTodayV2State', () => {
     scheduleMocks.replaceSchedule.mockImplementation(async ({ blocks }) => blocks.map((block, index) => ({ ...block, id: `block-${index}` })));
     serviceMocks.updateDesiredDirection.mockResolvedValue(undefined);
     serviceMocks.updateControllableFocus.mockResolvedValue(undefined);
+    serviceMocks.updateBecomingRating.mockResolvedValue(undefined);
     serviceMocks.replaceTomorrowActions.mockImplementation(async ({ rawPlanText, actionTexts }) => ({
       rawPlanText: rawPlanText.trim(),
       fragments: actionTexts,
@@ -162,6 +165,138 @@ describe('useTodayV2State', () => {
     expect(latest.draftStorageUnavailable).toBe(true);
     expect(window.localStorage.getItem('today-v2-draft:user-1:2026-09-28')).toBeNull();
   });
+
+    it('autosaves an optional integer rating and explicitly clears it to null', async () => {
+      await renderHook();
+      expect(latest.becomingRating).toBeNull();
+      await act(async () => { latest.setBecomingRating(8); });
+      expect(JSON.parse(window.localStorage.getItem('today-v2-draft:user-1:2026-09-28'))).toMatchObject({
+        becomingRating: 8, becomingRatingNeedsSync: true,
+      });
+      await act(async () => { vi.advanceTimersByTime(801); });
+      expect(serviceMocks.updateBecomingRating).toHaveBeenCalledExactlyOnceWith('review-2026-09-28', 8);
+      expect(latest.state.review.becoming_rating).toBe(8);
+      await act(async () => { latest.setBecomingRating(null); await latest.flushAll(); });
+      expect(serviceMocks.updateBecomingRating).toHaveBeenLastCalledWith('review-2026-09-28', null);
+      expect(latest.state.review.becoming_rating).toBeNull();
+      expect(latest.becomingRatingSaveStatus).toBe('saved');
+      for (const invalid of [0, 11, 2.5, '8', undefined]) {
+        await act(async () => latest.setBecomingRating(invalid));
+        expect(latest.becomingRating).toBeNull();
+      }
+    });
+
+    it.each([7, null])('recovers a dirty rating draft (%s) and saves it before completion', async (rating) => {
+      const initial = makeState();
+      initial.review.becoming_rating = 4;
+      serviceMocks.loadTodayReviewState.mockResolvedValue(initial);
+      window.localStorage.setItem('today-v2-draft:user-1:2026-09-28', JSON.stringify({
+        reviewLocalDate: '2026-09-28', planningLocalDate: '2026-09-29',
+        becomingRating: rating, becomingRatingNeedsSync: true,
+      }));
+      serviceMocks.completeTodayV2Review.mockImplementation(async () => {
+        expect(serviceMocks.updateBecomingRating).toHaveBeenCalledWith(initial.review.id, rating);
+        return { ...initial.review, becoming_rating: rating, completed_at: 'completed' };
+      });
+      await renderHook();
+      expect(latest.becomingRating).toBe(rating);
+      await act(async () => { await latest.completeReview(); });
+      expect(latest.state.review.becoming_rating).toBe(rating);
+      expect(latest.isCompleted).toBe(true);
+    });
+
+    it('keeps the rating optional and locks completed server evidence instead of dirty drafts', async () => {
+      const initial = makeState();
+      initial.review = { ...initial.review, becoming_rating: 6, completed_at: 'completed' };
+      serviceMocks.loadTodayReviewState.mockResolvedValue(initial);
+      window.localStorage.setItem('today-v2-draft:user-1:2026-09-28', JSON.stringify({
+        becomingRating: 10, becomingRatingNeedsSync: true,
+      }));
+      await renderHook();
+      expect(latest.becomingRating).toBe(6);
+      await act(async () => { latest.setBecomingRating(1); await latest.flushAll(); });
+      expect(latest.becomingRating).toBe(6);
+      expect(serviceMocks.updateBecomingRating).not.toHaveBeenCalled();
+      serviceMocks.reopenTodayV2Review.mockResolvedValue({ ...initial.review, completed_at: null });
+      await act(async () => { await latest.reopenReview(); });
+      await act(async () => { latest.setBecomingRating(9); await latest.flushAll(); });
+      expect(serviceMocks.updateBecomingRating).toHaveBeenCalledWith(initial.review.id, 9);
+    });
+
+    it('preserves an offline rating draft and retries it on reconnect', async () => {
+      await renderHook();
+      await act(async () => latest.setBecomingRating(3));
+      Object.defineProperty(navigator, 'onLine', { configurable: true, value: false });
+      try {
+        await act(async () => { await expect(latest.completeReview()).rejects.toThrow(/Offline/); });
+        expect(latest.becomingRatingSaveStatus).toBe('offline');
+        expect(serviceMocks.completeTodayV2Review).not.toHaveBeenCalled();
+        expect(JSON.parse(window.localStorage.getItem('today-v2-draft:user-1:2026-09-28'))).toMatchObject({
+          becomingRating: 3, becomingRatingNeedsSync: true,
+        });
+      } finally {
+        Object.defineProperty(navigator, 'onLine', { configurable: true, value: true });
+      }
+      await act(async () => { window.dispatchEvent(new Event('online')); });
+      expect(serviceMocks.updateBecomingRating).toHaveBeenCalledWith('review-2026-09-28', 3);
+      expect(latest.becomingRatingSaveStatus).toBe('saved');
+    });
+
+    it('drains the latest rating before completion without overwriting newer local choices', async () => {
+      await renderHook();
+      let resolveRating;
+      serviceMocks.updateBecomingRating.mockImplementationOnce(() => new Promise((resolve) => { resolveRating = resolve; }));
+      await act(async () => latest.setBecomingRating(2));
+      let pending;
+      await act(async () => { pending = latest.flushAll(); });
+      await act(async () => latest.setBecomingRating(9));
+      serviceMocks.completeTodayV2Review.mockResolvedValue({ becoming_rating: 9, completed_at: 'completed' });
+      let completing;
+      await act(async () => { completing = latest.completeReview(); });
+      expect(serviceMocks.completeTodayV2Review).not.toHaveBeenCalled();
+      await act(async () => { resolveRating(); await pending; await completing; });
+      expect(serviceMocks.updateBecomingRating.mock.calls.map((call) => call[1])).toEqual([2, 9]);
+      expect(latest.becomingRating).toBe(9);
+      expect(latest.state.review.becoming_rating).toBe(9);
+    });
+
+    it('does not apply a stale rating save after the authenticated user changes', async () => {
+      await renderHook();
+      let resolveRating;
+      serviceMocks.updateBecomingRating.mockImplementationOnce(() => new Promise((resolve) => { resolveRating = resolve; }));
+      await act(async () => latest.setBecomingRating(2));
+      let pending;
+      await act(async () => { pending = latest.flushAll(); void pending.catch(() => {}); });
+      const second = makeState();
+      second.review = { ...second.review, id: 'second-review', becoming_rating: 7 };
+      serviceMocks.loadTodayReviewState.mockResolvedValue(second);
+      await act(async () => { root.render(<HookProbe userId="user-2" onRender={(value) => { latest = value; }} />); });
+      await act(async () => { resolveRating(); await expect(pending).rejects.toThrow(/Review changed/); });
+      expect(latest.becomingRating).toBe(7);
+      expect(latest.state.review.becoming_rating).toBe(7);
+    });
+
+    it('renders the labeled 1–10 scale directly after habits and makes completed choices read-only', async () => {
+      await act(async () => { root.render(<TodayV2Page />); });
+      const question = container.querySelector('#becoming-rating-question');
+      expect(question.textContent.trim()).toBe("How do you feel about your progress toward who you're becoming?");
+      expect(question.closest('section').previousElementSibling.textContent).toContain('2. Habits');
+      const fieldset = container.querySelector('fieldset[aria-labelledby="becoming-rating-question"]');
+      const choices = [...fieldset.querySelectorAll('input[type="radio"]')];
+      expect(choices.map((choice) => choice.value)).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9', '10']);
+      await act(async () => choices[7].click());
+      expect(choices[7].checked).toBe(true);
+      await act(async () => container.querySelector('[aria-label="Clear progress rating"]').click());
+      expect(choices.every((choice) => !choice.checked)).toBe(true);
+      const completed = makeState();
+      completed.review = { ...completed.review, becoming_rating: 4, completed_at: 'completed' };
+      serviceMocks.loadTodayReviewState.mockResolvedValue(completed);
+      pageMocks.userId = 'user-2';
+      await act(async () => { root.render(<TodayV2Page />); });
+      expect(container.querySelector('fieldset[aria-labelledby="becoming-rating-question"]').disabled).toBe(true);
+      expect(container.querySelector('input[name="becoming-rating"]:checked').value).toBe('4');
+      expect(container.querySelector('[aria-label="Clear progress rating"]')).toBeNull();
+    });
 
   it('autosaves desired direction and tomorrow plans after the debounce window', async () => {
     await renderHook();
@@ -1488,6 +1623,7 @@ describe('useTodayV2State', () => {
     await clickButton("Complete tonight's review");
     expect(serviceMocks.completeTodayV2Review).toHaveBeenCalledTimes(1);
     expect(saveHabit.disabled).toBe(true);
+    expect(container.querySelector('fieldset[aria-labelledby="becoming-rating-question"]').disabled).toBe(true);
     await act(async () => { saveHabit.click(); });
     expect(serviceMocks.upsertHabitDefinition).not.toHaveBeenCalled();
     await act(async () => { resolveCompletion({ ...initial.review, completed_at: 'completed' }); });

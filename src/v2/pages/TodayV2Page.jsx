@@ -247,6 +247,9 @@ export default function TodayV2Page() {
     firstFiveMinutes,
     setFirstFiveMinutes,
     visibleHabits,
+    becomingRating,
+    setBecomingRating,
+    becomingRatingSaveLabel,
     habitDefinitionsById,
     load,
     splitTomorrowActions,
@@ -520,6 +523,42 @@ export default function TodayV2Page() {
               </button>
             )}
             {visibleHabits.length === 0 && <p className="text-sm text-zinc-500">No habits scheduled for today.</p>}
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <p id="becoming-rating-question" className="text-sm text-zinc-200">
+              How do you feel about your progress toward who you&apos;re becoming?
+            </p>
+            <fieldset disabled={readOnly} aria-labelledby="becoming-rating-question" aria-describedby="becoming-rating-help" className="min-w-0 shrink-0">
+              <div className="grid grid-cols-10 gap-1">
+                {Array.from({ length: 10 }, (_, index) => index + 1).map((rating) => (
+                  <label key={rating} className="relative cursor-pointer">
+                    <input
+                      type="radio"
+                      name="becoming-rating"
+                      value={rating}
+                      checked={becomingRating === rating}
+                      onChange={() => setBecomingRating(rating)}
+                      className="peer sr-only"
+                    />
+                    <span className="flex h-9 min-w-5 items-center justify-center rounded-lg border border-zinc-700 px-1 text-xs text-zinc-300 peer-checked:border-red-400 peer-checked:bg-red-600 peer-checked:text-white peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-white peer-disabled:cursor-not-allowed">
+                      {rating}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          </div>
+          <div className="mt-2 flex flex-wrap items-center justify-end gap-3 text-xs text-zinc-500">
+            <p id="becoming-rating-help">Optional · 1–10</p>
+            <p role="status">{becomingRatingSaveLabel}</p>
+            {!readOnly && becomingRating !== null && (
+              <button type="button" aria-label="Clear progress rating" onClick={() => setBecomingRating(null)} className="text-zinc-400 hover:text-white">
+                Clear
+              </button>
+            )}
           </div>
         </section>
 

@@ -16,6 +16,17 @@ const consolidatedSqlPath = path.join(repositoryRoot, 'supabase/sql/today_v2_iso
 const todayV2ServicePath = path.join(repositoryRoot, 'src/v2/services/todayReview.js');
 
 describe('TodayV2 SQL contract', () => {
+  it('adds a nullable integer progress rating with a range constraint while retaining existing RLS and completion guards', () => {
+    const sql = fs.readFileSync(path.join(repositoryRoot, 'supabase/migrations/20261022_today_v2_becoming_rating.sql'), 'utf8');
+    expect(sql).toContain('add column if not exists becoming_rating integer');
+    expect(sql).toContain("conrelid = 'public.today_v2_daily_reviews'::regclass");
+    expect(sql).toContain('becoming_rating is null or becoming_rating between 1 and 10');
+    expect(sql).toContain("notify pgrst, 'reload schema'");
+    expect(sql).not.toMatch(/(?:drop|create) policy|disable row level security|security definer/i);
+    const guard = fs.readFileSync(releaseGuardPath, 'utf8');
+    expect(guard).toContain("to_jsonb(new) - array['completed_at','updated_at']");
+  });
+
   it('keeps the migration and SQL editor copy in sync', () => {
     const consolidatedSql = fs.readFileSync(consolidatedSqlPath, 'utf8');
     const initialMigration = fs.readFileSync(migrationPath, 'utf8');
