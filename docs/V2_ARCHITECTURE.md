@@ -177,6 +177,11 @@ Materialized daily habit checklist rows with immutable snapshots:
 - `answered_at` distinguishes unanswered from explicit `false`
 - historical meaning survives later definition edits or archival
 
+The open Review & Plan checklist displays the current definition name so saved
+renames appear immediately, falling back to the occurrence snapshot if the
+definition is unavailable. Completed reviews retain snapshot names. Response
+types, units, answers, and stored snapshots are unchanged by this display rule.
+
 ## Failure handling
 - Default seeding is optional. If `today_v2_seed_default_habits_for_user` is absent or fails, Today V2 still renders with an empty/addable habit state and a non-blocking diagnostic.
 - Real load errors still show retry UI.

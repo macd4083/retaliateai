@@ -445,12 +445,13 @@ export default function TodayV2Page() {
           <div className="space-y-2">
             {visibleHabits.map((occurrence) => {
               const habitDefinition = habitDefinitionsById.get(occurrence.habit_definition_id) || occurrence;
+              const habitName = (!isCompleted && habitDefinition.name) || occurrence.snapshot_name;
               const booleanAnswer = getTodayV2BooleanAnswer(occurrence.boolean_response, occurrence.answered_at);
               return (
                 <div key={occurrence.id} className="rounded-xl border border-zinc-800 p-3">
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <p className="text-sm text-zinc-200">{occurrence.snapshot_name}</p>
+                      <p className="text-sm text-zinc-200">{habitName}</p>
                       <p className="mt-1 text-xs text-zinc-500">
                         {occurrence.snapshot_response_type === TODAY_V2_RESPONSE_TYPES.NUMBER
                           ? occurrence.snapshot_unit || 'units'
@@ -461,7 +462,7 @@ export default function TodayV2Page() {
                       <div className="relative">
                         <button
                           type="button"
-                          aria-label={`Habit options for ${occurrence.snapshot_name}`}
+                          aria-label={`Habit options for ${habitName}`}
                           onClick={() => setMenuOpenHabitId((current) => current === habitDefinition.id ? null : habitDefinition.id)}
                           className="text-zinc-400 hover:text-white"
                         >
