@@ -172,7 +172,8 @@ export default function HomeV2Page() {
       key: `action:${item.id}`, source_id: item.id, type: 'action', label: item.normalized_fragment_text || item.fragment_text,
     })),
     ...calendarHabits.map((habit) => ({
-      key: `habit:${habit.habit_definition_id}`, source_id: habit.habit_definition_id, type: 'habit', label: habit.snapshot_name,
+      key: `habit:${habit.habit_definition_id}`, source_id: habit.habit_definition_id, type: 'habit',
+      label: (!calendarReview?.completed_at && (homeState.habitDefinitions || []).find((definition) => definition.id === habit.habit_definition_id)?.name) || habit.snapshot_name,
     })),
   ];
   const calendarBlocks = (civilDiffers ? civilVisible : todayVisible).map((block) => {
