@@ -12,6 +12,7 @@ const lockMigrationPath = path.join(repositoryRoot, 'supabase/migrations/2026100
 const releaseGuardPath = path.join(repositoryRoot, 'supabase/migrations/20261009_today_v2_completion_release_guard.sql');
 const recurrenceMigrationPath = path.join(repositoryRoot, 'supabase/migrations/20261010_today_v2_habit_recurrence.sql');
 const dayScheduleMigrationPath = path.join(repositoryRoot, 'supabase/migrations/20261011_today_v2_day_schedule.sql');
+const scheduleConflictMigrationPath = path.join(repositoryRoot, 'supabase/migrations/20261013_today_v2_schedule_conflicts.sql');
 const consolidatedSqlPath = path.join(repositoryRoot, 'supabase/sql/today_v2_isolated_workflow.sql');
 const todayV2ServicePath = path.join(repositoryRoot, 'src/v2/services/todayReview.js');
 
@@ -36,12 +37,13 @@ describe('TodayV2 SQL contract', () => {
     const releaseGuard = fs.readFileSync(releaseGuardPath, 'utf8');
     const recurrenceMigration = fs.readFileSync(recurrenceMigrationPath, 'utf8');
     const dayScheduleMigration = fs.readFileSync(dayScheduleMigrationPath, 'utf8');
+    const scheduleConflictMigration = fs.readFileSync(scheduleConflictMigrationPath, 'utf8');
 
     expect(consolidatedSql.startsWith(initialMigration)).toBe(true);
     expect(consolidatedSql.slice(initialMigration.length).trim()).toBe(
-      `${featureMigration.trim()}\n\n${schedulingMigration.trim()}\n\n${lockMigration.trim()}\n\n${releaseGuard.trim()}\n\n${recurrenceMigration.trim()}\n\n${dayScheduleMigration.trim()}`
+      `${featureMigration.trim()}\n\n${schedulingMigration.trim()}\n\n${lockMigration.trim()}\n\n${releaseGuard.trim()}\n\n${recurrenceMigration.trim()}\n\n${dayScheduleMigration.trim()}\n\n${scheduleConflictMigration.trim()}`
     );
-    expect(consolidatedSql.endsWith(dayScheduleMigration)).toBe(true);
+    expect(consolidatedSql.endsWith(scheduleConflictMigration)).toBe(true);
   });
 
   it('authorizes only current civil-day timing edits with a private transaction capability', () => {
