@@ -240,6 +240,7 @@ export default function TodayV2Page() {
     scheduleBlocks,
     scheduleSaveStatus,
     scheduleError,
+    reloadSavedSchedule,
     scheduleAvailable,
     scheduleDiagnostic,
     updateSchedule,
@@ -644,7 +645,7 @@ export default function TodayV2Page() {
             })}
             available={scheduleAvailable}
             availabilityError={isMissingScheduleSchema(scheduleDiagnostic)
-              ? 'Calendar database setup is incomplete. Apply the Today V2 scheduling migrations in order through 20261011_today_v2_day_schedule.sql, then retry scheduling.'
+              ? 'Calendar database setup is incomplete. Apply the Today V2 scheduling migrations in order through 20261013_today_v2_schedule_conflicts.sql, then retry scheduling.'
               : scheduleDiagnostic?.message}
             readOnly={readOnly}
             saveStatus={scheduleSaveStatus}
@@ -656,6 +657,11 @@ export default function TodayV2Page() {
             onUnschedule={unschedule}
             onRetry={load}
           />
+          {scheduleError?.code === '40001' && (
+            <button type="button" disabled={readOnly} onClick={reloadSavedSchedule} className="rounded-lg border border-zinc-700 px-3 py-2 text-sm">
+              Archive pending calendar and load saved times
+            </button>
+          )}
           </div>
         )}
 

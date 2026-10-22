@@ -975,6 +975,140 @@ describe('useTodayV2State', () => {
     expect(serviceMocks.replaceTomorrowActions).toHaveBeenCalledWith(expect.objectContaining({ fragmentIds: ['id1', 'id2'] }));
   });
 
+  it('keeps a conflicting schedule draft and its original baseline through reload, then explicitly recovers saved times', async () => {
+    const savedBlock = {
+      id: 'habit-block', source_type: 'habit', source_id: 'daily',
+      target_local_date: '2026-09-29', timezone_name: 'UTC',
+      starts_at: '2026-09-29T09:00:00Z', ends_at: '2026-09-29T09:30:00Z',
+    };
+    const initial = {
+      ...makeState(), scheduleAvailable: true, planningSchedules: [savedBlock],
+      habitDefinitions: [{ id: 'daily', name: 'Daily', schedule_weekdays: [0, 1, 2, 3, 4, 5, 6] }],
+    };
+    serviceMocks.loadTodayReviewState.mockResolvedValue(initial);
+    await renderHook();
+    await act(async () => latest.updateSchedule('habit:daily', {
+      starts_at: '2026-09-29T10:00:00Z', ends_at: '2026-09-29T10:30:00Z',
+    }));
+    const conflict = { code: '40001', message: 'Calendar changed; your draft is preserved.' };
+    scheduleMocks.replaceSchedule.mockRejectedValue(conflict);
+    await act(async () => { await expect(latest.flushSchedule()).rejects.toEqual(conflict); });
+    expect(scheduleMocks.replaceSchedule).toHaveBeenLastCalledWith(expect.objectContaining({ expectedBlocks: [savedBlock] }));
+    expect(latest.scheduleSaveStatus).toBe('error');
+    expect(latest.scheduleBlocks[0].starts_at).toBe('2026-09-29T10:00:00.000Z');
+    const key = 'today-v2-draft:user-1:2026-09-28';
+    const pendingDraft = JSON.parse(window.localStorage.getItem(key));
+    expect(pendingDraft.scheduleNeedsSync).toBe(true);
+    expect(pendingDraft.scheduleBaseBlocks).toEqual([savedBlock]);
+
+    const newerBlock = { ...savedBlock, starts_at: '2026-09-29T11:00:00Z', ends_at: '2026-09-29T11:30:00Z' };
+    serviceMocks.loadTodayReviewState.mockResolvedValue({ ...initial, planningSchedules: [newerBlock] });
+    await act(async () => latest.load());
+    await act(async () => { await expect(latest.flushSchedule()).rejects.toEqual(conflict); });
+    expect(scheduleMocks.replaceSchedule).toHaveBeenLastCalledWith(expect.objectContaining({ expectedBlocks: [savedBlock] }));
+    await act(async () => latest.reloadSavedSchedule());
+    expect(latest.scheduleBlocks[0].starts_at).toBe(newerBlock.starts_at);
+    expect(latest.scheduleSaveStatus).toBe('saved');
+    expect(latest.scheduleError).toBeNull();
+    expect(JSON.parse(window.localStorage.getItem(`${key}:archived`)).scheduleBlocks).toEqual(pendingDraft.scheduleBlocks);
+    expect(JSON.parse(window.localStorage.getItem(key)).scheduleBaseBlocks).toEqual([newerBlock]);
+    expect(JSON.parse(window.localStorage.getItem(key)).scheduleNeedsSync).toBe(false);
+  });
+
+  it('advances the expected baseline after each successful schedule save', async () => {
+    serviceMocks.loadTodayReviewState.mockResolvedValue({
+      ...makeState(), scheduleAvailable: true,
+      habitDefinitions: [{ id: 'daily', name: 'Daily', schedule_weekdays: [0, 1, 2, 3, 4, 5, 6] }],
+    });
+    await renderHook();
+    await act(async () => latest.updateSchedule('habit:daily', {
+      starts_at: '2026-09-29T10:00:00Z', ends_at: '2026-09-29T10:30:00Z',
+    }));
+    await act(async () => latest.flushSchedule());
+    expect(scheduleMocks.replaceSchedule.mock.calls[0][0].expectedBlocks).toEqual([]);
+    const saved = await scheduleMocks.replaceSchedule.mock.results[0].value;
+    await act(async () => latest.unschedule('habit:daily'));
+    await act(async () => latest.flushSchedule());
+    expect(scheduleMocks.replaceSchedule.mock.calls[1][0]).toMatchObject({ blocks: [], expectedBlocks: saved });
+  });
+
+  it('does not rebase older pending drafts onto newer server times or discard them when archival fails', async () => {
+    const savedBlock = {
+      id: 'habit-block', source_type: 'habit', source_id: 'daily', target_local_date: '2026-09-29',
+      starts_at: '2026-09-29T11:00:00Z', ends_at: '2026-09-29T11:30:00Z',
+    };
+    serviceMocks.loadTodayReviewState.mockResolvedValue({
+      ...makeState(), scheduleAvailable: true, planningSchedules: [savedBlock],
+      habitDefinitions: [{ id: 'daily', name: 'Daily', schedule_weekdays: [0, 1, 2, 3, 4, 5, 6] }],
+    });
+    const key = 'today-v2-draft:user-1:2026-09-28';
+    window.localStorage.setItem(key, JSON.stringify({
+      reviewLocalDate: '2026-09-28', planningLocalDate: '2026-09-29',
+      scheduleNeedsSync: true, scheduleBlocks: [],
+    }));
+    await renderHook();
+    scheduleMocks.replaceSchedule.mockRejectedValue({ code: '40001', message: 'Calendar changed' });
+    await act(async () => { await expect(latest.flushSchedule()).rejects.toMatchObject({ code: '40001' }); });
+    expect(scheduleMocks.replaceSchedule).toHaveBeenLastCalledWith(expect.objectContaining({ expectedBlocks: [], blocks: [] }));
+    const pending = window.localStorage.getItem(key);
+    const writes = Storage.prototype.setItem;
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (storageKey, value) {
+      if (storageKey.includes(':archived')) throw new Error('Storage full');
+      return writes.call(this, storageKey, value);
+    });
+    await act(async () => latest.reloadSavedSchedule());
+    expect(latest.scheduleBlocks).toEqual([]);
+    expect(latest.scheduleError.message).toContain('Could not archive');
+    expect(window.localStorage.getItem(key)).toBe(pending);
+    expect(serviceMocks.loadTodayReviewState).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers explicit archive-and-reload recovery for a calendar conflict', async () => {
+    serviceMocks.loadTodayReviewState.mockResolvedValue({
+      ...makeState(), scheduleAvailable: true,
+      habitDefinitions: [{ id: 'daily', name: 'Daily', schedule_weekdays: [0, 1, 2, 3, 4, 5, 6] }],
+    });
+    const key = 'today-v2-draft:user-1:2026-09-28';
+    window.localStorage.setItem(key, JSON.stringify({
+      reviewLocalDate: '2026-09-28', planningLocalDate: '2026-09-29',
+      scheduleNeedsSync: true, scheduleBaseBlocks: [],
+      scheduleBlocks: [{ source_key: 'habit:daily', source_type: 'habit', source_id: 'daily',
+        starts_at: '2026-09-29T09:00:00Z', ends_at: '2026-09-29T09:30:00Z' }],
+    }));
+    scheduleMocks.replaceSchedule.mockRejectedValue({ code: '40001', message: 'Calendar changed; draft preserved.' });
+    await act(async () => root.render(<TodayV2Page />));
+    await act(async () => { await vi.advanceTimersByTimeAsync(801); });
+    const recovery = [...container.querySelectorAll('button')]
+      .find((button) => button.textContent === 'Archive pending calendar and load saved times');
+    expect(recovery).toBeDefined();
+    await act(async () => recovery.click());
+    expect(window.localStorage.getItem(`${key}:archived`)).not.toBeNull();
+    expect(JSON.parse(window.localStorage.getItem(key)).scheduleNeedsSync).toBe(false);
+    expect(container.textContent).not.toContain('Calendar changed; draft preserved.');
+  });
+
+  it('archives the in-memory calendar even if its active draft could not be written', async () => {
+    serviceMocks.loadTodayReviewState.mockResolvedValue({
+      ...makeState(), scheduleAvailable: true,
+      habitDefinitions: [{ id: 'daily', name: 'Daily', schedule_weekdays: [0, 1, 2, 3, 4, 5, 6] }],
+    });
+    await renderHook();
+    const key = 'today-v2-draft:user-1:2026-09-28';
+    const writes = Storage.prototype.setItem;
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (storageKey, value) {
+      if (storageKey === key) throw new Error('Draft write unavailable');
+      return writes.call(this, storageKey, value);
+    });
+    await act(async () => latest.updateSchedule('habit:daily', {
+      starts_at: '2026-09-29T10:00:00Z', ends_at: '2026-09-29T10:30:00Z',
+    }));
+    const pending = latest.scheduleBlocks;
+    expect(latest.draftStorageUnavailable).toBe(true);
+    await act(async () => latest.reloadSavedSchedule());
+    expect(JSON.parse(window.localStorage.getItem(`${key}:archived`)).scheduleBlocks).toEqual(pending);
+    expect(latest.scheduleBlocks).toEqual([]);
+  });
+
   it('defers blank-row autosave and retains scheduled identity through clear, pause, reload and retype', async () => {
     serviceMocks.loadTodayReviewState.mockResolvedValue({
       ...makeState(), scheduleAvailable: true, tomorrowPlanInput: 'Write',
