@@ -12,10 +12,22 @@ const lockMigrationPath = path.join(repositoryRoot, 'supabase/migrations/2026100
 const releaseGuardPath = path.join(repositoryRoot, 'supabase/migrations/20261009_today_v2_completion_release_guard.sql');
 const recurrenceMigrationPath = path.join(repositoryRoot, 'supabase/migrations/20261010_today_v2_habit_recurrence.sql');
 const dayScheduleMigrationPath = path.join(repositoryRoot, 'supabase/migrations/20261011_today_v2_day_schedule.sql');
+const scheduleConflictMigrationPath = path.join(repositoryRoot, 'supabase/migrations/20261013_today_v2_schedule_conflicts.sql');
 const consolidatedSqlPath = path.join(repositoryRoot, 'supabase/sql/today_v2_isolated_workflow.sql');
 const todayV2ServicePath = path.join(repositoryRoot, 'src/v2/services/todayReview.js');
 
 describe('TodayV2 SQL contract', () => {
+  it('adds a nullable integer progress rating with a range constraint while retaining existing RLS and completion guards', () => {
+    const sql = fs.readFileSync(path.join(repositoryRoot, 'supabase/migrations/20261022_today_v2_becoming_rating.sql'), 'utf8');
+    expect(sql).toContain('add column if not exists becoming_rating integer');
+    expect(sql).toContain("conrelid = 'public.today_v2_daily_reviews'::regclass");
+    expect(sql).toContain('becoming_rating is null or becoming_rating between 1 and 10');
+    expect(sql).toContain("notify pgrst, 'reload schema'");
+    expect(sql).not.toMatch(/(?:drop|create) policy|disable row level security|security definer/i);
+    const guard = fs.readFileSync(releaseGuardPath, 'utf8');
+    expect(guard).toContain("to_jsonb(new) - array['completed_at','updated_at']");
+  });
+
   it('keeps the migration and SQL editor copy in sync', () => {
     const consolidatedSql = fs.readFileSync(consolidatedSqlPath, 'utf8');
     const initialMigration = fs.readFileSync(migrationPath, 'utf8');
@@ -25,12 +37,13 @@ describe('TodayV2 SQL contract', () => {
     const releaseGuard = fs.readFileSync(releaseGuardPath, 'utf8');
     const recurrenceMigration = fs.readFileSync(recurrenceMigrationPath, 'utf8');
     const dayScheduleMigration = fs.readFileSync(dayScheduleMigrationPath, 'utf8');
+    const scheduleConflictMigration = fs.readFileSync(scheduleConflictMigrationPath, 'utf8');
 
     expect(consolidatedSql.startsWith(initialMigration)).toBe(true);
     expect(consolidatedSql.slice(initialMigration.length).trim()).toBe(
-      `${featureMigration.trim()}\n\n${schedulingMigration.trim()}\n\n${lockMigration.trim()}\n\n${releaseGuard.trim()}\n\n${recurrenceMigration.trim()}\n\n${dayScheduleMigration.trim()}`
+      `${featureMigration.trim()}\n\n${schedulingMigration.trim()}\n\n${lockMigration.trim()}\n\n${releaseGuard.trim()}\n\n${recurrenceMigration.trim()}\n\n${dayScheduleMigration.trim()}\n\n${scheduleConflictMigration.trim()}`
     );
-    expect(consolidatedSql.endsWith(dayScheduleMigration)).toBe(true);
+    expect(consolidatedSql.endsWith(scheduleConflictMigration)).toBe(true);
   });
 
   it('authorizes only current civil-day timing edits with a private transaction capability', () => {

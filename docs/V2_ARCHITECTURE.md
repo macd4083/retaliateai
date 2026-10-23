@@ -7,7 +7,7 @@
 - Explicit `/today` always opens the structured nightly workflow, including its completed-review reopen/edit behavior and ROI action checklist. `/home` opens Today with an editable calendar of actions and habits, plus habit check-ins; ROI completion is recorded only in Review & Plan.
 - `VITE_ENABLE_TODAY_V2` is retired and ignored. Generic entry cannot roll back to the removed AI dialogue; legacy bookmarks always use the live V2 resolver.
 - User navigation is Today (`/home`), Review & Plan (`/today`), Progress (`/insights`), Settings (`/settings`). Administration remains separate.
-- Progress currently uses the existing Insights implementation. Migrating its reporting data to V2 is separate work; this change does not merge legacy and V2 histories.
+- Progress charts actual V2 follow-through as `kept / (kept + not_kept)`, ignoring unanswered fragments. Recorded legacy `commitment_score` is a fallback only on dates without V2 fragments; source records are not rewritten or backfilled. Ranges are trailing 7, 30, or 365 days and paginated all-time history. Today shows the last seven days of `becomingRatings`. Both use the shared `TrendChart`, with a fine 1.25px red line and 0.5px zinc calendar rules.
 - Both pages reuse `TomorrowScheduler` and Google event management controls. A missing scheduling schema or connection disables native editing and shows diagnostics without hiding the calendar; an invalid date/timezone still prevents timeline rendering. Unscheduled actions remain visible in the calendar's tray. Today uses the actual civil local date, including before the 04:00 review boundary, and refreshes on date rollover.
 - Review & Plan uses the configured day boundary (04:00 by default) for both review and planning. The planning source is the active review date, and the target is the next waking day. Both dates are labeled in the UI.
 
@@ -32,6 +32,7 @@ Apply the existing Today V2 migrations in this exact dependency order (paths rel
 6. `20261010_today_v2_habit_recurrence.sql`
 7. `20261011_today_v2_day_schedule.sql`
 8. `20261013_today_v2_schedule_conflicts.sql`
+9. `20261022_today_v2_becoming_rating.sql`
 
 These extend the existing production auth/application schema; do not replace them with `supabase/sql/today_v2_isolated_workflow.sql` or run retired generic V2 SQL. Google connection credential tables ship in `20261007_today_v2_scheduling.sql`; credentials remain backend-only.
 
@@ -71,7 +72,7 @@ Global schema diagnostics render no banner, modal, loading notice, or retry butt
 ### Retained legacy persistence and reporting
 - `src/lib/supabase/reflection.js`
 - Legacy tables such as `reflection_sessions`, `reflection_messages`, `follow_up_queue`, `growth_markers`, and `goal_commitment_log`
-- Progress, commitment statistics, administration and guest signup transfer still use historical data. All database history and migrations remain untouched.
+- Progress uses V2 fragments with recorded legacy scores as its date-level fallback; other commitment statistics, administration and guest signup transfer retain their historical sources. Database history is not rewritten.
 - `src/pages/ReflectionV2.jsx`, the `reflection-coach`, `goals`, and `synthesize-insights` API endpoints, and their end-to-end simulator are removed; unrelated legacy helpers are retained.
 
 ## Persistence boundary
@@ -109,7 +110,7 @@ These generic objects are replaced by the isolated Today V2 schema and should no
 3. `useTodayV2State` delegates all persistence to `src/v2/services/todayReview.js`.
 4. The DAL reads/writes only `today_v2_*` tables and `today_v2_*` RPCs.
 5. Commitment splitting happens in `src/shared/commitmentFragmentation.js`, then the resulting fragments are saved through `today_v2_replace_plan_for_date`.
-6. `/legacy/reflection` redirects to `/app`; historical reporting still reads legacy objects without merging them into V2.
+6. `/legacy/reflection` redirects to `/app`; Progress reads V2 follow-through and falls back to recorded legacy scores only on dates without V2 fragments, without copying legacy records into V2.
 
 ## Schema/data-flow diagram (text)
 ```text
@@ -125,15 +126,20 @@ These generic objects are replaced by the isolated Today V2 schema and should no
 
 /reflection, /legacy/reflection -> /app (compatibility)
 
-Progress / historical reporting
-  -> legacy reflectionHelpers
-    -> reflection_sessions + legacy tables only
+Progress trend
+  -> V2 commitment fragments
+  -> recorded legacy commitment_score fallback for dates without V2 fragments
+
+Other historical reporting
+  -> legacy reflectionHelpers -> reflection_sessions + legacy tables
 ```
 
 ## Table responsibilities
 ### `today_v2_daily_reviews`
 One row per user and local date for V2 review metadata and the `Who am I actively becoming?` response.
 Desired Direction edits autosave and replace that day's response, whether typed manually or populated with Autofill. Autofill uses the current saved response, falling back to the latest nonempty prior review; it does not overwrite a new day's answer automatically. The retired 5.2 question is no longer displayed, but its historical data remains intact.
+
+The optional `becoming_rating` records the answer to “How do you feel about your progress toward who you're becoming?” immediately below habits. It is a nullable integer from 1 through 10, keyed to the active review date (including before the 04:00 boundary). Selecting or clearing it uses the existing draft recovery, debounced autosave, reconnect retry, and completion flush behavior; it adds no completion requirement. Completed reviews show the saved rating read-only until reopened. Existing owner RLS and the generic completed-review guard protect this column. Home exposes the 30-day review history as `becomingRatings`, including `local_date` and nullable `becoming_rating`.
 
 ### `today_v2_plan_inputs`
 Raw plan input for a target local date. Stores the paragraph before fragmentation, with source date, target date, timezone, and parser version.

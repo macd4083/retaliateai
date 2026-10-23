@@ -6,6 +6,8 @@ import { loadTodayV2HomeState } from '../services/todayReview';
 import { ENABLE_TODAY_V2_SCHEDULER } from '../../lib/featureFlags';
 import GoogleCalendarConnection from '../components/GoogleCalendarConnection';
 import TomorrowScheduler from '../components/TomorrowScheduler';
+import TrendChart from '../components/TrendChart';
+import { buildBecomingTrend } from '../today/trends';
 import { updateDaySchedule, isMissingScheduleSchema } from '../services/scheduling';
 import {
   getTodayV2NextBoundaryDate,
@@ -357,6 +359,15 @@ export default function HomeV2Page() {
           />
           <button type="button" onClick={() => navigate('/today')} className="rounded-lg border border-zinc-700 px-3 py-2 text-sm">Open Review &amp; Plan</button>
         </section>}
+
+        <TrendChart
+          title="Becoming"
+          description="How you feel about your progress · past 7 days"
+          points={buildBecomingTrend(homeState.becomingRatings, homeState.todayLocalDate)}
+          min={1}
+          max={10}
+          unit="/10"
+        />
 
         <section className="grid grid-cols-2 gap-3">
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { MoreHorizontal, BarChart2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
@@ -7,6 +7,10 @@ import { supabase } from '../lib/supabase/client';
 import { reflectionHelpers } from '../lib/supabase/reflection';
 import { localDateStr } from '../lib/dateUtils';
 import AppShellV2 from '../components/v2/AppShellV2';
+import TrendChart from '../v2/components/TrendChart';
+import { TREND_RANGES, buildCommitmentTrend } from '../v2/today/trends';
+import { getTodayV2DateContext } from '../v2/today/model';
+import { loadCommitmentHistory } from '../v2/services/commitmentHistory';
 
 // ─── Date helpers ─────────────────────────────────────────────────────────────
 
@@ -23,15 +27,6 @@ function formatDate(dateStr) {
   });
 }
 
-function getMondayOf(dateStr) {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  const date = new Date(y, m - 1, d);
-  const day = date.getDay();
-  const offset = day === 0 ? 6 : day - 1;
-  const monday = new Date(y, m - 1, d - offset);
-  return `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')}`;
-}
-
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function InsightsV2() {
@@ -39,12 +34,11 @@ export default function InsightsV2() {
   const navigate = useNavigate();
 
   const [allCommitments, setAllCommitments]       = useState([]);
-  const [selectedWeekIndex, setSelectedWeekIndex] = useState(null);
-  const [selectedDayIndex, setSelectedDayIndex]   = useState(null);
-  const [slideDir, setSlideDir]                   = useState(null);
-  const [chartOffset, setChartOffset]             = useState(0);
+  const [trendRange, setTrendRange]               = useState('7D');
+  const [commitmentHistory, setCommitmentHistory] = useState({ fragments: [], legacySessions: [] });
+  const [trendError, setTrendError]               = useState(false);
+  const trendRequest = useRef(0);
   const [streak, setStreak]                       = useState(0);
-  const [commitmentStats, setCommitmentStats]     = useState(null);
   const [loading, setLoading]                     = useState(true);
   const [activeGoals, setActiveGoals]             = useState([]);
   const [showAddGoal, setShowAddGoal]             = useState(false);
@@ -60,6 +54,7 @@ export default function InsightsV2() {
   useEffect(() => {
     if (!user?.id) return;
     loadData();
+    return () => { trendRequest.current += 1; };
   }, [user?.id]);
 
   useEffect(() => {
@@ -296,17 +291,15 @@ export default function InsightsV2() {
   }
 
   async function loadCommitmentStats() {
+    const request = ++trendRequest.current;
+    setTrendError(false);
+    setCommitmentHistory({ fragments: [], legacySessions: [] });
     try {
-      const res = await fetch('/api/commitment-stats', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user.id }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setCommitmentStats(data);
-      }
-    } catch (_e) {}
+      const history = await loadCommitmentHistory(user.id, getTodayV2DateContext().todayLocalDate);
+      if (request === trendRequest.current) setCommitmentHistory(history);
+    } catch (_e) {
+      if (request === trendRequest.current) setTrendError(true);
+    }
   }
 
   if (isAnonymousGuestUser(user)) {
@@ -353,27 +346,6 @@ export default function InsightsV2() {
 
   // ── Derived values ────────────────────────────────────────────────────────
 
-  const weeklyData = commitmentStats?.weeklyData || [];
-
-  // Selected week defaults to the most recent (last index)
-  const activeWeekIndex      = selectedWeekIndex !== null ? selectedWeekIndex : Math.max(0, weeklyData.length - 1);
-  const selectedWeek         = weeklyData[activeWeekIndex] ?? null;
-  const isCurrentWeekSelected = weeklyData.length === 0 || activeWeekIndex === weeklyData.length - 1;
-
-  function goToWeek(newIndex) {
-    if (newIndex < 0 || newIndex >= weeklyData.length || newIndex === activeWeekIndex) return;
-    const dir = newIndex > activeWeekIndex ? -1 : 1;
-    setSlideDir(dir < 0 ? 'left' : 'right');
-    setChartOffset(dir * 100);
-    setSelectedWeekIndex(newIndex);
-    setSelectedDayIndex(null);
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        setChartOffset(0);
-      });
-    });
-  }
-
   const yesterday = addDays(localDateStr(0), -1);
   const yesterdayCommitment = allCommitments.find((c) => c.date === yesterday && c.commitment !== null) || null;
 
@@ -388,154 +360,21 @@ export default function InsightsV2() {
           {/* ── ZONE 1: Momentum ──────────────────────────────────────────── */}
 
           {/* Section 1: Consistency Tracker */}
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
-            <p className="text-white font-semibold text-lg mb-4">Consistency Tracker</p>
-
-            {weeklyData.length > 0 ? (() => {
-              const dayLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
-              const padX     = 28;
-              const baseline = 88;
-              const chartTop = 12;
-              const chartH   = baseline - chartTop;
-              const totalW   = 320;
-              const xStep    = (totalW - 2 * padX) / 6;
-
-              function getX(i) { return padX + i * xStep; }
-              function getY(score) {
-                return score === null ? baseline : baseline - (score / 100) * chartH;
-              }
-
-              const thisMonday = getMondayOf(localDateStr(0));
-              const weeksBack = weeklyData.length - 1 - activeWeekIndex;
-              const wStart = addDays(thisMonday, -weeksBack * 7);
-              const weekDays = Array.from({ length: 7 }, (_, d) => {
-                const date = addDays(wStart, d);
-                const commitment = allCommitments.find((c) => c.date === date) || null;
-                return {
-                  date,
-                  label: dayLabels[d],
-                  score: commitment?.score ?? null,
-                  status: commitment?.status ?? null,
-                  hasCommitment: commitment !== null,
-                };
-              });
-
-              const DEMO_TODAY_WEEKDAY = 5; // Saturday — locked for demo
-              const todayWeekdayIndex = DEMO_TODAY_WEEKDAY;
-              const lineParts = [];
-              weekDays.forEach((d, i) => {
-                if (d.score === null || i > DEMO_TODAY_WEEKDAY) return;
-                const x = getX(i).toFixed(1);
-                const y = getY(d.score).toFixed(1);
-                lineParts.push(lineParts.length === 0 ? `M ${x} ${y}` : `L ${x} ${y}`);
-              });
-              const lastDayWithCommitment = (() => {
-                for (let i = 6; i >= 0; i -= 1) {
-                  if (weekDays[i].hasCommitment) return i;
-                }
-                return -1;
-              })();
-              const resolvedDayIndex = selectedDayIndex !== null
-                ? Math.max(0, Math.min(6, selectedDayIndex))
-                : isCurrentWeekSelected
-                  ? todayWeekdayIndex
-                  : (lastDayWithCommitment !== -1 ? lastDayWithCommitment : 6);
-
-              function dotColor(day, isSelected) {
-                if (!day.hasCommitment) return '#27272a';
-                if (day.status === 'missed') return '#52525b';
-                if (day.status === 'pending') return '#f97316';
-                if (day.status === 'kept') {
-                  if (isSelected) return '#ef4444';
-                  if (day.score != null && day.score >= 80) return '#fb7185';
-                  if (day.score != null && day.score >= 60) return '#fdba74';
-                  return '#fca5a5';
-                }
-                return '#71717a';
-              }
-
-              return (
-                <>
-                  <p className="text-center text-zinc-300 text-sm font-medium mb-2">{selectedWeek?.weekLabel} week</p>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => goToWeek(Math.max(0, activeWeekIndex - 1))}
-                      disabled={activeWeekIndex === 0}
-                      className="flex-shrink-0 w-10 h-10 flex items-center justify-center text-zinc-500 hover:text-white disabled:opacity-20 disabled:cursor-not-allowed transition-colors text-3xl"
-                    >
-                      ‹
-                    </button>
-
-                    <div className="flex-1 overflow-hidden min-h-[80px]">
-                      <div
-                        key={activeWeekIndex}
-                        data-slide-dir={slideDir || 'none'}
-                        onTransitionEnd={() => setSlideDir(null)}
-                        style={{
-                          transform: `translateX(${chartOffset}%)`,
-                          transition: chartOffset === 0 && slideDir ? 'transform 0.3s ease' : 'none',
-                        }}
-                      >
-                        <svg viewBox="0 0 320 120" className="w-full mb-1">
-                          <text x={padX - 4} y={chartTop + 7} textAnchor="end" fill="#71717a" fontSize={8} fontFamily="sans-serif">100</text>
-                          <text x={padX - 4} y={getY(50) + 4} textAnchor="end" fill="#71717a" fontSize={8} fontFamily="sans-serif">50</text>
-                          <text x={padX - 4} y={baseline} textAnchor="end" fill="#71717a" fontSize={8} fontFamily="sans-serif">0</text>
-                          <line x1={padX} y1={baseline} x2={totalW - padX} y2={baseline}
-                            stroke="#3f3f46" strokeWidth={1} strokeDasharray="3 3" />
-                          <line x1={padX} y1={getY(50)} x2={totalW - padX} y2={getY(50)}
-                            stroke="#27272a" strokeWidth={1} strokeDasharray="2 4" />
-                          <line x1={padX} y1={chartTop} x2={totalW - padX} y2={chartTop}
-                            stroke="#27272a" strokeWidth={1} strokeDasharray="2 4" />
-                          <path d={lineParts.join(' ')} fill="none" stroke="#52525b" strokeWidth={0.8} />
-                          {weekDays.map((d, i) => {
-                            if (i > DEMO_TODAY_WEEKDAY) return null; // Skip days after Saturday (currently Sunday): future day, no dot
-                            const x = getX(i);
-                            const y = getY(d.score);
-                            const isSelected = i === resolvedDayIndex;
-                            return (
-                              <g
-                                key={d.date}
-                                onClick={() => setSelectedDayIndex(i)}
-                                tabIndex={0}
-                                onFocus={() => setSelectedDayIndex(i)}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter' || e.key === ' ') {
-                                    e.preventDefault();
-                                    setSelectedDayIndex(i);
-                                  }
-                                }}
-                                style={{ cursor: 'pointer' }}
-                              >
-                                <circle cx={x} cy={y} r={isSelected ? 3 : 2} fill={dotColor(d, isSelected)} />
-                                <text
-                                  x={x}
-                                  y={112}
-                                  textAnchor="middle"
-                                  fill={isSelected ? '#ef4444' : '#52525b'}
-                                  fontSize={8}
-                                  fontFamily="sans-serif"
-                                >
-                                  {d.label}
-                                </text>
-                              </g>
-                            );
-                          })}
-                        </svg>
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={() => goToWeek(Math.min(weeklyData.length - 1, activeWeekIndex + 1))}
-                      disabled={activeWeekIndex === weeklyData.length - 1}
-                      className="flex-shrink-0 w-10 h-10 flex items-center justify-center text-zinc-500 hover:text-white disabled:opacity-20 disabled:cursor-not-allowed transition-colors text-3xl"
-                    >
-                      ›
-                    </button>
-                  </div>
-                </>
-              );
-            })() : null}
-          </div>
+          {trendError ? (
+            <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+              <h2 className="text-sm font-medium text-zinc-300">Commitments kept</h2>
+              <p role="alert" className="mt-3 text-sm text-zinc-400">Could not load commitment history.</p>
+              <button type="button" onClick={loadCommitmentStats} className="mt-3 rounded-lg border border-zinc-700 px-3 py-2 text-xs">Try again</button>
+            </section>
+          ) : <TrendChart
+            title="Commitments kept"
+            description="Daily kept rate · unanswered commitments are excluded. Earlier history uses recorded commitment scores."
+            points={buildCommitmentTrend(commitmentHistory.fragments, commitmentHistory.legacySessions, getTodayV2DateContext().todayLocalDate, trendRange)}
+            controls={<div role="group" aria-label="Commitment chart time range" className="flex gap-1 rounded-full border border-zinc-800 p-1">
+              {TREND_RANGES.map((range) => <button key={range.value} type="button" aria-label={range.label} aria-pressed={trendRange === range.value}
+                onClick={() => setTrendRange(range.value)} className={`min-h-8 rounded-full px-3 text-xs transition-colors ${trendRange === range.value ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-zinc-200'}`}>{range.value === 'ALL' ? 'All' : range.value}</button>)}
+            </div>}
+          />}
 
           {/* Section 2: Streak */}
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 flex items-center gap-4">

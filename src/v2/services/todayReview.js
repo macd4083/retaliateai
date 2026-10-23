@@ -56,7 +56,7 @@ export async function ensureTodayV2DailyReview(userId, localDate, timezoneName) 
       },
       { onConflict: 'user_id,local_date' }
     )
-    .select('id, local_date, timezone_name, desired_direction, controllable_focus, updated_at, completed_at')
+    .select('id, local_date, timezone_name, desired_direction, controllable_focus, becoming_rating, updated_at, completed_at')
     .single();
 
   if (error) throw error;
@@ -247,7 +247,7 @@ export async function loadTodayV2HomeState(userId, options = {}) {
   const [reviewsResult, fragmentsResult, habitOccurrencesResult] = await Promise.all([
     supabase
       .from(TODAY_V2_TABLES.DAILY_REVIEWS)
-      .select('local_date, desired_direction, controllable_focus, completed_at')
+      .select('local_date, desired_direction, controllable_focus, becoming_rating, completed_at')
       .eq('user_id', userId)
       .gte('local_date', last30Start)
       .lte('local_date', current.todayLocalDate)
@@ -286,6 +286,7 @@ export async function loadTodayV2HomeState(userId, options = {}) {
     civilFollowThroughItems,
     civilHabitOccurrences,
     civilReview,
+    becomingRatings: reviewHistory,
     latestDesiredDirection: getLatestTodayV2Identity(reviewHistory, current.review?.desired_direction || ''),
     metrics: buildTodayV2HomeMetrics({
       reviews: reviewHistory,
@@ -435,13 +436,25 @@ export async function updateControllableFocus(reviewId, controllableFocus) {
   if (error) throw error;
 }
 
+export async function updateBecomingRating(reviewId, becomingRating) {
+  if (becomingRating !== null && (!Number.isInteger(becomingRating) || becomingRating < 1 || becomingRating > 10)) {
+    throw new Error('Progress rating must be an integer from 1 to 10, or null.');
+  }
+  const { error } = await supabase
+    .from(TODAY_V2_TABLES.DAILY_REVIEWS)
+    .update({ becoming_rating: becomingRating })
+    .eq('id', reviewId);
+
+  if (error) throw error;
+}
+
 export async function completeTodayV2Review(reviewId) {
   const completedAt = new Date().toISOString();
   const { data, error } = await supabase
     .from(TODAY_V2_TABLES.DAILY_REVIEWS)
     .update({ completed_at: completedAt })
     .eq('id', reviewId)
-    .select('id, local_date, timezone_name, desired_direction, controllable_focus, updated_at, completed_at')
+    .select('id, local_date, timezone_name, desired_direction, controllable_focus, becoming_rating, updated_at, completed_at')
     .single();
 
   if (error) throw error;
@@ -453,7 +466,7 @@ export async function reopenTodayV2Review(reviewId) {
     .from(TODAY_V2_TABLES.DAILY_REVIEWS)
     .update({ completed_at: null })
     .eq('id', reviewId)
-    .select('id, local_date, timezone_name, desired_direction, controllable_focus, updated_at, completed_at')
+    .select('id, local_date, timezone_name, desired_direction, controllable_focus, becoming_rating, updated_at, completed_at')
     .single();
 
   if (error) throw error;

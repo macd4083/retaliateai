@@ -30,6 +30,7 @@ import {
   replaceTomorrowActions,
   setFollowThroughCompletion,
   updateControllableFocus,
+  updateBecomingRating,
   updateDesiredDirection,
   upsertHabitDefinition,
   upsertHabitLog,
@@ -97,6 +98,10 @@ function normalizeFragmentList(items) {
     .filter(Boolean);
 }
 
+function normalizeBecomingRating(value) {
+  return Number.isInteger(value) && value >= 1 && value <= 10 ? value : null;
+}
+
 function isCurrentDateScope(state) {
   if (!state) return false;
   if (!state.planningSourceLocalDate) return true;
@@ -115,6 +120,8 @@ export function useTodayV2State(userId) {
   const [draftStorageUnavailable, setDraftStorageUnavailable] = React.useState(false);
   const [desiredDirection, setDesiredDirectionState] = React.useState('');
   const [controllableFocus, setControllableFocusState] = React.useState('');
+  const [becomingRating, setBecomingRatingState] = React.useState(null);
+  const [becomingRatingSaveStatus, setBecomingRatingSaveStatus] = React.useState('idle');
   const [tomorrowInput, setTomorrowInputState] = React.useState('');
   const [tomorrowActions, setTomorrowActionsState] = React.useState([]);
   const [firstFiveMinutes, setFirstFiveMinutesState] = React.useState('');
@@ -149,6 +156,9 @@ export function useTodayV2State(userId) {
   const stateRef = React.useRef(null);
   const desiredDirectionRef = React.useRef('');
   const controllableFocusRef = React.useRef('');
+  const becomingRatingRef = React.useRef(null);
+  const becomingRatingSavePromiseRef = React.useRef(Promise.resolve());
+  const becomingRatingSavingRef = React.useRef(false);
   const tomorrowInputRef = React.useRef('');
   const tomorrowActionsRef = React.useRef([]);
   const firstFiveMinutesRef = React.useRef('');
@@ -162,6 +172,7 @@ export function useTodayV2State(userId) {
   stateRef.current = state;
   desiredDirectionRef.current = desiredDirection;
   controllableFocusRef.current = controllableFocus;
+  becomingRatingRef.current = becomingRating;
   tomorrowInputRef.current = tomorrowInput;
   tomorrowActionsRef.current = tomorrowActions;
   firstFiveMinutesRef.current = firstFiveMinutes;
@@ -224,6 +235,7 @@ export function useTodayV2State(userId) {
     () => normalizeTodayV2Text(controllableFocus) !== normalizeTodayV2Text(state?.review?.controllable_focus || ''),
     [controllableFocus, state?.review?.controllable_focus]
   );
+  const becomingRatingDirty = becomingRating !== normalizeBecomingRating(state?.review?.becoming_rating);
 
   const tomorrowPlanDirty = React.useMemo(() => {
     if (!state) return false;
@@ -254,6 +266,13 @@ export function useTodayV2State(userId) {
     controllableFocusRef.current = value;
     editRevisionRef.current += 1;
     setControllableFocusState(value);
+  }, [canEdit]);
+
+  const setBecomingRating = React.useCallback((value) => {
+    if (!canEdit() || (value !== null && normalizeBecomingRating(value) === null)) return;
+    becomingRatingRef.current = value;
+    editRevisionRef.current += 1;
+    setBecomingRatingState(value);
   }, [canEdit]);
 
   const applyActions = React.useCallback((items) => {
@@ -352,6 +371,9 @@ export function useTodayV2State(userId) {
       const nextControllableFocus = reviewDraft && (reviewDraft.controllableFocusNeedsSync || !normalizeTodayV2Text(next.review?.controllable_focus))
         ? String(reviewDraft.controllableFocus || '')
         : next.review?.controllable_focus || '';
+      const nextBecomingRating = reviewDraft && (reviewDraft.becomingRatingNeedsSync || next.review?.becoming_rating == null)
+        ? normalizeBecomingRating(reviewDraft.becomingRating)
+        : normalizeBecomingRating(next.review?.becoming_rating);
       const nextTomorrowInput = draft && (draft.tomorrowPlanNeedsSync || (!normalizeTodayV2Text(next.tomorrowPlanInput) && normalizeFragmentList(next.tomorrowFragments).length === 0))
         ? String(draft.tomorrowInput || '')
         : next.tomorrowPlanInput || '';
@@ -422,9 +444,11 @@ export function useTodayV2State(userId) {
       writeErrorsRef.current.clear();
       desiredDirectionSavingRef.current = false;
       controllableFocusSavingRef.current = false;
+      becomingRatingSavingRef.current = false;
       tomorrowPlanSavingRef.current = false;
       desiredDirectionSavePromiseRef.current = Promise.resolve();
       controllableFocusSavePromiseRef.current = Promise.resolve();
+      becomingRatingSavePromiseRef.current = Promise.resolve();
       tomorrowPlanSavePromiseRef.current = Promise.resolve();
       schedulePromiseRef.current = null;
       completionSavingRef.current = false;
@@ -436,12 +460,14 @@ export function useTodayV2State(userId) {
       setSeedDiagnostic(next.seedDiagnostic || null);
       setDesiredDirectionState(nextDesiredDirection);
       setControllableFocusState(nextControllableFocus);
+      setBecomingRatingState(nextBecomingRating);
       setTomorrowInputState(nextTomorrowInput);
       setTomorrowActionsState(nextTomorrowActions);
       setFirstFiveMinutesState(nextFirstFiveMinutes);
       setCustomTomorrowActions(nextTomorrowActions.join('\n') !== autoSplit.join('\n'));
       setDesiredDirectionSaveStatus(reviewDraft?.desiredDirectionNeedsSync ? 'offline' : 'saved');
       setControllableFocusSaveStatus(reviewDraft?.controllableFocusNeedsSync ? 'offline' : 'saved');
+      setBecomingRatingSaveStatus(reviewDraft?.becomingRatingNeedsSync ? 'offline' : 'saved');
       setTomorrowPlanSaveStatus(draft?.tomorrowPlanNeedsSync ? 'offline' : 'saved');
       setFirstFiveMinutesSaveStatus(draft?.tomorrowPlanNeedsSync ? 'offline' : 'saved');
       setTomorrowPlanError(null);
@@ -490,6 +516,8 @@ export function useTodayV2State(userId) {
         desiredDirectionNeedsSync: desiredDirectionDirty,
         controllableFocus,
         controllableFocusNeedsSync: controllableFocusDirty,
+        becomingRating,
+        becomingRatingNeedsSync: becomingRatingDirty,
       });
     }
     const planningDraftSaved = writeDraft(userId, state.planningSourceLocalDate || state.todayLocalDate, {
@@ -499,6 +527,8 @@ export function useTodayV2State(userId) {
       desiredDirectionNeedsSync: desiredDirectionDirty,
       controllableFocus,
       controllableFocusNeedsSync: controllableFocusDirty,
+      becomingRating,
+      becomingRatingNeedsSync: becomingRatingDirty,
       tomorrowInput,
       tomorrowActions,
       customTomorrowActions,
@@ -511,7 +541,7 @@ export function useTodayV2State(userId) {
       updatedAt: new Date().toISOString(),
     });
     setDraftStorageUnavailable(!reviewDraftSaved || !planningDraftSaved);
-  }, [tomorrowActions, customTomorrowActions, actionIdentities, scheduleBlocks, scheduleSaveStatus, controllableFocus, controllableFocusDirty, desiredDirection, desiredDirectionDirty, firstFiveMinutes, normalizedTomorrowActions, state?.todayLocalDate, state?.planningSourceLocalDate, state?.planningLocalDate, tomorrowInput, tomorrowPlanDirty, userId]);
+  }, [tomorrowActions, customTomorrowActions, actionIdentities, scheduleBlocks, scheduleSaveStatus, becomingRating, becomingRatingDirty, controllableFocus, controllableFocusDirty, desiredDirection, desiredDirectionDirty, firstFiveMinutes, normalizedTomorrowActions, state?.todayLocalDate, state?.planningSourceLocalDate, state?.planningLocalDate, tomorrowInput, tomorrowPlanDirty, userId]);
 
   const flushDesiredDirection = React.useCallback(async () => {
     if (loadedUserRef.current !== currentUserRef.current) return;
@@ -622,6 +652,53 @@ export function useTodayV2State(userId) {
       });
 
     controllableFocusSavePromiseRef.current = savePromise;
+    return savePromise;
+  }, []);
+
+  const flushBecomingRating = React.useCallback(async () => {
+    if (loadedUserRef.current !== currentUserRef.current || !isCurrentDateScope(stateRef.current)) return;
+    const reviewId = stateRef.current?.review?.id;
+    if (!reviewId || stateRef.current.review.completed_at) return;
+    if (becomingRatingSavingRef.current) {
+      const waitingGeneration = loadGenerationRef.current;
+      const waitingOwnerId = currentUserRef.current;
+      await becomingRatingSavePromiseRef.current;
+      if (waitingGeneration !== loadGenerationRef.current || waitingOwnerId !== currentUserRef.current) return;
+      return flushBecomingRating();
+    }
+    if (becomingRatingRef.current === normalizeBecomingRating(stateRef.current.review.becoming_rating)) {
+      setBecomingRatingSaveStatus('saved');
+      return;
+    }
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      setBecomingRatingSaveStatus('offline');
+      throw new Error('Offline – will retry');
+    }
+
+    becomingRatingSavingRef.current = true;
+    setBecomingRatingSaveStatus('saving');
+    const nextRating = becomingRatingRef.current;
+    const generation = loadGenerationRef.current;
+    const ownerId = currentUserRef.current;
+    const savePromise = updateBecomingRating(reviewId, nextRating)
+      .then(() => {
+        if (generation !== loadGenerationRef.current || currentUserRef.current !== ownerId || stateRef.current?.review?.id !== reviewId) return;
+        stateRef.current = { ...stateRef.current, review: { ...stateRef.current.review, becoming_rating: nextRating } };
+        setState((previous) => previous ? {
+          ...previous, review: { ...previous.review, becoming_rating: nextRating },
+        } : previous);
+        if (nextRating === becomingRatingRef.current) setBecomingRatingSaveStatus('saved');
+      })
+      .catch((saveError) => {
+        if (generation === loadGenerationRef.current && currentUserRef.current === ownerId) {
+          setBecomingRatingSaveStatus(isOfflineLikeError(saveError) ? 'offline' : 'error');
+        }
+        throw saveError;
+      })
+      .finally(() => {
+        if (becomingRatingSavePromiseRef.current === savePromise) becomingRatingSavingRef.current = false;
+      });
+    becomingRatingSavePromiseRef.current = savePromise;
     return savePromise;
   }, []);
 
@@ -891,7 +968,7 @@ export function useTodayV2State(userId) {
       .map((entry) => entry.promise));
     requireCurrentContext();
     if (writeErrorsRef.current.size) throw writeErrorsRef.current.values().next().value;
-    const results = await Promise.allSettled([flushDesiredDirection(), flushControllableFocus(), flushTomorrowPlan()]);
+    const results = await Promise.allSettled([flushDesiredDirection(), flushControllableFocus(), flushBecomingRating(), flushTomorrowPlan()]);
     const rejected = results.find((result) => result.status === 'rejected');
     if (rejected?.status === 'rejected') {
       throw rejected.reason;
@@ -899,7 +976,7 @@ export function useTodayV2State(userId) {
     requireCurrentContext();
     await flushSchedule();
     return results;
-  }, [flushControllableFocus, flushDesiredDirection, flushTomorrowPlan, flushSchedule]);
+  }, [flushBecomingRating, flushControllableFocus, flushDesiredDirection, flushTomorrowPlan, flushSchedule]);
 
   React.useEffect(() => {
     if (!scheduleAvailable || scheduleRevisionRef.current === scheduleSavedRevisionRef.current) return undefined;
@@ -990,6 +1067,15 @@ export function useTodayV2State(userId) {
     }, 800);
     return () => window.clearTimeout(timeoutId);
   }, [controllableFocusDirty, flushControllableFocus, state]);
+
+  React.useEffect(() => {
+    if (!state || !becomingRatingDirty) return undefined;
+    setBecomingRatingSaveStatus('saving');
+    const timeoutId = window.setTimeout(() => {
+      void flushBecomingRating().catch(() => {});
+    }, 800);
+    return () => window.clearTimeout(timeoutId);
+  }, [becomingRating, becomingRatingDirty, flushBecomingRating, state]);
 
   React.useEffect(() => {
     if (!state || !tomorrowPlanDirty) return undefined;
@@ -1197,6 +1283,10 @@ export function useTodayV2State(userId) {
     setDesiredDirection,
     controllableFocus,
     setControllableFocus,
+    becomingRating,
+    setBecomingRating,
+    becomingRatingSaveStatus,
+    becomingRatingSaveLabel: SAVE_STATUS_LABELS[becomingRatingSaveStatus] || SAVE_STATUS_LABELS.idle,
     tomorrowInput,
     setTomorrowInput,
     tomorrowActions,
