@@ -31,8 +31,11 @@ Apply the existing Today V2 migrations in this exact dependency order (paths rel
 5. `20261009_today_v2_completion_release_guard.sql`
 6. `20261010_today_v2_habit_recurrence.sql`
 7. `20261011_today_v2_day_schedule.sql`
-8. `20261013_today_v2_schedule_conflicts.sql`
-9. `20261022_today_v2_becoming_rating.sql`
+8. `20261012_google_schedule_sync_locks.sql`
+9. `20261013_today_v2_schedule_conflicts.sql`
+10. `20261022_today_v2_becoming_rating.sql`
+
+`20261012_google_schedule_sync_locks.sql` creates the server-only lease used by `/api/google-calendar?action=sync`. Its table and RPCs are granted only to `service_role`, so browser schema diagnostics cannot detect it; without it, every Google push fails with "Apply the Google schedule sync lock migration, then retry sync." while local saves still succeed.
 
 These extend the existing production auth/application schema; do not replace them with `supabase/sql/today_v2_isolated_workflow.sql` or run retired generic V2 SQL. Google connection credential tables ship in `20261007_today_v2_scheduling.sql`; credentials remain backend-only.
 
